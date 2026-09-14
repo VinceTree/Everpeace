@@ -1,0 +1,42 @@
+{
+  "name": "everpeace",
+  "version": "0.1.10",
+  "description": "A minimal ReAct coding agent with a Bash tool.",
+  "type": "module",
+  "bin": {
+    "everpeace": "dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "tsx src/cli/index.ts",
+    "clean": "node --eval \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "pnpm clean && tsc -p tsconfig.build.json",
+    "start": "node dist/cli/index.js",
+    "test": "tsx --test tests/**/*.test.{ts,tsx}",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.22.0",
+  "dependencies": {
+    "@inkjs/ui": "^2.0.0",
+    "@napi-rs/keyring": "^2.1.0",
+    "@xterm/headless": "^6.0.0",
+    "ink": "^7.1.1",
+    "node-pty": "^1.1.0",
+    "openai": "^7.15.0",
+    "react": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.3.0",
+    "ink-testing-library": "^4.0.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}
