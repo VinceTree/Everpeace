@@ -6,6 +6,23 @@ const MAX_CAPTURED_OUTPUT = 2 * 1024 * 1024;
 const MAX_SCROLLBACK_LINES = 10_000;
 const { Terminal } = xtermHeadless;
 
+export const DISABLE_FOCUS_REPORTING = "\u001B[?1004l";
+export const DISABLE_WIN32_INPUT_MODE = "\u001B[?9001l";
+
+interface TerminalOutput {
+  write(chunk: string): unknown;
+}
+
+export function resetTerminalModes(
+  output: TerminalOutput = process.stdout,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  output.write(
+    DISABLE_FOCUS_REPORTING
+      + (platform === "win32" ? DISABLE_WIN32_INPUT_MODE : ""),
+  );
+}
+
 export interface TerminalCommandOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -112,12 +129,11 @@ export function runTerminalCommand(
         // Ink reclaims stdin after terminal suspension even if restoration fails.
       }
 
-      if (platform === "win32") {
-        // PowerShell running under ConPTY enables Win32 input mode (DEC 9001).
-        // Since its output is proxied into Ink's parent terminal, reset that
-        // private mode before Ink resumes or normal keys arrive as CSI records.
-        stdout.write("\u001B[?9001l");
-      }
+      // Child terminals can enable focus reporting (DEC 1004), and PowerShell
+      // under ConPTY also enables Win32 input mode (DEC 9001). Since their
+      // output is proxied into Ink's parent terminal, reset both before Ink
+      // resumes or focus changes arrive as literal "[I" / "[O" input.
+      resetTerminalModes(stdout, platform);
 
       void renderTerminalOutput(captured, columns, rows).then((output) => {
         resolve({

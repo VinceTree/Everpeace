@@ -421,7 +421,7 @@ export function EverpeaceApp({
   return (
     <Box width="100%" paddingRight={1} flexDirection="column">
       <History
-        key={timelineEpoch}
+        key={`history-${timelineEpoch}`}
         entries={timeline}
         version={dependencies.version}
         workspacePath={dependencies.workspacePath}
@@ -457,7 +457,7 @@ export function EverpeaceApp({
         <Spinner label={busyLabel} />
       ) : (
         <Prompt
-          inputKey={inputKey}
+          key={`prompt-${inputKey}`}
           activeModelName={activeModel?.model_name}
           onSubmit={handleSubmit}
         />

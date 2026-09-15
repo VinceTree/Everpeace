@@ -1,9 +1,33 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  DISABLE_FOCUS_REPORTING,
+  DISABLE_WIN32_INPUT_MODE,
   renderTerminalOutput,
+  resetTerminalModes,
   resolveTerminalInvocation,
 } from "../../../src/tools/terminal.js";
+
+test("terminal mode reset disables focus reporting and Windows input mode", () => {
+  let windowsOutput = "";
+  resetTerminalModes({
+    write(chunk) {
+      windowsOutput += chunk;
+    },
+  }, "win32");
+  assert.equal(
+    windowsOutput,
+    DISABLE_FOCUS_REPORTING + DISABLE_WIN32_INPUT_MODE,
+  );
+
+  let unixOutput = "";
+  resetTerminalModes({
+    write(chunk) {
+      unixOutput += chunk;
+    },
+  }, "linux");
+  assert.equal(unixOutput, DISABLE_FOCUS_REPORTING);
+});
 
 test("direct terminal commands use PowerShell on Windows", () => {
   const invocation = resolveTerminalInvocation("Get-ChildItem", {

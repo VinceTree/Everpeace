@@ -1,5 +1,6 @@
 import { render } from "ink";
 import React from "react";
+import { resetTerminalModes } from "../tools/terminal.js";
 import { EverpeaceApp } from "./app.js";
 import { createDefaultTuiDependencies } from "./dependencies.js";
 import type { TuiDependencies, TuiModelRegistry } from "./types.js";
@@ -13,6 +14,7 @@ export const TUI_RENDER_OPTIONS = {
   exitOnCtrlC: false,
   alternateScreen: false,
   incrementalRendering: false,
+  kittyKeyboard: { mode: "auto" },
 } as const;
 
 interface TerminalOutput {
@@ -43,6 +45,10 @@ export async function runTui({ registry, dependencies }: RunTuiOptions): Promise
     throw new Error("Everpeace TUI requires an interactive terminal");
   }
 
+  // Recover from a previous child process or interrupted session that left
+  // terminal focus reporting enabled before Ink starts reading input.
+  resetTerminalModes();
+
   const resolvedDependencies =
     dependencies ?? createDefaultTuiDependencies(registry);
   const initialModels = await resolvedDependencies.registry.resolveAll();
@@ -67,5 +73,6 @@ export async function runTui({ registry, dependencies }: RunTuiOptions): Promise
     return typeof result === "number" ? result : 0;
   } finally {
     removeResizeRecovery();
+    resetTerminalModes();
   }
 }

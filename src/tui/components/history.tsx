@@ -10,28 +10,44 @@ export interface HistoryProps {
 }
 
 function HistoryLine({ entry }: { entry: Exclude<TimelineEntry, { kind: "banner" }> }) {
+  if (entry.kind === "user") {
+    return (
+      <Box
+        width="100%"
+        marginBottom={1}
+        paddingX={1}
+        paddingY={1}
+        backgroundColor="#1F2937"
+      >
+        <Box width={2} flexShrink={0}>
+          <Text color="#9CA3AF">›</Text>
+        </Box>
+        <Text wrap="wrap">{entry.text}</Text>
+      </Box>
+    );
+  }
+
   if (entry.kind === "output") {
     return (
-      <Box marginBottom={1}>
+      <Box marginBottom={1} marginLeft={3}>
         <Text wrap="wrap">{entry.text}</Text>
       </Box>
     );
   }
 
   const styles = {
-    user: { label: "you", color: "#D4AF37" },
-    assistant: { label: "assistant", color: "#4EC9B0" },
-    system: { label: "system", color: "gray" },
-    tool: { label: "bash", color: "magenta" },
-    error: { label: "error", color: "red" },
+    assistant: { marker: "•", color: "#9CA3AF" },
+    system: { marker: "•", color: "gray" },
+    tool: { marker: "•", color: "magenta" },
+    error: { marker: "×", color: "red" },
   } as const;
   const style = styles[entry.kind];
 
   return (
-    <Box marginBottom={1}>
-      <Box width={11} flexShrink={0}>
+    <Box marginBottom={1} paddingLeft={1}>
+      <Box width={2} flexShrink={0}>
         <Text bold color={style.color}>
-          {style.label}
+          {style.marker}
         </Text>
       </Box>
       <Text wrap="wrap">{entry.text}</Text>

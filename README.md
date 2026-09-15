@@ -60,26 +60,30 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.1.15) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.17) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────╮
 │ model: deepseek-flash  /model to change      │
 │ directory: C:\projects\Everpeace              │
 ╰──────────────────────────────────────────────╯
 
-everpeace ❯ 列出当前项目文件
+› 列出当前项目文件
 
-assistant  我将查看当前目录。
+• 我将查看当前目录。
 
 ! ls -la
 是否执行？ y
 ...
 
-everpeace ❯ !git status
+› !git status
 ...
 ```
 
-输入区域会直接跟随终端的当前可用宽度，并预留最后一列防止 Windows 终端自动换行；启动时的 model/directory 信息框采用 Codex 风格的 76 列上限，在窄终端中自动收缩。交互输入框始终固定为三行，过长输入会在框内裁剪，不会撑出新行。TUI 使用原生 inline 模式，普通滚轮可以浏览 PowerShell 历史；Ctrl + 滚轮改变字号时会清除被终端重新排版的旧帧和 scrollback，再按新尺寸完整重绘，界面只保留一个交互框。
+输入区域会直接跟随终端的当前可用宽度，并预留最后一列防止 Windows 终端自动换行；启动时的 model/directory 信息框采用 Codex 风格的 76 列上限，在窄终端中自动收缩。输入区只有显式换行才会增高，过长输入会在当前行内水平裁剪，不会因 Ctrl + 滚轮缩放而自动折行。TUI 使用原生 inline 模式，普通滚轮可以浏览 PowerShell 历史；Ctrl + 滚轮改变字号时会清除被终端重新排版的旧帧和 scrollback，再按新尺寸完整重绘，界面只保留一个交互框。
+
+输入快捷键与 Codex composer 保持一致：`Enter` 提交，`Shift+Enter`、`Alt+Enter` 或 `Ctrl+J` 换行，`Home`/`End` 与 `Ctrl+A`/`Ctrl+E` 移动到当前行首/行尾，`Ctrl+U`/`Ctrl+K` 删除到当前行首/行尾，`Ctrl+W` 删除前一个词，`Ctrl+Y` 恢复最近删除的内容。方向键、`Ctrl+B/F/P/N` 和 `Alt+B/F` 也可移动光标。
+
+TUI 会在启动、退出及 `!` 命令结束时关闭终端焦点事件上报，切换窗口不会再把 `[I`、`[O` 写入输入框。
 
 TUI 命令：
 
