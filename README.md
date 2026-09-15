@@ -60,7 +60,7 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.1.14) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.15) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────╮
 │ model: deepseek-flash  /model to change      │
@@ -89,7 +89,7 @@ TUI 命令：
 - `/logout`：多选删除模型与对应系统凭据。
 - `/clear`：清屏并重置当前对话，保留当前模型。
 - `/help`、`/exit`：显示帮助或退出。
-- `!<command>`：直接运行当前系统的命令行（Windows 使用 PowerShell，macOS/Linux 使用 Bash），不再次确认；执行时会接管当前终端，原生输出保留在终端 scrollback 中。
+- `!<command>`：直接运行当前系统的命令行（Windows 使用 PowerShell，macOS/Linux 使用 Bash），不再次确认；执行期间显示原生终端输出，结束后把按终端布局整理的结果保留在 TUI 历史中。
 
 行为说明：
 

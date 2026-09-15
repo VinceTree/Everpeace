@@ -67,6 +67,12 @@ function terminalStatus(result: BashResult): { kind: HistoryKind; text: string }
   return { kind: "system", text: "Command completed successfully" };
 }
 
+function commandOutput(result: BashResult): string {
+  return [result.stdout.trimEnd(), result.stderr.trimEnd()]
+    .filter((text) => text.length > 0)
+    .join("\n");
+}
+
 export function EverpeaceApp({
   dependencies,
   initialModels,
@@ -143,6 +149,8 @@ export function EverpeaceApp({
         result = await dependencies.runBash(command);
       });
       if (result === undefined) throw new Error("Bash did not return a result");
+      const output = commandOutput(result);
+      if (output) append("output", output);
       const status = bashStatus(result);
       append(status.kind, status.text);
       return result;
@@ -157,6 +165,8 @@ export function EverpeaceApp({
         result = await dependencies.runTerminalCommand(command);
       });
       if (result === undefined) throw new Error("Terminal command did not return a result");
+      const output = commandOutput(result);
+      if (output) append("output", output);
       const status = terminalStatus(result);
       append(status.kind, status.text);
       return result;

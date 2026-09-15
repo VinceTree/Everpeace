@@ -74,7 +74,7 @@ function createFixture(options?: {
   };
   const dependencies: TuiDependencies = {
     registry,
-    version: "0.1.14",
+    version: "0.1.15",
     workspacePath: "C:\\workspace",
     async listModels() {
       return ["deepseek-flash"];
@@ -331,7 +331,7 @@ test("direct commands use the native terminal runner", async () => {
   await waitFor(() => (view.lastFrame() ?? "").includes("Command completed successfully"));
 
   assert.equal(directCommand, "ls");
-  assert.doesNotMatch(view.lastFrame() ?? "", /NAME    SIZE|file-a  10/);
+  assert.match(view.lastFrame() ?? "", /NAME    SIZE\nfile-a  10/);
   view.unmount();
 });
 

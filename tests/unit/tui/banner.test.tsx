@@ -7,7 +7,7 @@ import { Banner } from "../../../src/tui/components/banner.js";
 test("Banner renders Codex-style startup model and directory details", () => {
   const view = render(
     <Banner
-      version="0.1.14"
+      version="0.1.15"
       modelName="deepseek-flash"
       workspacePath={"C:\\workspace"}
     />,
@@ -15,7 +15,7 @@ test("Banner renders Codex-style startup model and directory details", () => {
 
   const frame = view.lastFrame() ?? "";
   assert.match(frame, /Everpeace Agent/);
-  assert.match(frame, /v0\.1\.14/);
+  assert.match(frame, /v0\.1\.15/);
   assert.match(frame, /长平/);
   assert.match(frame, /model: deepseek-flash\s+\/model to change/);
   assert.match(frame, /directory: C:\\workspace/);

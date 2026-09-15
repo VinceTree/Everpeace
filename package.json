@@ -1,6 +1,6 @@
 {
   "name": "everpeace",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "A minimal ReAct coding agent with a Bash tool.",
   "type": "module",
   "bin": {
