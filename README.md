@@ -1,49 +1,53 @@
 # Everpeace
 
-一个带交互式 TUI 的 ReAct coding agent，支持 DeepSeek、OpenAI 和自定义 OpenAI-compatible API。普通输入由所选模型处理，模型可以请求调用 Bash；你也可以用 `!<command>` 直接运行 Bash。
+**English** | [简体中文](./README.zh-CN.md)
 
-API Key 不从环境变量读取，也不会写入项目或配置 JSON。Everpeace 使用操作系统凭据库保存 Key，并在本地模型注册表中只保存模型名、base URL 和凭据引用。
+Everpeace is a ReAct coding agent with an interactive TUI. It supports DeepSeek, OpenAI, and custom OpenAI-compatible APIs. Regular messages are handled by the selected model, which may request Bash tool calls. You can also run a local command directly with `!<command>`.
 
-## 需求
+API keys are never read from environment variables or written to the project or configuration JSON. Everpeace stores keys in the operating system credential store. Its local model registry contains only the model name, base URL, and credential reference.
+
+## Requirements
 
 - Node.js 22+
 - pnpm
-- macOS/Linux 上的 Bash，或 Windows 上的 Git Bash/WSL Bash
-- DeepSeek、OpenAI 或兼容服务的 API Key
+- Bash on macOS/Linux, or Git Bash/WSL Bash on Windows
+- An API key for DeepSeek, OpenAI, or a compatible service
 
-## 开发运行
+## Run in development
+
+PowerShell:
 
 ```powershell
 pnpm install
 pnpm dev
 ```
 
-macOS/Linux：
+macOS/Linux:
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-启动后输入 `/login`。TUI 登录向导会依次选择服务地址、掩码输入 API Key，并从 `/models` 加载模型：
+After startup, enter `/login`. The TUI login wizard lets you choose a provider, enter a masked API key, and load the available models from `/models`:
 
-- DeepSeek 官方 API：`https://api.deepseek.com`
-- OpenAI 官方 API：`https://api.openai.com/v1`
-- 自定义 OpenAI-compatible base URL
+- DeepSeek official API: `https://api.deepseek.com`
+- OpenAI official API: `https://api.openai.com/v1`
+- A custom OpenAI-compatible base URL
 
-API Key 不会显示在终端。验证成功后选择一个服务端返回的原始模型 ID，该模型会被安全保存并立即用于当前会话：
+The API key is never displayed in the terminal. After validation, select one of the original model IDs returned by the server. Everpeace securely saves it and activates it for the current session:
 
 ```text
-/login · 模型登录
+/login · Model login
 ❯ DeepSeek
 
 API Key ❯ ********
 
-选择一个模型：
+Select a model:
 ❯ deepseek-flash
 ```
 
-旧式管理子命令仍然可用：
+The legacy management subcommands remain available:
 
 ```powershell
 pnpm dev -- login
@@ -51,78 +55,80 @@ pnpm dev -- models
 pnpm dev -- logout
 ```
 
-如果 `bash` 不在 PATH 中，可以显式配置：
+If `bash` is not in `PATH`, configure it explicitly:
 
 ```powershell
 $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ```
 
-## 使用
+## Usage
 
 ```text
-✦ Everpeace Agent (v0.1.17) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.18) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────╮
 │ model: deepseek-flash  /model to change      │
 │ directory: C:\projects\Everpeace              │
 ╰──────────────────────────────────────────────╯
 
-› 列出当前项目文件
+› List the files in this project
 
-• 我将查看当前目录。
+• I will inspect the current directory.
 
 ! ls -la
-是否执行？ y
+Run this command? y
 ...
 
 › !git status
 ...
 ```
 
-输入区域会直接跟随终端的当前可用宽度，并预留最后一列防止 Windows 终端自动换行；启动时的 model/directory 信息框采用 Codex 风格的 76 列上限，在窄终端中自动收缩。输入区只有显式换行才会增高，过长输入会在当前行内水平裁剪，不会因 Ctrl + 滚轮缩放而自动折行。TUI 使用原生 inline 模式，普通滚轮可以浏览 PowerShell 历史；Ctrl + 滚轮改变字号时会清除被终端重新排版的旧帧和 scrollback，再按新尺寸完整重绘，界面只保留一个交互框。
+The input area follows the terminal's available width and reserves the final column to prevent Windows Terminal from wrapping automatically. The startup model/directory panel uses a Codex-style maximum width of 76 columns and shrinks in narrower terminals. The composer grows only for explicit newlines; long input is horizontally clipped instead of wrapping when the terminal font size changes.
 
-输入快捷键与 Codex composer 保持一致：`Enter` 提交，`Shift+Enter`、`Alt+Enter` 或 `Ctrl+J` 换行，`Home`/`End` 与 `Ctrl+A`/`Ctrl+E` 移动到当前行首/行尾，`Ctrl+U`/`Ctrl+K` 删除到当前行首/行尾，`Ctrl+W` 删除前一个词，`Ctrl+Y` 恢复最近删除的内容。方向键、`Ctrl+B/F/P/N` 和 `Alt+B/F` 也可移动光标。
+The TUI runs inline, so the normal scroll wheel can browse PowerShell history. When Ctrl + scroll wheel changes the font size, Everpeace clears reflowed frames and scrollback before redrawing at the new dimensions, keeping only one composer visible.
 
-TUI 会在启动、退出及 `!` 命令结束时关闭终端焦点事件上报，切换窗口不会再把 `[I`、`[O` 写入输入框。
+Composer shortcuts follow Codex conventions: `Enter` submits; `Shift+Enter`, `Alt+Enter`, or `Ctrl+J` inserts a newline; `Home`/`End` and `Ctrl+A`/`Ctrl+E` move to the current line's start/end; `Ctrl+U`/`Ctrl+K` delete to the current line's start/end; `Ctrl+W` deletes the previous word; and `Ctrl+Y` restores the most recently killed text. Arrow keys, `Ctrl+B/F/P/N`, and `Alt+B/F` also move the cursor.
 
-TUI 命令：
+Everpeace disables terminal focus reporting at startup, shutdown, and after `!` commands, preventing `[I` and `[O` from appearing in the composer when switching windows.
 
-- `/login`：登录并立即启用一个模型。
-- `/model`：切换已注册模型，切换后重置对话上下文。
-- `/models`：查看所有模型和凭据状态。
-- `/logout`：多选删除模型与对应系统凭据。
-- `/clear`：清屏并重置当前对话，保留当前模型。
-- `/help`、`/exit`：显示帮助或退出。
-- `!<command>`：直接运行当前系统的命令行（Windows 使用 PowerShell，macOS/Linux 使用 Bash），不再次确认；执行期间显示原生终端输出，结束后把按终端布局整理的结果保留在 TUI 历史中。
+TUI commands:
 
-行为说明：
+- `/login`: Sign in and activate a model immediately.
+- `/model`: Switch to a registered model and reset the conversation context.
+- `/models`: List all registered models and credential states.
+- `/logout`: Select and remove models with their operating system credentials.
+- `/clear`: Clear the screen and reset the conversation while retaining the active model.
+- `/help`, `/exit`: Show help or exit Everpeace.
+- `!<command>`: Run a command directly in the native system shell (PowerShell on Windows, Bash on macOS/Linux) without confirmation. Native output is shown while the command runs and retained in the TUI history afterward.
 
-- 模型提出的命令每次都需要确认。
-- `!<command>` 是用户直接输入的本机终端命令，不会再次确认，也不会加入模型上下文。
-- 模型名称在 login 时直接来自所选端点的 `/models` 接口。
-- 重复 login 相同 `base_url + model_name` 会更新 Key，不会生成重复注册项。
-- 远程自定义 base URL 必须使用 HTTPS；只有本机地址可使用 HTTP。
-- 系统凭据库不可用时会直接失败，不会降级为明文存储。
-- Linux 使用持久化的 Secret Service；如果不可用，不会回退到仅存于内存的 kernel keyring。
-- Bash 命令使用当前用户权限运行，没有额外沙箱。
-- 每次 Bash 调用都是独立进程，`cd` 和临时环境变量不会在调用间保留。
-- TUI 需要交互式终端；重定向或管道环境下会直接给出错误提示。
+Behavior notes:
 
-## 项目结构
+- Every command requested by the model requires confirmation.
+- A direct `!<command>` is user-authored, requires no second confirmation, and is not added to model context.
+- Model names come directly from the selected endpoint's `/models` response during login.
+- Logging in again with the same `base_url + model_name` updates the key instead of creating a duplicate registration.
+- Remote custom base URLs must use HTTPS; HTTP is allowed only for local endpoints.
+- Everpeace fails closed if the operating system credential store is unavailable and never falls back to plaintext storage.
+- Linux uses the persistent Secret Service and does not fall back to an in-memory kernel keyring.
+- Bash commands run with the current user's permissions and have no additional sandbox.
+- Every Bash call runs in a separate process, so `cd` and temporary environment variables do not persist between calls.
+- The TUI requires an interactive terminal and reports an error when its input or output is redirected.
+
+## Project structure
 
 ```text
 src/
-├─ cli/          # CLI 入口、交互组件和 login/models/logout/run 命令
-├─ agent/        # ReAct 循环和会话状态
-├─ providers/    # DeepSeek、OpenAI 及兼容端点适配
-├─ storage/      # 系统凭据与模型注册表
-├─ tui/          # Ink 页面、状态机、登录向导和交互组件
-└─ tools/        # Agent 工具定义和执行器
+├─ cli/          # CLI entry point and login/models/logout/run commands
+├─ agent/        # ReAct loop and session state
+├─ providers/    # DeepSeek, OpenAI, and compatible endpoint adapters
+├─ storage/      # Operating system credentials and model registry
+├─ tui/          # Ink views, state machine, login wizard, and composer
+└─ tools/        # Agent tool definitions and executors
 
-tests/unit/      # 与 src 领域对应的单元测试
+tests/unit/      # Unit tests organized by source domain
 ```
 
-## 构建与安装
+## Build and install
 
 ```powershell
 pnpm build
@@ -133,7 +139,7 @@ everpeace
 everpeace logout
 ```
 
-## 验证
+## Verification
 
 ```powershell
 pnpm typecheck

@@ -74,7 +74,7 @@ function createFixture(options?: {
   };
   const dependencies: TuiDependencies = {
     registry,
-    version: "0.1.17",
+    version: "0.1.18",
     workspacePath: "C:\\workspace",
     async listModels() {
       return ["deepseek-flash"];
