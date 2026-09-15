@@ -14,10 +14,9 @@ export interface BannerProps {
 export function Banner({ version, modelName, workspacePath }: BannerProps) {
   const { columns } = useWindowSize();
   const wide = columns >= 88;
-  const panelWidth = Math.max(24, Math.min(76, columns - 2));
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box width="100%" flexDirection="column" marginBottom={1}>
       {wide ? (
         <Box gap={5}>
           <Text color={CYAN}>{`░█▀▀░█░█░█▀▀░█▀▄░█▀█░█▀▀░█▀█░█▀▀░█▀▀
@@ -42,7 +41,9 @@ export function Banner({ version, modelName, workspacePath }: BannerProps) {
       </Box>
 
       <Box
-        width={panelWidth}
+        width={76}
+        maxWidth="100%"
+        flexShrink={1}
         marginTop={1}
         paddingX={1}
         flexDirection="column"

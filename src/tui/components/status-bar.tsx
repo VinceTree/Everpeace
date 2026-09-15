@@ -8,7 +8,12 @@ export interface StatusBarProps {
 
 export function StatusBar({ modelName, workspacePath }: StatusBarProps) {
   return (
-    <Box paddingX={1} gap={2} justifyContent="space-between">
+    <Box
+      width="100%"
+      paddingX={1}
+      gap={2}
+      justifyContent="space-between"
+    >
       <Text color={modelName ? "green" : "yellow"} wrap="truncate-end">
         {modelName ?? "未选择模型"}
       </Text>

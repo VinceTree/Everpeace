@@ -60,7 +60,7 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.1.10) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.14) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────╮
 │ model: deepseek-flash  /model to change      │
@@ -79,7 +79,7 @@ everpeace ❯ !git status
 ...
 ```
 
-输入区域使用带底色的全宽三行边框，输入内容位于垂直中线。模型名称和工作目录以 Codex 风格排列在输入框下方，不显示额外的操作提示。TUI 使用独立的 alternate screen，滚轮调整终端字号时不会把旧方框留在主滚动区中。
+输入区域会直接跟随终端的当前可用宽度，并预留最后一列防止 Windows 终端自动换行；启动时的 model/directory 信息框采用 Codex 风格的 76 列上限，在窄终端中自动收缩。交互输入框始终固定为三行，过长输入会在框内裁剪，不会撑出新行。TUI 使用原生 inline 模式，普通滚轮可以浏览 PowerShell 历史；Ctrl + 滚轮改变字号时会清除被终端重新排版的旧帧和 scrollback，再按新尺寸完整重绘，界面只保留一个交互框。
 
 TUI 命令：
 
@@ -89,7 +89,7 @@ TUI 命令：
 - `/logout`：多选删除模型与对应系统凭据。
 - `/clear`：清屏并重置当前对话，保留当前模型。
 - `/help`、`/exit`：显示帮助或退出。
-- `!<command>`：直接运行当前系统的命令行（Windows 使用 PowerShell，macOS/Linux 使用 Bash），不再次确认；执行时会接管当前终端，结束后把保留布局的输出回放到 TUI 中。
+- `!<command>`：直接运行当前系统的命令行（Windows 使用 PowerShell，macOS/Linux 使用 Bash），不再次确认；执行时会接管当前终端，原生输出保留在终端 scrollback 中。
 
 行为说明：
 

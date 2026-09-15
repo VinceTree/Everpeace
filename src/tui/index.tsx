@@ -11,15 +11,31 @@ export interface RunTuiOptions {
 
 export const TUI_RENDER_OPTIONS = {
   exitOnCtrlC: false,
-  alternateScreen: true,
+  alternateScreen: false,
+  incrementalRendering: false,
 } as const;
 
 interface TerminalOutput {
   write(chunk: string): unknown;
 }
 
+interface ResizableTerminalOutput extends TerminalOutput {
+  prependListener(event: "resize", listener: () => void): unknown;
+  off(event: "resize", listener: () => void): unknown;
+}
+
+export const TERMINAL_RESET_SEQUENCE = "\u001B[2J\u001B[3J\u001B[H";
+
 export function clearTerminal(output: TerminalOutput = process.stdout): void {
-  output.write("\u001B[2J\u001B[H");
+  output.write(TERMINAL_RESET_SEQUENCE);
+}
+
+export function installResizeRecovery(
+  output: ResizableTerminalOutput = process.stdout,
+): () => void {
+  const recover = () => clearTerminal(output);
+  output.prependListener("resize", recover);
+  return () => output.off("resize", recover);
 }
 
 export async function runTui({ registry, dependencies }: RunTuiOptions): Promise<number> {
@@ -30,20 +46,26 @@ export async function runTui({ registry, dependencies }: RunTuiOptions): Promise
   const resolvedDependencies =
     dependencies ?? createDefaultTuiDependencies(registry);
   const initialModels = await resolvedDependencies.registry.resolveAll();
-  let clearOutput: () => void = () => undefined;
-  const instance = render(
-    <EverpeaceApp
-      dependencies={resolvedDependencies}
-      initialModels={initialModels}
-      onClearOutput={() => clearOutput()}
-    />,
-    TUI_RENDER_OPTIONS,
-  );
-  clearOutput = () => {
-    instance.clear();
-    clearTerminal();
-  };
+  const removeResizeRecovery = installResizeRecovery();
 
-  const result = await instance.waitUntilExit();
-  return typeof result === "number" ? result : 0;
+  try {
+    let clearOutput: () => void = () => undefined;
+    const instance = render(
+      <EverpeaceApp
+        dependencies={resolvedDependencies}
+        initialModels={initialModels}
+        onClearOutput={() => clearOutput()}
+      />,
+      TUI_RENDER_OPTIONS,
+    );
+    clearOutput = () => {
+      instance.clear();
+      clearTerminal();
+    };
+
+    const result = await instance.waitUntilExit();
+    return typeof result === "number" ? result : 0;
+  } finally {
+    removeResizeRecovery();
+  }
 }

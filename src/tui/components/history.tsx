@@ -1,4 +1,4 @@
-import { Box, Static, Text } from "ink";
+import { Box, Text } from "ink";
 import React from "react";
 import type { TimelineEntry } from "../types.js";
 import { Banner } from "./banner.js";
@@ -41,8 +41,8 @@ function HistoryLine({ entry }: { entry: Exclude<TimelineEntry, { kind: "banner"
 
 export function History({ entries, version, workspacePath }: HistoryProps) {
   return (
-    <Static items={entries}>
-      {(entry) =>
+    <Box width="100%" flexDirection="column">
+      {entries.map((entry) =>
         entry.kind === "banner" ? (
           <Banner
             key={entry.id}
@@ -53,7 +53,7 @@ export function History({ entries, version, workspacePath }: HistoryProps) {
         ) : (
           <HistoryLine key={entry.id} entry={entry} />
         )
-      }
-    </Static>
+      )}
+    </Box>
   );
 }

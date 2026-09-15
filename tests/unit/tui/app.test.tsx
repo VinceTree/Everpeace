@@ -74,7 +74,7 @@ function createFixture(options?: {
   };
   const dependencies: TuiDependencies = {
     registry,
-    version: "0.1.10",
+    version: "0.1.14",
     workspacePath: "C:\\workspace",
     async listModels() {
       return ["deepseek-flash"];
@@ -138,6 +138,84 @@ test("TUI accepts chat and renders the assistant response", async () => {
   assert.match(frameLines[promptTop] ?? "", /^╭/);
   assert.match(frameLines[promptBottom] ?? "", /^╰/);
   assert.equal(promptBottom - promptTop, 2);
+  const topBorders = frameLines.filter((line) => line.startsWith("╭"));
+  assert.deepEqual(topBorders.map((line) => line.length), [76, 99]);
+  view.unmount();
+});
+
+test("prompt remains one three-row box when its input exceeds the terminal width", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onClearOutput={() => undefined}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("x".repeat(180));
+  await tick();
+
+  const frameLines = (view.lastFrame() ?? "").split("\n");
+  const promptLines = frameLines.filter((line) => line.includes("everpeace ❯"));
+  assert.equal(promptLines.length, 1);
+  const promptInput = frameLines.findIndex((line) => line.includes("everpeace ❯"));
+  assert.match(frameLines[promptInput - 1] ?? "", /^╭/);
+  assert.match(frameLines[promptInput + 1] ?? "", /^╰/);
+  assert.equal(frameLines.filter((line) => line.startsWith("╭")).length, 2);
+  view.unmount();
+});
+
+test("repeated terminal resizes keep exactly one non-wrapping prompt box", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onClearOutput={() => undefined}
+    />,
+  );
+
+  await tick();
+  for (const columns of [72, 45, 120, 58]) {
+    Object.defineProperty(view.stdout, "columns", {
+      configurable: true,
+      value: columns,
+    });
+    view.stdout.emit("resize");
+    await waitFor(() => {
+      const lines = (view.lastFrame() ?? "").split("\n");
+      const promptIndex = lines.findIndex((line) => line.includes("everpeace ❯"));
+      return (lines[promptIndex - 1]?.length ?? 0) === columns - 1;
+    });
+
+    const lines = (view.lastFrame() ?? "").split("\n");
+    const promptIndexes = lines
+      .map((line, index) => (line.includes("everpeace ❯") ? index : -1))
+      .filter((index) => index >= 0);
+    assert.equal(promptIndexes.length, 1);
+    const promptIndex = promptIndexes[0]!;
+    assert.match(lines[promptIndex - 1] ?? "", /^╭/);
+    assert.match(lines[promptIndex + 1] ?? "", /^╰/);
+    const topBorderWidths = lines
+      .filter((line) => line.startsWith("╭"))
+      .map((line) => line.length);
+    assert.deepEqual(topBorderWidths, [Math.min(76, columns - 1), columns - 1]);
+  }
+
   view.unmount();
 });
 
@@ -253,7 +331,7 @@ test("direct commands use the native terminal runner", async () => {
   await waitFor(() => (view.lastFrame() ?? "").includes("Command completed successfully"));
 
   assert.equal(directCommand, "ls");
-  assert.match(view.lastFrame() ?? "", /NAME    SIZE\nfile-a  10/);
+  assert.doesNotMatch(view.lastFrame() ?? "", /NAME    SIZE|file-a  10/);
   view.unmount();
 });
 
