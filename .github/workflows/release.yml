@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+    paths:
+      - package.json
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish version
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Read and validate version
+        id: version
+        shell: bash
+        run: |
+          version="$(node --print "require('./package.json').version")"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid package version: $version" >&2
+            exit 1
+          fi
+
+          tag="v${version}"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "$tag" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match package version $tag" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag when needed
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --annotate "$TAG" --message "Everpeace $TAG" "$GITHUB_SHA"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release when needed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+            exit 0
+          fi
+
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --generate-notes \
+            --verify-tag
