@@ -87,6 +87,8 @@ The input area follows the terminal's available width and reserves the final col
 
 The TUI runs inline, so the normal scroll wheel can browse the completed Everpeace conversation. After Ctrl + scroll wheel changes the font size, Everpeace performs a synchronized source-backed redraw after Codex's 75 ms trailing delay, restoring the complete banner and conversation without exposing an empty intermediate frame.
 
+The first normal prompt creates a local JSONL session. Everpeace saves the visible transcript and the model context needed to continue the conversation, while a separate background model request generates a short title from that first prompt. `/new` immediately creates and enters an empty session; its temporary title is replaced after the first prompt. `/resume` lists every local session by title and last activity time, restores its original model and working directory, and continues appending to the same file. Session files live under the platform application-state directory (`%APPDATA%\Everpeace\sessions` on Windows).
+
 Composer shortcuts follow Codex conventions: `Enter` submits; `Shift+Enter`, `Alt+Enter`, or `Ctrl+J` inserts a newline; `Home`/`End` and `Ctrl+A`/`Ctrl+E` move to the current line's start/end; `Ctrl+U`/`Ctrl+K` delete to the current line's start/end; `Ctrl+W` deletes the previous word; and `Ctrl+Y` restores the most recently killed text. Arrow keys, `Ctrl+B/F/P/N`, and `Alt+B/F` also move the cursor.
 
 Everpeace disables terminal focus reporting at startup, shutdown, and after `!` commands, preventing `[I` and `[O` from appearing in the composer when switching windows.
@@ -96,8 +98,10 @@ TUI commands:
 - `/login`: Sign in and activate a model immediately.
 - `/model`: Switch to a registered model and reset the conversation context.
 - `/models`: List all registered models and credential states.
+- `/new`: Immediately create and enter a new local session.
+- `/resume`: List and resume local JSONL sessions.
 - `/logout`: Select and remove models with their operating system credentials.
-- `/clear`: Clear the screen and reset the conversation while retaining the active model.
+- `/clear`: End the current conversation and start a fresh session on the next prompt while retaining the active model.
 - `/help`, `/exit`: Show help or exit Everpeace.
 - `!<command>`: Run a command directly in the native system shell (PowerShell on Windows, Bash on macOS/Linux) without confirmation. PTY-formatted output streams into the TUI history without suspending or refreshing the whole interface.
 

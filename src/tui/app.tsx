@@ -7,6 +7,11 @@ import type {
   RegisteredModelStatus,
   ResolvedModels,
 } from "../storage/model-registry.js";
+import type {
+  LoadedSession,
+  SessionModelRef,
+  SessionSummary,
+} from "../storage/session-store.js";
 import type { BashResult } from "../tools/bash.js";
 import { parseTuiInput, TUI_HELP } from "./commands.js";
 import { BashConfirmation } from "./components/bash-confirmation.js";
@@ -15,7 +20,9 @@ import { LoginWizard } from "./components/login-wizard.js";
 import { LogoutWizard } from "./components/logout-wizard.js";
 import { ModelPicker } from "./components/model-picker.js";
 import { Prompt } from "./components/prompt.js";
+import { SessionPicker } from "./components/session-picker.js";
 import { StatusBar } from "./components/status-bar.js";
+import { truncateEnd } from "./text-width.js";
 import type {
   HistoryKind,
   TimelineEntry,
@@ -25,7 +32,13 @@ import type {
 type View =
   | { kind: "chat" }
   | { kind: "login" }
-  | { kind: "model-picker"; title: string; models: RegisteredModel[] }
+  | {
+      kind: "model-picker";
+      title: string;
+      models: RegisteredModel[];
+      resumeSession?: LoadedSession;
+    }
+  | { kind: "session-picker"; sessions: SessionSummary[] }
   | { kind: "logout"; models: RegisteredModelStatus[] };
 
 interface PendingConfirmation {
@@ -52,6 +65,19 @@ function initialView(models: RegisteredModel[]): View {
   return models.length > 1
     ? { kind: "model-picker", title: "选择本次会话模型", models }
     : { kind: "chat" };
+}
+
+function toSessionModel(model: RegisteredModel): SessionModelRef {
+  return {
+    id: model.id,
+    model_name: model.model_name,
+    base_url: model.base_url,
+  };
+}
+
+function fallbackSessionTitle(firstQuestion: string): string {
+  const normalized = firstQuestion.replace(/\s+/g, " ").trim();
+  return truncateEnd(normalized || "Untitled Session", 60);
 }
 
 function bashStatus(result: BashResult): { kind: HistoryKind; text: string } {
@@ -134,13 +160,20 @@ export function EverpeaceApp({
 
   const nextId = useRef(initialTimeline.length);
   const abortController = useRef<AbortController | undefined>(undefined);
+  const titleControllers = useRef(new Set<AbortController>());
   const confirmationRef = useRef<PendingConfirmation | undefined>(undefined);
   const terminalCommandRunning = useRef(false);
+  const activeSessionId = useRef<string | undefined>(undefined);
+  const sessionTitlePending = useRef(false);
   const [timeline, setTimeline] = useState(initialTimeline);
   const [timelineEpoch, setTimelineEpoch] = useState(0);
   const [inputKey, setInputKey] = useState(0);
   const [sessionEpoch, setSessionEpoch] = useState(0);
+  const [sessionContext, setSessionContext] = useState<
+    Array<Record<string, unknown>>
+  >([]);
   const [activeModel, setActiveModel] = useState(firstActiveModel);
+  const [workspacePath, setWorkspacePath] = useState(dependencies.workspacePath);
   const [view, setView] = useState<View>(() => initialView(initialModels.available));
   const [busyLabel, setBusyLabel] = useState<string>();
   const [terminalBusy, setTerminalBusy] = useState(false);
@@ -153,8 +186,21 @@ export function EverpeaceApp({
       ...current,
       { id, kind, text },
     ]);
+    const sessionId = activeSessionId.current;
+    if (sessionId !== undefined) {
+      void dependencies.sessionStore
+        .appendTimeline(sessionId, { kind, text })
+        .catch((error: unknown) => {
+          const errorId = nextId.current++;
+          const message = error instanceof Error ? error.message : String(error);
+          setTimeline((current) => [
+            ...current,
+            { id: errorId, kind: "error", text: `Session save failed: ${message}` },
+          ]);
+        });
+    }
     return id;
-  }, []);
+  }, [dependencies.sessionStore]);
 
   const finishConfirmation = useCallback(
     (accepted: boolean) => {
@@ -231,19 +277,36 @@ export function EverpeaceApp({
     () =>
       activeModel === undefined
         ? undefined
-        : dependencies.createAgent(activeModel, agentIo),
-    [activeModel, agentIo, dependencies, sessionEpoch],
+        : dependencies.createAgent(activeModel, agentIo, {
+            initialContext: sessionContext,
+            async onContextAppend(items) {
+              const sessionId = activeSessionId.current;
+              if (sessionId !== undefined) {
+                await dependencies.sessionStore.appendContext(sessionId, items);
+              }
+            },
+          }),
+    [activeModel, agentIo, dependencies, sessionContext, sessionEpoch],
   );
 
   const activateModel = useCallback(
     (model: RegisteredModel, message = `已启用模型 ${model.model_name}`) => {
       abortController.current?.abort();
+      const sessionId = activeSessionId.current;
+      if (sessionId !== undefined) {
+        void dependencies.sessionStore
+          .selectModel(sessionId, toSessionModel(model), false)
+          .catch((error: unknown) => {
+            append("error", `Session save failed: ${error instanceof Error ? error.message : String(error)}`);
+          });
+      }
       setActiveModel(model);
+      setSessionContext([]);
       setSessionEpoch((current) => current + 1);
       setView({ kind: "chat" });
       append("system", `${message}；对话上下文已重置。`);
     },
-    [append],
+    [append, dependencies.sessionStore],
   );
 
   const showModels = useCallback(async () => {
@@ -302,8 +365,176 @@ export function EverpeaceApp({
     }
   }, [append, dependencies.registry]);
 
+  const completeResume = useCallback(
+    async (
+      loaded: LoadedSession,
+      model: RegisteredModel,
+      replacementModel: boolean,
+    ) => {
+      const previousWorkspace = workspacePath;
+      let changedWorkspace = false;
+      try {
+        const restoredWorkspace = await dependencies.changeWorkspace(
+          loaded.summary.workspace_path,
+        );
+        changedWorkspace = restoredWorkspace !== previousWorkspace;
+        if (replacementModel) {
+          await dependencies.sessionStore.selectModel(
+            loaded.summary.id,
+            toSessionModel(model),
+            true,
+          );
+        }
+
+        const restoredTimeline: TimelineEntry[] = [
+          { id: 0, kind: "banner", modelName: model.model_name },
+          ...loaded.timeline.map((entry, index) => ({
+            id: index + 1,
+            kind: entry.kind,
+            text: entry.text,
+          })),
+        ];
+
+        abortController.current?.abort();
+        activeSessionId.current = loaded.summary.id;
+        sessionTitlePending.current = loaded.summary.title_pending;
+        nextId.current = restoredTimeline.length;
+        onReplayOutput(() => {
+          setTimeline(restoredTimeline);
+          setTimelineEpoch((current) => current + 1);
+          setSessionContext(loaded.context.map((item) => ({ ...item })));
+          setActiveModel(model);
+          setWorkspacePath(restoredWorkspace);
+          setSessionEpoch((current) => current + 1);
+          setInputKey((current) => current + 1);
+          setView({ kind: "chat" });
+        });
+      } catch (error) {
+        if (changedWorkspace) {
+          await dependencies.changeWorkspace(previousWorkspace).catch(() => undefined);
+        }
+        throw error;
+      }
+    },
+    [dependencies, onReplayOutput, workspacePath],
+  );
+
+  const chooseSession = useCallback(
+    async (summary: SessionSummary) => {
+      setView({ kind: "chat" });
+      setBusyLabel("正在恢复 Session");
+      try {
+        const [loaded, resolved] = await Promise.all([
+          dependencies.sessionStore.load(summary.id),
+          dependencies.registry.resolveAll(),
+        ]);
+        const originalModel = resolved.available.find(
+          (candidate) =>
+            candidate.id === loaded.summary.model.id ||
+            (candidate.model_name === loaded.summary.model.model_name &&
+              candidate.base_url === loaded.summary.model.base_url),
+        );
+
+        if (originalModel) {
+          await completeResume(loaded, originalModel, false);
+        } else if (resolved.available.length > 0) {
+          setView({
+            kind: "model-picker",
+            title: `原模型 ${loaded.summary.model.model_name} 不可用，请选择替代模型`,
+            models: resolved.available,
+            resumeSession: loaded,
+          });
+        } else {
+          append("error", "原 Session 模型不可用；请先使用 /login 注册模型。");
+        }
+      } catch (error) {
+        append("error", `Session restore failed: ${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        setBusyLabel(undefined);
+      }
+    },
+    [append, completeResume, dependencies.registry, dependencies.sessionStore],
+  );
+
+  const openResume = useCallback(async () => {
+    setBusyLabel("正在读取 Session");
+    try {
+      const result = await dependencies.sessionStore.list();
+      if (result.skipped > 0) {
+        append("error", `已跳过 ${result.skipped} 个损坏的 Session 文件。`);
+      }
+      if (result.sessions.length === 0) {
+        append("system", "没有可恢复的 Session。");
+        return;
+      }
+      setView({ kind: "session-picker", sessions: result.sessions });
+    } catch (error) {
+      append("error", `Session list failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusyLabel(undefined);
+    }
+  }, [append, dependencies.sessionStore]);
+
+  const startTitleGeneration = useCallback(
+    (sessionId: string, model: RegisteredModel, firstQuestion: string) => {
+      const titleController = new AbortController();
+      titleControllers.current.add(titleController);
+      void dependencies
+        .generateSessionTitle(model, firstQuestion, titleController.signal)
+        .then((title) => dependencies.sessionStore.updateTitle(sessionId, title))
+        .catch(() => undefined)
+        .finally(() => titleControllers.current.delete(titleController));
+    },
+    [dependencies],
+  );
+
+  const createNewSession = useCallback(async () => {
+    if (!activeModel) {
+      append("error", "尚未启用模型，请先使用 /login 或 /model。");
+      return;
+    }
+
+    setBusyLabel("正在创建新 Session");
+    const message = "已创建新 Session；发送第一条消息后会自动生成名称。";
+    try {
+      const session = await dependencies.sessionStore.create({
+        title: "新 Session",
+        titlePending: true,
+        workspacePath,
+        model: toSessionModel(activeModel),
+      });
+      await dependencies.sessionStore.appendTimeline(session.id, {
+        kind: "system",
+        text: message,
+      });
+
+      abortController.current?.abort();
+      activeSessionId.current = session.id;
+      sessionTitlePending.current = true;
+      nextId.current = 2;
+      onReplayOutput(() => {
+        setTimeline([
+          { id: 0, kind: "banner", modelName: activeModel.model_name },
+          { id: 1, kind: "system", text: message },
+        ]);
+        setTimelineEpoch((current) => current + 1);
+        setSessionContext([]);
+        setSessionEpoch((current) => current + 1);
+        setInputKey((current) => current + 1);
+        setView({ kind: "chat" });
+      });
+    } catch (error) {
+      append("error", `Session creation failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusyLabel(undefined);
+    }
+  }, [activeModel, append, dependencies.sessionStore, onReplayOutput, workspacePath]);
+
   const clearConversation = useCallback(() => {
     abortController.current?.abort();
+    activeSessionId.current = undefined;
+    sessionTitlePending.current = false;
+    setSessionContext([]);
     const banner: TimelineEntry = {
       id: nextId.current++,
       kind: "banner",
@@ -318,9 +549,43 @@ export function EverpeaceApp({
 
   const runChat = useCallback(
     async (text: string) => {
-      if (!agent) {
+      if (!agent || !activeModel) {
         append("error", "尚未启用模型，请先使用 /login 或 /model。");
         return;
+      }
+
+      if (activeSessionId.current === undefined) {
+        setBusyLabel("正在创建 Session");
+        try {
+          const session = await dependencies.sessionStore.create({
+            title: fallbackSessionTitle(text),
+            titlePending: false,
+            workspacePath,
+            model: toSessionModel(activeModel),
+          });
+          activeSessionId.current = session.id;
+          sessionTitlePending.current = false;
+          startTitleGeneration(session.id, activeModel, text);
+        } catch (error) {
+          append("error", `Session creation failed: ${error instanceof Error ? error.message : String(error)}`);
+          setBusyLabel(undefined);
+          return;
+        }
+      } else if (sessionTitlePending.current) {
+        setBusyLabel("正在初始化 Session");
+        const sessionId = activeSessionId.current;
+        try {
+          await dependencies.sessionStore.updateTitle(
+            sessionId,
+            fallbackSessionTitle(text),
+          );
+          sessionTitlePending.current = false;
+          startTitleGeneration(sessionId, activeModel, text);
+        } catch (error) {
+          append("error", `Session initialization failed: ${error instanceof Error ? error.message : String(error)}`);
+          setBusyLabel(undefined);
+          return;
+        }
       }
 
       append("user", text);
@@ -340,7 +605,7 @@ export function EverpeaceApp({
         setBusyLabel(undefined);
       }
     },
-    [activeModel?.model_name, agent, append],
+    [activeModel, agent, append, dependencies.sessionStore, startTitleGeneration, workspacePath],
   );
 
   const runDirectBash = useCallback(
@@ -386,6 +651,8 @@ export function EverpeaceApp({
       if (parsed.command === "/login") setView({ kind: "login" });
       if (parsed.command === "/model") void openModelPicker();
       if (parsed.command === "/models") void showModels();
+      if (parsed.command === "/new") void createNewSession();
+      if (parsed.command === "/resume") void openResume();
       if (parsed.command === "/logout") void openLogout();
       if (parsed.command === "/clear") clearConversation();
       if (parsed.command === "/help") append("system", TUI_HELP);
@@ -394,9 +661,11 @@ export function EverpeaceApp({
     [
       append,
       clearConversation,
+      createNewSession,
       exit,
       openLogout,
       openModelPicker,
+      openResume,
       runChat,
       runDirectBash,
       showModels,
@@ -412,6 +681,7 @@ export function EverpeaceApp({
       }
 
       setActiveModel(undefined);
+      setSessionContext([]);
       setSessionEpoch((current) => current + 1);
       setBusyLabel("正在刷新可用模型");
       setView({ kind: "chat" });
@@ -458,6 +728,8 @@ export function EverpeaceApp({
   useEffect(
     () => () => {
       abortController.current?.abort();
+      titleControllers.current.forEach((controller) => controller.abort());
+      titleControllers.current.clear();
       confirmationRef.current?.resolve(false);
       confirmationRef.current = undefined;
     },
@@ -491,7 +763,7 @@ export function EverpeaceApp({
         key={`history-${timelineEpoch}`}
         entries={timeline}
         version={dependencies.version}
-        workspacePath={dependencies.workspacePath}
+        workspacePath={workspacePath}
       />
 
       {confirmation ? (
@@ -510,7 +782,26 @@ export function EverpeaceApp({
         <ModelPicker
           title={view.title}
           models={view.models}
-          onSelect={(model) => activateModel(model)}
+          onSelect={(model) => {
+            if (!view.resumeSession) {
+              activateModel(model);
+              return;
+            }
+            const loaded = view.resumeSession;
+            setView({ kind: "chat" });
+            setBusyLabel("正在恢复 Session");
+            void completeResume(loaded, model, true)
+              .catch((error: unknown) => {
+                append("error", `Session restore failed: ${error instanceof Error ? error.message : String(error)}`);
+              })
+              .finally(() => setBusyLabel(undefined));
+          }}
+          onCancel={() => setView({ kind: "chat" })}
+        />
+      ) : view.kind === "session-picker" ? (
+        <SessionPicker
+          sessions={view.sessions}
+          onSelect={(session) => void chooseSession(session)}
           onCancel={() => setView({ kind: "chat" })}
         />
       ) : view.kind === "logout" ? (
@@ -534,7 +825,7 @@ export function EverpeaceApp({
 
       <StatusBar
         modelName={activeModel?.model_name}
-        workspacePath={dependencies.workspacePath}
+        workspacePath={workspacePath}
       />
     </Box>
   );

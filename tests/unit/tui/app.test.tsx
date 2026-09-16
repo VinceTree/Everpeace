@@ -9,12 +9,21 @@ import type {
   ResolvedModels,
   StoredModelRegistration,
 } from "../../../src/storage/model-registry.js";
+import type {
+  CreateSessionInput,
+  LoadedSession,
+  SessionModelRef,
+  SessionStoreLike,
+  SessionSummary,
+  StoredTimelineEntry,
+} from "../../../src/storage/session-store.js";
 import type { BashResult } from "../../../src/tools/bash.js";
 import {
   EverpeaceApp,
   RESIZE_REDRAW_DEBOUNCE_MS,
 } from "../../../src/tui/app.js";
 import type {
+  AgentRestoreOptions,
   AgentSession,
   TuiDependencies,
   TuiModelRegistry,
@@ -45,9 +54,88 @@ function status(model: RegisteredModel): RegisteredModelStatus {
   return { ...stored(model), credential_status: "ready" };
 }
 
+interface MemorySessionStore extends SessionStoreLike {
+  readonly sessions: Map<string, LoadedSession>;
+}
+
+function createMemorySessionStore(): MemorySessionStore {
+  const sessions = new Map<string, LoadedSession>();
+  let nextSessionId = 0;
+  let clock = 0;
+  const timestamp = () => `2026-09-16T00:00:${String(clock++).padStart(2, "0")}.000Z`;
+  const requireSession = (sessionId: string) => {
+    const session = sessions.get(sessionId);
+    assert.ok(session);
+    return session;
+  };
+  return {
+    sessions,
+    async create(input: CreateSessionInput) {
+      const at = timestamp();
+      const summary: SessionSummary = {
+        id: `session-${++nextSessionId}`,
+        title: input.title,
+        title_pending: input.titlePending,
+        created_at: at,
+        updated_at: at,
+        workspace_path: input.workspacePath,
+        model: { ...input.model },
+      };
+      sessions.set(summary.id, { summary, timeline: [], context: [] });
+      return { ...summary, model: { ...summary.model } };
+    },
+    async updateTitle(sessionId, title) {
+      const session = requireSession(sessionId);
+      session.summary.title = title;
+      session.summary.title_pending = false;
+      session.summary.updated_at = timestamp();
+    },
+    async appendTimeline(sessionId, entry: StoredTimelineEntry) {
+      const session = requireSession(sessionId);
+      session.timeline.push({ ...entry });
+      session.summary.updated_at = timestamp();
+    },
+    async appendContext(sessionId, items) {
+      const session = requireSession(sessionId);
+      session.context.push(...items.map((item) => ({ ...item })));
+      session.summary.updated_at = timestamp();
+    },
+    async selectModel(
+      sessionId: string,
+      model: SessionModelRef,
+      preserveContext: boolean,
+    ) {
+      const session = requireSession(sessionId);
+      session.summary.model = { ...model };
+      if (!preserveContext) session.context = [];
+      session.summary.updated_at = timestamp();
+    },
+    async list() {
+      return {
+        sessions: [...sessions.values()]
+          .map(({ summary }) => ({ ...summary, model: { ...summary.model } }))
+          .sort((left, right) => right.updated_at.localeCompare(left.updated_at)),
+        skipped: 0,
+      };
+    },
+    async load(sessionId) {
+      const session = requireSession(sessionId);
+      return {
+        summary: { ...session.summary, model: { ...session.summary.model } },
+        timeline: session.timeline.map((entry) => ({ ...entry })),
+        context: session.context.map((item) => ({ ...item })),
+      };
+    },
+  };
+}
+
 function createFixture(options?: {
   initial?: RegisteredModel[];
-  createAgent?: (model: RegisteredModel, io: AgentIO) => AgentSession;
+  createAgent?: (
+    model: RegisteredModel,
+    io: AgentIO,
+    restore?: AgentRestoreOptions,
+  ) => AgentSession;
 }) {
   let available = options?.initial ?? [];
   const registry: TuiModelRegistry = {
@@ -76,20 +164,32 @@ function createFixture(options?: {
       return removed;
     },
   };
+  const sessionStore = createMemorySessionStore();
   const dependencies: TuiDependencies = {
     registry,
     version: "0.1.19",
     workspacePath: "C:\\workspace",
+    sessionStore,
     async listModels() {
       return ["deepseek-flash"];
     },
     createAgent:
       options?.createAgent ??
-      ((_model, io) => ({
+      ((_model, io, restore) => ({
         async runTurn(input) {
+          await restore?.onContextAppend?.([{ role: "user", content: input }]);
           io.writeAssistant(`echo: ${input}`);
+          await restore?.onContextAppend?.([
+            { type: "message", role: "assistant", content: `echo: ${input}` },
+          ]);
         },
       })),
+    async generateSessionTitle(_model, firstQuestion) {
+      return firstQuestion;
+    },
+    async changeWorkspace(workspacePath) {
+      return workspacePath;
+    },
     async runBash() {
       return { stdout: "ok\n", stderr: "", exitCode: 0, signal: null };
     },
@@ -97,7 +197,7 @@ function createFixture(options?: {
       return { stdout: "", stderr: "", exitCode: 0, signal: null };
     },
   };
-  return { dependencies, registry };
+  return { dependencies, registry, sessionStore };
 }
 
 test("TUI accepts chat and renders the assistant response", async () => {
@@ -521,3 +621,443 @@ test("/clear resets the agent session and clears rendered output", async () => {
   assert.equal(clearCalls, 1);
   view.unmount();
 });
+
+test("the first chat creates one session and generates its title without blocking", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  let resolveTitle: ((title: string) => void) | undefined;
+  fixture.dependencies.generateSessionTitle = async () =>
+    new Promise((resolve) => {
+      resolveTitle = resolve;
+    });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("/help");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("斜杠命令"));
+  assert.equal(fixture.sessionStore.sessions.size, 0);
+
+  view.stdin.write("first persisted question");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("echo: first persisted question"));
+  assert.equal(fixture.sessionStore.sessions.size, 1);
+  const session = [...fixture.sessionStore.sessions.values()][0];
+  assert.ok(session);
+  assert.equal(session.summary.title, "first persisted question");
+  assert.deepEqual(session.timeline.map((entry) => entry.kind), ["user", "assistant"]);
+  assert.equal(session.context.length, 2);
+
+  resolveTitle?.("Generated session title");
+  await waitFor(() => session.summary.title === "Generated session title");
+  view.unmount();
+});
+
+test("/new immediately creates and enters a session that is named by its first question", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  let resolveTitle: ((title: string) => void) | undefined;
+  fixture.dependencies.generateSessionTitle = async () =>
+    new Promise((resolve) => {
+      resolveTitle = resolve;
+    });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("/new");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("已创建新 Session"));
+
+  assert.equal(fixture.sessionStore.sessions.size, 1);
+  const session = [...fixture.sessionStore.sessions.values()][0];
+  assert.ok(session);
+  assert.equal(session.summary.title, "新 Session");
+  assert.equal(session.summary.title_pending, true);
+  assert.deepEqual(session.timeline, [
+    {
+      kind: "system",
+      text: "已创建新 Session；发送第一条消息后会自动生成名称。",
+    },
+  ]);
+
+  view.stdin.write("name this conversation");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("echo: name this conversation"));
+  assert.equal(fixture.sessionStore.sessions.size, 1);
+  assert.equal(session.summary.title, "name this conversation");
+  assert.equal(session.summary.title_pending, false);
+  assert.equal(session.context.length, 2);
+
+  resolveTitle?.("Generated new title");
+  await waitFor(() => session.summary.title === "Generated new title");
+  view.unmount();
+});
+
+test("/new requires an active model and does not create an unusable session", async () => {
+  const fixture = createFixture();
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("/new");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("尚未启用模型"));
+
+  assert.equal(fixture.sessionStore.sessions.size, 0);
+  view.unmount();
+});
+
+test("/new leaves the previous session intact and writes subsequent chat only to the new one", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("old conversation");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("echo: old conversation"));
+  const oldSession = [...fixture.sessionStore.sessions.values()][0];
+  assert.ok(oldSession);
+
+  view.stdin.write("/new");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("已创建新 Session"));
+  view.stdin.write("new conversation");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("echo: new conversation"));
+
+  assert.equal(fixture.sessionStore.sessions.size, 2);
+  assert.doesNotMatch(
+    oldSession.timeline.map((entry) => entry.text).join("\n"),
+    /new conversation/,
+  );
+  const newSession = [...fixture.sessionStore.sessions.values()].at(-1);
+  assert.ok(newSession);
+  assert.match(
+    newSession.timeline.map((entry) => entry.text).join("\n"),
+    /new conversation/,
+  );
+  view.unmount();
+});
+
+test("a pending session resumed before its first question is named without duplication", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  const summary = await fixture.sessionStore.create({
+    title: "新 Session",
+    titlePending: true,
+    workspacePath: "C:\\workspace",
+    model: toSessionModelForTest(model),
+  });
+  await fixture.sessionStore.appendTimeline(summary.id, {
+    kind: "system",
+    text: "已创建新 Session；发送第一条消息后会自动生成名称。",
+  });
+  let titleQuestion: string | undefined;
+  fixture.dependencies.generateSessionTitle = async (_model, firstQuestion) => {
+    titleQuestion = firstQuestion;
+    return "Resumed title";
+  };
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("/resume");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("新 Session"));
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("已创建新 Session"));
+  view.stdin.write("first after resume");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("echo: first after resume"));
+  await waitFor(() => titleQuestion === "first after resume");
+
+  assert.equal(fixture.sessionStore.sessions.size, 1);
+  const loaded = await fixture.sessionStore.load(summary.id);
+  assert.equal(loaded.summary.title, "Resumed title");
+  assert.equal(loaded.summary.title_pending, false);
+  view.unmount();
+});
+
+test("/resume restores transcript, workspace, context, and continues the same session", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const restoredContexts: Array<readonly Record<string, unknown>[]> = [];
+  const fixture = createFixture({
+    initial: [model],
+    createAgent: (_model, io, restore) => {
+      restoredContexts.push(restore?.initialContext ?? []);
+      return {
+        async runTurn(input) {
+          await restore?.onContextAppend?.([{ role: "user", content: input }]);
+          io.writeAssistant(`continued: ${input}`);
+        },
+      };
+    },
+  });
+  const summary = await fixture.sessionStore.create({
+    title: "Old session",
+    titlePending: false,
+    workspacePath: "C:\\old-repo",
+    model: toSessionModelForTest(model),
+  });
+  await fixture.sessionStore.appendTimeline(summary.id, {
+    kind: "user",
+    text: "before restart",
+  });
+  await fixture.sessionStore.appendTimeline(summary.id, {
+    kind: "assistant",
+    text: "old answer",
+  });
+  await fixture.sessionStore.appendContext(summary.id, [
+    { role: "user", content: "before restart" },
+    { type: "message", role: "assistant", content: "old answer" },
+  ]);
+  const workspaces: string[] = [];
+  fixture.dependencies.changeWorkspace = async (workspacePath) => {
+    workspaces.push(workspacePath);
+    return workspacePath;
+  };
+
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+  await tick();
+  view.stdin.write("/resume");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Old session"));
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("old answer"));
+
+  assert.deepEqual(workspaces, ["C:\\old-repo"]);
+  assert.match(view.lastFrame() ?? "", /C:\\old-repo/);
+  assert.deepEqual(restoredContexts.at(-1), [
+    { role: "user", content: "before restart" },
+    { type: "message", role: "assistant", content: "old answer" },
+  ]);
+
+  view.stdin.write("continue now");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("continued: continue now"));
+  assert.equal(fixture.sessionStore.sessions.size, 1);
+  const loaded = await fixture.sessionStore.load(summary.id);
+  assert.match(loaded.timeline.at(-1)?.text ?? "", /continued: continue now/);
+  assert.deepEqual(loaded.context.at(-1), { role: "user", content: "continue now" });
+  view.unmount();
+});
+
+test("/resume asks for a replacement model and preserves the restored context", async () => {
+  const replacement: RegisteredModel = {
+    id: "model-new",
+    model_name: "gpt-5",
+    base_url: "https://api.openai.com/v1",
+    api_key: "secret",
+  };
+  const restoredContexts: Array<readonly Record<string, unknown>[]> = [];
+  const fixture = createFixture({
+    initial: [replacement],
+    createAgent: (_model, _io, restore) => {
+      restoredContexts.push(restore?.initialContext ?? []);
+      return { async runTurn() {} };
+    },
+  });
+  const oldModel: SessionModelRef = {
+    id: "removed-model",
+    model_name: "removed-model-name",
+    base_url: "https://old.example.com/v1",
+  };
+  const summary = await fixture.sessionStore.create({
+    title: "Needs replacement",
+    titlePending: false,
+    workspacePath: "C:\\restored",
+    model: oldModel,
+  });
+  await fixture.sessionStore.appendTimeline(summary.id, {
+    kind: "user",
+    text: "remember this",
+  });
+  await fixture.sessionStore.appendContext(summary.id, [
+    { role: "user", content: "remember this" },
+  ]);
+
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [replacement], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+  await tick();
+  view.stdin.write("/resume");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Needs replacement"));
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("请选择替代模型"));
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("remember this"));
+
+  const loaded = await fixture.sessionStore.load(summary.id);
+  assert.deepEqual(loaded.summary.model, toSessionModelForTest(replacement));
+  assert.deepEqual(loaded.context, [{ role: "user", content: "remember this" }]);
+  assert.deepEqual(restoredContexts.at(-1), loaded.context);
+  view.unmount();
+});
+
+test("/resume keeps the current conversation when the stored workspace is missing", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  const summary = await fixture.sessionStore.create({
+    title: "Missing workspace",
+    titlePending: false,
+    workspacePath: "C:\\missing",
+    model: toSessionModelForTest(model),
+  });
+  await fixture.sessionStore.appendTimeline(summary.id, {
+    kind: "user",
+    text: "must not replace current view",
+  });
+  fixture.dependencies.changeWorkspace = async () => {
+    throw new Error("ENOENT: workspace not found");
+  };
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("/resume");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Missing workspace"));
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("workspace not found"));
+
+  const frame = view.lastFrame() ?? "";
+  assert.match(frame, /C:\\workspace/);
+  assert.doesNotMatch(frame, /must not replace current view/);
+  view.unmount();
+});
+
+test("/clear causes the next question to create a different session", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("first session");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("echo: first session"));
+  view.stdin.write("/clear");
+  await tick();
+  view.stdin.write("\r");
+  await tick();
+  view.stdin.write("second session");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("echo: second session"));
+
+  assert.equal(fixture.sessionStore.sessions.size, 2);
+  view.unmount();
+});
+
+function toSessionModelForTest(model: RegisteredModel): SessionModelRef {
+  return {
+    id: model.id,
+    model_name: model.model_name,
+    base_url: model.base_url,
+  };
+}

@@ -8,6 +8,14 @@ test("parseTuiInput separates chat, slash commands, and direct Bash", () => {
     kind: "slash",
     command: "/login",
   });
+  assert.deepEqual(parseTuiInput("/resume"), {
+    kind: "slash",
+    command: "/resume",
+  });
+  assert.deepEqual(parseTuiInput("/new"), {
+    kind: "slash",
+    command: "/new",
+  });
   assert.deepEqual(parseTuiInput("!  git status"), {
     kind: "bash",
     command: "git status",

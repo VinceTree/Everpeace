@@ -223,3 +223,56 @@ test("agent forwards an AbortSignal to every model request", async () => {
 
   assert.deepEqual(signals, [controller.signal]);
 });
+
+test("agent restores prior context and persists each new context batch", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const persisted: Array<readonly Record<string, unknown>[]> = [];
+  const assistantItem = {
+    type: "message",
+    role: "assistant",
+    content: [{ type: "output_text", text: "continued" }],
+  };
+  const agent = new ReactAgent({
+    client: {
+      responses: {
+        async create(params) {
+          requests.push(structuredClone(params));
+          return {
+            id: "response-restored",
+            output_text: "continued",
+            output: [assistantItem],
+          };
+        },
+      },
+    },
+    model: "deepseek-flash",
+    io: {
+      async confirmBash() {
+        return false;
+      },
+      async runBash() {
+        return bashResult("");
+      },
+      writeAssistant() {},
+    },
+    initialHistory: [
+      { role: "user", content: "before restart" },
+      { type: "message", role: "assistant", content: "old answer" },
+    ],
+    async onHistoryAppend(items) {
+      persisted.push(items.map((item) => ({ ...item })));
+    },
+  });
+
+  await agent.runTurn("after restart");
+
+  assert.deepEqual(requests[0]?.input, [
+    { role: "user", content: "before restart" },
+    { type: "message", role: "assistant", content: "old answer" },
+    { role: "user", content: "after restart" },
+  ]);
+  assert.deepEqual(persisted, [
+    [{ role: "user", content: "after restart" }],
+    [assistantItem],
+  ]);
+});

@@ -44,6 +44,8 @@ export interface ReactAgentOptions {
   client: ResponsesClientLike;
   model: string;
   io: AgentIO;
+  initialHistory?: readonly Record<string, unknown>[];
+  onHistoryAppend?(items: readonly Record<string, unknown>[]): Promise<void>;
 }
 
 const INSTRUCTIONS = `You are Everpeace, a concise coding agent.
@@ -65,23 +67,33 @@ export class ReactAgent {
   readonly #client: ResponsesClientLike;
   readonly #model: string;
   readonly #io: AgentIO;
-  #history: Array<Record<string, unknown>> = [];
+  readonly #onHistoryAppend:
+    | ((items: readonly Record<string, unknown>[]) => Promise<void>)
+    | undefined;
+  #history: Array<Record<string, unknown>>;
 
   constructor(options: ReactAgentOptions) {
     this.#client = options.client;
     this.#model = options.model;
     this.#io = options.io;
+    this.#history = options.initialHistory?.map((item) => ({ ...item })) ?? [];
+    this.#onHistoryAppend = options.onHistoryAppend;
   }
 
   async runTurn(userInput: string, signal?: AbortSignal): Promise<void> {
+    const userItem = { role: "user", content: userInput };
     const history: Array<Record<string, unknown>> = [
       ...this.#history,
-      { role: "user", content: userInput },
+      userItem,
     ];
+    this.#history = [...history];
+    await this.#persist([userItem]);
     let response = await this.#createResponse(history, signal);
 
     while (true) {
       history.push(...response.output);
+      this.#history = [...history];
+      await this.#persist(response.output);
 
       if (response.output_text.trim()) {
         this.#io.writeAssistant(response.output_text.trim());
@@ -124,8 +136,13 @@ export class ReactAgent {
 
       history.push(...outputs);
       this.#history = [...history];
+      await this.#persist(outputs);
       response = await this.#createResponse(history, signal);
     }
+  }
+
+  async #persist(items: readonly Record<string, unknown>[]): Promise<void> {
+    if (items.length > 0) await this.#onHistoryAppend?.(items);
   }
 
   async #createResponse(

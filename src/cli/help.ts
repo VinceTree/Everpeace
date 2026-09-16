@@ -11,8 +11,10 @@ Commands inside the agent:
   /login                    Login and activate one model
   /model                    Switch the active model
   /models                   List registered models
+  /new                      Create and enter a new session
+  /resume                   List and resume local sessions
   /logout                   Remove models and credentials
-  /clear                    Clear the conversation
+  /clear                    Start a fresh session on the next prompt
   /help                     Show this help
   /exit                     Exit Everpeace
 

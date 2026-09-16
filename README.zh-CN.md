@@ -87,6 +87,8 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 
 TUI 使用原生 inline 模式，普通滚轮可以浏览已完成的 Everpeace 会话；Ctrl + 滚轮改变字号后，会采用 Codex 的 75ms 尾随延迟进行同步、基于源状态的重绘，完整恢复启动信息与会话，并且不会暴露清屏后的中间空帧。
 
+第一次普通提问会创建本地 JSONL session。Everpeace 会保存完整可见记录和继续聊天所需的模型上下文，同时在后台单独调用当前模型，根据第一次提问生成简短名称。`/new` 会立即创建并进入一个空 session，第一次提问后再替换临时名称。`/resume` 会按名称和最后活动时间列出本机全部 session，恢复原模型、原工作目录及上下文，并继续追加到同一个文件。Windows 下 session 默认保存在 `%APPDATA%\Everpeace\sessions`。
+
 输入快捷键与 Codex composer 保持一致：`Enter` 提交，`Shift+Enter`、`Alt+Enter` 或 `Ctrl+J` 换行，`Home`/`End` 与 `Ctrl+A`/`Ctrl+E` 移动到当前行首/行尾，`Ctrl+U`/`Ctrl+K` 删除到当前行首/行尾，`Ctrl+W` 删除前一个词，`Ctrl+Y` 恢复最近删除的内容。方向键、`Ctrl+B/F/P/N` 和 `Alt+B/F` 也可移动光标。
 
 TUI 会在启动、退出及 `!` 命令结束时关闭终端焦点事件上报，切换窗口不会再把 `[I`、`[O` 写入输入框。
@@ -96,8 +98,10 @@ TUI 命令：
 - `/login`：登录并立即启用一个模型。
 - `/model`：切换已注册模型，切换后重置对话上下文。
 - `/models`：查看所有模型和凭据状态。
+- `/new`：立即创建并进入一个新的本地 session。
+- `/resume`：查看并恢复本机 JSONL session。
 - `/logout`：多选删除模型与对应系统凭据。
-- `/clear`：清屏并重置当前对话，保留当前模型。
+- `/clear`：结束当前对话并清屏；下一次提问创建新 session，同时保留当前模型。
 - `/help`、`/exit`：显示帮助或退出。
 - `!<command>`：直接运行当前系统的命令行（Windows 使用 PowerShell，macOS/Linux 使用 Bash），不再次确认；PTY 排版结果会流式写入 TUI 历史，不再暂停或整页刷新交互界面。
 
