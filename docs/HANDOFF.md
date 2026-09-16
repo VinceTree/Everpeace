@@ -1,6 +1,6 @@
 # Session Handoff
 
-状态快照：2026-09-16。分支 `main`，HEAD `c603989`，与 `origin/main` 同步；Session 持久化、`/resume` 和 `/new` 改动仍在工作树中，尚未提交。
+状态快照：2026-09-16。分支 `main`，Session 持久化、`/resume` 和 `/new` 已通过提交 `3600b64` 推送至 `origin/main`；当前正在准备 v0.1.20 发布提交。
 
 ## 1. 当前目标
 
@@ -10,7 +10,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - `/new` 立即创建并进入一个空 session。
 - 首问由当前模型后台概括 session 名称。
 - `/resume` 恢复完整历史、模型 context、模型和工作目录，并继续聊天。
-- 保留 v0.1.19 已完成的 inline TUI、PTY 流式输出和 resize 稳定性行为。
+- 保留既有 inline TUI、PTY 流式输出和 resize 稳定性行为。
 
 ## 2. 已完成
 
@@ -25,6 +25,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - `/new` session 使用持久化 `title_pending`；首次提问或恢复后的首次提问会在同一 session 内完成命名，不重复建档。
 - `/clear` 保持延迟创建语义，不作为 `/new` 的别名。
 - 中英文 README、CLI/TUI help、PLAN 和架构决定已同步。
+- `package.json` 与中英文 README 展示版本已提升至 v0.1.20；推送后由 Release workflow 创建 tag 和 GitHub Release。
 
 ## 3. 关键设计决定
 
@@ -61,7 +62,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 4. 退出并重启，恢复该 session，确认完整历史出现且下一轮回答带有旧 context。
 5. 验证跨工作目录恢复、原模型缺失时选择替代模型，以及 `/clear` 仍在下一次提问时才建档。
 6. 同时复验 Ctrl+滚轮缩放、普通滚轮、`! Get-ChildItem` 流式输出和单一 prompt。
-7. 用户验收后决定下一版本号，再提交、推送并检查 tag/Release。
+7. v0.1.20 发布提交推送后，确认 Release workflow 成功创建 `v0.1.20` tag 和 GitHub Release。
 
 ## 7. 继续遵守的约束
 
