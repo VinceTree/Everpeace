@@ -1,5 +1,5 @@
 import { Spinner } from "@inkjs/ui";
-import { Box, useApp, useInput } from "ink";
+import { Box, Text, useApp, useInput, useStdout, useWindowSize } from "ink";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentIO } from "../agent/react-agent.js";
 import type {
@@ -33,10 +33,15 @@ interface PendingConfirmation {
   resolve(accepted: boolean): void;
 }
 
+// Codex uses a short trailing reflow: the live composer follows the viewport
+// immediately, while source-backed transcript replay waits for resize churn to
+// settle. This prevents a second, visibly delayed layout change during zoom.
+export const RESIZE_REDRAW_DEBOUNCE_MS = 75;
+
 export interface EverpeaceAppProps {
   dependencies: TuiDependencies;
   initialModels: ResolvedModels;
-  onClearOutput(): void;
+  onReplayOutput(update: () => void): void;
 }
 
 function initialActiveModel(models: RegisteredModel[]): RegisteredModel | undefined {
@@ -73,12 +78,39 @@ function commandOutput(result: BashResult): string {
     .join("\n");
 }
 
+function TerminalActivity({ output }: { output: string | undefined }) {
+  const { rows } = useWindowSize();
+  const allLines = output ? output.split("\n") : [];
+  const maximumOutputLines = Math.max(1, Math.min(12, rows - 4));
+  const hiddenLineCount = Math.max(0, allLines.length - maximumOutputLines);
+  const visibleLines = allLines.slice(hiddenLineCount);
+
+  return (
+    <Box flexDirection="column">
+      {hiddenLineCount > 0 ? (
+        <Box marginLeft={3} height={1}>
+          <Text dimColor>… {hiddenLineCount} earlier lines</Text>
+        </Box>
+      ) : null}
+      {visibleLines.map((line, index) => (
+        <Box key={`${hiddenLineCount + index}:${line}`} marginLeft={3} height={1} overflow="hidden">
+          <Text wrap="truncate-end">{line || " "}</Text>
+        </Box>
+      ))}
+      <Box paddingLeft={1}>
+        <Text dimColor>• 正在执行终端命令</Text>
+      </Box>
+    </Box>
+  );
+}
+
 export function EverpeaceApp({
   dependencies,
   initialModels,
-  onClearOutput,
+  onReplayOutput,
 }: EverpeaceAppProps) {
   const { exit, suspendTerminal } = useApp();
+  const { stdout } = useStdout();
   const firstActiveModel = initialActiveModel(initialModels.available);
   const initialTimeline = useMemo<TimelineEntry[]>(() => {
     const entries: TimelineEntry[] = [
@@ -103,6 +135,7 @@ export function EverpeaceApp({
   const nextId = useRef(initialTimeline.length);
   const abortController = useRef<AbortController | undefined>(undefined);
   const confirmationRef = useRef<PendingConfirmation | undefined>(undefined);
+  const terminalCommandRunning = useRef(false);
   const [timeline, setTimeline] = useState(initialTimeline);
   const [timelineEpoch, setTimelineEpoch] = useState(0);
   const [inputKey, setInputKey] = useState(0);
@@ -110,13 +143,17 @@ export function EverpeaceApp({
   const [activeModel, setActiveModel] = useState(firstActiveModel);
   const [view, setView] = useState<View>(() => initialView(initialModels.available));
   const [busyLabel, setBusyLabel] = useState<string>();
+  const [terminalBusy, setTerminalBusy] = useState(false);
+  const [terminalOutput, setTerminalOutput] = useState<string>();
   const [confirmation, setConfirmation] = useState<PendingConfirmation>();
 
-  const append = useCallback((kind: HistoryKind, text: string) => {
+  const append = useCallback((kind: HistoryKind, text: string): number => {
+    const id = nextId.current++;
     setTimeline((current) => [
       ...current,
-      { id: nextId.current++, kind, text },
+      { id, kind, text },
     ]);
+    return id;
   }, []);
 
   const finishConfirmation = useCallback(
@@ -159,19 +196,24 @@ export function EverpeaceApp({
   );
 
   const executeTerminalCommand = useCallback(
-    async (command: string): Promise<BashResult> => {
-      let result: BashResult | undefined;
-      await suspendTerminal(async () => {
-        result = await dependencies.runTerminalCommand(command);
-      });
-      if (result === undefined) throw new Error("Terminal command did not return a result");
+    async (
+      command: string,
+      onOutput?: (output: string) => void,
+    ): Promise<BashResult> => {
+      terminalCommandRunning.current = true;
+      let result: BashResult;
+      try {
+        result = await dependencies.runTerminalCommand(command, onOutput);
+      } finally {
+        terminalCommandRunning.current = false;
+      }
       const output = commandOutput(result);
       if (output) append("output", output);
       const status = terminalStatus(result);
       append(status.kind, status.text);
       return result;
     },
-    [append, dependencies, suspendTerminal],
+    [append, dependencies],
   );
 
   const agentIo = useMemo<AgentIO>(
@@ -267,11 +309,12 @@ export function EverpeaceApp({
       kind: "banner",
       ...(activeModel === undefined ? {} : { modelName: activeModel.model_name }),
     };
-    onClearOutput();
-    setTimeline([banner]);
-    setTimelineEpoch((current) => current + 1);
-    setSessionEpoch((current) => current + 1);
-  }, [activeModel, onClearOutput]);
+    onReplayOutput(() => {
+      setTimeline([banner]);
+      setTimelineEpoch((current) => current + 1);
+      setSessionEpoch((current) => current + 1);
+    });
+  }, [activeModel, onReplayOutput]);
 
   const runChat = useCallback(
     async (text: string) => {
@@ -307,13 +350,15 @@ export function EverpeaceApp({
         return;
       }
       append("tool", `! ${command}`);
-      setBusyLabel("正在执行终端命令");
+      setTerminalOutput(undefined);
+      setTerminalBusy(true);
       try {
-        await executeTerminalCommand(command);
+        await executeTerminalCommand(command, setTerminalOutput);
       } catch (error) {
         append("error", error instanceof Error ? error.message : String(error));
       } finally {
-        setBusyLabel(undefined);
+        setTerminalOutput(undefined);
+        setTerminalBusy(false);
       }
     },
     [append, executeTerminalCommand],
@@ -396,6 +441,7 @@ export function EverpeaceApp({
   useInput(
     (input, key) => {
       if (!key.ctrl || input !== "c") return;
+      if (terminalCommandRunning.current) return;
       if (abortController.current) {
         abortController.current.abort();
         return;
@@ -417,6 +463,27 @@ export function EverpeaceApp({
     },
     [],
   );
+
+  useEffect(() => {
+    let redrawTimer: ReturnType<typeof setTimeout> | undefined;
+    const redrawAfterResize = () => {
+      if (redrawTimer !== undefined) clearTimeout(redrawTimer);
+      redrawTimer = setTimeout(() => {
+        // Rebuild the complete source-backed timeline at the final width, like
+        // Codex's transcript reflow. The active composer has already followed
+        // the viewport through Ink's immediate resize render.
+        onReplayOutput(() => {
+          setTimelineEpoch((current) => current + 1);
+        });
+      }, RESIZE_REDRAW_DEBOUNCE_MS);
+    };
+
+    stdout.on("resize", redrawAfterResize);
+    return () => {
+      stdout.off("resize", redrawAfterResize);
+      if (redrawTimer !== undefined) clearTimeout(redrawTimer);
+    };
+  }, [onReplayOutput, stdout]);
 
   return (
     <Box width="100%" paddingRight={1} flexDirection="column">
@@ -453,6 +520,8 @@ export function EverpeaceApp({
           onComplete={finishLogout}
           onCancel={() => setView({ kind: "chat" })}
         />
+      ) : terminalBusy ? (
+        <TerminalActivity output={terminalOutput} />
       ) : busyLabel ? (
         <Spinner label={busyLabel} />
       ) : (

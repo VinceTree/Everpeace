@@ -30,6 +30,10 @@ export interface TerminalCommandOptions {
   shellPath?: string;
   stdin?: NodeJS.ReadStream;
   stdout?: NodeJS.WriteStream;
+  /** Write the raw PTY stream directly to stdout. */
+  streamOutput?: boolean;
+  /** Receive terminal-rendered snapshots suitable for an Ink history view. */
+  onOutput?(output: string): void;
 }
 
 export interface TerminalInvocation {
@@ -71,12 +75,66 @@ export function runTerminalCommand(
   const env = options.env ?? process.env;
   const stdin = options.stdin ?? process.stdin;
   const stdout = options.stdout ?? process.stdout;
+  const streamOutput = options.streamOutput ?? true;
+  const onOutput = options.onOutput;
   const columns = Math.max(1, stdout.columns ?? 80);
   const rows = Math.max(1, stdout.rows ?? 24);
+  const previewTerminal = onOutput
+    ? createHeadlessTerminal(columns, rows)
+    : undefined;
 
   return new Promise((resolve) => {
     let captured = "";
     let truncated = false;
+    let previewTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastPreview = "";
+
+    const emitPreview = (force = false): string => {
+      if (!previewTerminal || !onOutput) return "";
+      if (previewTimer) {
+        clearTimeout(previewTimer);
+        previewTimer = undefined;
+      }
+      const rendered = readTerminalOutput(previewTerminal);
+      if (rendered && (force || rendered !== lastPreview)) {
+        lastPreview = rendered;
+        onOutput(rendered);
+      }
+      return rendered;
+    };
+
+    const schedulePreview = (): void => {
+      if (!previewTerminal || previewTimer) return;
+      previewTimer = setTimeout(() => emitPreview(), 32);
+    };
+
+    const finish = (exitCode: number): void => {
+      const resolveWithOutput = (output: string): void => {
+        const finalOutput = truncated
+          ? `${output}\n[terminal output truncated after ${MAX_CAPTURED_OUTPUT} characters]`
+          : output;
+        if (onOutput && finalOutput && finalOutput !== lastPreview) {
+          lastPreview = finalOutput;
+          onOutput(finalOutput);
+        }
+        previewTerminal?.dispose();
+        resolve({
+          stdout: finalOutput,
+          stderr: "",
+          exitCode,
+          signal: null,
+        });
+      };
+
+      if (previewTerminal) {
+        // xterm queues writes. An empty write callback runs after every PTY
+        // chunk has been parsed, so the last snapshot cannot race the result.
+        previewTerminal.write("", () => resolveWithOutput(emitPreview(true)));
+      } else {
+        void renderTerminalOutput(captured, columns, rows).then(resolveWithOutput);
+      }
+    };
+
     let child;
     try {
       child = spawnPty(invocation.executable, invocation.args, {
@@ -89,7 +147,10 @@ export function runTerminalCommand(
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`Failed to start ${invocation.shellName}: ${message}\n`);
+      if (streamOutput) {
+        process.stderr.write(`Failed to start ${invocation.shellName}: ${message}\n`);
+      }
+      previewTerminal?.dispose();
       resolve({ stdout: "", stderr: "", exitCode: null, signal: null, error: message });
       return;
     }
@@ -107,10 +168,14 @@ export function runTerminalCommand(
     }
 
     const dataSubscription = child.onData((data) => {
-      stdout.write(data);
+      if (streamOutput) stdout.write(data);
       if (captured.length < MAX_CAPTURED_OUTPUT) {
         const remaining = MAX_CAPTURED_OUTPUT - captured.length;
-        captured += data.slice(0, remaining);
+        const accepted = data.slice(0, remaining);
+        captured += accepted;
+        if (previewTerminal && accepted) {
+          previewTerminal.write(accepted, schedulePreview);
+        }
         if (data.length > remaining) truncated = true;
       } else {
         truncated = true;
@@ -129,24 +194,34 @@ export function runTerminalCommand(
         // Ink reclaims stdin after terminal suspension even if restoration fails.
       }
 
-      // Child terminals can enable focus reporting (DEC 1004), and PowerShell
-      // under ConPTY also enables Win32 input mode (DEC 9001). Since their
-      // output is proxied into Ink's parent terminal, reset both before Ink
-      // resumes or focus changes arrive as literal "[I" / "[O" input.
-      resetTerminalModes(stdout, platform);
-
-      void renderTerminalOutput(captured, columns, rows).then((output) => {
-        resolve({
-          stdout: truncated
-            ? `${output}\n[terminal output truncated after ${MAX_CAPTURED_OUTPUT} characters]`
-            : output,
-          stderr: "",
-          exitCode,
-          signal: null,
-        });
-      });
+      // Only a raw stream can change modes on the parent terminal. Captured
+      // output is interpreted by the headless emulator instead.
+      if (streamOutput) resetTerminalModes(stdout, platform);
+      finish(exitCode);
     });
   });
+}
+
+function createHeadlessTerminal(columns: number, rows: number) {
+  return new Terminal({
+    cols: Math.max(2, columns),
+    rows: Math.max(1, rows),
+    scrollback: MAX_SCROLLBACK_LINES,
+    allowProposedApi: true,
+  });
+}
+
+function readTerminalOutput(terminal: InstanceType<typeof Terminal>): string {
+  const buffer = terminal.buffer.active;
+  const lines: string[] = [];
+  for (let index = 0; index < buffer.length; index += 1) {
+    lines.push(buffer.getLine(index)?.translateToString(true) ?? "");
+  }
+
+  return lines
+    .join("\n")
+    .replace(/^(?:[ \t]*\n)+/u, "")
+    .trimEnd();
 }
 
 /** Render a VT/ConPTY byte stream into plain text using terminal semantics. */
@@ -155,28 +230,13 @@ export function renderTerminalOutput(
   columns = 80,
   rows = 24,
 ): Promise<string> {
-  const terminal = new Terminal({
-    cols: Math.max(2, columns),
-    rows: Math.max(1, rows),
-    scrollback: MAX_SCROLLBACK_LINES,
-    allowProposedApi: true,
-  });
+  const terminal = createHeadlessTerminal(columns, rows);
 
   return new Promise((resolve) => {
     terminal.write(output.replaceAll("\0", ""), () => {
-      const buffer = terminal.buffer.active;
-      const lines: string[] = [];
-      for (let index = 0; index < buffer.length; index += 1) {
-        lines.push(buffer.getLine(index)?.translateToString(true) ?? "");
-      }
+      const rendered = readTerminalOutput(terminal);
       terminal.dispose();
-
-      resolve(
-        lines
-          .join("\n")
-          .replace(/^(?:[ \t]*\n)+/u, "")
-          .trimEnd(),
-      );
+      resolve(rendered);
     });
   });
 }

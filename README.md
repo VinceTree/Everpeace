@@ -64,12 +64,12 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.1.18) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.19) · 天下长平，以规司矩
 
-╭──────────────────────────────────────────────╮
-│ model: deepseek-flash  /model to change      │
-│ directory: C:\projects\Everpeace              │
-╰──────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────╮
+│ model:     deepseek-flash   /model to change             │
+│ directory: C:\projects\Everpeace                         │
+╰──────────────────────────────────────────────────────────╯
 
 › List the files in this project
 
@@ -83,9 +83,9 @@ Run this command? y
 ...
 ```
 
-The input area follows the terminal's available width and reserves the final column to prevent Windows Terminal from wrapping automatically. The startup model/directory panel uses a Codex-style maximum width of 76 columns and shrinks in narrower terminals. The composer grows only for explicit newlines; long input is horizontally clipped instead of wrapping when the terminal font size changes.
+The input area follows the terminal's available width and reserves the final column to prevent Windows Terminal from wrapping automatically. The startup model/directory panel uses Codex's 56-cell inner-width cap (60 columns including padding and borders), pre-truncates every row, and shrinks in narrower terminals without wrapping. The composer grows only for explicit newlines; long input is horizontally clipped instead of wrapping when the terminal font size changes.
 
-The TUI runs inline, so the normal scroll wheel can browse PowerShell history. When Ctrl + scroll wheel changes the font size, Everpeace clears reflowed frames and scrollback before redrawing at the new dimensions, keeping only one composer visible.
+The TUI runs inline, so the normal scroll wheel can browse the completed Everpeace conversation. After Ctrl + scroll wheel changes the font size, Everpeace performs a synchronized source-backed redraw after Codex's 75 ms trailing delay, restoring the complete banner and conversation without exposing an empty intermediate frame.
 
 Composer shortcuts follow Codex conventions: `Enter` submits; `Shift+Enter`, `Alt+Enter`, or `Ctrl+J` inserts a newline; `Home`/`End` and `Ctrl+A`/`Ctrl+E` move to the current line's start/end; `Ctrl+U`/`Ctrl+K` delete to the current line's start/end; `Ctrl+W` deletes the previous word; and `Ctrl+Y` restores the most recently killed text. Arrow keys, `Ctrl+B/F/P/N`, and `Alt+B/F` also move the cursor.
 
@@ -99,7 +99,7 @@ TUI commands:
 - `/logout`: Select and remove models with their operating system credentials.
 - `/clear`: Clear the screen and reset the conversation while retaining the active model.
 - `/help`, `/exit`: Show help or exit Everpeace.
-- `!<command>`: Run a command directly in the native system shell (PowerShell on Windows, Bash on macOS/Linux) without confirmation. Native output is shown while the command runs and retained in the TUI history afterward.
+- `!<command>`: Run a command directly in the native system shell (PowerShell on Windows, Bash on macOS/Linux) without confirmation. PTY-formatted output streams into the TUI history without suspending or refreshing the whole interface.
 
 Behavior notes:
 

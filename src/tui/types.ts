@@ -29,7 +29,10 @@ export interface TuiDependencies {
   listModels(baseUrl: string, apiKey: string, signal?: AbortSignal): Promise<string[]>;
   createAgent(model: RegisteredModel, io: AgentIO): AgentSession;
   runBash(command: string): Promise<BashResult>;
-  runTerminalCommand(command: string): Promise<BashResult>;
+  runTerminalCommand(
+    command: string,
+    onOutput?: (output: string) => void,
+  ): Promise<BashResult>;
 }
 
 export type HistoryKind =

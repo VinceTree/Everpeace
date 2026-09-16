@@ -21,23 +21,12 @@ interface TerminalOutput {
   write(chunk: string): unknown;
 }
 
-interface ResizableTerminalOutput extends TerminalOutput {
-  prependListener(event: "resize", listener: () => void): unknown;
-  off(event: "resize", listener: () => void): unknown;
-}
-
 export const TERMINAL_RESET_SEQUENCE = "\u001B[2J\u001B[3J\u001B[H";
+export const SYNCHRONIZED_OUTPUT_START = "\u001B[?2026h";
+export const SYNCHRONIZED_OUTPUT_END = "\u001B[?2026l";
 
 export function clearTerminal(output: TerminalOutput = process.stdout): void {
   output.write(TERMINAL_RESET_SEQUENCE);
-}
-
-export function installResizeRecovery(
-  output: ResizableTerminalOutput = process.stdout,
-): () => void {
-  const recover = () => clearTerminal(output);
-  output.prependListener("resize", recover);
-  return () => output.off("resize", recover);
 }
 
 export async function runTui({ registry, dependencies }: RunTuiOptions): Promise<number> {
@@ -52,27 +41,41 @@ export async function runTui({ registry, dependencies }: RunTuiOptions): Promise
   const resolvedDependencies =
     dependencies ?? createDefaultTuiDependencies(registry);
   const initialModels = await resolvedDependencies.registry.resolveAll();
-  const removeResizeRecovery = installResizeRecovery();
 
   try {
-    let clearOutput: () => void = () => undefined;
+    let replayOutput: (update: () => void) => void = (update) => update();
     const instance = render(
       <EverpeaceApp
         dependencies={resolvedDependencies}
         initialModels={initialModels}
-        onClearOutput={() => clearOutput()}
+        onReplayOutput={(update) => replayOutput(update)}
       />,
       TUI_RENDER_OPTIONS,
     );
-    clearOutput = () => {
+    replayOutput = (update) => {
+      // Keep the scrollback reset and the following synchronous Ink commit in
+      // one terminal update. Windows Terminal therefore never exposes the
+      // empty intermediate frame while a resize replay is taking place.
+      process.stdout.write(SYNCHRONIZED_OUTPUT_START);
       instance.clear();
       clearTerminal();
+      try {
+        update();
+      } catch (error) {
+        process.stdout.write(SYNCHRONIZED_OUTPUT_END);
+        throw error;
+      }
+      const finishSynchronizedOutput = () => {
+        process.stdout.write(SYNCHRONIZED_OUTPUT_END);
+      };
+      void instance
+        .waitUntilRenderFlush()
+        .then(finishSynchronizedOutput, finishSynchronizedOutput);
     };
 
     const result = await instance.waitUntilExit();
     return typeof result === "number" ? result : 0;
   } finally {
-    removeResizeRecovery();
     resetTerminalModes();
   }
 }

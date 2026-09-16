@@ -9,7 +9,11 @@ import type {
   ResolvedModels,
   StoredModelRegistration,
 } from "../../../src/storage/model-registry.js";
-import { EverpeaceApp } from "../../../src/tui/app.js";
+import type { BashResult } from "../../../src/tools/bash.js";
+import {
+  EverpeaceApp,
+  RESIZE_REDRAW_DEBOUNCE_MS,
+} from "../../../src/tui/app.js";
 import type {
   AgentSession,
   TuiDependencies,
@@ -74,7 +78,7 @@ function createFixture(options?: {
   };
   const dependencies: TuiDependencies = {
     registry,
-    version: "0.1.18",
+    version: "0.1.19",
     workspacePath: "C:\\workspace",
     async listModels() {
       return ["deepseek-flash"];
@@ -108,7 +112,7 @@ test("TUI accepts chat and renders the assistant response", async () => {
     <EverpeaceApp
       dependencies={fixture.dependencies}
       initialModels={{ available: [model], missing: [] }}
-      onClearOutput={() => undefined}
+      onReplayOutput={(update) => update()}
     />,
   );
 
@@ -125,7 +129,7 @@ test("TUI accepts chat and renders the assistant response", async () => {
   assert.doesNotMatch(frame, /https:\/\/api\.deepseek\.com/);
   assert.doesNotMatch(frame, /当前模型|登录状态/);
   assert.equal(frame.match(/deepseek-flash/g)?.length, 2);
-  assert.match(frame, /model: deepseek-flash\s+\/model to change/);
+  assert.match(frame, /model:\s+deepseek-flash\s+\/model to change/);
   assert.match(frame, /directory: C:\\workspace/);
   assert.match(frame, /C:\\workspace/);
   assert.doesNotMatch(frame, /Enter 发送|终端命令|命令菜单/);
@@ -138,7 +142,7 @@ test("TUI accepts chat and renders the assistant response", async () => {
   );
   assert.match(frameLines[promptInput] ?? "", /^\s*›/);
   const topBorders = frameLines.filter((line) => line.startsWith("╭"));
-  assert.deepEqual(topBorders.map((line) => line.length), [76]);
+  assert.deepEqual(topBorders.map((line) => line.length), [60]);
   view.unmount();
 });
 
@@ -154,7 +158,7 @@ test("prompt remains one non-wrapping input row when its input exceeds terminal 
     <EverpeaceApp
       dependencies={fixture.dependencies}
       initialModels={{ available: [model], missing: [] }}
-      onClearOutput={() => undefined}
+      onReplayOutput={(update) => update()}
     />,
   );
 
@@ -170,7 +174,8 @@ test("prompt remains one non-wrapping input row when its input exceeds terminal 
   view.unmount();
 });
 
-test("repeated terminal resizes keep exactly one non-wrapping prompt box", async () => {
+test("repeated terminal resizes preserve history and keep one non-wrapping prompt box", async () => {
+  assert.equal(RESIZE_REDRAW_DEBOUNCE_MS, 75);
   const model: RegisteredModel = {
     id: "model-1",
     model_name: "deepseek-flash",
@@ -178,39 +183,63 @@ test("repeated terminal resizes keep exactly one non-wrapping prompt box", async
     api_key: "secret",
   };
   const fixture = createFixture({ initial: [model] });
+  let resizeRedraws = 0;
   const view = render(
     <EverpeaceApp
       dependencies={fixture.dependencies}
       initialModels={{ available: [model], missing: [] }}
-      onClearOutput={() => undefined}
+      onReplayOutput={(update) => {
+        resizeRedraws += 1;
+        update();
+      }}
     />,
   );
 
   await tick();
+  view.stdin.write("history-before-resize");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("echo: history-before-resize"));
+
   for (const columns of [72, 45, 120, 58]) {
+    const frameCountBeforeResize = view.frames.length;
     Object.defineProperty(view.stdout, "columns", {
       configurable: true,
       value: columns,
     });
     view.stdout.emit("resize");
-    await waitFor(() => {
-      const lines = (view.lastFrame() ?? "").split("\n");
-      const bannerBorder = lines.find((line) => line.startsWith("╭"));
-      return (bannerBorder?.length ?? 0) === Math.min(76, columns - 1);
-    });
+    await tick();
 
-    const lines = (view.lastFrame() ?? "").split("\n");
+    const frame = view.lastFrame() ?? "";
+    const resizeWrites = view.frames.slice(frameCountBeforeResize).join("");
+    assert.match(frame, /Everpeace Agent/);
+    assert.match(frame, /history-before-resize/);
+    assert.match(frame, /echo: history-before-resize/);
+    assert.doesNotMatch(resizeWrites, /\u001B\[3J/);
+
+    const lines = frame.split("\n");
     const promptIndexes = lines
-      .map((line, index) => (line.trimStart().startsWith("›") ? index : -1))
+      .map((line, index) =>
+        line.includes("Ask Everpeace to do anything") ? index : -1,
+      )
       .filter((index) => index >= 0);
     assert.equal(promptIndexes.length, 1);
     const promptIndex = promptIndexes[0]!;
     assert.ok((lines[promptIndex]?.length ?? 0) <= columns - 1);
-    const topBorderWidths = lines
-      .filter((line) => line.startsWith("╭"))
-      .map((line) => line.length);
-    assert.deepEqual(topBorderWidths, [Math.min(76, columns - 1)]);
   }
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, RESIZE_REDRAW_DEBOUNCE_MS + 30),
+  );
+  await waitFor(() => resizeRedraws === 1);
+  const recoveredFrame = view.lastFrame() ?? "";
+  assert.match(recoveredFrame, /Everpeace Agent/);
+  assert.match(recoveredFrame, /history-before-resize/);
+  assert.match(recoveredFrame, /echo: history-before-resize/);
+  assert.equal(
+    recoveredFrame.match(/Ask Everpeace to do anything/g)?.length,
+    1,
+  );
 
   view.unmount();
 });
@@ -227,7 +256,7 @@ test("composer supports End, Shift+Enter, and Ctrl+U like Codex", async () => {
     <EverpeaceApp
       dependencies={fixture.dependencies}
       initialModels={{ available: [model], missing: [] }}
-      onClearOutput={() => undefined}
+      onReplayOutput={(update) => update()}
     />,
   );
 
@@ -264,7 +293,7 @@ test("/login masks the API Key, registers one model, and activates it", async ()
     <EverpeaceApp
       dependencies={fixture.dependencies}
       initialModels={{ available: [], missing: [] }}
-      onClearOutput={() => undefined}
+      onReplayOutput={(update) => update()}
     />,
   );
 
@@ -318,7 +347,7 @@ test("model-requested Bash waits for confirmation", async () => {
     <EverpeaceApp
       dependencies={fixture.dependencies}
       initialModels={{ available: [model], missing: [] }}
-      onClearOutput={() => undefined}
+      onReplayOutput={(update) => update()}
     />,
   );
 
@@ -345,15 +374,19 @@ test("direct commands use the native terminal runner", async () => {
   };
   const fixture = createFixture({ initial: [model] });
   let directCommand: string | undefined;
-  fixture.dependencies.runTerminalCommand = async (command) => {
+  let finishCommand: ((result: BashResult) => void) | undefined;
+  fixture.dependencies.runTerminalCommand = (command, onOutput) => {
     directCommand = command;
-    return { stdout: "NAME    SIZE\nfile-a  10", stderr: "", exitCode: 0, signal: null };
+    onOutput?.("NAME    SIZE");
+    return new Promise((resolve) => {
+      finishCommand = resolve;
+    });
   };
   const view = render(
     <EverpeaceApp
       dependencies={fixture.dependencies}
       initialModels={{ available: [model], missing: [] }}
-      onClearOutput={() => undefined}
+      onReplayOutput={(update) => update()}
     />,
   );
 
@@ -361,6 +394,19 @@ test("direct commands use the native terminal runner", async () => {
   view.stdin.write("!ls");
   await tick();
   view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("NAME    SIZE"));
+
+  const streamingFrame = view.lastFrame() ?? "";
+  assert.match(streamingFrame, /Everpeace Agent/);
+  assert.match(streamingFrame, /NAME    SIZE/);
+  assert.match(streamingFrame, /正在执行终端命令/);
+
+  finishCommand?.({
+    stdout: "NAME    SIZE\nfile-a  10",
+    stderr: "",
+    exitCode: 0,
+    signal: null,
+  });
   await waitFor(() => (view.lastFrame() ?? "").includes("Command completed successfully"));
 
   assert.equal(directCommand, "ls");
@@ -388,7 +434,7 @@ test("startup model picker activates the selected registered model", async () =>
     <EverpeaceApp
       dependencies={fixture.dependencies}
       initialModels={{ available: models, missing: [] }}
-      onClearOutput={() => undefined}
+      onReplayOutput={(update) => update()}
     />,
   );
 
@@ -416,7 +462,7 @@ test("/logout removes the active model and returns to logged-out chat", async ()
     <EverpeaceApp
       dependencies={fixture.dependencies}
       initialModels={{ available: [model], missing: [] }}
-      onClearOutput={() => undefined}
+      onReplayOutput={(update) => update()}
     />,
   );
 
@@ -458,8 +504,9 @@ test("/clear resets the agent session and clears rendered output", async () => {
     <EverpeaceApp
       dependencies={fixture.dependencies}
       initialModels={{ available: [model], missing: [] }}
-      onClearOutput={() => {
+      onReplayOutput={(update) => {
         clearCalls += 1;
+        update();
       }}
     />,
   );

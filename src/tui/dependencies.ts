@@ -39,8 +39,11 @@ export function createDefaultTuiDependencies(
     runBash(command) {
       return runBash(command);
     },
-    runTerminalCommand(command) {
-      return runTerminalCommand(command);
+    runTerminalCommand(command, onOutput) {
+      return runTerminalCommand(command, {
+        streamOutput: false,
+        ...(onOutput === undefined ? {} : { onOutput }),
+      });
     },
   };
 }

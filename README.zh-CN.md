@@ -64,12 +64,12 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.1.18) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.19) · 天下长平，以规司矩
 
-╭──────────────────────────────────────────────╮
-│ model: deepseek-flash  /model to change      │
-│ directory: C:\projects\Everpeace              │
-╰──────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────╮
+│ model:     deepseek-flash   /model to change             │
+│ directory: C:\projects\Everpeace                         │
+╰──────────────────────────────────────────────────────────╯
 
 › 列出当前项目文件
 
@@ -83,9 +83,9 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ...
 ```
 
-输入区域会直接跟随终端的当前可用宽度，并预留最后一列防止 Windows Terminal 自动换行；启动时的 model/directory 信息框采用 Codex 风格的 76 列上限，在窄终端中自动收缩。输入区只有显式换行才会增高，过长输入会在当前行内水平裁剪，不会因 Ctrl + 滚轮缩放而自动折行。
+输入区域会直接跟随终端的当前可用宽度，并预留最后一列防止 Windows Terminal 自动换行；启动时的 model/directory 信息框与 Codex 一样把内容区限制为 56 格（含内边距和边框共 60 列），每行预先裁剪，在窄终端中只缩短、不换行。输入区只有显式换行才会增高，过长输入会在当前行内水平裁剪，不会因 Ctrl + 滚轮缩放而自动折行。
 
-TUI 使用原生 inline 模式，普通滚轮可以浏览 PowerShell 历史；Ctrl + 滚轮改变字号时会清除被终端重新排版的旧帧和 scrollback，再按新尺寸完整重绘，界面只保留一个交互框。
+TUI 使用原生 inline 模式，普通滚轮可以浏览已完成的 Everpeace 会话；Ctrl + 滚轮改变字号后，会采用 Codex 的 75ms 尾随延迟进行同步、基于源状态的重绘，完整恢复启动信息与会话，并且不会暴露清屏后的中间空帧。
 
 输入快捷键与 Codex composer 保持一致：`Enter` 提交，`Shift+Enter`、`Alt+Enter` 或 `Ctrl+J` 换行，`Home`/`End` 与 `Ctrl+A`/`Ctrl+E` 移动到当前行首/行尾，`Ctrl+U`/`Ctrl+K` 删除到当前行首/行尾，`Ctrl+W` 删除前一个词，`Ctrl+Y` 恢复最近删除的内容。方向键、`Ctrl+B/F/P/N` 和 `Alt+B/F` 也可移动光标。
 
@@ -99,7 +99,7 @@ TUI 命令：
 - `/logout`：多选删除模型与对应系统凭据。
 - `/clear`：清屏并重置当前对话，保留当前模型。
 - `/help`、`/exit`：显示帮助或退出。
-- `!<command>`：直接运行当前系统的命令行（Windows 使用 PowerShell，macOS/Linux 使用 Bash），不再次确认；执行期间显示原生终端输出，结束后把按终端布局整理的结果保留在 TUI 历史中。
+- `!<command>`：直接运行当前系统的命令行（Windows 使用 PowerShell，macOS/Linux 使用 Bash），不再次确认；PTY 排版结果会流式写入 TUI 历史，不再暂停或整页刷新交互界面。
 
 行为说明：
 
