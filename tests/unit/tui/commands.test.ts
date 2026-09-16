@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseTuiInput } from "../../../src/tui/commands.js";
+import {
+  filterSlashCommands,
+  parseTuiInput,
+  SLASH_COMMANDS,
+} from "../../../src/tui/commands.js";
+
+test("filterSlashCommands matches a single leading command token by prefix", () => {
+  assert.deepEqual(filterSlashCommands("/"), [...SLASH_COMMANDS]);
+  assert.deepEqual(filterSlashCommands(" /MO"), ["/model", "/models"]);
+  assert.deepEqual(filterSlashCommands("/res"), ["/resume"]);
+  assert.deepEqual(filterSlashCommands("/wat"), []);
+  assert.deepEqual(filterSlashCommands("message /help"), []);
+  assert.deepEqual(filterSlashCommands("/help "), []);
+  assert.deepEqual(filterSlashCommands("/help\n"), []);
+});
 
 test("parseTuiInput separates chat, slash commands, and direct Bash", () => {
   assert.deepEqual(parseTuiInput("hello"), { kind: "chat", text: "hello" });

@@ -1,6 +1,10 @@
 import { Box, Text, useInput, useStdout } from "ink";
 import React, { useMemo, useRef, useState } from "react";
 import {
+  filterSlashCommands,
+  type SlashCommand,
+} from "../commands.js";
+import {
   createComposerState,
   deleteComposerBackward,
   deleteComposerForward,
@@ -28,10 +32,52 @@ export interface PromptProps {
 }
 
 const MAX_VISIBLE_LINES = 8;
+const MAX_VISIBLE_SLASH_COMMANDS = 8;
 
 interface ComposerLine {
   text: string;
   cursorColumn?: number;
+}
+
+interface SlashCommandMenuProps {
+  commands: SlashCommand[];
+  selectedIndex: number;
+}
+
+function SlashCommandMenu({ commands, selectedIndex }: SlashCommandMenuProps) {
+  const firstVisibleIndex = Math.max(
+    0,
+    Math.min(
+      selectedIndex - MAX_VISIBLE_SLASH_COMMANDS + 1,
+      commands.length - MAX_VISIBLE_SLASH_COMMANDS,
+    ),
+  );
+  const visibleCommands = commands.slice(
+    firstVisibleIndex,
+    firstVisibleIndex + MAX_VISIBLE_SLASH_COMMANDS,
+  );
+
+  return (
+    <Box
+      width="100%"
+      flexDirection="column"
+      backgroundColor="#111827"
+      paddingX={1}
+      overflow="hidden"
+    >
+      {visibleCommands.map((command, index) => {
+        const isSelected = firstVisibleIndex + index === selectedIndex;
+        return (
+          <Box key={command} height={1} flexWrap="nowrap" overflow="hidden">
+            <Text bold={isSelected} color={isSelected ? "#D4AF37" : "#D1D5DB"}>
+              {isSelected ? "› " : "  "}
+              {command}
+            </Text>
+          </Box>
+        );
+      })}
+    </Box>
+  );
 }
 
 function composerLines(state: ComposerState): ComposerLine[] {
@@ -94,14 +140,36 @@ export function Prompt({
   const { stdout } = useStdout();
   const stateRef = useRef<ComposerState>(createComposerState());
   const [state, setState] = useState(stateRef.current);
+  const [selectedSlashCommandIndex, setSelectedSlashCommandIndex] = useState(0);
+  const [dismissedSlashCommandValue, setDismissedSlashCommandValue] = useState<
+    string | undefined
+  >();
   const placeholder = activeModelName
     ? "Ask Everpeace to do anything"
     : "输入 /login 开始";
   const updateState = (operation: (current: ComposerState) => ComposerState) => {
-    const next = operation(stateRef.current);
+    const current = stateRef.current;
+    const next = operation(current);
     stateRef.current = next;
     setState(next);
+    if (next.value !== current.value) {
+      setSelectedSlashCommandIndex(0);
+      setDismissedSlashCommandValue(undefined);
+    }
   };
+  const matchingSlashCommands = useMemo(
+    () => filterSlashCommands(state.value),
+    [state.value],
+  );
+  const effectiveSlashCommandIndex = Math.min(
+    selectedSlashCommandIndex,
+    Math.max(0, matchingSlashCommands.length - 1),
+  );
+  const slashCommandMenuVisible =
+    matchingSlashCommands.length > 0 && dismissedSlashCommandValue !== state.value;
+  const selectedSlashCommand = slashCommandMenuVisible
+    ? matchingSlashCommands[effectiveSlashCommandIndex]
+    : undefined;
 
   useInput(
     (input, key) => {
@@ -111,7 +179,7 @@ export function Prompt({
         if (key.shift || key.meta || key.ctrl) {
           updateState((current) => insertComposerText(current, "\n"));
         } else {
-          const submittedValue = stateRef.current.value;
+          const submittedValue = selectedSlashCommand ?? stateRef.current.value;
           updateState(() => createComposerState());
           onSubmit(submittedValue);
         }
@@ -122,6 +190,28 @@ export function Prompt({
       // enhanced keyboard protocol Ctrl+J/Ctrl+M arrive as named Ctrl keys.
       if (input === "\n" || (key.ctrl && (input === "j" || input === "m"))) {
         updateState((current) => insertComposerText(current, "\n"));
+        return;
+      }
+
+      if (slashCommandMenuVisible && (key.upArrow || (key.ctrl && input === "p"))) {
+        setSelectedSlashCommandIndex((current) => Math.max(0, current - 1));
+        return;
+      }
+      if (slashCommandMenuVisible && (key.downArrow || (key.ctrl && input === "n"))) {
+        setSelectedSlashCommandIndex((current) =>
+          Math.min(matchingSlashCommands.length - 1, current + 1),
+        );
+        return;
+      }
+      if (slashCommandMenuVisible && key.tab && selectedSlashCommand) {
+        const leadingWhitespace = stateRef.current.value.match(/^\s*/u)?.[0] ?? "";
+        const completedValue = `${leadingWhitespace}${selectedSlashCommand}`;
+        updateState(() => createComposerState(completedValue));
+        setDismissedSlashCommandValue(completedValue);
+        return;
+      }
+      if (slashCommandMenuVisible && key.escape) {
+        setDismissedSlashCommandValue(stateRef.current.value);
         return;
       }
 
@@ -205,68 +295,76 @@ export function Prompt({
   const availableWidth = Math.max(1, (stdout.columns ?? 80) - 5);
 
   return (
-    <Box
-      width="100%"
-      minHeight={3}
-      backgroundColor="#1F2937"
-      paddingX={1}
-      paddingY={1}
-      overflow="hidden"
-      aria-role="textbox"
-      aria-state={{ multiline: true }}
-    >
-      <Box width={2} flexShrink={0}>
-        <Text bold color="#F8FAFC">
-          ›
-        </Text>
-      </Box>
-      <Box minWidth={0} flexGrow={1} flexDirection="column" overflow="hidden">
-        {visibleLines.map((line, index) => {
-          const absoluteLine = firstVisibleLine + index;
-          const key = `${absoluteLine}:${line.text}`;
-          if (line.cursorColumn === undefined) {
-            return (
-              <Box key={key} height={1} overflow="hidden">
-                <Text wrap="truncate-end">{line.text || " "}</Text>
-              </Box>
-            );
-          }
+    <Box width="100%" flexDirection="column">
+      <Box
+        width="100%"
+        minHeight={3}
+        backgroundColor="#1F2937"
+        paddingX={1}
+        paddingY={1}
+        overflow="hidden"
+        aria-role="textbox"
+        aria-state={{ multiline: true }}
+      >
+        <Box width={2} flexShrink={0}>
+          <Text bold color="#F8FAFC">
+            ›
+          </Text>
+        </Box>
+        <Box minWidth={0} flexGrow={1} flexDirection="column" overflow="hidden">
+          {visibleLines.map((line, index) => {
+            const absoluteLine = firstVisibleLine + index;
+            const key = `${absoluteLine}:${line.text}`;
+            if (line.cursorColumn === undefined) {
+              return (
+                <Box key={key} height={1} overflow="hidden">
+                  <Text wrap="truncate-end">{line.text || " "}</Text>
+                </Box>
+              );
+            }
 
-          if (state.value.length === 0) {
+            if (state.value.length === 0) {
+              return (
+                <Box key={key} height={1} flexWrap="nowrap" overflow="hidden">
+                  <Text inverse> </Text>
+                  <Text color="#9CA3AF" wrap="truncate-end">
+                    {placeholder}
+                  </Text>
+                </Box>
+              );
+            }
+
+            const clipped = clippedCursorLine(
+              line.text,
+              line.cursorColumn,
+              availableWidth,
+            );
             return (
               <Box key={key} height={1} flexWrap="nowrap" overflow="hidden">
-                <Text inverse> </Text>
-                <Text color="#9CA3AF" wrap="truncate-end">
-                  {placeholder}
+                <Text wrap="truncate-end">
+                  {clipped.before}
+                  <Text inverse>{clipped.cursor}</Text>
+                  {clipped.after}
                 </Text>
               </Box>
             );
-          }
-
-          const clipped = clippedCursorLine(
-            line.text,
-            line.cursorColumn,
-            availableWidth,
-          );
-          return (
-            <Box key={key} height={1} flexWrap="nowrap" overflow="hidden">
-              <Text wrap="truncate-end">
-                {clipped.before}
-                <Text inverse>{clipped.cursor}</Text>
-                {clipped.after}
-              </Text>
-            </Box>
-          );
-        })}
-        {firstVisibleLine + visibleLines.length < lines.length ? (
-          <Text dimColor>…</Text>
-        ) : null}
-        {firstVisibleLine > 0 ? (
-          <Box position="absolute" top={0} right={0}>
+          })}
+          {firstVisibleLine + visibleLines.length < lines.length ? (
             <Text dimColor>…</Text>
-          </Box>
-        ) : null}
+          ) : null}
+          {firstVisibleLine > 0 ? (
+            <Box position="absolute" top={0} right={0}>
+              <Text dimColor>…</Text>
+            </Box>
+          ) : null}
+        </Box>
       </Box>
+      {slashCommandMenuVisible ? (
+        <SlashCommandMenu
+          commands={matchingSlashCommands}
+          selectedIndex={effectiveSlashCommandIndex}
+        />
+      ) : null}
     </Box>
   );
 }

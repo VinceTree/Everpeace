@@ -10,6 +10,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - `/new` 立即创建并进入一个空 session。
 - 首问由当前模型后台概括 session 名称。
 - `/resume` 恢复完整历史、模型 context、模型和工作目录，并继续聊天。
+- 输入开头的 `/` 显示可筛选、可键盘操作的 slash command 菜单。
 - 保留既有 inline TUI、PTY 流式输出和 resize 稳定性行为。
 
 ## 2. 已完成
@@ -28,6 +29,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - `package.json` 与中英文 README 展示版本已提升至 v0.1.20。
 - Release workflow 运行 `35097961255` 成功；`v0.1.20` tag 指向 `bab62c4`，GitHub Release 已发布且不是 draft/prerelease。
 - 根级 `AGENTS.md` 已替换临时内容，集中记录新 Session 的启动顺序、架构不变量、关键代码入口和交付规则。
+- Slash command 菜单在输入区下方按前缀实时筛选；最多显示八项，支持滚动选择、Enter 执行、Tab 补全和 Esc 关闭。
 
 ## 3. 关键设计决定
 
@@ -38,6 +40,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - 标题请求使用当前官方 model ID、无工具且 `store: false`；退出 TUI 时取消未完成的标题请求。
 - Session 恢复仍通过 `onReplayOutput` 原子重放，保持 inline 模式和原生 scrollback。
 - 跨目录恢复通过 `process.chdir` 切换；失败时回滚并保留当前会话。
+- Slash command 候选复用 `SLASH_COMMANDS` 作为唯一命令源；筛选逻辑保持纯函数，菜单不引入额外 `useInput` 监听器。
 
 ## 4. 主要实现位置
 
@@ -46,11 +49,12 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - `src/tui/app.tsx`：session 生命周期、`/new`、`/resume`、命名和工作目录切换。
 - `src/tui/components/session-picker.tsx`：名称和时间选择列表。
 - `src/tui/dependencies.ts`：默认 SessionStore、标题模型请求及目录切换。
+- `src/tui/commands.ts`、`src/tui/components/prompt.tsx`：slash command 筛选、菜单渲染和键盘交互。
 - `tests/unit/storage/session-store.test.ts`、`tests/unit/tui/app.test.tsx`：存储和完整 TUI 流程回归。
 
 ## 5. 验证结果
 
-- `pnpm test`：68/68 通过。
+- `pnpm test`：72/72 通过。
 - `pnpm typecheck`：通过。
 - `pnpm build`：通过。
 - `git diff --check`：通过，仅有 Windows LF/CRLF 提示。
@@ -64,7 +68,8 @@ Everpeace 需要提供完整的本地 Session 工作流：
 4. 退出并重启，恢复该 session，确认完整历史出现且下一轮回答带有旧 context。
 5. 验证跨工作目录恢复、原模型缺失时选择替代模型，以及 `/clear` 仍在下一次提问时才建档。
 6. 同时复验 Ctrl+滚轮缩放、普通滚轮、`! Get-ChildItem` 流式输出和单一 prompt。
-7. 后续功能改动继续同步更新版本计划、测试状态和相关 docs。
+7. 在真实终端输入 `/`，复验八项窗口滚动、逐字筛选、Enter 执行、Tab 补全和 Esc 关闭。
+8. 后续功能改动继续同步更新版本计划、测试状态和相关 docs。
 
 ## 7. 继续遵守的约束
 

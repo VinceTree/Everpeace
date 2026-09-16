@@ -30,6 +30,13 @@
 - 恢复其他项目时自动切换到原工作目录；目录不存在则拒绝恢复并保留当前会话。
 - transcript 重放继续使用现有 synchronized output 和 source-backed timeline，不改变 inline TUI 与普通滚轮行为。
 
+## Slash 命令菜单
+
+- 仅当去除前导空格后的单行输入是以 `/` 开头的单个 token 时显示候选，正文、参数和多行输入不触发。
+- 候选按现有命令定义顺序进行不区分大小写的前缀匹配；最多同时显示八项，超出时随当前选择滚动。
+- `Prompt` 独占输入处理：方向键或 `Ctrl+P/N` 选择，Enter 执行，Tab 只补全，Esc 关闭到下一次编辑；菜单本身不注册第二个 input handler。
+- 菜单位于 composer 下方且只展示命令名，不改变 slash command 的解析和执行接口。
+
 ## 维护约束
 
 - 功能、行为、接口或验证结果发生变化时，同步更新 `docs/PLAN.md`、本文件及 `docs/HANDOFF.md` 中受影响的内容。

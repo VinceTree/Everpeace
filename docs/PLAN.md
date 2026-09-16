@@ -22,6 +22,7 @@
 - [x] JSONL 旧格式兼容：缺少 `title_pending` 时按已命名处理。
 - [x] 中英文 README、CLI/TUI help 和 docs 同步。
 - [x] 根级 `AGENTS.md` 汇总新 Session 必读的长期项目知识和工作约束。
+- [x] 输入开头的 `/` 打开实时前缀筛选菜单，最多显示八项并支持键盘选择、执行和补全。
 
 ## 验收与后续
 

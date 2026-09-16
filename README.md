@@ -91,6 +91,8 @@ The first normal prompt creates a local JSONL session. Everpeace saves the visib
 
 Composer shortcuts follow Codex conventions: `Enter` submits; `Shift+Enter`, `Alt+Enter`, or `Ctrl+J` inserts a newline; `Home`/`End` and `Ctrl+A`/`Ctrl+E` move to the current line's start/end; `Ctrl+U`/`Ctrl+K` delete to the current line's start/end; `Ctrl+W` deletes the previous word; and `Ctrl+Y` restores the most recently killed text. Arrow keys, `Ctrl+B/F/P/N`, and `Alt+B/F` also move the cursor.
 
+Typing `/` at the start of the composer opens a slash-command menu below the input. The list filters by case-insensitive prefix as you type, shows up to eight commands at once, and scrolls to any remaining matches. Use `Up`/`Down` or `Ctrl+P/N` to select, `Enter` to run the selected command, `Tab` to complete it without running, and `Esc` to dismiss the menu while keeping the input.
+
 Everpeace disables terminal focus reporting at startup, shutdown, and after `!` commands, preventing `[I` and `[O` from appearing in the composer when switching windows.
 
 TUI commands:

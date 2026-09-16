@@ -12,6 +12,16 @@ export const SLASH_COMMANDS = [
 
 export type SlashCommand = (typeof SLASH_COMMANDS)[number];
 
+export function filterSlashCommands(input: string): SlashCommand[] {
+  if (input.includes("\n") || input.includes("\r")) return [];
+
+  const query = input.trimStart();
+  if (!query.startsWith("/") || /\s/u.test(query)) return [];
+
+  const normalizedQuery = query.toLowerCase();
+  return SLASH_COMMANDS.filter((command) => command.startsWith(normalizedQuery));
+}
+
 export type ParsedTuiInput =
   | { kind: "empty" }
   | { kind: "chat"; text: string }

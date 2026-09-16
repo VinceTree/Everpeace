@@ -22,6 +22,10 @@ import {
   EverpeaceApp,
   RESIZE_REDRAW_DEBOUNCE_MS,
 } from "../../../src/tui/app.js";
+import {
+  SLASH_COMMANDS,
+  type SlashCommand,
+} from "../../../src/tui/commands.js";
 import type {
   AgentRestoreOptions,
   AgentSession,
@@ -37,6 +41,14 @@ async function waitFor(check: () => boolean): Promise<void> {
     await tick();
   }
   assert.fail("Timed out waiting for TUI update");
+}
+
+function visibleSlashCommandLines(frame: string): SlashCommand[] {
+  const commands = new Set<string>(SLASH_COMMANDS);
+  return frame
+    .split("\n")
+    .map((line) => line.trim().replace(/^›\s+/u, ""))
+    .filter((line): line is SlashCommand => commands.has(line));
 }
 
 function stored(model: RegisteredModel): StoredModelRegistration {
@@ -378,6 +390,132 @@ test("composer supports End, Shift+Enter, and Ctrl+U like Codex", async () => {
   assert.match(frame, /›\s+first\n\s+second/);
   assert.match(frame, /•\s+echo: first\n\s+second/);
   assert.doesNotMatch(frame, /abcZ/);
+  view.unmount();
+});
+
+test("slash command menu filters commands and scrolls an eight-item window", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("/");
+  await tick();
+  assert.deepEqual(
+    visibleSlashCommandLines(view.lastFrame() ?? ""),
+    SLASH_COMMANDS.slice(0, 8),
+  );
+  const initialLines = (view.lastFrame() ?? "").split("\n");
+  const promptLine = initialLines.findIndex((line) => /›\s+\//u.test(line));
+  const firstOptionLine = initialLines.findIndex((line) => /›\s+\/login/u.test(line));
+  assert.ok(promptLine >= 0);
+  assert.ok(firstOptionLine > promptLine);
+
+  for (let index = 0; index < 8; index += 1) {
+    view.stdin.write("\u001B[B");
+    await tick();
+  }
+  assert.deepEqual(
+    visibleSlashCommandLines(view.lastFrame() ?? ""),
+    SLASH_COMMANDS.slice(1),
+  );
+
+  view.stdin.write("MO");
+  await tick();
+  assert.deepEqual(visibleSlashCommandLines(view.lastFrame() ?? ""), [
+    "/model",
+    "/models",
+  ]);
+  view.stdin.write("\u001B[B");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("[ready]"));
+  view.unmount();
+});
+
+test("Tab completes a slash command without executing it", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("/mo");
+  await tick();
+  assert.deepEqual(visibleSlashCommandLines(view.lastFrame() ?? ""), [
+    "/model",
+    "/models",
+  ]);
+
+  view.stdin.write("\t");
+  await tick();
+  const completedFrame = view.lastFrame() ?? "";
+  assert.equal(
+    completedFrame
+      .split("\n")
+      .map((line) => line.trim().replace(/^›\s+/u, ""))
+      .filter((line) => line === "/model").length,
+    1,
+  );
+  assert.doesNotMatch(completedFrame, /切换当前模型/);
+
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("切换当前模型"));
+  view.unmount();
+});
+
+test("Escape dismisses slash suggestions until editing resumes and Enter executes selection", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("/res");
+  await tick();
+  assert.deepEqual(visibleSlashCommandLines(view.lastFrame() ?? ""), ["/resume"]);
+
+  view.stdin.write("\u001B");
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(visibleSlashCommandLines(view.lastFrame() ?? ""), []);
+  assert.match(view.lastFrame() ?? "", /›\s+\/res/);
+
+  view.stdin.write("u");
+  await tick();
+  assert.deepEqual(visibleSlashCommandLines(view.lastFrame() ?? ""), ["/resume"]);
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("没有可恢复的 Session"));
   view.unmount();
 });
 
