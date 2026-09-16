@@ -21,6 +21,7 @@
 - [x] `/new` 立即建档、切换界面和 `title_pending` 首问命名。
 - [x] JSONL 旧格式兼容：缺少 `title_pending` 时按已命名处理。
 - [x] 中英文 README、CLI/TUI help 和 docs 同步。
+- [x] 根级 `AGENTS.md` 汇总新 Session 必读的长期项目知识和工作约束。
 
 ## 验收与后续
 

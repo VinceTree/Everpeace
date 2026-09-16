@@ -27,6 +27,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - 中英文 README、CLI/TUI help、PLAN 和架构决定已同步。
 - `package.json` 与中英文 README 展示版本已提升至 v0.1.20。
 - Release workflow 运行 `35097961255` 成功；`v0.1.20` tag 指向 `bab62c4`，GitHub Release 已发布且不是 draft/prerelease。
+- 根级 `AGENTS.md` 已替换临时内容，集中记录新 Session 的启动顺序、架构不变量、关键代码入口和交付规则。
 
 ## 3. 关键设计决定
 
@@ -72,3 +73,4 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - 模型名保持供应商官方 model ID。
 - 保持 inline TUI；不要切换 alternate screen，不允许原始 PTY 控制序列写入 Ink stdout。
 - 每次修改功能、行为、接口或测试状态后，同步更新相关 `docs/` 文档。
+- 每个新 Session 先读根级 `AGENTS.md` 和本文件；长期规则放在 `AGENTS.md`，实时状态只更新本文件。
