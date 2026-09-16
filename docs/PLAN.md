@@ -26,7 +26,7 @@
 
 - 自动验证目标：完整测试、类型检查、构建和 diff 检查全部通过；最新实际结果记录在 `HANDOFF.md`。
 - 待在真实 Windows Terminal 中验证 `/new` → 首问命名 → 退出 → `/resume` → 继续聊天。
-- 当前发布目标为 v0.1.20；版本提交推送后检查自动生成的 tag 和 GitHub Release。
+- v0.1.20 已发布；Release workflow、tag 和 GitHub Release 均已确认成功。
 
 ## 文档规则
 
