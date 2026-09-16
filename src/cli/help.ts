@@ -11,6 +11,7 @@ Commands inside the agent:
   /login                    Login and activate one model
   /model                    Switch the active model
   /models                   List registered models
+  /status                   Show model, context, and token usage
   /new                      Create and enter a new session
   /resume                   List and resume local sessions
   /logout                   Remove models and credentials

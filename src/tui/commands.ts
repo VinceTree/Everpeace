@@ -2,6 +2,7 @@ export const SLASH_COMMANDS = [
   "/login",
   "/model",
   "/models",
+  "/status",
   "/new",
   "/resume",
   "/logout",
@@ -52,6 +53,7 @@ export const TUI_HELP = `斜杠命令
   /login   登录并立即启用一个模型
   /model   切换已登录模型
   /models  查看模型及凭据状态
+  /status  查看当前 Session、模型和 Token 使用状态
   /new     立即创建并进入新 Session
   /resume  查看并恢复本机 Session
   /logout  删除模型和对应系统凭据

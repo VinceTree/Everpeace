@@ -89,6 +89,8 @@ The TUI runs inline, so the normal scroll wheel can browse the completed Everpea
 
 The first normal prompt creates a local JSONL session. Everpeace saves the visible transcript and the model context needed to continue the conversation, while a separate background model request generates a short title from that first prompt. `/new` immediately creates and enters an empty session; its temporary title is replaced after the first prompt. `/resume` lists every local session by title and last activity time, restores its original model and working directory, and continues appending to the same file. Session files live under the platform application-state directory (`%APPDATA%\Everpeace\sessions` on Windows).
 
+`/status` adds a Codex-style status card to the inline transcript. It shows the active model, provider inferred from `base_url`, endpoint, workspace, session ID, current context occupancy, and cumulative input/output tokens reported by the main Responses API loop. Usage and status snapshots are persisted with the session and restored by `/resume`; internal title-generation requests are excluded. Known official model IDs use documented context limits, while unknown or custom compatible models show `N/A` instead of a guessed limit.
+
 Composer shortcuts follow Codex conventions: `Enter` submits; `Shift+Enter`, `Alt+Enter`, or `Ctrl+J` inserts a newline; `Home`/`End` and `Ctrl+A`/`Ctrl+E` move to the current line's start/end; `Ctrl+U`/`Ctrl+K` delete to the current line's start/end; `Ctrl+W` deletes the previous word; and `Ctrl+Y` restores the most recently killed text. Arrow keys, `Ctrl+B/F/P/N`, and `Alt+B/F` also move the cursor.
 
 Typing `/` at the start of the composer opens a slash-command menu below the input. The list filters by case-insensitive prefix as you type, shows up to eight commands at once, and scrolls to any remaining matches. Use `Up`/`Down` or `Ctrl+P/N` to select, `Enter` to run the selected command, `Tab` to complete it without running, and `Esc` to dismiss the menu while keeping the input.
@@ -100,6 +102,7 @@ TUI commands:
 - `/login`: Sign in and activate a model immediately.
 - `/model`: Switch to a registered model and reset the conversation context.
 - `/models`: List all registered models and credential states.
+- `/status`: Show the current model, provider, context window, and session token usage.
 - `/new`: Immediately create and enter a new local session.
 - `/resume`: List and resume local JSONL sessions.
 - `/logout`: Select and remove models with their operating system credentials.

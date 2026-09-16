@@ -7,7 +7,15 @@
 - 每个 session 使用一个版本化 JSONL 文件，存放于平台应用状态目录；API Key 仍只进入系统 keyring。
 - 可见 timeline 与 Responses API context 分开记录，保证恢复界面完整，同时不把直接 `!` 命令错误加入模型上下文。
 - 写入按 session 串行追加；不完整末行可忽略，其他损坏只隔离对应文件。
-- `session_created` 保存模型引用和工作目录；`model_selected` 表达模型变化及是否重置 context。
+- `session_created` 保存模型引用、工作目录及 usage tracking 能力；`model_selected` 表达模型变化及是否重置 context；`usage_recorded` 保存每次主 Agent 响应的 token 增量。
+
+## Status 与 usage
+
+- `/status` 生成结构化 timeline 快照，进入 inline scrollback 并随 session 恢复，但不进入 Responses context；没有活动 session 时只显示、不建档。
+- Session input/output token 是主 Agent 每次 Responses API 调用 usage 的累计值，包括工具循环中的中间响应，不包含后台标题请求。
+- Context 占用取最近一次成功响应的 `total_tokens`；切换并清空 context 后归零，保留 context 换用替代模型时在下一次响应前视为未知。
+- Provider 由规范化 `base_url` 识别；context 上限只对已知官方 model ID 使用文档值，自定义端点和未知型号显示 `N/A`。
+- 旧 session 缺少 usage tracking 时继续兼容读取，历史总量标记为不完整，不反推或伪造 token。
 
 ## Session 生命周期
 

@@ -109,10 +109,93 @@ test("session files written before title_pending default to a completed title", 
       "utf8",
     );
 
-    assert.equal(
-      (await fixture.store.load("legacy-session")).summary.title_pending,
-      false,
-    );
+    const loaded = await fixture.store.load("legacy-session");
+    assert.equal(loaded.summary.title_pending, false);
+    assert.deepEqual(loaded.usage, {
+      input_tokens: 0,
+      output_tokens: 0,
+      context_tokens: null,
+      complete: false,
+    });
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("session store persists usage totals, context resets, and status snapshots", async () => {
+  const fixture = await createFixture();
+  try {
+    const created = await fixture.store.create({
+      title: "usage",
+      titlePending: false,
+      workspacePath: "C:\\repo",
+      model,
+    });
+    await fixture.store.appendUsage(created.id, {
+      input_tokens: 100,
+      output_tokens: 20,
+      total_tokens: 120,
+    });
+    await fixture.store.appendUsage(created.id, {
+      input_tokens: 150,
+      output_tokens: 30,
+      total_tokens: 180,
+    });
+    await fixture.store.appendTimeline(created.id, {
+      kind: "status",
+      snapshot: {
+        version: "0.1.20",
+        model_name: "deepseek-chat",
+        provider: "DeepSeek",
+        base_url: "https://api.deepseek.com",
+        workspace_path: "C:\\repo",
+        session_id: created.id,
+        context_window: null,
+        context_tokens: 180,
+        input_tokens: 250,
+        output_tokens: 50,
+        usage_complete: true,
+      },
+    });
+
+    let loaded = await fixture.store.load(created.id);
+    assert.deepEqual(loaded.usage, {
+      input_tokens: 250,
+      output_tokens: 50,
+      context_tokens: 180,
+      complete: true,
+    });
+    assert.equal(loaded.timeline.at(-1)?.kind, "status");
+
+    await fixture.store.selectModel(created.id, model, false);
+    loaded = await fixture.store.load(created.id);
+    assert.deepEqual(loaded.usage, {
+      input_tokens: 250,
+      output_tokens: 50,
+      context_tokens: 0,
+      complete: true,
+    });
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("missing provider usage is persisted as partial without corrupting the session", async () => {
+  const fixture = await createFixture();
+  try {
+    const created = await fixture.store.create({
+      title: "partial usage",
+      titlePending: false,
+      workspacePath: "C:\\repo",
+      model,
+    });
+    await fixture.store.appendUsage(created.id, null);
+    assert.deepEqual((await fixture.store.load(created.id)).usage, {
+      input_tokens: 0,
+      output_tokens: 0,
+      context_tokens: null,
+      complete: false,
+    });
   } finally {
     await fixture.cleanup();
   }

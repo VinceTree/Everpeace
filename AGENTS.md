@@ -37,9 +37,11 @@ git diff --check
 - `/new` 创建的记录使用持久化的 `title_pending: true`。第一条问题先提供可靠回退标题，再异步调用当前模型生成简短名称，不能阻塞正常回答。
 - `/clear` 只清屏并解除当前 session；下一条普通问题才创建新 session，同时保留当前模型。
 - `/resume` 全局列出所有 session，按最后活动时间倒序显示名称和时间，并恢复 timeline、context、模型及工作目录，然后继续写入原文件。
+- `/status` 以 Codex 风格方格显示当前模型、base URL 对应供应商、context window 和 session 累计 token；状态快照进入可恢复 timeline，但不能进入模型 context。
+- 主 Agent 的 Responses usage 按 session 持久累计；标题请求不计入。切换模型保留累计 token，但在新模型完成响应前重置或未知当前 context 占用。
 - 原模型缺失时允许用户选择替代模型并保留 context；原工作目录不存在时拒绝恢复并保持当前会话不变。
 - JSONL 损坏必须按文件隔离；只允许忽略不完整的最后一行。旧记录缺少 `title_pending` 时按 `false` 处理。
-- JSONL 事件目前包括 `session_created`、`title_updated`、`timeline_entry`、`context_append` 和 `model_selected`；改变 schema 时必须考虑向后兼容并补测试。
+- JSONL 事件目前包括 `session_created`、`title_updated`、`timeline_entry`、`context_append`、`model_selected` 和 `usage_recorded`；改变 schema 时必须考虑向后兼容并补测试。
 
 ## TUI 与终端不变量
 

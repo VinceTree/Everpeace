@@ -10,6 +10,7 @@ test("filterSlashCommands matches a single leading command token by prefix", () 
   assert.deepEqual(filterSlashCommands("/"), [...SLASH_COMMANDS]);
   assert.deepEqual(filterSlashCommands(" /MO"), ["/model", "/models"]);
   assert.deepEqual(filterSlashCommands("/res"), ["/resume"]);
+  assert.deepEqual(filterSlashCommands("/sta"), ["/status"]);
   assert.deepEqual(filterSlashCommands("/wat"), []);
   assert.deepEqual(filterSlashCommands("message /help"), []);
   assert.deepEqual(filterSlashCommands("/help "), []);
@@ -29,6 +30,10 @@ test("parseTuiInput separates chat, slash commands, and direct Bash", () => {
   assert.deepEqual(parseTuiInput("/new"), {
     kind: "slash",
     command: "/new",
+  });
+  assert.deepEqual(parseTuiInput("/status"), {
+    kind: "slash",
+    command: "/status",
   });
   assert.deepEqual(parseTuiInput("!  git status"), {
     kind: "bash",

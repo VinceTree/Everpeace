@@ -2,6 +2,7 @@ import { Box, Static, Text } from "ink";
 import React from "react";
 import type { TimelineEntry } from "../types.js";
 import { Banner } from "./banner.js";
+import { StatusCard } from "./status-card.js";
 
 export interface HistoryProps {
   entries: TimelineEntry[];
@@ -9,7 +10,11 @@ export interface HistoryProps {
   workspacePath: string;
 }
 
-function HistoryLine({ entry }: { entry: Exclude<TimelineEntry, { kind: "banner" }> }) {
+function HistoryLine({
+  entry,
+}: {
+  entry: Exclude<TimelineEntry, { kind: "banner" } | { kind: "status" }>;
+}) {
   if (entry.kind === "user") {
     return (
       <Box
@@ -70,6 +75,8 @@ export function History({ entries, version, workspacePath }: HistoryProps) {
             modelName={entry.modelName}
             workspacePath={workspacePath}
           />
+        ) : entry.kind === "status" ? (
+          <StatusCard key={entry.id} snapshot={entry.snapshot} />
         ) : (
           <HistoryLine key={entry.id} entry={entry} />
         )

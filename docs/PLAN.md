@@ -11,6 +11,7 @@
 - `/new` 立即创建并进入一个新 session；第一次提问后替换临时名称。
 - `/resume` 列出本机全部 session，恢复模型、工作目录、历史和上下文。
 - `/clear` 只退出当前 session，下一次普通提问时再创建新记录。
+- `/status` 显示并持久化当前模型、provider、context 和 session token usage 快照。
 
 ## 已完成
 
@@ -23,11 +24,14 @@
 - [x] 中英文 README、CLI/TUI help 和 docs 同步。
 - [x] 根级 `AGENTS.md` 汇总新 Session 必读的长期项目知识和工作约束。
 - [x] 输入开头的 `/` 打开实时前缀筛选菜单，最多显示八项并支持键盘选择、执行和补全。
+- [x] 主 Agent Responses usage 采集、JSONL 增量持久化和 `/resume` 恢复。
+- [x] `/status` Codex 风格状态方格、官方 base URL/model context 映射及兼容端点安全降级。
 
 ## 验收与后续
 
 - 自动验证目标：完整测试、类型检查、构建和 diff 检查全部通过；最新实际结果记录在 `HANDOFF.md`。
 - 待在真实 Windows Terminal 中验证 `/new` → 首问命名 → 退出 → `/resume` → 继续聊天。
+- 待使用真实 OpenAI、DeepSeek 和自定义兼容端点复验 `/status` usage 返回、context 映射和窄终端排版。
 - v0.1.20 已发布；Release workflow、tag 和 GitHub Release 均已确认成功。
 
 ## 文档规则

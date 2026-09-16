@@ -2,6 +2,16 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  applyUsageSample,
+  createEmptySessionUsage,
+  isStatusSnapshot,
+  isTokenUsageSample,
+  resetContextUsage,
+  type SessionUsage,
+  type StatusSnapshot,
+  type TokenUsageSample,
+} from "../status/model-status.js";
 
 const SESSION_FORMAT_VERSION = 1;
 
@@ -19,10 +29,19 @@ export interface SessionModelRef {
   base_url: string;
 }
 
-export interface StoredTimelineEntry {
+export interface StoredTextTimelineEntry {
   kind: SessionTimelineKind;
   text: string;
 }
+
+export interface StoredStatusTimelineEntry {
+  kind: "status";
+  snapshot: StatusSnapshot;
+}
+
+export type StoredTimelineEntry =
+  | StoredTextTimelineEntry
+  | StoredStatusTimelineEntry;
 
 export interface SessionSummary {
   id: string;
@@ -38,6 +57,7 @@ export interface LoadedSession {
   summary: SessionSummary;
   timeline: StoredTimelineEntry[];
   context: Array<Record<string, unknown>>;
+  usage: SessionUsage;
 }
 
 export interface SessionListResult {
@@ -60,6 +80,10 @@ export interface SessionStoreLike {
     sessionId: string,
     items: readonly Record<string, unknown>[],
   ): Promise<void>;
+  appendUsage(
+    sessionId: string,
+    usage: TokenUsageSample | null,
+  ): Promise<void>;
   selectModel(
     sessionId: string,
     model: SessionModelRef,
@@ -81,6 +105,7 @@ interface SessionCreatedEvent extends EventBase {
   title_pending: boolean;
   workspace_path: string;
   model: SessionModelRef;
+  usage_tracking: boolean;
 }
 
 interface TitleUpdatedEvent extends EventBase {
@@ -104,12 +129,18 @@ interface ModelSelectedEvent extends EventBase {
   preserve_context: boolean;
 }
 
+interface UsageRecordedEvent extends EventBase {
+  type: "usage_recorded";
+  usage: TokenUsageSample | null;
+}
+
 type SessionEvent =
   | SessionCreatedEvent
   | TitleUpdatedEvent
   | TimelineEntryEvent
   | ContextAppendEvent
-  | ModelSelectedEvent;
+  | ModelSelectedEvent
+  | UsageRecordedEvent;
 
 export interface SessionStoreOptions {
   directory?: string;
@@ -164,6 +195,9 @@ function isTimelineKind(value: unknown): value is SessionTimelineKind {
 }
 
 function isTimelineEntry(value: unknown): value is StoredTimelineEntry {
+  if (isRecord(value) && value.kind === "status") {
+    return isStatusSnapshot(value.snapshot);
+  }
   return (
     isRecord(value) &&
     isTimelineKind(value.kind) &&
@@ -200,6 +234,8 @@ function parseEvent(value: unknown): SessionEvent {
         typeof value.title_pending === "boolean" ? value.title_pending : false,
       workspace_path: value.workspace_path,
       model: value.model,
+      usage_tracking:
+        typeof value.usage_tracking === "boolean" ? value.usage_tracking : false,
     };
   }
 
@@ -230,6 +266,14 @@ function parseEvent(value: unknown): SessionEvent {
       model: value.model,
       preserve_context: value.preserve_context,
     };
+  }
+
+
+  if (value.type === "usage_recorded") {
+    if (value.usage !== null && !isTokenUsageSample(value.usage)) {
+      throw new Error("Session usage event is invalid");
+    }
+    return { ...base, type: "usage_recorded", usage: value.usage };
   }
 
   throw new Error(`Unsupported session event type: ${value.type}`);
@@ -264,6 +308,7 @@ function parseSession(contents: string, filePath: string): LoadedSession {
   let updatedAt = header.at;
   const timeline: StoredTimelineEntry[] = [];
   let context: Array<Record<string, unknown>> = [];
+  let usage = createEmptySessionUsage(header.usage_tracking);
 
   for (const event of events.slice(1)) {
     updatedAt = event.at;
@@ -276,6 +321,10 @@ function parseSession(contents: string, filePath: string): LoadedSession {
     if (event.type === "model_selected") {
       model = event.model;
       if (!event.preserve_context) context = [];
+      usage = resetContextUsage(usage, event.preserve_context);
+    }
+    if (event.type === "usage_recorded") {
+      usage = applyUsageSample(usage, event.usage);
     }
   }
 
@@ -291,6 +340,7 @@ function parseSession(contents: string, filePath: string): LoadedSession {
     },
     timeline,
     context,
+    usage,
   };
 }
 
@@ -330,6 +380,7 @@ export class SessionStore implements SessionStoreLike {
         title_pending: input.titlePending,
         workspace_path: input.workspacePath,
         model: modelRef(input.model),
+        usage_tracking: true,
       };
       try {
         const handle = await fs.open(this.#filePath(id), "wx", 0o600);
@@ -383,6 +434,18 @@ export class SessionStore implements SessionStoreLike {
       type: "context_append",
       at: this.#now().toISOString(),
       items: items.map((item) => ({ ...item })),
+    });
+  }
+
+  appendUsage(
+    sessionId: string,
+    usage: TokenUsageSample | null,
+  ): Promise<void> {
+    return this.#append(sessionId, {
+      version: SESSION_FORMAT_VERSION,
+      type: "usage_recorded",
+      at: this.#now().toISOString(),
+      usage: usage === null ? null : { ...usage },
     });
   }
 

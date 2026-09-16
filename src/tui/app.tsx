@@ -12,6 +12,13 @@ import type {
   SessionModelRef,
   SessionSummary,
 } from "../storage/session-store.js";
+import {
+  applyUsageSample,
+  createEmptySessionUsage,
+  resetContextUsage,
+  resolveModelStatusMetadata,
+  type StatusSnapshot,
+} from "../status/model-status.js";
 import type { BashResult } from "../tools/bash.js";
 import { parseTuiInput, TUI_HELP } from "./commands.js";
 import { BashConfirmation } from "./components/bash-confirmation.js";
@@ -172,6 +179,9 @@ export function EverpeaceApp({
   const [sessionContext, setSessionContext] = useState<
     Array<Record<string, unknown>>
   >([]);
+  const [sessionUsage, setSessionUsage] = useState(() =>
+    createEmptySessionUsage(),
+  );
   const [activeModel, setActiveModel] = useState(firstActiveModel);
   const [workspacePath, setWorkspacePath] = useState(dependencies.workspacePath);
   const [view, setView] = useState<View>(() => initialView(initialModels.available));
@@ -190,6 +200,31 @@ export function EverpeaceApp({
     if (sessionId !== undefined) {
       void dependencies.sessionStore
         .appendTimeline(sessionId, { kind, text })
+        .catch((error: unknown) => {
+          const errorId = nextId.current++;
+          const message = error instanceof Error ? error.message : String(error);
+          setTimeline((current) => [
+            ...current,
+            { id: errorId, kind: "error", text: `Session save failed: ${message}` },
+          ]);
+        });
+    }
+    return id;
+  }, [dependencies.sessionStore]);
+
+  const appendStatus = useCallback((snapshot: StatusSnapshot): number => {
+    const id = nextId.current++;
+    setTimeline((current) => [
+      ...current,
+      { id, kind: "status", snapshot: { ...snapshot } },
+    ]);
+    const sessionId = activeSessionId.current;
+    if (sessionId !== undefined) {
+      void dependencies.sessionStore
+        .appendTimeline(sessionId, {
+          kind: "status",
+          snapshot: { ...snapshot },
+        })
         .catch((error: unknown) => {
           const errorId = nextId.current++;
           const message = error instanceof Error ? error.message : String(error);
@@ -285,6 +320,13 @@ export function EverpeaceApp({
                 await dependencies.sessionStore.appendContext(sessionId, items);
               }
             },
+            async onUsage(usage) {
+              setSessionUsage((current) => applyUsageSample(current, usage));
+              const sessionId = activeSessionId.current;
+              if (sessionId !== undefined) {
+                await dependencies.sessionStore.appendUsage(sessionId, usage);
+              }
+            },
           }),
     [activeModel, agentIo, dependencies, sessionContext, sessionEpoch],
   );
@@ -302,6 +344,7 @@ export function EverpeaceApp({
       }
       setActiveModel(model);
       setSessionContext([]);
+      setSessionUsage((current) => resetContextUsage(current, false));
       setSessionEpoch((current) => current + 1);
       setView({ kind: "chat" });
       append("system", `${message}；对话上下文已重置。`);
@@ -388,11 +431,19 @@ export function EverpeaceApp({
 
         const restoredTimeline: TimelineEntry[] = [
           { id: 0, kind: "banner", modelName: model.model_name },
-          ...loaded.timeline.map((entry, index) => ({
-            id: index + 1,
-            kind: entry.kind,
-            text: entry.text,
-          })),
+          ...loaded.timeline.map((entry, index): TimelineEntry =>
+            entry.kind === "status"
+              ? {
+                  id: index + 1,
+                  kind: "status",
+                  snapshot: { ...entry.snapshot },
+                }
+              : {
+                  id: index + 1,
+                  kind: entry.kind,
+                  text: entry.text,
+                },
+          ),
         ];
 
         abortController.current?.abort();
@@ -403,6 +454,11 @@ export function EverpeaceApp({
           setTimeline(restoredTimeline);
           setTimelineEpoch((current) => current + 1);
           setSessionContext(loaded.context.map((item) => ({ ...item })));
+          setSessionUsage(
+            replacementModel
+              ? resetContextUsage(loaded.usage, true)
+              : { ...loaded.usage },
+          );
           setActiveModel(model);
           setWorkspacePath(restoredWorkspace);
           setSessionEpoch((current) => current + 1);
@@ -519,6 +575,7 @@ export function EverpeaceApp({
         ]);
         setTimelineEpoch((current) => current + 1);
         setSessionContext([]);
+        setSessionUsage(createEmptySessionUsage());
         setSessionEpoch((current) => current + 1);
         setInputKey((current) => current + 1);
         setView({ kind: "chat" });
@@ -535,6 +592,7 @@ export function EverpeaceApp({
     activeSessionId.current = undefined;
     sessionTitlePending.current = false;
     setSessionContext([]);
+    setSessionUsage(createEmptySessionUsage());
     const banner: TimelineEntry = {
       id: nextId.current++,
       kind: "banner",
@@ -546,6 +604,25 @@ export function EverpeaceApp({
       setSessionEpoch((current) => current + 1);
     });
   }, [activeModel, onReplayOutput]);
+
+  const showStatus = useCallback(() => {
+    const metadata = activeModel
+      ? resolveModelStatusMetadata(activeModel.base_url, activeModel.model_name)
+      : undefined;
+    appendStatus({
+      version: dependencies.version,
+      model_name: activeModel?.model_name ?? null,
+      provider: metadata?.provider ?? "N/A",
+      base_url: activeModel?.base_url ?? null,
+      workspace_path: workspacePath,
+      session_id: activeSessionId.current ?? null,
+      context_window: metadata?.context_window ?? null,
+      context_tokens: activeModel ? sessionUsage.context_tokens : null,
+      input_tokens: sessionUsage.input_tokens,
+      output_tokens: sessionUsage.output_tokens,
+      usage_complete: sessionUsage.complete,
+    });
+  }, [activeModel, appendStatus, dependencies.version, sessionUsage, workspacePath]);
 
   const runChat = useCallback(
     async (text: string) => {
@@ -651,6 +728,7 @@ export function EverpeaceApp({
       if (parsed.command === "/login") setView({ kind: "login" });
       if (parsed.command === "/model") void openModelPicker();
       if (parsed.command === "/models") void showModels();
+      if (parsed.command === "/status") showStatus();
       if (parsed.command === "/new") void createNewSession();
       if (parsed.command === "/resume") void openResume();
       if (parsed.command === "/logout") void openLogout();
@@ -669,6 +747,7 @@ export function EverpeaceApp({
       runChat,
       runDirectBash,
       showModels,
+      showStatus,
     ],
   );
 
@@ -682,6 +761,7 @@ export function EverpeaceApp({
 
       setActiveModel(undefined);
       setSessionContext([]);
+      setSessionUsage((current) => resetContextUsage(current, false));
       setSessionEpoch((current) => current + 1);
       setBusyLabel("正在刷新可用模型");
       setView({ kind: "chat" });

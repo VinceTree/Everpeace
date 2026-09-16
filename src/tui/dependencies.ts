@@ -61,6 +61,9 @@ export function createDefaultTuiDependencies(
         ...(restore?.onContextAppend === undefined
           ? {}
           : { onHistoryAppend: restore.onContextAppend }),
+        ...(restore?.onUsage === undefined
+          ? {}
+          : { onUsage: restore.onUsage }),
       });
     },
     async generateSessionTitle(model, firstQuestion, signal) {

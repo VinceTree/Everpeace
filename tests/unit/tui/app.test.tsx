@@ -19,6 +19,12 @@ import type {
 } from "../../../src/storage/session-store.js";
 import type { BashResult } from "../../../src/tools/bash.js";
 import {
+  applyUsageSample,
+  createEmptySessionUsage,
+  resetContextUsage,
+  type TokenUsageSample,
+} from "../../../src/status/model-status.js";
+import {
   EverpeaceApp,
   RESIZE_REDRAW_DEBOUNCE_MS,
 } from "../../../src/tui/app.js";
@@ -93,7 +99,12 @@ function createMemorySessionStore(): MemorySessionStore {
         workspace_path: input.workspacePath,
         model: { ...input.model },
       };
-      sessions.set(summary.id, { summary, timeline: [], context: [] });
+      sessions.set(summary.id, {
+        summary,
+        timeline: [],
+        context: [],
+        usage: createEmptySessionUsage(),
+      });
       return { ...summary, model: { ...summary.model } };
     },
     async updateTitle(sessionId, title) {
@@ -112,6 +123,11 @@ function createMemorySessionStore(): MemorySessionStore {
       session.context.push(...items.map((item) => ({ ...item })));
       session.summary.updated_at = timestamp();
     },
+    async appendUsage(sessionId, usage: TokenUsageSample | null) {
+      const session = requireSession(sessionId);
+      session.usage = applyUsageSample(session.usage, usage);
+      session.summary.updated_at = timestamp();
+    },
     async selectModel(
       sessionId: string,
       model: SessionModelRef,
@@ -120,6 +136,7 @@ function createMemorySessionStore(): MemorySessionStore {
       const session = requireSession(sessionId);
       session.summary.model = { ...model };
       if (!preserveContext) session.context = [];
+      session.usage = resetContextUsage(session.usage, preserveContext);
       session.summary.updated_at = timestamp();
     },
     async list() {
@@ -136,6 +153,7 @@ function createMemorySessionStore(): MemorySessionStore {
         summary: { ...session.summary, model: { ...session.summary.model } },
         timeline: session.timeline.map((entry) => ({ ...entry })),
         context: session.context.map((item) => ({ ...item })),
+        usage: { ...session.usage },
       };
     },
   };
@@ -256,6 +274,114 @@ test("TUI accepts chat and renders the assistant response", async () => {
   const topBorders = frameLines.filter((line) => line.startsWith("╭"));
   assert.deepEqual(topBorders.map((line) => line.length), [60]);
   view.unmount();
+});
+
+test("/status renders provider, context, and zero usage without creating a session", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("/status");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Context window:"));
+
+  const frame = view.lastFrame() ?? "";
+  assert.match(frame, /Model:\s+deepseek-flash/);
+  assert.match(frame, /Provider:\s+DeepSeek/);
+  assert.match(frame, /Base URL:\s+https:\/\/api\.deepseek\.com/);
+  assert.match(frame, /Session:\s+not started/);
+  assert.match(frame, /Context window:\s+100% left \(0 used \/ 1M\)/);
+  assert.match(frame, /Input tokens:\s+0/);
+  assert.match(frame, /Output tokens:\s+0/);
+  assert.doesNotMatch(frame, /secret/);
+  assert.equal(fixture.sessionStore.sessions.size, 0);
+  view.unmount();
+});
+
+test("/status persists cumulative main-agent usage and restores its snapshot", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({
+    initial: [model],
+    createAgent: (_model, io, restore) => ({
+      async runTurn(input) {
+        await restore?.onContextAppend?.([{ role: "user", content: input }]);
+        await restore?.onUsage?.({
+          input_tokens: 1_200,
+          output_tokens: 300,
+          total_tokens: 1_500,
+        });
+        io.writeAssistant("done");
+      },
+    }),
+  });
+  const firstView = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  firstView.stdin.write("use tokens");
+  await tick();
+  firstView.stdin.write("\r");
+  await waitFor(() => (firstView.lastFrame() ?? "").includes("done"));
+  firstView.stdin.write("/status");
+  await tick();
+  firstView.stdin.write("\r");
+  await waitFor(() => (firstView.lastFrame() ?? "").includes("Input tokens:"));
+
+  const statusFrame = firstView.lastFrame() ?? "";
+  assert.match(statusFrame, /Context window:\s+100% left \(1\.5K used \/ 1M\)/);
+  assert.match(statusFrame, /Input tokens:\s+1,200/);
+  assert.match(statusFrame, /Output tokens:\s+300/);
+  const session = [...fixture.sessionStore.sessions.values()][0];
+  assert.ok(session);
+  assert.deepEqual(session.usage, {
+    input_tokens: 1_200,
+    output_tokens: 300,
+    context_tokens: 1_500,
+    complete: true,
+  });
+  assert.equal(session.timeline.at(-1)?.kind, "status");
+  firstView.unmount();
+
+  const resumedView = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+  await tick();
+  resumedView.stdin.write("/resume");
+  await tick();
+  resumedView.stdin.write("\r");
+  await waitFor(() => (resumedView.lastFrame() ?? "").includes(session.summary.title));
+  await tick();
+  resumedView.stdin.write("\r");
+  await waitFor(() => (resumedView.lastFrame() ?? "").includes("Input tokens:"));
+  assert.match(resumedView.lastFrame() ?? "", /Input tokens:\s+1,200/);
+  resumedView.unmount();
 });
 
 test("prompt remains one non-wrapping input row when its input exceeds terminal width", async () => {
@@ -428,7 +554,13 @@ test("slash command menu filters commands and scrolls an eight-item window", asy
   }
   assert.deepEqual(
     visibleSlashCommandLines(view.lastFrame() ?? ""),
-    SLASH_COMMANDS.slice(1),
+    SLASH_COMMANDS.slice(1, 9),
+  );
+  view.stdin.write("\u001B[B");
+  await tick();
+  assert.deepEqual(
+    visibleSlashCommandLines(view.lastFrame() ?? ""),
+    SLASH_COMMANDS.slice(2),
   );
 
   view.stdin.write("MO");

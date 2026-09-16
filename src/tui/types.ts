@@ -7,6 +7,10 @@ import type {
 } from "../storage/model-registry.js";
 import type { SessionStoreLike } from "../storage/session-store.js";
 import type { BashResult } from "../tools/bash.js";
+import type {
+  StatusSnapshot,
+  TokenUsageSample,
+} from "../status/model-status.js";
 
 export interface AgentSession {
   runTurn(userInput: string, signal?: AbortSignal): Promise<void>;
@@ -15,6 +19,7 @@ export interface AgentSession {
 export interface AgentRestoreOptions {
   initialContext?: readonly Record<string, unknown>[];
   onContextAppend?(items: readonly Record<string, unknown>[]): Promise<void>;
+  onUsage?(usage: TokenUsageSample | null): Promise<void>;
 }
 
 export interface TuiModelRegistry {
@@ -72,4 +77,10 @@ export interface BannerEntry {
   modelName?: string;
 }
 
-export type TimelineEntry = BannerEntry | HistoryEntry;
+export interface StatusEntry {
+  id: number;
+  kind: "status";
+  snapshot: StatusSnapshot;
+}
+
+export type TimelineEntry = BannerEntry | HistoryEntry | StatusEntry;

@@ -11,6 +11,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - 首问由当前模型后台概括 session 名称。
 - `/resume` 恢复完整历史、模型 context、模型和工作目录，并继续聊天。
 - 输入开头的 `/` 显示可筛选、可键盘操作的 slash command 菜单。
+- `/status` 使用 Codex 风格卡片展示当前版本、模型、供应商、Base URL、目录、session 和 token/context 用量。
 - 保留既有 inline TUI、PTY 流式输出和 resize 稳定性行为。
 
 ## 2. 已完成
@@ -30,11 +31,18 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - Release workflow 运行 `35097961255` 成功；`v0.1.20` tag 指向 `bab62c4`，GitHub Release 已发布且不是 draft/prerelease。
 - 根级 `AGENTS.md` 已替换临时内容，集中记录新 Session 的启动顺序、架构不变量、关键代码入口和交付规则。
 - Slash command 菜单在输入区下方按前缀实时筛选；最多显示八项，支持滚动选择、Enter 执行、Tab 补全和 Esc 关闭。
+- 新增 `/status`：官方 Base URL 与 model 映射供应商和 context window；自定义或未知端点安全显示 `N/A`。
+- 主 Agent 每次 Responses API 请求的 usage 都会累加并写入 session；工具循环中的中间响应也计入，后台标题请求不计入。
+- 切换模型保留 session 累计输入/输出 token，并重置当前 context；旧 session 或兼容端点缺少 usage 时显示为不完整统计。
+- `/status` 卡片作为结构化 timeline 条目写入 JSONL，退出并 `/resume` 后仍可原样恢复。
 
 ## 3. 关键设计决定
 
-- JSONL 事件包含 `session_created`、`title_updated`、`timeline_entry`、`context_append` 和 `model_selected`。
+- JSONL 事件包含 `session_created`、`title_updated`、`timeline_entry`、`context_append`、`model_selected` 和 `usage_recorded`。
 - timeline 与模型 context 分开保存；直接 `!` 命令可恢复显示，但不进入模型 context。
+- usage 在 session 范围内累计；模型切换保留累计输入/输出并重置 context，缺失 usage 的响应会把统计标记为 partial。
+- `/status` 只读取当前状态，不会单独创建 session；有活动 session 时，其快照会进入可恢复 timeline。
+- 供应商和 context window 仅按已知的官方 Base URL 与 model ID 映射；自定义兼容端点不猜测上限。
 - `/new` 立即建档；默认首问建档；`/clear` 只解除当前 session。
 - `title_pending` 缺失时默认 false，以兼容本轮功能早期生成的 JSONL。
 - 标题请求使用当前官方 model ID、无工具且 `store: false`；退出 TUI 时取消未完成的标题请求。
@@ -46,30 +54,34 @@ Everpeace 需要提供完整的本地 Session 工作流：
 
 - `src/storage/session-store.ts`：JSONL schema、路径、读写、列表、恢复与兼容逻辑。
 - `src/agent/react-agent.ts`：初始 context 和增量持久化 callback。
+- `src/status/model-status.ts`：Base URL/provider/context 映射、usage 累加与 status snapshot 类型。
 - `src/tui/app.tsx`：session 生命周期、`/new`、`/resume`、命名和工作目录切换。
+- `src/tui/components/status-card.tsx`：Codex 风格 `/status` 方框、窄终端截断和 token 格式化。
 - `src/tui/components/session-picker.tsx`：名称和时间选择列表。
 - `src/tui/dependencies.ts`：默认 SessionStore、标题模型请求及目录切换。
 - `src/tui/commands.ts`、`src/tui/components/prompt.tsx`：slash command 筛选、菜单渲染和键盘交互。
-- `tests/unit/storage/session-store.test.ts`、`tests/unit/tui/app.test.tsx`：存储和完整 TUI 流程回归。
+- `tests/unit/status/model-status.test.ts`、`tests/unit/tui/status-card.test.tsx`：映射、累计和卡片布局回归。
+- `tests/unit/storage/session-store.test.ts`、`tests/unit/agent/react-agent.test.ts`、`tests/unit/tui/app.test.tsx`：存储、usage 回调和完整 TUI 流程回归。
 
 ## 5. 验证结果
 
-- `pnpm test`：72/72 通过。
+- `pnpm test`：84/84 通过。
 - `pnpm typecheck`：通过。
 - `pnpm build`：通过。
 - `git diff --check`：通过，仅有 Windows LF/CRLF 提示。
-- 尚未在带真实模型凭据的 Windows Terminal 中手工完成 `/new` 与 `/resume` 全流程验收。
+- 尚未在带真实模型凭据的 Windows Terminal 中手工完成 `/status`、`/new` 与 `/resume` 全流程验收。
 
 ## 6. 下一步
 
 1. 在真实 Windows Terminal 中运行 `pnpm dev`。
-2. 执行 `/new`，确认立即出现创建提示且 `/resume` 已能看到临时名称。
-3. 发送第一条问题，确认正常回答不被标题请求阻塞，并在 `/resume` 中看到模型生成的新名称。
-4. 退出并重启，恢复该 session，确认完整历史出现且下一轮回答带有旧 context。
-5. 验证跨工作目录恢复、原模型缺失时选择替代模型，以及 `/clear` 仍在下一次提问时才建档。
-6. 同时复验 Ctrl+滚轮缩放、普通滚轮、`! Get-ChildItem` 流式输出和单一 prompt。
-7. 在真实终端输入 `/`，复验八项窗口滚动、逐字筛选、Enter 执行、Tab 补全和 Esc 关闭。
-8. 后续功能改动继续同步更新版本计划、测试状态和相关 docs。
+2. 完成一次真实模型问答后执行 `/status`，核对 Model、Provider、Base URL、Context window、Input tokens 和 Output tokens。
+3. 触发一次工具调用，确认工具循环的多次响应累计；切换模型后确认总输入/输出保留而 context 重置。
+4. 使用自定义兼容端点或缺少 usage 的响应，确认未知 provider/context 显示 `N/A` 且 TUI 不崩溃。
+5. 退出并 `/resume`，确认历史 status 卡片和累计 usage 恢复；同时复验 `/new`、标题生成和旧 context 延续。
+6. 验证跨工作目录恢复、原模型缺失时选择替代模型，以及 `/clear` 仍在下一次提问时才建档。
+7. 同时复验 Ctrl+滚轮缩放、普通滚轮、`! Get-ChildItem` 流式输出、单一 prompt 和窄终端 resize。
+8. 在真实终端输入 `/`，复验八项窗口滚动、逐字筛选、Enter 执行、Tab 补全和 Esc 关闭。
+9. 后续功能改动继续同步更新版本计划、测试状态和相关 docs。
 
 ## 7. 继续遵守的约束
 

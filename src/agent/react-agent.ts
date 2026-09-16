@@ -4,6 +4,10 @@ import {
   serializeBashResult,
   type BashResult,
 } from "../tools/bash.js";
+import {
+  isTokenUsageSample,
+  type TokenUsageSample,
+} from "../status/model-status.js";
 
 interface FunctionCallItem extends Record<string, unknown> {
   type: "function_call";
@@ -23,6 +27,7 @@ interface AgentResponse {
   id: string;
   output_text: string;
   output: ResponseOutputItem[];
+  usage?: TokenUsageSample | null;
 }
 
 export interface ResponsesClientLike {
@@ -46,6 +51,7 @@ export interface ReactAgentOptions {
   io: AgentIO;
   initialHistory?: readonly Record<string, unknown>[];
   onHistoryAppend?(items: readonly Record<string, unknown>[]): Promise<void>;
+  onUsage?(usage: TokenUsageSample | null): Promise<void>;
 }
 
 const INSTRUCTIONS = `You are Everpeace, a concise coding agent.
@@ -70,6 +76,9 @@ export class ReactAgent {
   readonly #onHistoryAppend:
     | ((items: readonly Record<string, unknown>[]) => Promise<void>)
     | undefined;
+  readonly #onUsage:
+    | ((usage: TokenUsageSample | null) => Promise<void>)
+    | undefined;
   #history: Array<Record<string, unknown>>;
 
   constructor(options: ReactAgentOptions) {
@@ -78,6 +87,7 @@ export class ReactAgent {
     this.#io = options.io;
     this.#history = options.initialHistory?.map((item) => ({ ...item })) ?? [];
     this.#onHistoryAppend = options.onHistoryAppend;
+    this.#onUsage = options.onUsage;
   }
 
   async runTurn(userInput: string, signal?: AbortSignal): Promise<void> {
@@ -88,7 +98,7 @@ export class ReactAgent {
     ];
     this.#history = [...history];
     await this.#persist([userItem]);
-    let response = await this.#createResponse(history, signal);
+    let response = await this.#requestResponse(history, signal);
 
     while (true) {
       history.push(...response.output);
@@ -137,12 +147,25 @@ export class ReactAgent {
       history.push(...outputs);
       this.#history = [...history];
       await this.#persist(outputs);
-      response = await this.#createResponse(history, signal);
+      response = await this.#requestResponse(history, signal);
     }
   }
 
   async #persist(items: readonly Record<string, unknown>[]): Promise<void> {
     if (items.length > 0) await this.#onHistoryAppend?.(items);
+  }
+
+  async #requestResponse(
+    input: Array<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): Promise<AgentResponse> {
+    const response = await this.#createResponse(input, signal);
+    if (this.#onUsage) {
+      await this.#onUsage(
+        isTokenUsageSample(response.usage) ? response.usage : null,
+      );
+    }
+    return response;
   }
 
   async #createResponse(

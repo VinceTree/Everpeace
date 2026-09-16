@@ -276,3 +276,93 @@ test("agent restores prior context and persists each new context batch", async (
     [assistantItem],
   ]);
 });
+
+test("agent reports usage for every response in a tool loop", async () => {
+  const usage: Array<{
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+  } | null> = [];
+  const responses = [
+    {
+      id: "response-tool",
+      output_text: "checking",
+      output: [
+        {
+          type: "function_call",
+          name: "bash",
+          arguments: '{"command":"pwd"}',
+          call_id: "call-usage",
+        },
+      ],
+      usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120 },
+    },
+    {
+      id: "response-final",
+      output_text: "done",
+      output: [],
+      usage: { input_tokens: 150, output_tokens: 30, total_tokens: 180 },
+    },
+  ];
+  const agent = new ReactAgent({
+    client: {
+      responses: {
+        async create() {
+          const response = responses.shift();
+          assert.ok(response);
+          return response;
+        },
+      },
+    },
+    model: "deepseek-flash",
+    io: {
+      async confirmBash() {
+        return true;
+      },
+      async runBash() {
+        return bashResult("/repo\n");
+      },
+      writeAssistant() {},
+    },
+    async onUsage(sample) {
+      usage.push(sample);
+    },
+  });
+
+  await agent.runTurn("inspect");
+
+  assert.deepEqual(usage, [
+    { input_tokens: 100, output_tokens: 20, total_tokens: 120 },
+    { input_tokens: 150, output_tokens: 30, total_tokens: 180 },
+  ]);
+});
+
+test("agent reports unavailable usage without failing compatible endpoints", async () => {
+  const usage: Array<unknown> = [];
+  const agent = new ReactAgent({
+    client: {
+      responses: {
+        async create() {
+          return { id: "response-1", output_text: "done", output: [] };
+        },
+      },
+    },
+    model: "custom-model",
+    io: {
+      async confirmBash() {
+        return false;
+      },
+      async runBash() {
+        return bashResult("");
+      },
+      writeAssistant() {},
+    },
+    async onUsage(sample) {
+      usage.push(sample);
+    },
+  });
+
+  await agent.runTurn("hello");
+
+  assert.deepEqual(usage, [null]);
+});

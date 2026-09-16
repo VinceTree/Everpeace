@@ -89,6 +89,8 @@ TUI 使用原生 inline 模式，普通滚轮可以浏览已完成的 Everpeace 
 
 第一次普通提问会创建本地 JSONL session。Everpeace 会保存完整可见记录和继续聊天所需的模型上下文，同时在后台单独调用当前模型，根据第一次提问生成简短名称。`/new` 会立即创建并进入一个空 session，第一次提问后再替换临时名称。`/resume` 会按名称和最后活动时间列出本机全部 session，恢复原模型、原工作目录及上下文，并继续追加到同一个文件。Windows 下 session 默认保存在 `%APPDATA%\Everpeace\sessions`。
 
+`/status` 会在 inline transcript 中加入 Codex 风格的状态方格，显示当前模型、根据 `base_url` 识别的供应商、接口地址、工作目录、Session ID、当前 context 占用，以及主 Responses API 循环累计的输入/输出 token。Usage 和状态快照会随 session 持久化并由 `/resume` 恢复；后台标题请求不计入统计。已知官方 model ID 使用文档公布的 context 上限，未知型号和自定义兼容端点显示 `N/A`，不会猜测。
+
 输入快捷键与 Codex composer 保持一致：`Enter` 提交，`Shift+Enter`、`Alt+Enter` 或 `Ctrl+J` 换行，`Home`/`End` 与 `Ctrl+A`/`Ctrl+E` 移动到当前行首/行尾，`Ctrl+U`/`Ctrl+K` 删除到当前行首/行尾，`Ctrl+W` 删除前一个词，`Ctrl+Y` 恢复最近删除的内容。方向键、`Ctrl+B/F/P/N` 和 `Alt+B/F` 也可移动光标。
 
 在输入区开头输入 `/` 会在下方打开斜杠命令菜单。菜单会随输入进行不区分大小写的前缀筛选，每次最多显示八个命令，并可滚动访问其余匹配项。使用 `↑`/`↓` 或 `Ctrl+P/N` 选择，`Enter` 直接执行选中命令，`Tab` 只补全不执行，`Esc` 关闭菜单但保留输入。
@@ -100,6 +102,7 @@ TUI 命令：
 - `/login`：登录并立即启用一个模型。
 - `/model`：切换已注册模型，切换后重置对话上下文。
 - `/models`：查看所有模型和凭据状态。
+- `/status`：查看当前模型、供应商、context window 和 session token 使用量。
 - `/new`：立即创建并进入一个新的本地 session。
 - `/resume`：查看并恢复本机 JSONL session。
 - `/logout`：多选删除模型与对应系统凭据。
