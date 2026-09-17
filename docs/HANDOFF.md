@@ -1,10 +1,17 @@
 # Session Handoff
 
-状态快照：2026-09-17。分支 `main`，v0.1.23 已发布，包含权限管理第一阶段、终端交互改进及恢复会话 Bug 修复。用户原有未跟踪 `benchmark/`、`test-me/` 未改动且不纳入发布。
+状态快照：2026-09-17。分支 `main`，v0.1.24 已发布，新增 Codex 核心 Agent Loop TypeScript 适配，保留权限管理、终端交互及恢复会话修复。用户原有未跟踪 `benchmark/`、`test-me/` 未改动且不纳入发布。
 
 ## 最新发布
 
-正在准备 v0.1.24：已接入 Codex 核心 Agent Loop 的 TypeScript 适配。详见 `architecture/AGENT_LOOP.md`。保留既有端点、权限、Session 和工具接口，不新增 OS 沙箱或完整 Codex 服务。包含上游 Apache-2.0 许可证及改动说明。
+v0.1.24 已接入 Codex 核心 Agent Loop 的 TypeScript 适配。详见 `architecture/AGENT_LOOP.md`。保留既有端点、权限、Session 和工具接口，不新增 OS 沙箱或完整 Codex 服务。包含上游 Apache-2.0 许可证及改动说明。
+
+- 发布提交 `c508473ea1b8f475139a2bc7ec85d27463aea8cc` 已推送至 `origin/main`。
+- Release workflow `35232398930` 已完成且 conclusion 为 `success`；`v0.1.24` Release 已发布，draft/prerelease 均为 false。
+- Release: https://github.com/VinceTree/Everpeace/releases/tag/v0.1.24
+- 发布前 124 项测试、typecheck、build 及暂存 diff 检查全部通过。
+
+上一版本记录：
 
 - 发布提交 `524dc453ec9e2f880630bcf10433db923293b5a0` 已推送至 `origin/main`。
 - Release workflow `35229886201` 已完成且 conclusion 为 `success`；`v0.1.23` GitHub Release 已发布，draft/prerelease 均为 false。
