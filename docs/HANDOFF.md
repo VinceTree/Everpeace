@@ -1,6 +1,6 @@
 # Session Handoff
 
-状态快照：2026-09-17。分支 `main`，slash command 独立窗口与居中布局已通过提交 `fd3331f` 完成；当前正在准备 v0.1.21 发布提交。
+状态快照：2026-09-17。分支 `main`，slash command 独立窗口与居中布局已通过提交 `fd3331f` 完成；v0.1.21 已通过发布提交 `28a46aa` 正式发布。
 
 ## 1. 当前目标
 
@@ -29,8 +29,8 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - `/new` session 使用持久化 `title_pending`；首次提问或恢复后的首次提问会在同一 session 内完成命名，不重复建档。
 - `/clear` 保持延迟创建语义，不作为 `/new` 的别名。
 - 中英文 README、CLI/TUI help、PLAN 和架构决定已同步。
-- `package.json` 与中英文 README 展示版本已提升至 v0.1.21；推送后由 Release workflow 创建 tag 和 GitHub Release。
-- 上一版本 Release workflow 运行 `35097961255` 成功；`v0.1.20` tag 指向 `bab62c4`。
+- `package.json` 与中英文 README 展示版本已提升至 v0.1.21。
+- Release workflow 运行 `35214892486` 成功；`v0.1.21` annotated tag 指向 `28a46aa`，GitHub Release 已发布且不是 draft/prerelease。
 - 根级 `AGENTS.md` 已替换临时内容，集中记录新 Session 的启动顺序、架构不变量、关键代码入口和交付规则。
 - Slash command 菜单在输入区下方按前缀实时筛选；最多显示八项，支持滚动选择、Enter 执行、Tab 补全和 Esc 关闭。
 - 新增 `/status`：官方 Base URL 与 model 映射供应商和 context window；自定义或未知端点安全显示 `N/A`。
