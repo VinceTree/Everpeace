@@ -2,7 +2,7 @@
 
 [English](./README.md) | **简体中文**
 
-Everpeace 是一个带交互式 TUI 的 ReAct coding agent，支持 DeepSeek、OpenAI 和自定义 OpenAI-compatible API。普通输入由所选模型处理，模型可以请求调用 Bash；你也可以用 `!<command>` 直接运行本地命令。
+Everpeace 是一个具备较强编程能力、带交互式 TUI 的通用 ReAct agent，支持 DeepSeek、OpenAI 和自定义 OpenAI-compatible API。所选模型可以搜索网页、读取公共页面并请求调用 Bash；你也可以用 `!<command>` 直接运行本地命令。
 
 API Key 不从环境变量读取，也不会写入项目或配置 JSON。Everpeace 使用操作系统凭据库保存 Key，并在本地模型注册表中只保存模型名、base URL 和凭据引用。
 
@@ -12,6 +12,7 @@ API Key 不从环境变量读取，也不会写入项目或配置 JSON。Everpea
 - pnpm
 - macOS/Linux 上的 Bash，或 Windows 上的 Git Bash/WSL Bash
 - DeepSeek、OpenAI 或兼容服务的 API Key
+- 能够通过 HTTPS 访问 Bing 或 DuckDuckGo，以及 Agent 需要读取的公共网页
 
 ## 开发运行
 
@@ -64,7 +65,7 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.1.21) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.22) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -81,7 +82,15 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 
 › !git status
 ...
+
+› TypeScript 最新版本改了什么？
+
+• 搜索网页：TypeScript 最新版本
+• 读取网页：https://www.typescriptlang.org/...
+...
 ```
+
+对于依赖当前信息或冷门资料的问题，模型可以先调用 `web_search`，再使用 `web_fetch` 读取有价值的来源。搜索和网页读取不需要 Bash 确认；function call 及结果会保留在可恢复的模型上下文中，TUI transcript 则显示简短的工具动作。模型会被要求在最终回答中列出实际采用的来源 URL。
 
 输入区域会直接跟随终端的当前可用宽度，并预留最后一列防止 Windows Terminal 自动换行；启动时的 model/directory 信息框与 Codex 一样把内容区限制为 56 格（含内边距和边框共 60 列），每行预先裁剪，在窄终端中只缩短、不换行。输入区只有显式换行才会增高，过长输入会在当前行内水平裁剪，不会因 Ctrl + 滚轮缩放而自动折行。
 
@@ -113,6 +122,9 @@ TUI 命令：
 行为说明：
 
 - 模型提出的命令每次都需要确认。
+- 网页搜索和公共页面读取属于只读工具调用，不需要确认。搜索词会先发送给 Bing，失败时回退到 DuckDuckGo；打开搜索结果时会向对应网站发送请求。
+- 网页读取只允许公共 HTTP/HTTPS 地址，会逐次检查重定向、阻止本机和内网地址，并限制超时与响应大小；返回内容始终作为不可信数据处理。
+- 搜索可用性和结果质量取决于外部搜索服务及当前网络。联网失败会作为工具结果返回模型，由模型说明限制或尝试其他来源。
 - `!<command>` 是用户直接输入的本机终端命令，不会再次确认，也不会加入模型上下文。
 - 模型名称在 login 时直接来自所选端点的 `/models` 接口。
 - 重复 login 相同 `base_url + model_name` 会更新 Key，不会生成重复注册项。

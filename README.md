@@ -2,7 +2,7 @@
 
 **English** | [简体中文](./README.zh-CN.md)
 
-Everpeace is a ReAct coding agent with an interactive TUI. It supports DeepSeek, OpenAI, and custom OpenAI-compatible APIs. Regular messages are handled by the selected model, which may request Bash tool calls. You can also run a local command directly with `!<command>`.
+Everpeace is a general-purpose ReAct agent with strong coding abilities and an interactive TUI. It supports DeepSeek, OpenAI, and custom OpenAI-compatible APIs. The selected model can search the web, read public pages, and request Bash tool calls. You can also run a local command directly with `!<command>`.
 
 API keys are never read from environment variables or written to the project or configuration JSON. Everpeace stores keys in the operating system credential store. Its local model registry contains only the model name, base URL, and credential reference.
 
@@ -12,6 +12,7 @@ API keys are never read from environment variables or written to the project or 
 - pnpm
 - Bash on macOS/Linux, or Git Bash/WSL Bash on Windows
 - An API key for DeepSeek, OpenAI, or a compatible service
+- Outbound HTTPS access to Bing or DuckDuckGo and any public pages the agent reads
 
 ## Run in development
 
@@ -64,7 +65,7 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.1.21) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.22) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -81,7 +82,15 @@ Run this command? y
 
 › !git status
 ...
+
+› What changed in the latest TypeScript release?
+
+• Search web: latest TypeScript release
+• Fetch web page: https://www.typescriptlang.org/...
+...
 ```
+
+For questions that depend on current or niche information, the model can call `web_search` and then use `web_fetch` to read promising sources. Search and page reads do not require Bash confirmation. Their function calls and results remain in the recoverable model context, while concise tool activity is shown in the TUI transcript. The model is instructed to cite the source URLs it used.
 
 The input area follows the terminal's available width and reserves the final column to prevent Windows Terminal from wrapping automatically. The startup model/directory panel uses Codex's 56-cell inner-width cap (60 columns including padding and borders), pre-truncates every row, and shrinks in narrower terminals without wrapping. The composer grows only for explicit newlines; long input is horizontally clipped instead of wrapping when the terminal font size changes.
 
@@ -113,6 +122,9 @@ TUI commands:
 Behavior notes:
 
 - Every command requested by the model requires confirmation.
+- Web search and public page reads are read-only tool calls and do not require confirmation. Search queries are sent to Bing, with DuckDuckGo as a fallback; opening a result sends a request to that site.
+- Web page reads allow only public HTTP/HTTPS targets, validate redirects, block local/private network addresses, apply time and response-size limits, and treat returned content as untrusted data.
+- Search availability and result quality depend on the external search services and the current network connection. A failed web request is returned to the model so it can explain the limitation or try another source.
 - A direct `!<command>` is user-authored, requires no second confirmation, and is not added to model context.
 - Model names come directly from the selected endpoint's `/models` response during login.
 - Logging in again with the same `base_url + model_name` updates the key instead of creating a duplicate registration.

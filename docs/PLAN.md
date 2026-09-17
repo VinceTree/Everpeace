@@ -12,6 +12,7 @@
 - `/resume` 列出本机全部 session，恢复模型、工作目录、历史和上下文。
 - `/clear` 只退出当前 session，下一次普通提问时再创建新记录。
 - `/status` 在独立命令窗口中显示当前模型、provider、context 和 session token usage；窗口隐藏原会话内容，Esc 原子恢复原 Session，usage 累计持久化，窗口不进入 session。
+- 为 DeepSeek、OpenAI 和自定义兼容端点提供普通 function call 形式的网页搜索和公共页面读取，使模型可以回答依赖最新网络信息的问题。
 
 ## 已完成
 
@@ -30,13 +31,16 @@
 - [x] 异步命令使用独立加载窗口；Esc 返回后忽略迟到结果，resize 时继续保持历史隐藏。
 - [x] 所有独立命令窗口使用共享的水平、垂直居中布局，最大 80 列，并在窄终端自适应安全边距。
 - [x] Slash command 界面与可恢复 transcript 分离，不写入 JSONL 或模型 context。
+- [x] 新增 `web_search` 和 `web_fetch`，支持搜索结果摘要、网页正文提取、来源 URL、失败降级和取消信号。
+- [x] 网页读取限制为公共 HTTP/HTTPS，逐次验证重定向并阻止 localhost、内网和链路本地地址。
+- [x] 搜索采用 Bing 优先、DuckDuckGo 回退，不额外要求搜索服务 API Key。
 
 ## 验收与后续
 
 - 自动验证目标：完整测试、类型检查、构建和 diff 检查全部通过；最新实际结果记录在 `HANDOFF.md`。
 - 待在真实 Windows Terminal 中验证 `/new` → 首问命名 → 退出 → `/resume` → 继续聊天。
 - 待使用真实 OpenAI、DeepSeek 和自定义兼容端点复验 `/status` usage 返回、context 映射、居中与窄终端排版，以及 Esc 返回原 Session。
-- v0.1.21 已发布；Release workflow、annotated tag 和 GitHub Release 均已确认成功。
+- v0.1.22 已完成版本和 README 展示版本更新，推送后由 Release workflow 创建 tag 和 GitHub Release，并需确认实际发布结果。
 
 ## 文档规则
 

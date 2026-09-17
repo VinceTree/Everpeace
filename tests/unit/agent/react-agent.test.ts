@@ -148,6 +148,139 @@ test("agent tells the model when the user rejects Bash", async () => {
   assert.match(String(toolOutput.output), /rejected/);
 });
 
+test("agent searches the web without requesting Bash confirmation", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const toolActivity: string[] = [];
+  const responses = [
+    {
+      id: "response-search",
+      output_text: "",
+      output: [
+        {
+          type: "function_call",
+          name: "web_search",
+          arguments: '{"query":"latest TypeScript release"}',
+          call_id: "call-search",
+        },
+      ],
+    },
+    { id: "response-final", output_text: "TypeScript was released.", output: [] },
+  ];
+  const agent = new ReactAgent({
+    client: {
+      responses: {
+        async create(params) {
+          requests.push(params);
+          const response = responses.shift();
+          assert.ok(response);
+          return response;
+        },
+      },
+    },
+    model: "deepseek-flash",
+    io: {
+      async confirmBash() {
+        throw new Error("Web search must not request Bash confirmation");
+      },
+      async runBash() {
+        throw new Error("Web search must not run Bash");
+      },
+      writeAssistant() {},
+      writeTool(text) {
+        toolActivity.push(text);
+      },
+    },
+    web: {
+      async search(query) {
+        assert.equal(query, "latest TypeScript release");
+        return {
+          query,
+          results: [
+            {
+              title: "TypeScript",
+              url: "https://www.typescriptlang.org/",
+              snippet: "Latest release",
+            },
+          ],
+        };
+      },
+      async fetch() {
+        throw new Error("web_fetch should not run");
+      },
+    },
+  });
+
+  await agent.runTurn("What is the latest TypeScript release?");
+
+  assert.deepEqual(toolActivity, ["搜索网页：latest TypeScript release"]);
+  const tools = requests[0]?.tools as Array<Record<string, unknown>>;
+  assert.deepEqual(tools.map((tool) => tool.name), [
+    "bash",
+    "web_search",
+    "web_fetch",
+  ]);
+  const history = requests[1]?.input as Array<Record<string, unknown>>;
+  const toolOutput = history.find((item) => item.type === "function_call_output");
+  assert.ok(toolOutput);
+  assert.match(String(toolOutput.output), /typescriptlang\.org/u);
+});
+
+test("agent returns web failures to the model as tool output", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const responses = [
+    {
+      id: "response-search",
+      output_text: "",
+      output: [
+        {
+          type: "function_call",
+          name: "web_search",
+          arguments: '{"query":"current news"}',
+          call_id: "call-search",
+        },
+      ],
+    },
+    { id: "response-final", output_text: "Search is unavailable.", output: [] },
+  ];
+  const agent = new ReactAgent({
+    client: {
+      responses: {
+        async create(params) {
+          requests.push(params);
+          const response = responses.shift();
+          assert.ok(response);
+          return response;
+        },
+      },
+    },
+    model: "deepseek-flash",
+    io: {
+      async confirmBash() {
+        return false;
+      },
+      async runBash() {
+        return bashResult("");
+      },
+      writeAssistant() {},
+    },
+    web: {
+      async search() {
+        throw new Error("network unavailable");
+      },
+      async fetch() {
+        throw new Error("not used");
+      },
+    },
+  });
+
+  await agent.runTurn("search the news");
+
+  const history = requests[1]?.input as Array<Record<string, unknown>>;
+  const toolOutput = history.find((item) => item.type === "function_call_output");
+  assert.ok(toolOutput);
+  assert.match(String(toolOutput.output), /network unavailable/u);
+});
+
 test("agent keeps the final response as context for the next turn", async () => {
   const requests: Array<Record<string, unknown>> = [];
   let responseNumber = 0;

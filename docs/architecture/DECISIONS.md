@@ -51,6 +51,15 @@
 - 带界面的命令执行后通过同步清屏进入独立窗口，只显示当前命令内容；Esc 再次同步清屏并重放完整 transcript，不启用 alternate screen。
 - 命令窗口 resize 时按新的行列数重新居中；Session 列表标签按窗口实际宽度截断，不按全屏宽度计算。
 
+## 联网工具
+
+- 联网能力使用 Responses API 普通 `function` 工具 `web_search` 和 `web_fetch`，不依赖供应商私有 built-in tool，因此 DeepSeek 和自定义 OpenAI-compatible 端点可复用同一 ReAct 循环。
+- `web_search` 先请求 Bing HTML 搜索，失败或无结果时回退 DuckDuckGo HTML 搜索；每次最多返回五条标题、URL 和摘要，不需要额外搜索 API Key。
+- `web_fetch` 只执行公共 HTTP/HTTPS GET，请求前解析 DNS，每次重定向重新校验，拒绝凭据 URL、localhost、本地域名、内网、链路本地和其他非公共 IP。
+- 搜索页和目标页都有限时及响应体上限；页面正文最多向模型返回 30,000 字符。网络、解析和页面错误序列化为 function output，让模型可以解释失败或换用其他来源。
+- 网页内容是提示注入边界之外的不可信数据；系统指令要求模型不得执行网页中的指令，并在最终回答中列出实际采用的来源 URL。
+- 搜索和页面读取无需 Bash 确认，简短工具动作写入可恢复 timeline；完整 function call/output 继续按既有规则写入 Responses context。
+
 ## 维护约束
 
 - 功能、行为、接口或验证结果发生变化时，同步更新 `docs/PLAN.md`、本文件及 `docs/HANDOFF.md` 中受影响的内容。

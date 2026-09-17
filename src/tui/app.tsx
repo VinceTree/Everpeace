@@ -381,6 +381,9 @@ export function EverpeaceApp({
       writeAssistant(text) {
         append("assistant", text);
       },
+      writeTool(text) {
+        append("tool", text);
+      },
     }),
     [append, executeBash, requestBashConfirmation],
   );

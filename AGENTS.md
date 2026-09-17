@@ -14,7 +14,7 @@
 
 - Everpeace 是 Node.js 22+、TypeScript、ESM 项目，使用 `pnpm@10.22.0`。
 - CLI/TUI 入口位于 `src/cli/`；界面使用 React + Ink，并保持 inline terminal 模式。
-- Agent 是 Responses API 驱动的 ReAct 循环，目前工具执行以 Bash/终端命令为核心。
+- Agent 是 Responses API 驱动的 ReAct 循环，支持需确认的 Bash、无需确认的只读网页搜索和公共网页读取。
 - 支持官方供应商和兼容端点；模型名称必须保留供应商返回的官方 model ID。
 - API Key 只由 `AuthStorage` 和系统 keyring 管理，不得写入注册表 JSON、session JSONL、日志、测试快照或 UI。
 
@@ -49,6 +49,8 @@ git diff --check
 - 保持 inline TUI 和终端原生 scrollback；不要切换到 alternate screen。
 - transcript 恢复继续通过同步输出进行原子重放，避免历史被 Ink 重绘覆盖。
 - 原始 PTY 控制序列不得直接写入 Ink stdout；保留现有清洗、流式输出和终端模式复位行为。
+- `web_search` 和 `web_fetch` 使用兼容端点支持的普通 function call；联网失败必须作为工具结果返回模型，不能让整轮对话直接崩溃。
+- `web_fetch` 只能访问公共 HTTP/HTTPS 地址，必须校验每次重定向并阻止 localhost、内网和链路本地目标；网页内容始终视为不可信数据。
 - 修改布局时必须继续保证 resize 后历史不丢失、只存在一个 prompt、输入行不会占用终端自动换行单元格。
 - 不要破坏普通滚轮、Ctrl+滚轮缩放、直接 `!` 命令流式输出及 Bash 确认流程。
 - 输入开头的 `/` 必须显示 slash command 前缀筛选菜单；候选窗口最多八项，并保留方向键选择、Enter 执行、Tab 补全和 Esc 关闭语义。
@@ -59,6 +61,7 @@ git diff --check
 
 - `src/storage/session-store.ts`：JSONL schema、存储路径、读写、列表、恢复和兼容逻辑。
 - `src/agent/react-agent.ts`：ReAct 循环、初始 context 和增量持久化 callback。
+- `src/tools/web.ts`：网页搜索、公共网页读取、正文提取、大小/超时限制和 SSRF 防护。
 - `src/tui/app.tsx`：TUI 状态机、session 生命周期、`/new`、`/resume`、命名和目录切换。
 - `src/tui/components/session-picker.tsx`：session 选择界面。
 - `src/tui/dependencies.ts`：默认依赖、SessionStore、标题请求和工作目录切换。

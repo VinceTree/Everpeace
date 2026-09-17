@@ -1,6 +1,6 @@
 # Session Handoff
 
-状态快照：2026-09-17。分支 `main`，slash command 独立窗口与居中布局已通过提交 `fd3331f` 完成；v0.1.21 已通过发布提交 `28a46aa` 正式发布。
+状态快照：2026-09-17。分支 `main`，网页搜索和公共页面读取能力已完成，版本与 README 展示版本已提升到 v0.1.22，等待本轮 Release workflow 发布确认；工作区另有用户原有的未跟踪 `benchmark/`，本轮未改动。
 
 ## 1. 当前目标
 
@@ -15,6 +15,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - 信息型 slash command 和选择型 picker/wizard 都使用独立命令窗口；这些界面只保留在当前 UI，不写入可恢复 session timeline。
 - 所有独立命令窗口水平、垂直居中，外框最大 80 列，并在窄终端自适应保留安全边距。
 - 保留既有 inline TUI、PTY 流式输出和 resize 稳定性行为。
+- 当前 `deepseek-flash` 及其他支持 function call 的兼容模型可主动搜索网页、读取公共页面，并基于来源回答需要最新信息的问题。
 
 ## 2. 已完成
 
@@ -31,6 +32,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - 中英文 README、CLI/TUI help、PLAN 和架构决定已同步。
 - `package.json` 与中英文 README 展示版本已提升至 v0.1.21。
 - Release workflow 运行 `35214892486` 成功；`v0.1.21` annotated tag 指向 `28a46aa`，GitHub Release 已发布且不是 draft/prerelease。
+- `package.json` 与中英文 README 展示版本已提升至 v0.1.22；发布提交推送后需确认新的 workflow、tag 和 GitHub Release。
 - 根级 `AGENTS.md` 已替换临时内容，集中记录新 Session 的启动顺序、架构不变量、关键代码入口和交付规则。
 - Slash command 菜单在输入区下方按前缀实时筛选；最多显示八项，支持滚动选择、Enter 执行、Tab 补全和 Esc 关闭。
 - 新增 `/status`：官方 Base URL 与 model 映射供应商和 context window；自定义或未知端点安全显示 `N/A`。
@@ -42,6 +44,12 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - 独立窗口通过同步清屏进入，`Esc 返回 Session` 时从内存原子重放完整 timeline；异步加载被取消后会忽略迟到结果，resize 期间也不会泄露历史。
 - 独立窗口统一使用共享 `CommandScreen` 布局；Session 列表按窗口实际宽度截断，resize 后重新居中，窗口内部字段保持左对齐。
 - `/new`、`/clear` 和 `/exit` 继续保持立即动作语义。
+- 新增供应商无关的 `web_search` 和 `web_fetch` function 工具；DeepSeek Responses API 无需支持私有 built-in web search。
+- 搜索通过 Bing 获取最多五条结果并以 DuckDuckGo 作为回退；真实网络冒烟已成功搜索 TypeScript 文档。
+- 网页读取提取 HTML 正文或文本/JSON/XML，限制超时、响应体和模型输入长度；真实网络冒烟已成功读取 TypeScript 官方文档。
+- 页面读取只允许公共 HTTP/HTTPS，校验每次重定向并阻止本机、内网、链路本地及含凭据的 URL。
+- 联网错误作为结构化 function output 返回模型；外部取消信号仍会立即中止整轮请求。
+- TUI 会把“搜索网页/读取网页”动作写入可恢复 timeline，完整搜索结果只进入模型 context，避免 transcript 被大段网页内容淹没。
 
 ## 3. 关键设计决定
 
@@ -55,6 +63,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - `/new` 立即建档；默认首问建档；`/clear` 只解除当前 session。
 - `title_pending` 缺失时默认 false，以兼容本轮功能早期生成的 JSONL。
 - 标题请求使用当前官方 model ID、无工具且 `store: false`；退出 TUI 时取消未完成的标题请求。
+- 联网工具使用普通 function call 以兼容 DeepSeek 和自定义端点；网页内容一律视为不可信数据，模型必须引用实际采用的来源 URL。
 - Session 恢复仍通过 `onReplayOutput` 原子重放，保持 inline 模式和原生 scrollback。
 - 跨目录恢复通过 `process.chdir` 切换；失败时回滚并保留当前会话。
 - Slash command 候选复用 `SLASH_COMMANDS` 作为唯一命令源；筛选逻辑保持纯函数，菜单不引入额外 `useInput` 监听器。
@@ -69,17 +78,20 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - `src/tui/components/status-card.tsx`：共享状态字段、旧 timeline 状态卡兼容、临时面板详情和窄终端截断。
 - `src/tui/components/session-picker.tsx`：名称和时间选择列表。
 - `src/tui/dependencies.ts`：默认 SessionStore、标题模型请求及目录切换。
+- `src/tools/web.ts`：Bing/DuckDuckGo 搜索、网页读取、正文提取、大小/超时限制和 SSRF 防护。
+- `tests/unit/tools/web.test.ts`：搜索解析、正文提取、重定向验证和私网阻断回归。
 - `src/tui/commands.ts`、`src/tui/components/prompt.tsx`：slash command 筛选、菜单渲染和键盘交互。
 - `tests/unit/status/model-status.test.ts`、`tests/unit/tui/status-card.test.tsx`：映射、累计和卡片布局回归。
 - `tests/unit/storage/session-store.test.ts`、`tests/unit/agent/react-agent.test.ts`、`tests/unit/tui/app.test.tsx`：存储、usage 回调和完整 TUI 流程回归。
 
 ## 5. 验证结果
 
-- `pnpm test`：89/89 通过。
+- `pnpm test`：98/98 通过。
 - `pnpm typecheck`：通过。
 - `pnpm build`：通过。
 - `git diff --check`：通过，仅有 Windows LF/CRLF 提示。
 - 尚未在带真实模型凭据的 Windows Terminal 中手工完成 slash command 独立窗口、`/status`、`/new` 与 `/resume` 全流程验收。
+- 尚未在真实 TUI 中让 `deepseek-flash` 自主完成一次 `web_search` → `web_fetch` → 带来源回答的端到端验收；工具执行器的真实网络冒烟已通过。
 
 ## 6. 下一步
 
@@ -91,7 +103,8 @@ Everpeace 需要提供完整的本地 Session 工作流：
 6. 验证跨工作目录恢复、原模型缺失时选择替代模型，以及 `/clear` 仍在下一次提问时才建档。
 7. 同时复验 Ctrl+滚轮缩放、普通滚轮、`! Get-ChildItem` 流式输出、单一 prompt 和窄终端 resize。
 8. 在真实终端输入 `/`，复验八项候选窗口滚动、逐字筛选、Enter 执行和 Tab 补全；再打开 `/help`、`/models`、`/status` 及各 picker，确认所有独立窗口居中、完全隐藏历史并可用 Esc 返回。
-9. 后续功能改动继续同步更新版本计划、测试状态和相关 docs。
+9. 在真实 TUI 中询问一个明确依赖最新信息的问题，确认 `deepseek-flash` 会显示搜索/读取动作、引用来源，并能从单个来源失败中恢复。
+10. 后续功能改动继续同步更新版本计划、测试状态和相关 docs。
 
 ## 7. 继续遵守的约束
 

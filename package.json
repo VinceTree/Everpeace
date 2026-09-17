@@ -1,7 +1,7 @@
 {
   "name": "everpeace",
-  "version": "0.1.21",
-  "description": "A minimal ReAct coding agent with a Bash tool.",
+  "version": "0.1.22",
+  "description": "A terminal ReAct agent with persistent sessions, Bash, and web access.",
   "type": "module",
   "bin": {
     "everpeace": "dist/cli/index.js"
