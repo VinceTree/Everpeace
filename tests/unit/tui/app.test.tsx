@@ -32,6 +32,7 @@ import {
   SLASH_COMMANDS,
   type SlashCommand,
 } from "../../../src/tui/commands.js";
+import { textWidth } from "../../../src/tui/text-width.js";
 import type {
   AgentRestoreOptions,
   AgentSession,
@@ -55,6 +56,16 @@ function visibleSlashCommandLines(frame: string): SlashCommand[] {
     .split("\n")
     .map((line) => line.trim().replace(/^›\s+/u, ""))
     .filter((line): line is SlashCommand => commands.has(line));
+}
+
+function lastBorderedSurface(frame: string): string {
+  const lines = frame.split("\n");
+  const bottom = lines.findLastIndex((line) => line.trimStart().startsWith("╰"));
+  assert.ok(bottom >= 0, "expected a bordered command surface");
+  let top = bottom;
+  while (top >= 0 && !lines[top]!.trimStart().startsWith("╭")) top -= 1;
+  assert.ok(top >= 0, "expected the command surface top border");
+  return lines.slice(top, bottom + 1).join("\n");
 }
 
 function stored(model: RegisteredModel): StoredModelRegistration {
@@ -284,11 +295,15 @@ test("/status renders provider, context, and zero usage without creating a sessi
     api_key: "secret",
   };
   const fixture = createFixture({ initial: [model] });
+  let replayCalls = 0;
   const view = render(
     <EverpeaceApp
       dependencies={fixture.dependencies}
       initialModels={{ available: [model], missing: [] }}
-      onReplayOutput={(update) => update()}
+      onReplayOutput={(update) => {
+        replayCalls += 1;
+        update();
+      }}
     />,
   );
 
@@ -298,7 +313,11 @@ test("/status renders provider, context, and zero usage without creating a sessi
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("Context window:"));
 
-  const frame = view.lastFrame() ?? "";
+  const frame = lastBorderedSurface(view.lastFrame() ?? "");
+  assert.match(frame, /\/status · Session 状态/);
+  assert.match(frame, /Esc 返回 Session/);
+  assert.doesNotMatch(frame, /Ask Everpeace to do anything/);
+  assert.doesNotMatch(frame, /Everpeace Agent/);
   assert.match(frame, /Model:\s+deepseek-flash/);
   assert.match(frame, /Provider:\s+DeepSeek/);
   assert.match(frame, /Base URL:\s+https:\/\/api\.deepseek\.com/);
@@ -307,11 +326,22 @@ test("/status renders provider, context, and zero usage without creating a sessi
   assert.match(frame, /Input tokens:\s+0/);
   assert.match(frame, /Output tokens:\s+0/);
   assert.doesNotMatch(frame, /secret/);
+  const topBorder = frame.split("\n")[0] ?? "";
+  assert.equal(textWidth(topBorder.trimStart()), 80);
+  assert.equal(textWidth(topBorder) - textWidth(topBorder.trimStart()), 10);
+  assert.equal(replayCalls, 1);
   assert.equal(fixture.sessionStore.sessions.size, 0);
+
+  await tick();
+  view.stdin.write("\u001B");
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything"));
+  assert.doesNotMatch(view.lastFrame() ?? "", /\/status · Session 状态/);
+  assert.equal(replayCalls, 2);
   view.unmount();
 });
 
-test("/status persists cumulative main-agent usage and restores its snapshot", async () => {
+test("/status keeps cumulative usage persistent while its command screen stays transient", async () => {
   const model: RegisteredModel = {
     id: "model-1",
     model_name: "deepseek-flash",
@@ -362,7 +392,7 @@ test("/status persists cumulative main-agent usage and restores its snapshot", a
     context_tokens: 1_500,
     complete: true,
   });
-  assert.equal(session.timeline.at(-1)?.kind, "status");
+  assert.deepEqual(session.timeline.map((entry) => entry.kind), ["user", "assistant"]);
   firstView.unmount();
 
   const resumedView = render(
@@ -379,9 +409,180 @@ test("/status persists cumulative main-agent usage and restores its snapshot", a
   await waitFor(() => (resumedView.lastFrame() ?? "").includes(session.summary.title));
   await tick();
   resumedView.stdin.write("\r");
+  await waitFor(() => (resumedView.lastFrame() ?? "").includes("done"));
+  assert.doesNotMatch(resumedView.lastFrame() ?? "", /Input tokens:/);
+
+  resumedView.stdin.write("/status");
+  await tick();
+  resumedView.stdin.write("\r");
   await waitFor(() => (resumedView.lastFrame() ?? "").includes("Input tokens:"));
   assert.match(resumedView.lastFrame() ?? "", /Input tokens:\s+1,200/);
   resumedView.unmount();
+});
+
+test("/resume still renders status snapshots saved by earlier versions", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  const summary = await fixture.sessionStore.create({
+    title: "legacy status",
+    titlePending: false,
+    workspacePath: "C:\\workspace",
+    model: toSessionModelForTest(model),
+  });
+  await fixture.sessionStore.appendTimeline(summary.id, {
+    kind: "status",
+    snapshot: {
+      version: "0.1.20",
+      model_name: model.model_name,
+      provider: "DeepSeek",
+      base_url: model.base_url,
+      workspace_path: "C:\\workspace",
+      session_id: summary.id,
+      context_window: 1_000_000,
+      context_tokens: 30,
+      input_tokens: 20,
+      output_tokens: 10,
+      usage_complete: true,
+    },
+  });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("/resume");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes(summary.title));
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Input tokens:"));
+  assert.match(view.lastFrame() ?? "", /Input tokens:\s+20/);
+  view.unmount();
+});
+
+test("slash command surfaces close back to chat while direct commands remain persistent", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  let replayCalls = 0;
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => {
+        replayCalls += 1;
+        update();
+      }}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("persist this chat");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("echo: persist this chat"));
+  const session = [...fixture.sessionStore.sessions.values()][0];
+  assert.ok(session);
+  const persistedKinds = ["user", "assistant"];
+  assert.deepEqual(session.timeline.map((entry) => entry.kind), persistedKinds);
+
+  for (const [command, output] of [
+    ["/help", "斜杠命令"],
+    ["/models", "[ready]"],
+    ["/status", "Input tokens:"],
+    ["/wat", "未知命令：/wat"],
+  ] as const) {
+    view.stdin.write(command);
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes(output));
+    const commandFrame = lastBorderedSurface(view.lastFrame() ?? "");
+    assert.match(commandFrame, /Esc 返回 Session/);
+    assert.doesNotMatch(commandFrame, /persist this chat/);
+    assert.doesNotMatch(commandFrame, /echo: persist this chat/);
+    assert.doesNotMatch(commandFrame, /Ask Everpeace to do anything/);
+    assert.doesNotMatch(commandFrame, /Everpeace Agent/);
+    assert.deepEqual(session.timeline.map((entry) => entry.kind), persistedKinds);
+    await tick();
+    view.stdin.write("\u001B");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything"));
+    assert.equal((view.lastFrame() ?? "").includes(output), false);
+    assert.match(view.lastFrame() ?? "", /persist this chat/);
+    assert.match(view.lastFrame() ?? "", /echo: persist this chat/);
+  }
+  assert.equal(replayCalls, 8);
+
+  view.stdin.write("!echo kept");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Command completed successfully"));
+  assert.deepEqual(session.timeline.map((entry) => entry.kind), [
+    "user",
+    "assistant",
+    "tool",
+    "system",
+  ]);
+  view.unmount();
+});
+
+test("Esc cancels an in-flight slash command load without reopening its window", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  let resolveStatuses: ((models: RegisteredModelStatus[]) => void) | undefined;
+  fixture.dependencies.registry.listStatuses = async () =>
+    new Promise((resolve) => {
+      resolveStatuses = resolve;
+    });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("/models");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("正在读取模型注册表"));
+  const loadingFrame = lastBorderedSurface(view.lastFrame() ?? "");
+  assert.doesNotMatch(loadingFrame, /Everpeace Agent/);
+  assert.match(loadingFrame, /Esc 返回 Session/);
+
+  await tick();
+  view.stdin.write("\u001B");
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything"));
+  resolveStatuses?.([status(model)]);
+  await tick();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  const restoredFrame = view.lastFrame() ?? "";
+  assert.match(restoredFrame, /Everpeace Agent/);
+  assert.match(restoredFrame, /Ask Everpeace to do anything/);
+  assert.doesNotMatch(restoredFrame, /\[ready\]/);
+  view.unmount();
 });
 
 test("prompt remains one non-wrapping input row when its input exceeds terminal width", async () => {
@@ -478,6 +679,35 @@ test("repeated terminal resizes preserve history and keep one non-wrapping promp
     recoveredFrame.match(/Ask Everpeace to do anything/g)?.length,
     1,
   );
+
+  view.stdin.write("/status");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("/status · Session 状态"));
+  Object.defineProperty(view.stdout, "columns", {
+    configurable: true,
+    value: 64,
+  });
+  view.stdout.emit("resize");
+  await new Promise((resolve) =>
+    setTimeout(resolve, RESIZE_REDRAW_DEBOUNCE_MS + 30),
+  );
+  const commandFrame = lastBorderedSurface(view.lastFrame() ?? "");
+  assert.match(commandFrame, /\/status · Session 状态/);
+  assert.doesNotMatch(commandFrame, /history-before-resize/);
+  assert.doesNotMatch(commandFrame, /Everpeace Agent/);
+  const narrowTopBorder = commandFrame.split("\n")[0] ?? "";
+  assert.equal(textWidth(narrowTopBorder.trimStart()), 62);
+  assert.equal(
+    textWidth(narrowTopBorder) - textWidth(narrowTopBorder.trimStart()),
+    1,
+  );
+
+  await tick();
+  view.stdin.write("\u001B");
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await waitFor(() => (view.lastFrame() ?? "").includes("history-before-resize"));
+  assert.match(view.lastFrame() ?? "", /echo: history-before-resize/);
 
   view.unmount();
 });
@@ -614,6 +844,8 @@ test("Tab completes a slash command without executing it", async () => {
 
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("切换当前模型"));
+  assert.match(view.lastFrame() ?? "", /Esc 返回 Session/);
+  assert.doesNotMatch(lastBorderedSurface(view.lastFrame() ?? ""), /Everpeace Agent/);
   view.unmount();
 });
 
@@ -639,7 +871,7 @@ test("Escape dismisses slash suggestions until editing resumes and Enter execute
   assert.deepEqual(visibleSlashCommandLines(view.lastFrame() ?? ""), ["/resume"]);
 
   view.stdin.write("\u001B");
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await new Promise((resolve) => setTimeout(resolve, 100));
   assert.deepEqual(visibleSlashCommandLines(view.lastFrame() ?? ""), []);
   assert.match(view.lastFrame() ?? "", /›\s+\/res/);
 
@@ -648,6 +880,12 @@ test("Escape dismisses slash suggestions until editing resumes and Enter execute
   assert.deepEqual(visibleSlashCommandLines(view.lastFrame() ?? ""), ["/resume"]);
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("没有可恢复的 Session"));
+  assert.match(view.lastFrame() ?? "", /Esc 返回 Session/);
+  assert.doesNotMatch(lastBorderedSurface(view.lastFrame() ?? ""), /Everpeace Agent/);
+  await tick();
+  view.stdin.write("\u001B");
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything"));
   view.unmount();
 });
 
@@ -672,6 +910,8 @@ test("/login masks the API Key, registers one model, and activates it", async ()
   await tick();
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("模型登录"));
+  assert.match(view.lastFrame() ?? "", /Esc 返回 Session/);
+  assert.doesNotMatch(lastBorderedSurface(view.lastFrame() ?? ""), /Everpeace Agent/);
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("API Key"));
   await tick();
@@ -841,6 +1081,8 @@ test("/logout removes the active model and returns to logged-out chat", async ()
   await tick();
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("注销模型"));
+  assert.match(view.lastFrame() ?? "", /Esc 返回 Session/);
+  assert.doesNotMatch(lastBorderedSurface(view.lastFrame() ?? ""), /Everpeace Agent/);
   await tick();
   view.stdin.write(" ");
   await tick();
@@ -919,6 +1161,11 @@ test("the first chat creates one session and generates its title without blockin
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("斜杠命令"));
   assert.equal(fixture.sessionStore.sessions.size, 0);
+  assert.match(view.lastFrame() ?? "", /Esc 返回 Session/);
+  await tick();
+  view.stdin.write("\u001B");
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything"));
 
   view.stdin.write("first persisted question");
   await tick();
@@ -968,12 +1215,7 @@ test("/new immediately creates and enters a session that is named by its first q
   assert.ok(session);
   assert.equal(session.summary.title, "新 Session");
   assert.equal(session.summary.title_pending, true);
-  assert.deepEqual(session.timeline, [
-    {
-      kind: "system",
-      text: "已创建新 Session；发送第一条消息后会自动生成名称。",
-    },
-  ]);
+  assert.deepEqual(session.timeline, []);
 
   view.stdin.write("name this conversation");
   await tick();
@@ -1070,10 +1312,6 @@ test("a pending session resumed before its first question is named without dupli
     workspacePath: "C:\\workspace",
     model: toSessionModelForTest(model),
   });
-  await fixture.sessionStore.appendTimeline(summary.id, {
-    kind: "system",
-    text: "已创建新 Session；发送第一条消息后会自动生成名称。",
-  });
   let titleQuestion: string | undefined;
   fixture.dependencies.generateSessionTitle = async (_model, firstQuestion) => {
     titleQuestion = firstQuestion;
@@ -1094,7 +1332,7 @@ test("a pending session resumed before its first question is named without dupli
   await waitFor(() => (view.lastFrame() ?? "").includes("新 Session"));
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("已创建新 Session"));
+  await waitFor(() => !(view.lastFrame() ?? "").includes("恢复 Session"));
   view.stdin.write("first after resume");
   await tick();
   view.stdin.write("\r");
@@ -1284,9 +1522,16 @@ test("/resume keeps the current conversation when the stored workspace is missin
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("workspace not found"));
 
-  const frame = view.lastFrame() ?? "";
-  assert.match(frame, /C:\\workspace/);
+  const frame = lastBorderedSurface(view.lastFrame() ?? "");
+  assert.doesNotMatch(frame, /C:\\workspace/);
   assert.doesNotMatch(frame, /must not replace current view/);
+
+  await tick();
+  view.stdin.write("\u001B");
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything"));
+  assert.match(view.lastFrame() ?? "", /C:\\workspace/);
+  assert.doesNotMatch(view.lastFrame() ?? "", /must not replace current view/);
   view.unmount();
 });
 

@@ -87,9 +87,9 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 
 TUI 使用原生 inline 模式，普通滚轮可以浏览已完成的 Everpeace 会话；Ctrl + 滚轮改变字号后，会采用 Codex 的 75ms 尾随延迟进行同步、基于源状态的重绘，完整恢复启动信息与会话，并且不会暴露清屏后的中间空帧。
 
-第一次普通提问会创建本地 JSONL session。Everpeace 会保存完整可见记录和继续聊天所需的模型上下文，同时在后台单独调用当前模型，根据第一次提问生成简短名称。`/new` 会立即创建并进入一个空 session，第一次提问后再替换临时名称。`/resume` 会按名称和最后活动时间列出本机全部 session，恢复原模型、原工作目录及上下文，并继续追加到同一个文件。Windows 下 session 默认保存在 `%APPDATA%\Everpeace\sessions`。
+第一次普通提问会创建本地 JSONL session。Everpeace 会保存对话记录和继续聊天所需的模型上下文，同时在后台单独调用当前模型，根据第一次提问生成简短名称。带信息或选择界面的 slash command 会打开独立临时窗口，隐藏 banner、历史、输入框和全局状态栏。命令窗口水平、垂直居中，最大宽度 80 列，并在窄终端自动缩小、保留安全边距。按 `Esc` 后原子重放并返回同一个 session，窗口内容不会加入历史。直接 `!` 命令的输出仍属于可恢复记录。`/new` 会立即创建并进入一个空 session，第一次提问后再替换临时名称。`/resume` 会按名称和最后活动时间列出本机全部 session，恢复原模型、原工作目录及上下文，并继续追加到同一个文件。Windows 下 session 默认保存在 `%APPDATA%\Everpeace\sessions`。
 
-`/status` 会在 inline transcript 中加入 Codex 风格的状态方格，显示当前模型、根据 `base_url` 识别的供应商、接口地址、工作目录、Session ID、当前 context 占用，以及主 Responses API 循环累计的输入/输出 token。Usage 和状态快照会随 session 持久化并由 `/resume` 恢复；后台标题请求不计入统计。已知官方 model ID 使用文档公布的 context 上限，未知型号和自定义兼容端点显示 `N/A`，不会猜测。
+`/status` 会打开居中的独立 Codex 风格命令窗口，只显示状态详情和 `Esc` 返回提示。它显示当前模型、根据 `base_url` 识别的供应商、接口地址、工作目录、Session ID、当前 context 占用，以及主 Responses API 循环累计的输入/输出 token。Usage 总量会随 session 持久化并由 `/resume` 恢复，但状态窗口本身不会加入 transcript；恢复后再次执行 `/status` 即可查看累计值。后台标题请求不计入统计。已知官方 model ID 使用文档公布的 context 上限，未知型号和自定义兼容端点显示 `N/A`，不会猜测。
 
 输入快捷键与 Codex composer 保持一致：`Enter` 提交，`Shift+Enter`、`Alt+Enter` 或 `Ctrl+J` 换行，`Home`/`End` 与 `Ctrl+A`/`Ctrl+E` 移动到当前行首/行尾，`Ctrl+U`/`Ctrl+K` 删除到当前行首/行尾，`Ctrl+W` 删除前一个词，`Ctrl+Y` 恢复最近删除的内容。方向键、`Ctrl+B/F/P/N` 和 `Alt+B/F` 也可移动光标。
 

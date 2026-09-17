@@ -194,7 +194,7 @@ export function LoginWizard({
       {step === "saving" ? <Spinner label="正在安全保存凭据并启用模型" /> : null}
 
       {step !== "saving" ? (
-        <Text dimColor>Enter 确认 · Esc 取消</Text>
+        <Text dimColor>Enter 确认 · Esc 返回 Session</Text>
       ) : null}
     </Box>
   );

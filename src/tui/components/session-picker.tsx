@@ -3,9 +3,11 @@ import { Box, Text, useInput, useWindowSize } from "ink";
 import React from "react";
 import type { SessionSummary } from "../../storage/session-store.js";
 import { truncateEnd } from "../text-width.js";
+import { commandScreenWidth } from "./command-surface.js";
 
 export interface SessionPickerProps {
   sessions: SessionSummary[];
+  notice?: string;
   onSelect(session: SessionSummary): void;
   onCancel(): void;
 }
@@ -15,8 +17,14 @@ function sessionLabel(session: SessionSummary, maximumWidth: number): string {
   return truncateEnd(`${session.title} — ${timestamp}`, maximumWidth);
 }
 
-export function SessionPicker({ sessions, onSelect, onCancel }: SessionPickerProps) {
+export function SessionPicker({
+  sessions,
+  notice,
+  onSelect,
+  onCancel,
+}: SessionPickerProps) {
   const { columns } = useWindowSize();
+  const labelWidth = Math.max(1, commandScreenWidth(columns) - 6);
   useInput((input, key) => {
     if (key.escape || (key.ctrl && input === "c")) onCancel();
   });
@@ -24,9 +32,10 @@ export function SessionPicker({ sessions, onSelect, onCancel }: SessionPickerPro
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="#D4AF37" paddingX={1}>
       <Text bold color="#D4AF37">恢复 Session</Text>
+      {notice ? <Text color="yellow">{notice}</Text> : null}
       <Select
         options={sessions.map((session) => ({
-          label: sessionLabel(session, Math.max(12, columns - 8)),
+          label: sessionLabel(session, labelWidth),
           value: session.id,
         }))}
         visibleOptionCount={Math.min(8, sessions.length)}
@@ -35,7 +44,7 @@ export function SessionPicker({ sessions, onSelect, onCancel }: SessionPickerPro
           if (session) onSelect(session);
         }}
       />
-      <Text dimColor>↑↓ 选择 · Enter 恢复 · Esc 取消</Text>
+      <Text dimColor>↑↓ 选择 · Enter 恢复 · Esc 返回 Session</Text>
     </Box>
   );
 }

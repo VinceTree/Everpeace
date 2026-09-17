@@ -1,6 +1,6 @@
 # Session Handoff
 
-状态快照：2026-09-16。分支 `main`，Session 持久化、`/resume` 和 `/new` 已通过提交 `3600b64` 推送至 `origin/main`；v0.1.20 已通过发布提交 `bab62c4` 正式发布。
+状态快照：2026-09-17。分支 `main`，Session 持久化、`/resume` 和 `/new` 已通过提交 `3600b64` 推送至 `origin/main`；v0.1.20 已通过发布提交 `bab62c4` 正式发布。
 
 ## 1. 当前目标
 
@@ -11,7 +11,9 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - 首问由当前模型后台概括 session 名称。
 - `/resume` 恢复完整历史、模型 context、模型和工作目录，并继续聊天。
 - 输入开头的 `/` 显示可筛选、可键盘操作的 slash command 菜单。
-- `/status` 使用 Codex 风格卡片展示当前版本、模型、供应商、Base URL、目录、session 和 token/context 用量。
+- `/status` 使用 Codex 风格独立命令窗口展示当前版本、模型、供应商、Base URL、目录、session 和 token/context 用量，窗口隐藏原会话内容，Esc 原子恢复原 Session。
+- 信息型 slash command 和选择型 picker/wizard 都使用独立命令窗口；这些界面只保留在当前 UI，不写入可恢复 session timeline。
+- 所有独立命令窗口水平、垂直居中，外框最大 80 列，并在窄终端自适应保留安全边距。
 - 保留既有 inline TUI、PTY 流式输出和 resize 稳定性行为。
 
 ## 2. 已完成
@@ -34,14 +36,21 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - 新增 `/status`：官方 Base URL 与 model 映射供应商和 context window；自定义或未知端点安全显示 `N/A`。
 - 主 Agent 每次 Responses API 请求的 usage 都会累加并写入 session；工具循环中的中间响应也计入，后台标题请求不计入。
 - 切换模型保留 session 累计输入/输出 token，并重置当前 context；旧 session 或兼容端点缺少 usage 时显示为不完整统计。
-- `/status` 卡片作为结构化 timeline 条目写入 JSONL，退出并 `/resume` 后仍可原样恢复。
+- `/status` 卡片和其他 slash command 反馈不再写入 JSONL；usage 总量、模型选择等真实状态仍按原语义持久化。
+- `/new` 的创建提示只在当前 UI 显示，新 session 的 timeline 在首问前保持为空。
+- `/status`、`/models`、`/help`、无数据和命令错误，以及 `/model`、`/login`、`/logout`、`/resume` 等选择界面统一进入独立命令窗口；窗口隐藏 banner、历史、Prompt 和全局状态栏。
+- 独立窗口通过同步清屏进入，`Esc 返回 Session` 时从内存原子重放完整 timeline；异步加载被取消后会忽略迟到结果，resize 期间也不会泄露历史。
+- 独立窗口统一使用共享 `CommandScreen` 布局；Session 列表按窗口实际宽度截断，resize 后重新居中，窗口内部字段保持左对齐。
+- `/new`、`/clear` 和 `/exit` 继续保持立即动作语义。
 
 ## 3. 关键设计决定
 
 - JSONL 事件包含 `session_created`、`title_updated`、`timeline_entry`、`context_append`、`model_selected` 和 `usage_recorded`。
 - timeline 与模型 context 分开保存；直接 `!` 命令可恢复显示，但不进入模型 context。
 - usage 在 session 范围内累计；模型切换保留累计输入/输出并重置 context，缺失 usage 的响应会把统计标记为 partial。
-- `/status` 只读取当前状态，不会单独创建 session；有活动 session 时，其快照会进入可恢复 timeline。
+- `/status` 只读取当前状态，不会单独创建 session；其 transient `View` 不进入 `Static` timeline，恢复后重新执行可查看持久化的 usage。
+- 信息型 slash command 使用 transient `View`，选择型命令使用 picker/wizard；两者都与聊天根视图互斥且不写入 JSONL。旧 JSONL 中已有的状态卡继续兼容恢复。
+- 独立窗口保持 inline terminal，不启用 alternate screen；进入与返回复用同步输出和 source-backed replay，返回后定位在会话底部。
 - 供应商和 context window 仅按已知的官方 Base URL 与 model ID 映射；自定义兼容端点不猜测上限。
 - `/new` 立即建档；默认首问建档；`/clear` 只解除当前 session。
 - `title_pending` 缺失时默认 false，以兼容本轮功能早期生成的 JSONL。
@@ -56,7 +65,8 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - `src/agent/react-agent.ts`：初始 context 和增量持久化 callback。
 - `src/status/model-status.ts`：Base URL/provider/context 映射、usage 累加与 status snapshot 类型。
 - `src/tui/app.tsx`：session 生命周期、`/new`、`/resume`、命名和工作目录切换。
-- `src/tui/components/status-card.tsx`：Codex 风格 `/status` 方框、窄终端截断和 token 格式化。
+- `src/tui/components/command-surface.tsx`：独立命令窗口、80 列自适应居中布局、可取消加载状态、Esc 返回和 `/status` 容器。
+- `src/tui/components/status-card.tsx`：共享状态字段、旧 timeline 状态卡兼容、临时面板详情和窄终端截断。
 - `src/tui/components/session-picker.tsx`：名称和时间选择列表。
 - `src/tui/dependencies.ts`：默认 SessionStore、标题模型请求及目录切换。
 - `src/tui/commands.ts`、`src/tui/components/prompt.tsx`：slash command 筛选、菜单渲染和键盘交互。
@@ -65,22 +75,22 @@ Everpeace 需要提供完整的本地 Session 工作流：
 
 ## 5. 验证结果
 
-- `pnpm test`：84/84 通过。
+- `pnpm test`：89/89 通过。
 - `pnpm typecheck`：通过。
 - `pnpm build`：通过。
 - `git diff --check`：通过，仅有 Windows LF/CRLF 提示。
-- 尚未在带真实模型凭据的 Windows Terminal 中手工完成 `/status`、`/new` 与 `/resume` 全流程验收。
+- 尚未在带真实模型凭据的 Windows Terminal 中手工完成 slash command 独立窗口、`/status`、`/new` 与 `/resume` 全流程验收。
 
 ## 6. 下一步
 
 1. 在真实 Windows Terminal 中运行 `pnpm dev`。
-2. 完成一次真实模型问答后执行 `/status`，核对 Model、Provider、Base URL、Context window、Input tokens 和 Output tokens。
+2. 完成一次真实模型问答后执行 `/status`，确认窗口水平、垂直居中且不显示 banner、历史、Prompt 或全局状态栏，核对各状态字段，并确认 Esc 完整恢复同一个 Session。
 3. 触发一次工具调用，确认工具循环的多次响应累计；切换模型后确认总输入/输出保留而 context 重置。
 4. 使用自定义兼容端点或缺少 usage 的响应，确认未知 provider/context 显示 `N/A` 且 TUI 不崩溃。
-5. 退出并 `/resume`，确认历史 status 卡片和累计 usage 恢复；同时复验 `/new`、标题生成和旧 context 延续。
+5. 退出并 `/resume`，确认本轮 slash command 面板内容不会恢复；再次执行 `/status`，确认累计 usage 已恢复，同时复验旧版本保存的 status 卡片仍可读取。
 6. 验证跨工作目录恢复、原模型缺失时选择替代模型，以及 `/clear` 仍在下一次提问时才建档。
 7. 同时复验 Ctrl+滚轮缩放、普通滚轮、`! Get-ChildItem` 流式输出、单一 prompt 和窄终端 resize。
-8. 在真实终端输入 `/`，复验八项窗口滚动、逐字筛选、Enter 执行、Tab 补全和 Esc 关闭。
+8. 在真实终端输入 `/`，复验八项候选窗口滚动、逐字筛选、Enter 执行和 Tab 补全；再打开 `/help`、`/models`、`/status` 及各 picker，确认所有独立窗口居中、完全隐藏历史并可用 Esc 返回。
 9. 后续功能改动继续同步更新版本计划、测试状态和相关 docs。
 
 ## 7. 继续遵守的约束

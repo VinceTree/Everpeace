@@ -31,7 +31,7 @@ export function ModelPicker({ title, models, onSelect, onCancel }: ModelPickerPr
           if (model) onSelect(model);
         }}
       />
-      <Text dimColor>↑↓ 选择 · Enter 确认 · Esc 取消</Text>
+      <Text dimColor>↑↓ 选择 · Enter 确认 · Esc 返回 Session</Text>
     </Box>
   );
 }

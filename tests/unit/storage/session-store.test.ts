@@ -122,7 +122,7 @@ test("session files written before title_pending default to a completed title", 
   }
 });
 
-test("session store persists usage totals, context resets, and status snapshots", async () => {
+test("session store loads usage totals, context resets, and legacy status snapshots", async () => {
   const fixture = await createFixture();
   try {
     const created = await fixture.store.create({

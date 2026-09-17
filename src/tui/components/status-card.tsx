@@ -53,6 +53,44 @@ function contextStatus(snapshot: StatusSnapshot): string {
   return `${remaining}% left (${compactTokens(snapshot.context_tokens)} used / ${compactTokens(snapshot.context_window)})`;
 }
 
+interface StatusField {
+  label: string;
+  value: string;
+  truncateFromMiddle?: boolean;
+}
+
+function statusFields(snapshot: StatusSnapshot): StatusField[] {
+  return [
+    { label: "Version", value: `v${snapshot.version}` },
+    { label: "Model", value: snapshot.model_name ?? "not selected" },
+    { label: "Provider", value: snapshot.provider },
+    {
+      label: "Base URL",
+      value: snapshot.base_url ?? "N/A",
+      truncateFromMiddle: true,
+    },
+    {
+      label: "Directory",
+      value: snapshot.workspace_path,
+      truncateFromMiddle: true,
+    },
+    {
+      label: "Session",
+      value: snapshot.session_id ?? "not started",
+      truncateFromMiddle: true,
+    },
+    { label: "Context window", value: contextStatus(snapshot) },
+    {
+      label: "Input tokens",
+      value: totalTokens(snapshot.input_tokens, snapshot.usage_complete),
+    },
+    {
+      label: "Output tokens",
+      value: totalTokens(snapshot.output_tokens, snapshot.usage_complete),
+    },
+  ];
+}
+
 function fitRow(
   label: string,
   value: string,
@@ -78,25 +116,14 @@ export function createStatusCard(
     availableWidth - 4,
     STATUS_CARD_MAX_INNER_WIDTH,
   );
-  const content = [
-    fitRow("Version", `v${snapshot.version}`, innerWidth),
-    fitRow("Model", snapshot.model_name ?? "not selected", innerWidth),
-    fitRow("Provider", snapshot.provider, innerWidth),
-    fitRow("Base URL", snapshot.base_url ?? "N/A", innerWidth, true),
-    fitRow("Directory", snapshot.workspace_path, innerWidth, true),
-    fitRow("Session", snapshot.session_id ?? "not started", innerWidth, true),
-    fitRow("Context window", contextStatus(snapshot), innerWidth),
+  const content = statusFields(snapshot).map((field) =>
     fitRow(
-      "Input tokens",
-      totalTokens(snapshot.input_tokens, snapshot.usage_complete),
+      field.label,
+      field.value,
       innerWidth,
+      field.truncateFromMiddle,
     ),
-    fitRow(
-      "Output tokens",
-      totalTokens(snapshot.output_tokens, snapshot.usage_complete),
-      innerWidth,
-    ),
-  ];
+  );
   const horizontal = "─".repeat(innerWidth + 2);
   return {
     lines: [
@@ -106,6 +133,35 @@ export function createStatusCard(
     ],
     width: innerWidth + 4,
   };
+}
+
+export function StatusDetails({ snapshot }: { snapshot: StatusSnapshot }) {
+  const { columns } = useWindowSize();
+  const contentWidth = Math.max(1, columns - 5);
+  const labelWidth = Math.min(LABEL_WIDTH, Math.max(1, Math.floor(contentWidth / 2)));
+
+  return (
+    <Box width="100%" flexDirection="column">
+      {statusFields(snapshot).map((field) => (
+        <Box
+          key={field.label}
+          width="100%"
+          height={1}
+          flexWrap="nowrap"
+          overflow="hidden"
+        >
+          <Box width={labelWidth} flexShrink={0} overflow="hidden">
+            <Text wrap="truncate-end">{`${field.label}:`}</Text>
+          </Box>
+          <Box flexGrow={1} overflow="hidden">
+            <Text wrap={field.truncateFromMiddle ? "truncate-middle" : "truncate-end"}>
+              {field.value}
+            </Text>
+          </Box>
+        </Box>
+      ))}
+    </Box>
+  );
 }
 
 export function StatusCard({ snapshot }: { snapshot: StatusSnapshot }) {

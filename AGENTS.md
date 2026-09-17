@@ -37,7 +37,8 @@ git diff --check
 - `/new` 创建的记录使用持久化的 `title_pending: true`。第一条问题先提供可靠回退标题，再异步调用当前模型生成简短名称，不能阻塞正常回答。
 - `/clear` 只清屏并解除当前 session；下一条普通问题才创建新 session，同时保留当前模型。
 - `/resume` 全局列出所有 session，按最后活动时间倒序显示名称和时间，并恢复 timeline、context、模型及工作目录，然后继续写入原文件。
-- `/status` 以 Codex 风格方格显示当前模型、base URL 对应供应商、context window 和 session 累计 token；状态快照进入可恢复 timeline，但不能进入模型 context。
+- `/status` 打开 Codex 风格独立命令窗口，显示当前模型、base URL 对应供应商、context window 和 session 累计 token；窗口隐藏 banner、历史、composer 和全局状态栏，Esc 原子恢复原 Session，窗口不写入 session timeline 或模型 context。
+- 信息型 slash command 和选择型 picker/wizard 都使用独立命令窗口；`/new`、`/clear`、`/exit` 保持立即动作。这些界面都不进入可恢复 timeline，命令造成的真实状态变化仍按各自语义持久化，普通聊天、Agent 工具输出和直接 `!` 命令继续写入可恢复 timeline。
 - 主 Agent 的 Responses usage 按 session 持久累计；标题请求不计入。切换模型保留累计 token，但在新模型完成响应前重置或未知当前 context 占用。
 - 原模型缺失时允许用户选择替代模型并保留 context；原工作目录不存在时拒绝恢复并保持当前会话不变。
 - JSONL 损坏必须按文件隔离；只允许忽略不完整的最后一行。旧记录缺少 `title_pending` 时按 `false` 处理。
@@ -51,6 +52,8 @@ git diff --check
 - 修改布局时必须继续保证 resize 后历史不丢失、只存在一个 prompt、输入行不会占用终端自动换行单元格。
 - 不要破坏普通滚轮、Ctrl+滚轮缩放、直接 `!` 命令流式输出及 Bash 确认流程。
 - 输入开头的 `/` 必须显示 slash command 前缀筛选菜单；候选窗口最多八项，并保留方向键选择、Enter 执行、Tab 补全和 Esc 关闭语义。
+- Slash command 独立窗口必须保持 inline 且不使用 alternate screen；进入时同步清屏并只渲染当前命令，Esc 后从内存同步重放原 Session。加载中允许返回的操作必须忽略迟到结果，不得写入 `Static` 历史、JSONL 或模型 context。
+- 所有独立命令窗口通过共享布局水平、垂直居中，外框最大 80 列并在窄终端保留左右安全边距；字段和值保持左对齐，resize 后必须重新居中且不得泄露历史。
 
 ## 关键代码入口
 

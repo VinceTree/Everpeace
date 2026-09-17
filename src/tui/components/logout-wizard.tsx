@@ -66,7 +66,7 @@ export function LogoutWizard({
             visibleOptionCount={Math.min(8, models.length)}
             onSubmit={submitSelection}
           />
-          <Text dimColor>↑↓ 移动 · Space 勾选 · Enter 继续 · Esc 取消</Text>
+          <Text dimColor>↑↓ 移动 · Space 勾选 · Enter 继续 · Esc 返回 Session</Text>
         </>
       ) : null}
 
@@ -74,6 +74,7 @@ export function LogoutWizard({
         <Box flexDirection="column">
           <Text>删除 {selectedIds.length} 个模型及对应系统凭据？</Text>
           <ConfirmInput defaultChoice="cancel" onConfirm={remove} onCancel={onCancel} />
+          <Text dimColor>Esc 返回 Session</Text>
         </Box>
       ) : null}
 

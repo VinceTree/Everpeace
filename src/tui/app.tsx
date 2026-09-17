@@ -22,6 +22,13 @@ import {
 import type { BashResult } from "../tools/bash.js";
 import { parseTuiInput, TUI_HELP } from "./commands.js";
 import { BashConfirmation } from "./components/bash-confirmation.js";
+import {
+  CommandInfoSurface,
+  CommandLoadingSurface,
+  CommandScreen,
+  StatusSurface,
+  type CommandSurfaceTone,
+} from "./components/command-surface.js";
 import { History } from "./components/history.js";
 import { LoginWizard } from "./components/login-wizard.js";
 import { LogoutWizard } from "./components/logout-wizard.js";
@@ -45,8 +52,23 @@ type View =
       models: RegisteredModel[];
       resumeSession?: LoadedSession;
     }
-  | { kind: "session-picker"; sessions: SessionSummary[] }
-  | { kind: "logout"; models: RegisteredModelStatus[] };
+  | { kind: "session-picker"; sessions: SessionSummary[]; notice?: string }
+  | { kind: "logout"; models: RegisteredModelStatus[] }
+  | {
+      kind: "loading";
+      title: string;
+      label: string;
+      cancellable: boolean;
+    }
+  | {
+      kind: "info";
+      title: string;
+      text: string;
+      tone: CommandSurfaceTone;
+    }
+  | { kind: "status"; snapshot: StatusSnapshot };
+
+type CommandView = Exclude<View, { kind: "chat" }>;
 
 interface PendingConfirmation {
   command: string;
@@ -72,6 +94,14 @@ function initialView(models: RegisteredModel[]): View {
   return models.length > 1
     ? { kind: "model-picker", title: "选择本次会话模型", models }
     : { kind: "chat" };
+}
+
+function infoView(
+  title: string,
+  text: string,
+  tone: CommandSurfaceTone = "default",
+): CommandView {
+  return { kind: "info", title, text, tone };
 }
 
 function toSessionModel(model: RegisteredModel): SessionModelRef {
@@ -170,6 +200,7 @@ export function EverpeaceApp({
   const titleControllers = useRef(new Set<AbortController>());
   const confirmationRef = useRef<PendingConfirmation | undefined>(undefined);
   const terminalCommandRunning = useRef(false);
+  const commandOperation = useRef(0);
   const activeSessionId = useRef<string | undefined>(undefined);
   const sessionTitlePending = useRef(false);
   const [timeline, setTimeline] = useState(initialTimeline);
@@ -190,12 +221,18 @@ export function EverpeaceApp({
   const [terminalOutput, setTerminalOutput] = useState<string>();
   const [confirmation, setConfirmation] = useState<PendingConfirmation>();
 
-  const append = useCallback((kind: HistoryKind, text: string): number => {
+  const appendText = useCallback((
+    kind: HistoryKind,
+    text: string,
+    persist: boolean,
+  ): number => {
     const id = nextId.current++;
     setTimeline((current) => [
       ...current,
       { id, kind, text },
     ]);
+    if (!persist) return id;
+
     const sessionId = activeSessionId.current;
     if (sessionId !== undefined) {
       void dependencies.sessionStore
@@ -212,30 +249,70 @@ export function EverpeaceApp({
     return id;
   }, [dependencies.sessionStore]);
 
-  const appendStatus = useCallback((snapshot: StatusSnapshot): number => {
-    const id = nextId.current++;
-    setTimeline((current) => [
-      ...current,
-      { id, kind: "status", snapshot: { ...snapshot } },
-    ]);
-    const sessionId = activeSessionId.current;
-    if (sessionId !== undefined) {
-      void dependencies.sessionStore
-        .appendTimeline(sessionId, {
-          kind: "status",
-          snapshot: { ...snapshot },
-        })
-        .catch((error: unknown) => {
-          const errorId = nextId.current++;
-          const message = error instanceof Error ? error.message : String(error);
-          setTimeline((current) => [
-            ...current,
-            { id: errorId, kind: "error", text: `Session save failed: ${message}` },
-          ]);
-        });
+  const append = useCallback(
+    (kind: HistoryKind, text: string): number => appendText(kind, text, true),
+    [appendText],
+  );
+
+  const appendTransient = useCallback(
+    (kind: HistoryKind, text: string): number => appendText(kind, text, false),
+    [appendText],
+  );
+
+  const enterCommandView = useCallback((nextView: CommandView) => {
+    commandOperation.current += 1;
+    onReplayOutput(() => {
+      setView(nextView);
+    });
+  }, [onReplayOutput]);
+
+  const replaceCommandView = useCallback((nextView: CommandView) => {
+    setView(nextView);
+  }, []);
+
+  const startCommandLoad = useCallback((
+    title: string,
+    label: string,
+    enterFromChat = true,
+    cancellable = true,
+  ): number => {
+    const operation = ++commandOperation.current;
+    const nextView: CommandView = {
+      kind: "loading",
+      title,
+      label,
+      cancellable,
+    };
+    if (enterFromChat) {
+      onReplayOutput(() => setView(nextView));
+    } else {
+      setView(nextView);
     }
-    return id;
-  }, [dependencies.sessionStore]);
+    return operation;
+  }, [onReplayOutput]);
+
+  const isCurrentCommandOperation = useCallback(
+    (operation: number): boolean => commandOperation.current === operation,
+    [],
+  );
+
+  const returnToChat = useCallback((update?: () => void) => {
+    commandOperation.current += 1;
+    onReplayOutput(() => {
+      update?.();
+      setView({ kind: "chat" });
+      setTimelineEpoch((current) => current + 1);
+      setInputKey((current) => current + 1);
+    });
+  }, [onReplayOutput]);
+
+  const openInfo = useCallback((
+    title: string,
+    text: string,
+    tone: CommandSurfaceTone = "default",
+  ) => {
+    enterCommandView(infoView(title, text, tone));
+  }, [enterCommandView]);
 
   const finishConfirmation = useCallback(
     (accepted: boolean) => {
@@ -339,74 +416,125 @@ export function EverpeaceApp({
         void dependencies.sessionStore
           .selectModel(sessionId, toSessionModel(model), false)
           .catch((error: unknown) => {
-            append("error", `Session save failed: ${error instanceof Error ? error.message : String(error)}`);
+            appendTransient("error", `Session save failed: ${error instanceof Error ? error.message : String(error)}`);
           });
       }
-      setActiveModel(model);
-      setSessionContext([]);
-      setSessionUsage((current) => resetContextUsage(current, false));
-      setSessionEpoch((current) => current + 1);
-      setView({ kind: "chat" });
-      append("system", `${message}；对话上下文已重置。`);
+      returnToChat(() => {
+        setActiveModel(model);
+        setSessionContext([]);
+        setSessionUsage((current) => resetContextUsage(current, false));
+        setSessionEpoch((current) => current + 1);
+        appendTransient("system", `${message}；对话上下文已重置。`);
+      });
     },
-    [append, dependencies.sessionStore],
+    [appendTransient, dependencies.sessionStore, returnToChat],
   );
 
   const showModels = useCallback(async () => {
-    setBusyLabel("正在读取模型注册表");
+    const operation = startCommandLoad(
+      "/models · 模型状态",
+      "正在读取模型注册表",
+    );
     try {
       const models = await dependencies.registry.listStatuses();
+      if (!isCurrentCommandOperation(operation)) return;
       if (models.length === 0) {
-        append("system", "尚未注册模型，请使用 /login。");
+        replaceCommandView(infoView(
+          "/models · 模型状态",
+          "尚未注册模型，请使用 /login。",
+        ));
         return;
       }
-      append(
-        "system",
+      replaceCommandView(infoView(
+        "/models · 模型状态",
         models
           .map(
             (model) =>
               `${activeModel?.id === model.id ? "●" : "○"} ${model.model_name} [${model.credential_status}]`,
           )
           .join("\n"),
-      );
+      ));
     } catch (error) {
-      append("error", error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusyLabel(undefined);
+      if (!isCurrentCommandOperation(operation)) return;
+      replaceCommandView(infoView(
+        "/models · 读取失败",
+        error instanceof Error ? error.message : String(error),
+        "error",
+      ));
     }
-  }, [activeModel?.id, append, dependencies.registry]);
+  }, [
+    activeModel?.id,
+    dependencies.registry,
+    isCurrentCommandOperation,
+    replaceCommandView,
+    startCommandLoad,
+  ]);
 
   const openModelPicker = useCallback(async () => {
-    setBusyLabel("正在读取可用模型");
+    const operation = startCommandLoad(
+      "/model · 切换模型",
+      "正在读取可用模型",
+    );
     try {
       const resolved = await dependencies.registry.resolveAll();
+      if (!isCurrentCommandOperation(operation)) return;
       if (resolved.available.length === 0) {
-        append("system", "没有可用模型，请先使用 /login。");
+        replaceCommandView(infoView(
+          "/model · 切换模型",
+          "没有可用模型，请先使用 /login。",
+        ));
         return;
       }
-      setView({ kind: "model-picker", title: "切换当前模型", models: resolved.available });
+      replaceCommandView({
+        kind: "model-picker",
+        title: "切换当前模型",
+        models: resolved.available,
+      });
     } catch (error) {
-      append("error", error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusyLabel(undefined);
+      if (!isCurrentCommandOperation(operation)) return;
+      replaceCommandView(infoView(
+        "/model · 读取失败",
+        error instanceof Error ? error.message : String(error),
+        "error",
+      ));
     }
-  }, [append, dependencies.registry]);
+  }, [
+    dependencies.registry,
+    isCurrentCommandOperation,
+    replaceCommandView,
+    startCommandLoad,
+  ]);
 
   const openLogout = useCallback(async () => {
-    setBusyLabel("正在读取模型注册表");
+    const operation = startCommandLoad(
+      "/logout · 注销模型",
+      "正在读取模型注册表",
+    );
     try {
       const models = await dependencies.registry.listStatuses();
+      if (!isCurrentCommandOperation(operation)) return;
       if (models.length === 0) {
-        append("system", "尚未注册模型。");
+        replaceCommandView(infoView(
+          "/logout · 注销模型",
+          "尚未注册模型。",
+        ));
         return;
       }
-      setView({ kind: "logout", models });
+      replaceCommandView({ kind: "logout", models });
     } catch (error) {
-      append("error", error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusyLabel(undefined);
+      if (!isCurrentCommandOperation(operation)) return;
+      replaceCommandView(infoView(
+        "/logout · 读取失败",
+        error instanceof Error ? error.message : String(error),
+        "error",
+      ));
     }
-  }, [append, dependencies.registry]);
+  }, [
+    dependencies.registry,
+    isCurrentCommandOperation,
+    replaceCommandView,
+    startCommandLoad,
+  ]);
 
   const completeResume = useCallback(
     async (
@@ -477,13 +605,17 @@ export function EverpeaceApp({
 
   const chooseSession = useCallback(
     async (summary: SessionSummary) => {
-      setView({ kind: "chat" });
-      setBusyLabel("正在恢复 Session");
+      let operation = startCommandLoad(
+        "/resume · 恢复 Session",
+        "正在读取 Session",
+        false,
+      );
       try {
         const [loaded, resolved] = await Promise.all([
           dependencies.sessionStore.load(summary.id),
           dependencies.registry.resolveAll(),
         ]);
+        if (!isCurrentCommandOperation(operation)) return;
         const originalModel = resolved.available.find(
           (candidate) =>
             candidate.id === loaded.summary.model.id ||
@@ -492,44 +624,84 @@ export function EverpeaceApp({
         );
 
         if (originalModel) {
+          operation = startCommandLoad(
+            "/resume · 恢复 Session",
+            "正在恢复 Session",
+            false,
+            false,
+          );
           await completeResume(loaded, originalModel, false);
         } else if (resolved.available.length > 0) {
-          setView({
+          replaceCommandView({
             kind: "model-picker",
             title: `原模型 ${loaded.summary.model.model_name} 不可用，请选择替代模型`,
             models: resolved.available,
             resumeSession: loaded,
           });
         } else {
-          append("error", "原 Session 模型不可用；请先使用 /login 注册模型。");
+          replaceCommandView(infoView(
+            "/resume · 恢复失败",
+            "原 Session 模型不可用；请先使用 /login 注册模型。",
+            "error",
+          ));
         }
       } catch (error) {
-        append("error", `Session restore failed: ${error instanceof Error ? error.message : String(error)}`);
-      } finally {
-        setBusyLabel(undefined);
+        if (!isCurrentCommandOperation(operation)) return;
+        replaceCommandView(infoView(
+          "/resume · 恢复失败",
+          `Session restore failed: ${error instanceof Error ? error.message : String(error)}`,
+          "error",
+        ));
       }
     },
-    [append, completeResume, dependencies.registry, dependencies.sessionStore],
+    [
+      completeResume,
+      dependencies.registry,
+      dependencies.sessionStore,
+      isCurrentCommandOperation,
+      replaceCommandView,
+      startCommandLoad,
+    ],
   );
 
   const openResume = useCallback(async () => {
-    setBusyLabel("正在读取 Session");
+    const operation = startCommandLoad(
+      "/resume · 恢复 Session",
+      "正在读取 Session",
+    );
     try {
       const result = await dependencies.sessionStore.list();
-      if (result.skipped > 0) {
-        append("error", `已跳过 ${result.skipped} 个损坏的 Session 文件。`);
-      }
+      if (!isCurrentCommandOperation(operation)) return;
+      const notice = result.skipped > 0
+        ? `已跳过 ${result.skipped} 个损坏的 Session 文件。`
+        : undefined;
       if (result.sessions.length === 0) {
-        append("system", "没有可恢复的 Session。");
+        replaceCommandView(infoView(
+          "/resume · 恢复 Session",
+          [notice, "没有可恢复的 Session。"].filter(Boolean).join("\n"),
+          notice ? "error" : "default",
+        ));
         return;
       }
-      setView({ kind: "session-picker", sessions: result.sessions });
+      replaceCommandView({
+        kind: "session-picker",
+        sessions: result.sessions,
+        ...(notice === undefined ? {} : { notice }),
+      });
     } catch (error) {
-      append("error", `Session list failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setBusyLabel(undefined);
+      if (!isCurrentCommandOperation(operation)) return;
+      replaceCommandView(infoView(
+        "/resume · 读取失败",
+        `Session list failed: ${error instanceof Error ? error.message : String(error)}`,
+        "error",
+      ));
     }
-  }, [append, dependencies.sessionStore]);
+  }, [
+    dependencies.sessionStore,
+    isCurrentCommandOperation,
+    replaceCommandView,
+    startCommandLoad,
+  ]);
 
   const startTitleGeneration = useCallback(
     (sessionId: string, model: RegisteredModel, firstQuestion: string) => {
@@ -546,7 +718,11 @@ export function EverpeaceApp({
 
   const createNewSession = useCallback(async () => {
     if (!activeModel) {
-      append("error", "尚未启用模型，请先使用 /login 或 /model。");
+      openInfo(
+        "/new · 无法创建 Session",
+        "尚未启用模型，请先使用 /login 或 /model。",
+        "error",
+      );
       return;
     }
 
@@ -558,10 +734,6 @@ export function EverpeaceApp({
         titlePending: true,
         workspacePath,
         model: toSessionModel(activeModel),
-      });
-      await dependencies.sessionStore.appendTimeline(session.id, {
-        kind: "system",
-        text: message,
       });
 
       abortController.current?.abort();
@@ -581,11 +753,15 @@ export function EverpeaceApp({
         setView({ kind: "chat" });
       });
     } catch (error) {
-      append("error", `Session creation failed: ${error instanceof Error ? error.message : String(error)}`);
+      openInfo(
+        "/new · 创建失败",
+        `Session creation failed: ${error instanceof Error ? error.message : String(error)}`,
+        "error",
+      );
     } finally {
       setBusyLabel(undefined);
     }
-  }, [activeModel, append, dependencies.sessionStore, onReplayOutput, workspacePath]);
+  }, [activeModel, dependencies.sessionStore, onReplayOutput, openInfo, workspacePath]);
 
   const clearConversation = useCallback(() => {
     abortController.current?.abort();
@@ -609,20 +785,29 @@ export function EverpeaceApp({
     const metadata = activeModel
       ? resolveModelStatusMetadata(activeModel.base_url, activeModel.model_name)
       : undefined;
-    appendStatus({
-      version: dependencies.version,
-      model_name: activeModel?.model_name ?? null,
-      provider: metadata?.provider ?? "N/A",
-      base_url: activeModel?.base_url ?? null,
-      workspace_path: workspacePath,
-      session_id: activeSessionId.current ?? null,
-      context_window: metadata?.context_window ?? null,
-      context_tokens: activeModel ? sessionUsage.context_tokens : null,
-      input_tokens: sessionUsage.input_tokens,
-      output_tokens: sessionUsage.output_tokens,
-      usage_complete: sessionUsage.complete,
+    enterCommandView({
+      kind: "status",
+      snapshot: {
+        version: dependencies.version,
+        model_name: activeModel?.model_name ?? null,
+        provider: metadata?.provider ?? "N/A",
+        base_url: activeModel?.base_url ?? null,
+        workspace_path: workspacePath,
+        session_id: activeSessionId.current ?? null,
+        context_window: metadata?.context_window ?? null,
+        context_tokens: activeModel ? sessionUsage.context_tokens : null,
+        input_tokens: sessionUsage.input_tokens,
+        output_tokens: sessionUsage.output_tokens,
+        usage_complete: sessionUsage.complete,
+      },
     });
-  }, [activeModel, appendStatus, dependencies.version, sessionUsage, workspacePath]);
+  }, [
+    activeModel,
+    dependencies.version,
+    enterCommandView,
+    sessionUsage,
+    workspacePath,
+  ]);
 
   const runChat = useCallback(
     async (text: string) => {
@@ -721,11 +906,15 @@ export function EverpeaceApp({
         return;
       }
       if (parsed.kind === "unknown") {
-        append("error", `未知命令：${parsed.command}。输入 /help 查看可用命令。`);
+        openInfo(
+          "Slash command 错误",
+          `未知命令：${parsed.command}。输入 /help 查看可用命令。`,
+          "error",
+        );
         return;
       }
 
-      if (parsed.command === "/login") setView({ kind: "login" });
+      if (parsed.command === "/login") enterCommandView({ kind: "login" });
       if (parsed.command === "/model") void openModelPicker();
       if (parsed.command === "/models") void showModels();
       if (parsed.command === "/status") showStatus();
@@ -733,17 +922,18 @@ export function EverpeaceApp({
       if (parsed.command === "/resume") void openResume();
       if (parsed.command === "/logout") void openLogout();
       if (parsed.command === "/clear") clearConversation();
-      if (parsed.command === "/help") append("system", TUI_HELP);
+      if (parsed.command === "/help") openInfo("/help · 帮助", TUI_HELP);
       if (parsed.command === "/exit") exit(0);
     },
     [
-      append,
       clearConversation,
       createNewSession,
+      enterCommandView,
       exit,
       openLogout,
       openModelPicker,
       openResume,
+      openInfo,
       runChat,
       runDirectBash,
       showModels,
@@ -753,39 +943,60 @@ export function EverpeaceApp({
 
   const finishLogout = useCallback(
     (removedIds: string[]) => {
-      append("system", `已删除 ${removedIds.length} 个模型及对应系统凭据。`);
+      const message = `已删除 ${removedIds.length} 个模型及对应系统凭据。`;
       if (!activeModel || !removedIds.includes(activeModel.id)) {
-        setView({ kind: "chat" });
+        returnToChat(() => appendTransient("system", message));
         return;
       }
 
+      appendTransient("system", message);
       setActiveModel(undefined);
       setSessionContext([]);
       setSessionUsage((current) => resetContextUsage(current, false));
       setSessionEpoch((current) => current + 1);
-      setBusyLabel("正在刷新可用模型");
-      setView({ kind: "chat" });
+      const operation = startCommandLoad(
+        "/logout · 注销模型",
+        "正在刷新可用模型",
+        false,
+        false,
+      );
       void dependencies.registry
         .resolveAll()
         .then((resolved) => {
+          if (!isCurrentCommandOperation(operation)) return;
           if (resolved.available.length === 1) {
             activateModel(resolved.available[0]!, `已自动切换到 ${resolved.available[0]!.model_name}`);
           } else if (resolved.available.length > 1) {
-            setView({
+            replaceCommandView({
               kind: "model-picker",
               title: "当前模型已注销，请选择新模型",
               models: resolved.available,
             });
           } else {
-            append("system", "当前没有可用模型，请使用 /login。");
+            returnToChat(() => {
+              appendTransient("system", "当前没有可用模型，请使用 /login。");
+            });
           }
         })
         .catch((error: unknown) => {
-          append("error", error instanceof Error ? error.message : String(error));
-        })
-        .finally(() => setBusyLabel(undefined));
+          if (!isCurrentCommandOperation(operation)) return;
+          replaceCommandView(infoView(
+            "/logout · 刷新失败",
+            error instanceof Error ? error.message : String(error),
+            "error",
+          ));
+        });
     },
-    [activeModel, activateModel, append, dependencies.registry],
+    [
+      activeModel,
+      activateModel,
+      appendTransient,
+      dependencies.registry,
+      isCurrentCommandOperation,
+      replaceCommandView,
+      returnToChat,
+      startCommandLoad,
+    ],
   );
 
   useInput(
@@ -837,6 +1048,80 @@ export function EverpeaceApp({
     };
   }, [onReplayOutput, stdout]);
 
+  if (view.kind !== "chat") {
+    return (
+      <CommandScreen>
+        {view.kind === "login" ? (
+          <LoginWizard
+            dependencies={dependencies}
+            onComplete={(model) => activateModel(model, `已登录并启用 ${model.model_name}`)}
+            onCancel={returnToChat}
+          />
+        ) : view.kind === "model-picker" ? (
+          <ModelPicker
+            title={view.title}
+            models={view.models}
+            onSelect={(model) => {
+              if (!view.resumeSession) {
+                activateModel(model);
+                return;
+              }
+              const loaded = view.resumeSession;
+              const operation = startCommandLoad(
+                "/resume · 恢复 Session",
+                "正在恢复 Session",
+                false,
+                false,
+              );
+              void completeResume(loaded, model, true)
+                .catch((error: unknown) => {
+                  if (!isCurrentCommandOperation(operation)) return;
+                  replaceCommandView(infoView(
+                    "/resume · 恢复失败",
+                    `Session restore failed: ${error instanceof Error ? error.message : String(error)}`,
+                    "error",
+                  ));
+                });
+            }}
+            onCancel={returnToChat}
+          />
+        ) : view.kind === "session-picker" ? (
+          <SessionPicker
+            sessions={view.sessions}
+            {...(view.notice === undefined ? {} : { notice: view.notice })}
+            onSelect={(session) => void chooseSession(session)}
+            onCancel={returnToChat}
+          />
+        ) : view.kind === "logout" ? (
+          <LogoutWizard
+            dependencies={dependencies}
+            models={view.models}
+            onComplete={finishLogout}
+            onCancel={returnToChat}
+          />
+        ) : view.kind === "loading" ? (
+          <CommandLoadingSurface
+            title={view.title}
+            label={view.label}
+            {...(view.cancellable ? { onBack: returnToChat } : {})}
+          />
+        ) : view.kind === "info" ? (
+          <CommandInfoSurface
+            title={view.title}
+            text={view.text}
+            tone={view.tone}
+            onBack={returnToChat}
+          />
+        ) : (
+          <StatusSurface
+            snapshot={view.snapshot}
+            onBack={returnToChat}
+          />
+        )}
+      </CommandScreen>
+    );
+  }
+
   return (
     <Box width="100%" paddingRight={1} flexDirection="column">
       <History
@@ -851,45 +1136,6 @@ export function EverpeaceApp({
           command={confirmation.command}
           onConfirm={() => finishConfirmation(true)}
           onCancel={() => finishConfirmation(false)}
-        />
-      ) : view.kind === "login" ? (
-        <LoginWizard
-          dependencies={dependencies}
-          onComplete={(model) => activateModel(model, `已登录并启用 ${model.model_name}`)}
-          onCancel={() => setView({ kind: "chat" })}
-        />
-      ) : view.kind === "model-picker" ? (
-        <ModelPicker
-          title={view.title}
-          models={view.models}
-          onSelect={(model) => {
-            if (!view.resumeSession) {
-              activateModel(model);
-              return;
-            }
-            const loaded = view.resumeSession;
-            setView({ kind: "chat" });
-            setBusyLabel("正在恢复 Session");
-            void completeResume(loaded, model, true)
-              .catch((error: unknown) => {
-                append("error", `Session restore failed: ${error instanceof Error ? error.message : String(error)}`);
-              })
-              .finally(() => setBusyLabel(undefined));
-          }}
-          onCancel={() => setView({ kind: "chat" })}
-        />
-      ) : view.kind === "session-picker" ? (
-        <SessionPicker
-          sessions={view.sessions}
-          onSelect={(session) => void chooseSession(session)}
-          onCancel={() => setView({ kind: "chat" })}
-        />
-      ) : view.kind === "logout" ? (
-        <LogoutWizard
-          dependencies={dependencies}
-          models={view.models}
-          onComplete={finishLogout}
-          onCancel={() => setView({ kind: "chat" })}
         />
       ) : terminalBusy ? (
         <TerminalActivity output={terminalOutput} />

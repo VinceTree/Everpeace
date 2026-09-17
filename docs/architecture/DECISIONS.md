@@ -1,6 +1,6 @@
 # Architecture Decisions
 
-状态快照：2026-09-16。
+状态快照：2026-09-17。
 
 ## Session 持久化
 
@@ -11,16 +11,20 @@
 
 ## Status 与 usage
 
-- `/status` 生成结构化 timeline 快照，进入 inline scrollback 并随 session 恢复，但不进入 Responses context；没有活动 session 时只显示、不建档。
+- `/status` 生成结构化独立命令窗口；窗口与聊天根视图互斥，隐藏 `History`、Prompt 和全局状态栏。Esc 同步清屏并从内存重放原 Session，窗口不进入 `Static` timeline、session JSONL 或 Responses context。
+- 信息型 slash command 使用 transient `View`，选择型命令使用 picker/wizard，但都位于同一独立命令窗口。`session_created`、`model_selected`、注册表修改等真实状态变化仍分别持久化，立即动作的结果提示可以只留在当前 UI。普通聊天、Agent 工具输出和直接 `!` 命令保持可恢复。
+- 独立窗口继续使用 inline terminal 和同步输出，不启用 alternate screen；异步只读加载用 operation generation 隔离，Esc 返回后迟到结果不得重新打开窗口。
+- 所有独立窗口使用共享 `CommandScreen`：外框宽度为 `min(80, terminalColumns - 2)`，在 `terminalRows - 1` 的可用高度内水平、垂直居中；内容过高时容器自然扩展而不裁剪，字段内容保持左对齐。
 - Session input/output token 是主 Agent 每次 Responses API 调用 usage 的累计值，包括工具循环中的中间响应，不包含后台标题请求。
 - Context 占用取最近一次成功响应的 `total_tokens`；切换并清空 context 后归零，保留 context 换用替代模型时在下一次响应前视为未知。
 - Provider 由规范化 `base_url` 识别；context 上限只对已知官方 model ID 使用文档值，自定义端点和未知型号显示 `N/A`。
 - 旧 session 缺少 usage tracking 时继续兼容读取，历史总量标记为不完整，不反推或伪造 token。
+- 旧 session 已包含的结构化 status timeline entry 继续解析和显示，不迁移或改写已有 JSONL。
 
 ## Session 生命周期
 
 - 默认采用延迟创建：没有活动 session 时，第一次普通提问先建档再请求模型。
-- `/new` 是显式立即创建：要求已有活动模型，写入临时标题“新 Session”并立刻切换到新 timeline/context。
+- `/new` 是显式立即创建：要求已有活动模型，写入临时标题“新 Session”并立刻切换到新 timeline/context；创建提示只显示在当前 UI。
 - `/clear` 不等同于 `/new`：它只清屏并解除当前 session，下一次普通提问才创建文件。
 - 切换 session 不需要丢弃确认，因为所有活动内容持续写入本地文件。
 
@@ -44,6 +48,8 @@
 - 候选按现有命令定义顺序进行不区分大小写的前缀匹配；最多同时显示八项，超出时随当前选择滚动。
 - `Prompt` 独占输入处理：方向键或 `Ctrl+P/N` 选择，Enter 执行，Tab 只补全，Esc 关闭到下一次编辑；菜单本身不注册第二个 input handler。
 - 菜单位于 composer 下方且只展示命令名，不改变 slash command 的解析和执行接口。
+- 带界面的命令执行后通过同步清屏进入独立窗口，只显示当前命令内容；Esc 再次同步清屏并重放完整 transcript，不启用 alternate screen。
+- 命令窗口 resize 时按新的行列数重新居中；Session 列表标签按窗口实际宽度截断，不按全屏宽度计算。
 
 ## 维护约束
 
