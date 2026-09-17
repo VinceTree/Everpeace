@@ -4,6 +4,8 @@
 
 ## 当前目标
 
+Codex 核心 Agent Loop TypeScript 适配已接入：独立轮次控制、逐工具结果持久化、采样重试和取消、完成判断、并发 turn 防护。上游来源与未移植模块见 `architecture/AGENT_LOOP.md`。
+
 完成终端交互改进：Ctrl+C 取消、跨重启输入历史、Shift+Enter 配置、统一紧凑命令输出与 `/outputs`。不新增 OS 沙箱，也不实现 Ctrl+R、任务队列或外部编辑器。
 
 权限管理第一阶段：Codex 官方文档摘录与对标、`/permissions`、模型工作目录文件查看和工具运行时审批。见 `architecture/PERMISSIONS.md`。本轮不宣称实现 OS 沙箱；pi/Grok Build 后续再比较。

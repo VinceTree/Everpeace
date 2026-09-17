@@ -4,6 +4,8 @@
 
 ## 最新发布
 
+正在准备 v0.1.24：已接入 Codex 核心 Agent Loop 的 TypeScript 适配。详见 `architecture/AGENT_LOOP.md`。保留既有端点、权限、Session 和工具接口，不新增 OS 沙箱或完整 Codex 服务。包含上游 Apache-2.0 许可证及改动说明。
+
 - 发布提交 `524dc453ec9e2f880630bcf10433db923293b5a0` 已推送至 `origin/main`。
 - Release workflow `35229886201` 已完成且 conclusion 为 `success`；`v0.1.23` GitHub Release 已发布，draft/prerelease 均为 false。
 - Release: https://github.com/VinceTree/Everpeace/releases/tag/v0.1.23
@@ -120,7 +122,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 
 ## 5. 验证结果
 
-- `pnpm test`：118/118 通过（含恢复输入导航、斜杠历史、旧工具上下文修复及执行异常回归）。
+- `pnpm test`：124/124 通过（新增 Codex 核心循环 follow-up、逐结果保存、重试不重跑工具、取消退避、持久化失败阻止副作用及并发 turn 回归）。
 - `pnpm typecheck`：通过。
 - `pnpm build`：通过。
 - `git diff --check`：通过，仅有 Windows LF/CRLF 提示。

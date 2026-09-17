@@ -12,6 +12,24 @@ function bashResult(stdout: string): BashResult {
   return { stdout, stderr: "", exitCode: 0, signal: null };
 }
 
+test("agent rejects overlapping turns and releases the guard after cancellation", async () => {
+  const controller = new AbortController();
+  let started!: () => void;
+  const ready = new Promise<void>((resolve) => { started = resolve; });
+  const agent = new ReactAgent({ model: "test", client: { responses: { async create(_params, options) {
+    if (!options?.signal) return { id: "done", output: [], output_text: "done" };
+    started();
+    await new Promise((_resolve, reject) => options.signal!.addEventListener("abort", () => reject(options.signal!.reason), { once: true }));
+    return { id: "never", output: [], output_text: "" };
+  } } }, io: { async confirmBash() { return true; }, async runBash() { return bashResult(""); }, writeAssistant() {} } });
+  const first = agent.runTurn("first", controller.signal);
+  await ready;
+  await assert.rejects(agent.runTurn("overlap"), /already running/);
+  controller.abort();
+  await assert.rejects(first, /abort/i);
+  await agent.runTurn("next");
+});
+
 test("resumed missing outputs and thrown tool executors cannot poison subsequent requests", async () => {
   let requests = 0;
   const persisted: Record<string, unknown>[] = [];
@@ -61,7 +79,7 @@ test("cancellation closes pending function calls and the next turn remains usabl
   });
   await assert.rejects(agent.runTurn("run", controller.signal), /abort/i);
   assert.equal(requests, 1);
-  assert.equal(batches.at(-1)?.length, 2);
+  assert.equal(batches.flat().filter((item) => item.type === "function_call_output").length, 2);
   await agent.runTurn("continue");
   assert.equal(requests, 2);
 });

@@ -1,3 +1,4 @@
+import { runAgentLoop, type LoopPhase, type ToolCall } from "./agent-loop.js";
 import { repairToolContext } from "./repair-context.js";
 import {
   BASH_TOOL_DEFINITION,
@@ -20,13 +21,6 @@ import {
   type WebToolExecutor,
 } from "../tools/web.js";
 
-interface FunctionCallItem extends Record<string, unknown> {
-  type: "function_call";
-  name: string;
-  arguments: string;
-  call_id: string;
-}
-
 interface ResponseOutputItem extends Record<string, unknown> {
   type: string;
   name?: string;
@@ -35,6 +29,8 @@ interface ResponseOutputItem extends Record<string, unknown> {
 }
 
 interface AgentResponse {
+  end_turn?: boolean;
+  status?: string;
   id: string;
   output_text: string;
   output: ResponseOutputItem[];
@@ -45,7 +41,7 @@ export interface ResponsesClientLike {
   responses: {
     create(
       params: Record<string, unknown>,
-      options?: { signal?: AbortSignal },
+      options?: { signal?: AbortSignal; maxRetries?: number },
     ): Promise<AgentResponse>;
   };
 }
@@ -59,6 +55,7 @@ export interface AgentIO {
 }
 
 export interface ReactAgentOptions {
+  onPhase?(phase: LoopPhase): void;
   workspacePath?: string;
   client: ResponsesClientLike;
   model: string;
@@ -79,16 +76,9 @@ Before calling bash, briefly tell the user what you are about to do.
 Base your answer on actual tool results and never claim a command succeeded when it did not.
 Respect the current permission policy. A denied operation must not be retried through a different tool to bypass the policy.`;
 
-function isFunctionCall(item: ResponseOutputItem): item is FunctionCallItem {
-  return (
-    item.type === "function_call" &&
-    typeof item.name === "string" &&
-    typeof item.arguments === "string" &&
-    typeof item.call_id === "string"
-  );
-}
-
 export class ReactAgent {
+  #running = false;
+  readonly #onPhase: ((phase: LoopPhase) => void) | undefined;
   readonly #workspacePath: string;
   readonly #client: ResponsesClientLike;
   readonly #model: string;
@@ -103,6 +93,7 @@ export class ReactAgent {
   #history: Array<Record<string, unknown>>;
 
   constructor(options: ReactAgentOptions) {
+    this.#onPhase = options.onPhase;
     this.#workspacePath = options.workspacePath ?? process.cwd();
     this.#client = options.client;
     this.#model = options.model;
@@ -114,112 +105,84 @@ export class ReactAgent {
   }
 
   async runTurn(userInput: string, signal?: AbortSignal): Promise<void> {
+    if (this.#running) throw new Error("An agent turn is already running");
     signal?.throwIfAborted();
-    this.#history = repairToolContext(this.#history);
-    const userItem = { role: "user", content: userInput };
-    const history: Array<Record<string, unknown>> = [
-      ...this.#history,
-      userItem,
-    ];
-    this.#history = [...history];
-    await this.#persist([userItem]);
-    let response = await this.#requestResponse(history, signal);
-
-    while (true) {
-      history.push(...response.output);
-      this.#history = [...history];
-      await this.#persist(response.output);
-
-      if (response.output_text.trim()) {
-        this.#io.writeAssistant(response.output_text.trim());
-      }
-
-      const calls = response.output.filter(isFunctionCall);
-      if (calls.length === 0) {
-        this.#history = history;
-        return;
-      }
-
-      const outputs: Array<Record<string, unknown>> = [];
-
-      for (const call of calls) {
-        if (signal?.aborted) {
-          outputs.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify({ status: "cancelled" }) });
-          continue;
-        }
-        const policy = this.#io.getPermissions?.() ?? defaultPermissions();
-        let output: string;
-
-        try {
-        if (call.name === BASH_TOOL_DEFINITION.name) {
-          const command = parseBashCommand(call.arguments);
-          if (command === undefined) {
-            output = JSON.stringify({ error: "Invalid bash arguments" });
-          } else if (bashPermission(policy) === "deny") {
-            output = JSON.stringify({ status: "denied", error: "Read-only mode disables all model Bash commands; use read_file or list_directory." });
-          } else if (bashPermission(policy) === "ask" && !(await this.#io.confirmBash(command))) {
-            signal?.throwIfAborted();
-            output = JSON.stringify({
-              status: "rejected",
-              message: "The user rejected this Bash command. Do not execute it.",
-            });
-          } else {
-            signal?.throwIfAborted();
-            if (bashPermission(policy) === "allow") this.#io.writeTool?.(`! ${command}`);
-            const result = await this.#io.runBash(command, signal);
-            output = result.cancelled ? JSON.stringify({ status: "cancelled", stdout: result.stdout, stderr: result.stderr }) : serializeBashResult(result);
-          }
-        } else if (FILE_TOOL_DEFINITIONS.some((tool) => tool.name === call.name)) {
-          this.#io.writeTool?.(`File tool: ${call.name}`);
-          output = await this.#runWebTool(() => runFileTool(call.name, call.arguments, this.#workspacePath), signal);
-        } else if (!policy.web && (call.name === "web_search" || call.name === "web_fetch")) {
-          output = JSON.stringify({ status: "denied", error: "Web tools are disabled by the current permission policy." });
-        } else if (call.name === WEB_SEARCH_TOOL_DEFINITION.name) {
-          const query = parseWebSearchQuery(call.arguments);
-          if (query === undefined) {
-            output = JSON.stringify({ error: "Invalid web_search arguments" });
-          } else {
-            this.#io.writeTool?.(`搜索网页：${query}`);
-            output = await this.#runWebTool(
-              () => this.#web.search(query, signal),
-              signal,
-            );
-          }
-        } else if (call.name === WEB_FETCH_TOOL_DEFINITION.name) {
-          const url = parseWebFetchUrl(call.arguments);
-          if (url === undefined) {
-            output = JSON.stringify({ error: "Invalid web_fetch arguments" });
-          } else {
-            this.#io.writeTool?.(`读取网页：${url}`);
-            output = await this.#runWebTool(
-              () => this.#web.fetch(url, signal),
-              signal,
-            );
-          }
-        } else {
-          output = JSON.stringify({
-            error: `Invalid or unsupported tool call: ${call.name}`,
-          });
-        }
-
-        } catch (error) {
-          output = signal?.aborted
-            ? JSON.stringify({ status: "cancelled" })
-            : JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error) });
-        }
-        outputs.push({
-          type: "function_call_output",
-          call_id: call.call_id,
-          output,
-        });
-      }
-
-      history.push(...outputs);
-      this.#history = [...history];
-      await this.#persist(outputs);
-      signal?.throwIfAborted();
-      response = await this.#requestResponse(history, signal);
+    this.#running = true;
+    try {
+      this.#history = repairToolContext(this.#history);
+      await this.#record([{ role: "user", content: userInput }]);
+      await runAgentLoop({
+        sample: () => this.#requestResponse([...this.#history], signal),
+        record: (items) => this.#record(items),
+        dispatch: (call) => this.#dispatchTool(call, signal),
+        assistant: (text) => this.#io.writeAssistant(text),
+        ...(signal ? { signal } : {}),
+        ...(this.#onPhase ? { onPhase: this.#onPhase } : {}),
+      });
+    } finally {
+      this.#running = false;
     }
+  }
+
+  async #record(items: readonly Record<string, unknown>[]): Promise<void> {
+    await this.#persist(items);
+    this.#history.push(...items.map((item) => ({ ...item })));
+  }
+
+  async #dispatchTool(call: ToolCall, signal?: AbortSignal): Promise<string> {
+    const policy = this.#io.getPermissions?.() ?? defaultPermissions();
+    let output: string;
+    if (call.name === BASH_TOOL_DEFINITION.name) {
+      const command = parseBashCommand(call.arguments);
+      if (command === undefined) {
+        output = JSON.stringify({ error: "Invalid bash arguments" });
+      } else if (bashPermission(policy) === "deny") {
+        output = JSON.stringify({ status: "denied", error: "Read-only mode disables all model Bash commands; use read_file or list_directory." });
+      } else if (bashPermission(policy) === "ask" && !(await this.#io.confirmBash(command))) {
+        signal?.throwIfAborted();
+        output = JSON.stringify({
+          status: "rejected",
+          message: "The user rejected this Bash command. Do not execute it.",
+        });
+      } else {
+        signal?.throwIfAborted();
+        if (bashPermission(policy) === "allow") this.#io.writeTool?.(`! ${command}`);
+        const result = await this.#io.runBash(command, signal);
+        output = result.cancelled ? JSON.stringify({ status: "cancelled", stdout: result.stdout, stderr: result.stderr }) : serializeBashResult(result);
+      }
+    } else if (FILE_TOOL_DEFINITIONS.some((tool) => tool.name === call.name)) {
+      this.#io.writeTool?.(`File tool: ${call.name}`);
+      output = await this.#runWebTool(() => runFileTool(call.name, call.arguments, this.#workspacePath), signal);
+    } else if (!policy.web && (call.name === "web_search" || call.name === "web_fetch")) {
+      output = JSON.stringify({ status: "denied", error: "Web tools are disabled by the current permission policy." });
+    } else if (call.name === WEB_SEARCH_TOOL_DEFINITION.name) {
+      const query = parseWebSearchQuery(call.arguments);
+      if (query === undefined) {
+        output = JSON.stringify({ error: "Invalid web_search arguments" });
+      } else {
+        this.#io.writeTool?.(`搜索网页：${query}`);
+        output = await this.#runWebTool(
+          () => this.#web.search(query, signal),
+          signal,
+        );
+      }
+    } else if (call.name === WEB_FETCH_TOOL_DEFINITION.name) {
+      const url = parseWebFetchUrl(call.arguments);
+      if (url === undefined) {
+        output = JSON.stringify({ error: "Invalid web_fetch arguments" });
+      } else {
+        this.#io.writeTool?.(`读取网页：${url}`);
+        output = await this.#runWebTool(
+          () => this.#web.fetch(url, signal),
+          signal,
+        );
+      }
+    } else {
+      output = JSON.stringify({
+        error: `Invalid or unsupported tool call: ${call.name}`,
+      });
+    }
+    return output;
   }
 
   async #persist(items: readonly Record<string, unknown>[]): Promise<void> {
@@ -275,7 +238,7 @@ export class ReactAgent {
         store: false,
         include: ["reasoning.encrypted_content"],
       },
-      signal === undefined ? undefined : { signal },
+      { maxRetries: 0, ...(signal ? { signal } : {}) },
     );
   }
 }

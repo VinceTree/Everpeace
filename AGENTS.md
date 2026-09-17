@@ -67,6 +67,7 @@ git diff --check
 
 - `src/storage/session-store.ts`：JSONL schema、存储路径、读写、列表、恢复和兼容逻辑。
 - `src/agent/react-agent.ts`：ReAct 循环、初始 context 和增量持久化 callback。
+- `src/agent/agent-loop.ts`：Codex 核心控制流程的 TypeScript 适配，采样、结果记录、工具执行、后续采样与终止；来源和边界见 `docs/architecture/AGENT_LOOP.md`。
 - `src/tools/web.ts`：网页搜索、公共网页读取、正文提取、大小/超时限制和 SSRF 防护。
 - `src/tui/app.tsx`：TUI 状态机、session 生命周期、`/new`、`/resume`、命名和目录切换。
 - `src/tui/components/session-picker.tsx`：session 选择界面。

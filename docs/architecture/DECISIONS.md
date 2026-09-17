@@ -78,5 +78,7 @@
 
 ## 维护约束
 
+- Agent 主循环采用 Codex 核心控制流程的 TypeScript 适配，位于 `agent-loop.ts`；`ReactAgent` 保留为供应商/工具/持久化适配层。逐工具结果持久化，主请求重试由循环控制，明确不等同完整 Codex runtime。来源和差异见 `AGENT_LOOP.md`。
+
 - 功能、行为、接口或验证结果发生变化时，同步更新 `docs/PLAN.md`、本文件及 `docs/HANDOFF.md` 中受影响的内容。
 - 根级 `AGENTS.md` 只保存跨 Session 长期有效的项目事实和工作约束；易变化的进度、验证结果及下一步统一记录在 `docs/HANDOFF.md`。

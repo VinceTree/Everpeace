@@ -1,6 +1,6 @@
 {
   "name": "everpeace",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "description": "A terminal ReAct agent with persistent sessions, Bash, and web access.",
   "type": "module",
   "bin": {
@@ -8,6 +8,7 @@
   },
   "files": [
     "dist",
+    "third_party/codex",
     "README.md",
     "README.zh-CN.md",
     "LICENSE"

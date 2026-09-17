@@ -1,0 +1,9 @@
+OpenAI Codex
+Copyright 2025 OpenAI
+
+Everpeace adapts the core turn/sampling/follow-up control flow from
+openai/codex revision e269f2164cbb9f499e4f22301c393500e2a831f3.
+Modified implementation: src/agent/agent-loop.ts (TypeScript, buffered Responses,
+serial Everpeace tools, per-result persistence, bounded request retries).
+This is not the complete Codex runtime. No Ratatui UI code is included.
+See docs/architecture/AGENT_LOOP.md for source paths and scope.
