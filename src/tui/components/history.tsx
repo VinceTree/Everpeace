@@ -33,9 +33,12 @@ function HistoryLine({
   }
 
   if (entry.kind === "output") {
+    const lines = entry.text.split("\n");
+    const visible = lines.length > 6 ? [...lines.slice(0, 2), `... ${lines.length - 6} lines omitted (/outputs)`, ...lines.slice(-4)] : lines;
     return (
       <Box marginBottom={1} marginLeft={3} flexDirection="column">
-        {entry.text.split("\n").map((line, index) => (
+        {entry.command ? <Text dimColor wrap="truncate-end">{entry.command.shell} · {entry.command.status} · {(entry.command.durationMs / 1000).toFixed(1)}s{entry.command.truncated ? " · truncated" : ""}</Text> : null}
+        {visible.map((line, index) => (
           <Box key={`${index}:${line}`} height={1} overflow="hidden">
             <Text wrap="truncate-end">{line || " "}</Text>
           </Box>

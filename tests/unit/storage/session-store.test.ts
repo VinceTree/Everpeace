@@ -15,6 +15,21 @@ const model: SessionModelRef = {
   base_url: "https://api.deepseek.com",
 };
 
+test("command output metadata round-trips alongside legacy output without changing context", async () => {
+  const fixture = await createFixture();
+  try {
+    const session = await fixture.store.create({ title: "output", titlePending: false, workspacePath: "C:\\repo", model });
+    const command = { id: "command-1", command: "echo hello", shell: "Bash", workspace: "C:\\repo", source: "user" as const, status: "cancelled" as const, durationMs: 123, truncated: true };
+    await fixture.store.appendTimeline(session.id, { kind: "output", text: "legacy" });
+    await fixture.store.appendTimeline(session.id, { kind: "output", text: "hello", command });
+    const loaded = await fixture.store.load(session.id);
+    assert.deepEqual(loaded.timeline, [{ kind: "output", text: "legacy" }, { kind: "output", text: "hello", command }]);
+    assert.deepEqual(loaded.context, []);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 async function createFixture() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-sessions-"));
   let id = 0;

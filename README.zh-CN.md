@@ -65,7 +65,7 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.1.22) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.23) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -112,8 +112,13 @@ TUI 命令：
 - `/model`：切换已注册模型，切换后重置对话上下文。
 - `/models`：查看所有模型和凭据状态。
 - `/status`：查看当前模型、供应商、context window 和 session token 使用量。
+- `/permissions`：选择只读、逐条审批或完全访问模式，并开关网页工具。
+- `/outputs`：浏览命令状态及保留的输出，支持分页查看详情。
+- `/history`：浏览或明确确认后清空全局输入历史，不删除 Session。
+- `/terminal-setup`：预览并可选配置稳定版 Windows Terminal 的 Shift+Enter；确认后先备份设置，再新增全局按键绑定。
 - `/new`：立即创建并进入一个新的本地 session。
 - `/resume`：查看并恢复本机 JSONL session。
+- `/resume` 后上下键浏览该会话保存的用户提问及带来源记录的直接命令，向下越过最新一条回到空输入。召回的斜杠命令在编辑前不打开候选菜单；`/history` 仍显示全局输入历史。
 - `/logout`：多选删除模型与对应系统凭据。
 - `/clear`：结束当前对话并清屏；下一次提问创建新 session，同时保留当前模型。
 - `/help`、`/exit`：显示帮助或退出。
@@ -121,7 +126,10 @@ TUI 命令：
 
 行为说明：
 
-- 模型提出的命令每次都需要确认。
+- 默认 `ask` 模式逐条确认模型 Bash；`read-only` 拒绝所有模型 Bash；`full-access` 经二次明确确认后免审批。
+- 模型可以用 `read_file` 查看工作目录内不超过 128 KiB 的 UTF-8 文件，用 `list_directory` 列出最多 500 个目录项。拒绝目录外路径和符号链接越界。文件正文会进入模型 context 和 Session 文件，请避免读取机密。
+- 权限在当前进程内跨 `/new`、`/clear`、`/resume` 保留，重启恢复逐条审批、网页工具开启；切换权限不丢失 context，恢复 JSONL 不会恢复完全访问授权。
+- 当前是应用层权限，不是 OS 沙箱。获批 Bash 仍拥有当前系统账户的文件和网络权限；关闭网页工具不限制 Bash 网络、模型 API 或直接 `!` 命令。详见 [对标与安全限制](docs/architecture/PERMISSIONS.md)。
 - 网页搜索和公共页面读取属于只读工具调用，不需要确认。搜索词会先发送给 Bing，失败时回退到 DuckDuckGo；打开搜索结果时会向对应网站发送请求。
 - 网页读取只允许公共 HTTP/HTTPS 地址，会逐次检查重定向、阻止本机和内网地址，并限制超时与响应大小；返回内容始终作为不可信数据处理。
 - 搜索可用性和结果质量取决于外部搜索服务及当前网络。联网失败会作为工具结果返回模型，由模型说明限制或尝试其他来源。
@@ -151,6 +159,8 @@ tests/unit/      # 与 src 领域对应的单元测试
 
 ## 构建与安装
 
+请使用 pnpm 从本仓库安装，以应用随源码保存的 Windows node-pty 修复补丁。GitHub Release 分发源码；作为 npm 依赖安装不会自动继承本项目的 pnpm 补丁。
+
 ```powershell
 pnpm build
 pnpm link --global
@@ -167,3 +177,7 @@ pnpm typecheck
 pnpm test
 pnpm build
 ```
+- Ctrl+C 中断正在运行的模型任务、审批等待或命令，不退出程序；空闲时有草稿则清空，输入为空则退出。
+- 在首行/末行使用上下键浏览历史并恢复草稿，斜杠菜单选择优先。终端支持时 Shift+Enter 换行；多行括号粘贴不会自动提交。Windows Terminal 无法区分 Shift+Enter 与 Enter 时，可运行 `/terminal-setup`。
+- 输入历史跨重启共享，最多 1,000 条 / 4 MiB，保存于 sessions 目录旁的 `input-history.json`。登录向导密钥不记录，但手动输入在提问或命令中的机密不会自动脱敏；清空输入历史不会删除 Session 记录。
+- 命令运行时展示末尾五行，完成后折叠长输出；`/outputs` 查看保留内容，每条 UI 记录最多 10,000 行 / 2 MiB，已截断内容不可恢复。模型 Bash 分别保留最多 1 MiB 的 stdout/stderr，不提供交互 stdin；用户直接 `!` 命令仍支持交互输入。

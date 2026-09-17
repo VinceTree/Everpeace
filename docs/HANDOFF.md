@@ -1,6 +1,31 @@
 # Session Handoff
 
-状态快照：2026-09-17。分支 `main`，网页搜索和公共页面读取能力已完成并随 v0.1.22 正式发布；工作区另有用户原有的未跟踪 `benchmark/`，本轮未改动。
+状态快照：2026-09-17。分支 `main`，准备发布 v0.1.23，包含权限管理第一阶段、终端交互改进及恢复会话 Bug 修复。用户原有未跟踪 `benchmark/`、`test-me/` 未改动且不纳入发布。
+
+## 本轮终端交互改进
+
+- 后续 Bug 修复：`/resume` 原先只恢复 transcript/context，未从会话构建输入导航；现恢复保存的用户输入和带 source=user 元数据的直接命令，并清空导航草稿。召回 `/resume` 等斜杠历史不再触发候选菜单抢占方向键，Down 到末尾回到空输入。
+- 400 缺失 tool output 的可复现路径：旧 JSONL 中断后仅有 function_call，或工具执行器抛错导致结果未追加。Agent 现幂等修复旧上下文缺失结果为 interrupted/结果未知，工具异常也返回结构化 output；不自动重跑、不改写旧 Session 文件。新增完整批次保留、旧批次修复及下一轮可用性回归。
+
+- Ctrl+C 取消活动模型请求、审批或命令；空闲时先清草稿，空输入退出。模型取消补齐待处理 function outputs，下一轮仍可使用。
+- 全局输入历史跨进程重启保存，支持上下键恢复与草稿还原；`/history` 浏览和明确确认后清理。多行粘贴不会提交，编辑状态和历史导航在 Prompt 重挂载后保留。
+- `/terminal-setup` 预览稳定版 Windows Terminal Shift+Enter 设置，明确确认后备份和修改 JSONC，拒绝冲突及过期预览。本轮没有修改用户真实终端设置。
+- 模型 Bash 与直接 `!` 使用统一紧凑命令记录：运行时末尾五行，完成后折叠；`/outputs` 分页查看保留输出。output timeline 可选 command 元数据兼容旧文件；直接命令不进入模型 context。
+- 直接 PTY 支持 Ink 转发交互输入；取消会释放输入所有权。修复 node-pty 1.1.0 Windows 控制台退出竞争和自然退出 worker/socket 泄漏，以 pnpm 补丁形式保存。
+- 新增覆盖真实 PTY 取消与 PID 结束、Read-Host 输入、下一轮 TUI 可用、输出截断和 UTF-8 边界、Session 元数据、输入历史并发写入、Shift+Enter 和粘贴、终端设置备份与冲突的测试。
+- 采用兼容性可选 output 元数据而非新增 timeline 类型；模型 Bash 非交互，用户 `!` 保留交互；Unix Bash 当前直接终止进程组。Preview/其他 Windows Terminal 安装路径不自动修改。
+- 本次 GitHub Release 分发源码，支持仓库 pnpm 安装，以应用 `patches/node-pty@1.1.0.patch`；普通 npm 下游安装不继承根项目 pnpm 补丁，本次不发布 npm 包。中英文安装说明已明确限制。
+- `.patch-node-pty/` 是本轮 pnpm 补丁工作目录；自动审批审查两次拒绝递归删除（仅返回 blocked by policy），因此保留，勿误当作产品源码提交。
+
+## 本轮权限管理
+
+- Codex 官方权限、沙箱、规则与 CLI 文档已读取；摘录、来源和实现差异见 `architecture/PERMISSIONS.md`。pi/Grok Build 尚未对标。
+- 新增 `/permissions` 独立命令窗口：默认 ask 逐条审批；read-only 禁止模型 Bash；full-access 二次确认后免审批；网页工具独立开关。
+- 新增 `read_file` 和 `list_directory`，工作目录范围校验、realpath 越界检查、UTF-8/大小/目录项上限。结果进入 context，错误返回模型。
+- 权限进程内保留，重启复位；不从 JSONL 恢复权限，不重建 Agent，不改变 Session schema。直接 `!` 保持原语义。
+- 当前仅应用层权限，未实现 OS 沙箱、Codex Auto、命令前缀授权或持久配置。获批 Bash 仍拥有宿主用户权限。路径检查不抵御恶意并发替换，详见安全限制文档。
+- 修正等待 Bash 确认时 Ctrl+C 未解除等待的问题，并在执行工具前检查取消信号。
+- 待真实 Windows Terminal 验收权限选择、完全访问确认/取消、只读文件查看、关闭联网，以及跨目录恢复后的文件根目录。
 
 ## 1. 当前目标
 
@@ -87,7 +112,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 
 ## 5. 验证结果
 
-- `pnpm test`：98/98 通过。
+- `pnpm test`：118/118 通过（含恢复输入导航、斜杠历史、旧工具上下文修复及执行异常回归）。
 - `pnpm typecheck`：通过。
 - `pnpm build`：通过。
 - `git diff --check`：通过，仅有 Windows LF/CRLF 提示。
@@ -95,6 +120,8 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - 尚未在真实 TUI 中让 `deepseek-flash` 自主完成一次 `web_search` → `web_fetch` → 带来源回答的端到端验收；工具执行器的真实网络冒烟已通过。
 
 ## 6. 下一步
+
+优先在真实 Windows Terminal 验收 Ctrl+C、上下历史、Shift+Enter（必要时通过 `/terminal-setup` 确认配置）、多行粘贴、交互 `!` 和 `/outputs`，再验收 `/permissions` 三种模式、完全访问二次确认、文件查看和网页禁用。后续对标 pi/Grok Build，并单独设计 OS 沙箱，不把当前应用层审批等同于系统隔离。
 
 1. 在真实 Windows Terminal 中运行 `pnpm dev`。
 2. 完成一次真实模型问答后执行 `/status`，确认窗口水平、垂直居中且不显示 banner、历史、Prompt 或全局状态栏，核对各状态字段，并确认 Esc 完整恢复同一个 Session。

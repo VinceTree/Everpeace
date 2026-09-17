@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { isCommandRecord, type CommandRecord } from "../tools/command-record.js";
 import {
   applyUsageSample,
   createEmptySessionUsage,
@@ -30,6 +31,7 @@ export interface SessionModelRef {
 }
 
 export interface StoredTextTimelineEntry {
+  command?: CommandRecord;
   kind: SessionTimelineKind;
   text: string;
 }
@@ -201,6 +203,7 @@ function isTimelineEntry(value: unknown): value is StoredTimelineEntry {
   return (
     isRecord(value) &&
     isTimelineKind(value.kind) &&
+    (value.command === undefined || (value.kind === "output" && isCommandRecord(value.command))) &&
     typeof value.text === "string"
   );
 }

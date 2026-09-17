@@ -15,6 +15,8 @@
 - Everpeace 是 Node.js 22+、TypeScript、ESM 项目，使用 `pnpm@10.22.0`。
 - CLI/TUI 入口位于 `src/cli/`；界面使用 React + Ink，并保持 inline terminal 模式。
 - Agent 是 Responses API 驱动的 ReAct 循环，支持需确认的 Bash、无需确认的只读网页搜索和公共网页读取。
+- `/permissions` 管理进程内应用层权限：默认 ask 逐条审批 Bash，read-only 禁用模型 Bash，full-access 经二次确认后免审批；网页工具可独立禁用。当前没有 OS 沙箱，不得声称等同于 Codex Auto。
+- `read_file`、`list_directory` 始终限定当前工作目录。权限不从 JSONL 恢复，切换权限不得重建 Agent 或丢失 context；直接 `!` 仍由用户主动执行。对标与安全限制见 `docs/architecture/PERMISSIONS.md`。
 - 支持官方供应商和兼容端点；模型名称必须保留供应商返回的官方 model ID。
 - API Key 只由 `AuthStorage` 和系统 keyring 管理，不得写入注册表 JSON、session JSONL、日志、测试快照或 UI。
 
@@ -45,6 +47,10 @@ git diff --check
 - JSONL 事件目前包括 `session_created`、`title_updated`、`timeline_entry`、`context_append`、`model_selected` 和 `usage_recorded`；改变 schema 时必须考虑向后兼容并补测试。
 
 ## TUI 与终端不变量
+
+- Ctrl+C 取消活动任务；空闲有草稿则清空，否则退出。TUI 的 PTY stdin 必须由 Ink 单一入口转发，不能同时注册原始 stdin 监听器。
+- `/outputs`、`/history`、`/terminal-setup` 都是独立命令窗口。output timeline 可带兼容性可选 command 元数据；直接 `!` 仍不进入模型 context。
+- 输入历史单独持久化，不记录登录向导字段；配置终端按键必须预览、明确确认和备份，不能静默修改用户设置。
 
 - 保持 inline TUI 和终端原生 scrollback；不要切换到 alternate screen。
 - transcript 恢复继续通过同步输出进行原子重放，避免历史被 Ink 重绘覆盖。

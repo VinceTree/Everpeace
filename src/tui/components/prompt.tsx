@@ -1,4 +1,4 @@
-import { Box, Text, useInput, useStdout } from "ink";
+import { Box, Text, useInput, usePaste, useStdout } from "ink";
 import React, { useMemo, useRef, useState } from "react";
 import {
   filterSlashCommands,
@@ -26,6 +26,10 @@ import {
 import { characterWidth, textWidth } from "../text-width.js";
 
 export interface PromptProps {
+  historyNavigationRef?: React.RefObject<{ index: number | undefined; draft: string }>;
+  editorRef?: React.RefObject<ComposerState>;
+  history?: readonly string[];
+  onEmptyInterrupt?(): void;
   activeModelName: string | undefined;
   disabled?: boolean;
   onSubmit(value: string): void;
@@ -136,9 +140,16 @@ export function Prompt({
   activeModelName,
   disabled = false,
   onSubmit,
+  history = [],
+  onEmptyInterrupt,
+  editorRef,
+  historyNavigationRef,
 }: PromptProps) {
+  const localNavigation = useRef<{ index: number | undefined; draft: string }>({ index: undefined, draft: "" });
+  const navigation = historyNavigationRef ?? localNavigation;
   const { stdout } = useStdout();
-  const stateRef = useRef<ComposerState>(createComposerState());
+  const localStateRef = useRef<ComposerState>(createComposerState());
+  const stateRef = editorRef ?? localStateRef;
   const [state, setState] = useState(stateRef.current);
   const [selectedSlashCommandIndex, setSelectedSlashCommandIndex] = useState(0);
   const [dismissedSlashCommandValue, setDismissedSlashCommandValue] = useState<
@@ -171,15 +182,23 @@ export function Prompt({
     ? matchingSlashCommands[effectiveSlashCommandIndex]
     : undefined;
 
+  usePaste((text) => updateState((current) => insertComposerText(current, text)), { isActive: !disabled });
   useInput(
     (input, key) => {
       if (key.eventType === "release") return;
+      if (key.ctrl && input === "c") {
+        if (stateRef.current.value) updateState(() => createComposerState());
+        else onEmptyInterrupt?.();
+        navigation.current.index = undefined;
+        return;
+      }
 
       if (key.return) {
         if (key.shift || key.meta || key.ctrl) {
           updateState((current) => insertComposerText(current, "\n"));
         } else {
           const submittedValue = selectedSlashCommand ?? stateRef.current.value;
+          navigation.current = { index: undefined, draft: "" };
           updateState(() => createComposerState());
           onSubmit(submittedValue);
         }
@@ -232,10 +251,30 @@ export function Prompt({
         return;
       }
       if (key.upArrow || (key.ctrl && input === "p")) {
+        const current = stateRef.current;
+        if (!Array.from(current.value).slice(0, current.cursor).includes("\n") && history.length) {
+          if (navigation.current.index === undefined) navigation.current.draft = current.value;
+          navigation.current.index = Math.max(0, (navigation.current.index ?? history.length) - 1);
+          updateState(() => createComposerState(history[navigation.current.index!]!));
+          setDismissedSlashCommandValue(history[navigation.current.index!]!);
+          return;
+        }
         updateState((current) => moveComposerVertically(current, -1));
         return;
       }
       if (key.downArrow || (key.ctrl && input === "n")) {
+        const current = stateRef.current;
+        if (navigation.current.index !== undefined && !Array.from(current.value).slice(current.cursor).includes("\n")) {
+          navigation.current.index += 1;
+          if (navigation.current.index >= history.length) {
+            navigation.current.index = undefined;
+            updateState(() => createComposerState(navigation.current.draft));
+          } else {
+            updateState(() => createComposerState(history[navigation.current.index!]!));
+            setDismissedSlashCommandValue(history[navigation.current.index!]!);
+          }
+          return;
+        }
         updateState((current) => moveComposerVertically(current, 1));
         return;
       }

@@ -1,4 +1,6 @@
 import type { AgentIO } from "../agent/react-agent.js";
+import type { CommandRecord } from "../tools/command-record.js";
+import type { InputHistoryStore } from "../storage/input-history.js";
 import type {
   RegisteredModel,
   RegisteredModelStatus,
@@ -34,6 +36,7 @@ export interface TuiModelRegistry {
 }
 
 export interface TuiDependencies {
+  inputHistory?: InputHistoryStore;
   registry: TuiModelRegistry;
   version: string;
   workspacePath: string;
@@ -50,10 +53,12 @@ export interface TuiDependencies {
     signal?: AbortSignal,
   ): Promise<string>;
   changeWorkspace(workspacePath: string): Promise<string>;
-  runBash(command: string): Promise<BashResult>;
+  runBash(command: string, signal?: AbortSignal, onOutput?: (output: string) => void): Promise<BashResult>;
   runTerminalCommand(
     command: string,
     onOutput?: (output: string) => void,
+    signal?: AbortSignal,
+    onInputReady?: (write: ((input: string) => void) | undefined) => void,
   ): Promise<BashResult>;
 }
 
@@ -66,6 +71,7 @@ export type HistoryKind =
   | "error";
 
 export interface HistoryEntry {
+  command?: CommandRecord;
   id: number;
   kind: HistoryKind;
   text: string;

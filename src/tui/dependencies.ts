@@ -7,6 +7,7 @@ import {
 } from "../providers/openai-compatible.js";
 import type { RegisteredModel } from "../storage/model-registry.js";
 import { SessionStore } from "../storage/session-store.js";
+import { InputHistory } from "../storage/input-history.js";
 import { runBash } from "../tools/bash.js";
 import { runTerminalCommand } from "../tools/terminal.js";
 import type { TuiDependencies, TuiModelRegistry } from "./types.js";
@@ -44,11 +45,13 @@ export function createDefaultTuiDependencies(
     version: packageVersion(),
     workspacePath: process.cwd(),
     sessionStore,
+    inputHistory: new InputHistory(),
     async listModels(baseUrl, apiKey, signal) {
       return listOfficialModelIds(createProviderClient(baseUrl, apiKey), signal);
     },
     createAgent(model: RegisteredModel, io: AgentIO, restore) {
       return new ReactAgent({
+        workspacePath: process.cwd(),
         client: createProviderClient(
           model.base_url,
           model.api_key,
@@ -90,12 +93,14 @@ export function createDefaultTuiDependencies(
       process.chdir(workspacePath);
       return process.cwd();
     },
-    runBash(command) {
-      return runBash(command);
+    runBash(command, signal, onOutput) {
+      return runBash(command, { streamOutput: false, ...(signal ? { signal } : {}), ...(onOutput ? { onOutput } : {}) });
     },
-    runTerminalCommand(command, onOutput) {
+    runTerminalCommand(command, onOutput, signal, onInputReady) {
       return runTerminalCommand(command, {
         streamOutput: false,
+        ...(signal ? { signal } : {}),
+        ...(onInputReady ? { onInputReady } : {}),
         ...(onOutput === undefined ? {} : { onOutput }),
       });
     },

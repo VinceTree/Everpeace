@@ -241,6 +241,47 @@ function createFixture(options?: {
   return { dependencies, registry, sessionStore };
 }
 
+test("Ctrl+C cancels direct commands, retains details, and accepts the next input", async () => {
+  const model: RegisteredModel = { id: "cancel-model", model_name: "test", base_url: "https://example.com/v1", api_key: "secret" };
+  const fixture = createFixture({ initial: [model] });
+  let cancelled = false;
+  fixture.dependencies.runTerminalCommand = async (_command, onOutput, signal) => {
+    onOutput?.(Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n"));
+    await new Promise<void>((resolve) => signal?.addEventListener("abort", () => { cancelled = true; resolve(); }, { once: true }));
+    return { stdout: Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n"), stderr: "", exitCode: 1, signal: null, cancelled: true };
+  };
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await tick();
+    view.stdin.write("!long-command");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Running"));
+    assert.doesNotMatch(view.lastFrame() ?? "", /line 0\n/);
+    view.stdin.write("\u0003");
+    await waitFor(() => cancelled && (view.lastFrame() ?? "").includes("Ask Everpeace"));
+    assert.match(view.lastFrame() ?? "", /cancelled/);
+    assert.match(view.lastFrame() ?? "", /\/outputs/);
+    view.stdin.write("/outputs");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Esc 返回 Session"));
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => lastBorderedSurface(view.lastFrame() ?? "").includes("line 0"));
+    view.stdin.write("\u001b");
+    await waitFor(() => !lastBorderedSurface(view.lastFrame() ?? "").includes("line 0"));
+    view.stdin.write("\u001b");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
+    view.stdin.write("next turn");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("echo: next turn"));
+  } finally {
+    view.unmount();
+  }
+});
+
 test("TUI accepts chat and renders the assistant response", async () => {
   const model: RegisteredModel = {
     id: "model-1",
@@ -535,6 +576,7 @@ test("slash command surfaces close back to chat while direct commands remain per
     "user",
     "assistant",
     "tool",
+    "output",
     "system",
   ]);
   view.unmount();
@@ -790,7 +832,7 @@ test("slash command menu filters commands and scrolls an eight-item window", asy
   await tick();
   assert.deepEqual(
     visibleSlashCommandLines(view.lastFrame() ?? ""),
-    SLASH_COMMANDS.slice(2),
+    SLASH_COMMANDS.slice(2, 10),
   );
 
   view.stdin.write("MO");
@@ -1413,6 +1455,11 @@ test("/resume restores transcript, workspace, context, and continues the same se
     { type: "message", role: "assistant", content: "old answer" },
   ]);
 
+  view.stdin.write("\u001b[A");
+  await waitFor(() => !(view.lastFrame() ?? "").includes("Ask Everpeace"));
+  assert.match((view.lastFrame() ?? "").split("\n").filter((line) => line.trimStart().startsWith("›")).at(-1) ?? "", /before restart/);
+  view.stdin.write("\u001b[B");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
   view.stdin.write("continue now");
   await tick();
   view.stdin.write("\r");
@@ -1576,3 +1623,29 @@ function toSessionModelForTest(model: RegisteredModel): SessionModelRef {
     base_url: model.base_url,
   };
 }
+
+test("/permissions is transient and changes the live policy without rebuilding the agent", async () => {
+  const model: RegisteredModel = { id: "permissions-model", model_name: "test", base_url: "https://example.com/v1", api_key: "secret" };
+  let io: AgentIO | undefined;
+  let created = 0;
+  const fixture = createFixture({ initial: [model], createAgent: (_model, agentIo) => {
+    io = agentIo;
+    created++;
+    return { async runTurn() {} };
+  } });
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+  await tick();
+  const before = created;
+  assert.equal(io?.getPermissions?.().mode, "ask");
+  view.stdin.write("/permissions");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("OS sandbox: unavailable"));
+  assert.doesNotMatch(lastBorderedSurface(view.lastFrame() ?? ""), /Ask Everpeace/);
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => io?.getPermissions?.().mode === "read-only");
+  assert.equal(created, before);
+  assert.equal(fixture.sessionStore.sessions.size, 0);
+  view.unmount();
+});

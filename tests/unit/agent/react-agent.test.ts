@@ -6,10 +6,99 @@ import {
   type ResponsesClientLike,
 } from "../../../src/agent/react-agent.js";
 import type { BashResult } from "../../../src/tools/bash.js";
+import type { PermissionPolicy } from "../../../src/permissions/policy.js";
 
 function bashResult(stdout: string): BashResult {
   return { stdout, stderr: "", exitCode: 0, signal: null };
 }
+
+test("resumed missing outputs and thrown tool executors cannot poison subsequent requests", async () => {
+  let requests = 0;
+  const persisted: Record<string, unknown>[] = [];
+  const agent = new ReactAgent({
+    model: "test",
+    initialHistory: [{ type: "function_call", call_id: "old", name: "bash", arguments: "{}" }],
+    client: { responses: { async create(params) {
+      const input = params.input as Record<string, unknown>[];
+      assert.ok(input.some((item) => item.type === "function_call_output" && item.call_id === "old"));
+      if (++requests === 1) return { id: "tool", output_text: "", output: [{ type: "function_call", name: "bash", call_id: "new", arguments: '{"command":"pwd"}' }] };
+      assert.ok(input.some((item) => item.call_id === "new" && String(item.output).includes("executor failed")));
+      return { id: "done", output_text: "done", output: [] };
+    } } },
+    io: { async confirmBash() { return true; }, async runBash() { throw new Error("executor failed"); }, writeAssistant() {} },
+    async onHistoryAppend(items) { persisted.push(...items); },
+  });
+  await agent.runTurn("continue");
+  await agent.runTurn("again");
+  assert.equal(requests, 3);
+  assert.ok(persisted.some((item) => item.type === "function_call_output" && item.call_id === "new"));
+});
+
+test("cancellation closes pending function calls and the next turn remains usable", async () => {
+  const controller = new AbortController();
+  let requests = 0;
+  const batches: Array<readonly Record<string, unknown>[]> = [];
+  const agent = new ReactAgent({
+    model: "test",
+    client: { responses: { async create(params) {
+      requests++;
+      if (requests === 1) return { id: "tool", output_text: "", output: [
+        { type: "function_call", name: "bash", call_id: "cancel-1", arguments: '{"command":"sleep 60"}' },
+        { type: "function_call", name: "bash", call_id: "cancel-2", arguments: '{"command":"echo never"}' },
+      ] };
+      const history = params.input as Array<Record<string, unknown>>;
+      const results = history.filter((entry) => entry.type === "function_call_output");
+      assert.equal(results.length, 2);
+      assert.ok(results.every((entry) => String(entry.output).includes("cancelled")));
+      return { id: "done", output_text: "ready", output: [] };
+    } } },
+    io: {
+      async confirmBash() { return true; },
+      async runBash(_command, signal) { assert.equal(signal, controller.signal); controller.abort(); return { ...bashResult("partial"), cancelled: true }; },
+      writeAssistant() {},
+    },
+    async onHistoryAppend(items) { batches.push(items); },
+  });
+  await assert.rejects(agent.runTurn("run", controller.signal), /abort/i);
+  assert.equal(requests, 1);
+  assert.equal(batches.at(-1)?.length, 2);
+  await agent.runTurn("continue");
+  assert.equal(requests, 2);
+});
+
+test("permissions are checked at execution time and changing policy retains agent context", async () => {
+  let policy: PermissionPolicy = { mode: "read-only", web: false };
+  let ran = 0;
+  let requests = 0;
+  const outputs: string[] = [];
+  const agent = new ReactAgent({
+    model: "test",
+    client: { responses: { async create(params) {
+      requests++;
+      if (requests % 2 === 1) return { id: "tool", output_text: "", output: [
+        { type: "function_call", name: "bash", arguments: '{"command":"pwd"}', call_id: `bash-${requests}` },
+        { type: "function_call", name: "web_search", arguments: '{"query":"test"}', call_id: `web-${requests}` },
+      ] };
+      const history = params.input as Array<Record<string, unknown>>;
+      outputs.push(...history.filter((item) => item.type === "function_call_output").map((item) => String(item.output)));
+      if (requests === 4) assert.equal(history.filter((item) => item.role === "user").length, 2);
+      return { id: "done", output_text: "done", output: [] };
+    } } },
+    io: {
+      getPermissions: () => policy,
+      async confirmBash() { throw new Error("Must not prompt"); },
+      async runBash() { ran++; return bashResult("ok"); },
+      writeAssistant() {},
+    },
+    web: { async search() { throw new Error("Must not search"); }, async fetch() { throw new Error("Must not fetch"); } },
+  });
+  await agent.runTurn("inspect");
+  assert.equal(ran, 0);
+  assert.ok(outputs.every((output) => output.includes("denied")));
+  policy = { mode: "full-access", web: false };
+  await agent.runTurn("continue");
+  assert.equal(ran, 1);
+});
 
 test("agent returns a final answer without running Bash", async () => {
   const requests: Array<Record<string, unknown>> = [];
@@ -218,6 +307,8 @@ test("agent searches the web without requesting Bash confirmation", async () => 
     "bash",
     "web_search",
     "web_fetch",
+    "read_file",
+    "list_directory",
   ]);
   const history = requests[1]?.input as Array<Record<string, unknown>>;
   const toolOutput = history.find((item) => item.type === "function_call_output");

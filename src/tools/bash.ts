@@ -1,6 +1,10 @@
 import { spawn } from "node:child_process";
+import { stopProcessTree } from "./process-cancel.js";
+import { retainOutput } from "./command-record.js";
 
 export interface BashResult {
+  truncated?: boolean;
+  cancelled?: boolean;
   stdout: string;
   stderr: string;
   exitCode: number | null;
@@ -9,6 +13,8 @@ export interface BashResult {
 }
 
 export interface BashOptions {
+  signal?: AbortSignal;
+  onOutput?(output: string): void;
   bashPath?: string;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -65,6 +71,7 @@ export function serializeBashResult(result: BashResult): string {
     stderr: result.stderr,
     exit_code: result.exitCode,
     signal: result.signal,
+    ...(result.truncated ? { truncated: true } : {}),
     ...(result.error === undefined ? {} : { error: result.error }),
   });
 }
@@ -83,23 +90,32 @@ export function runBash(
   const terminal = options.terminal ?? false;
 
   return new Promise((resolve) => {
+    if (options.signal?.aborted) { resolve({ stdout: "", stderr: "", exitCode: null, signal: null, cancelled: true }); return; }
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let truncated = false;
+    let previewTimer: ReturnType<typeof setTimeout> | undefined;
+    const preview = () => {
+      if (!options.onOutput || previewTimer) return;
+      previewTimer = setTimeout(() => { previewTimer = undefined; options.onOutput?.(stdout + stderr); }, 80);
+    };
 
     const finish = (result: BashResult): void => {
       if (settled) return;
       settled = true;
+      if (previewTimer) clearTimeout(previewTimer);
       resolve(result);
     };
 
     let child;
     try {
       child = spawn(bashPath, ["-c", command], {
+        detached: process.platform !== "win32",
         cwd: options.cwd ?? process.cwd(),
         env,
         shell: false,
-        stdio: terminal ? "inherit" : ["inherit", "pipe", "pipe"],
+        stdio: terminal ? "inherit" : ["ignore", "pipe", "pipe"],
         windowsHide: true,
       });
     } catch (error) {
@@ -109,10 +125,18 @@ export function runBash(
       return;
     }
 
+    const cancel = () => { if (child.pid) stopProcessTree(child.pid); };
+    options.signal?.addEventListener("abort", cancel, { once: true });
+    if (options.signal?.aborted) cancel();
+
     if (child.stdout) {
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (chunk: string) => {
         stdout += chunk;
+        const retained = retainOutput(stdout, 1024 * 1024);
+        stdout = retained.text;
+        truncated ||= retained.truncated;
+        preview();
         if (streamOutput) process.stdout.write(chunk);
       });
     }
@@ -121,18 +145,26 @@ export function runBash(
       child.stderr.setEncoding("utf8");
       child.stderr.on("data", (chunk: string) => {
         stderr += chunk;
+        const retained = retainOutput(stderr, 1024 * 1024);
+        stderr = retained.text;
+        truncated ||= retained.truncated;
+        preview();
         if (streamOutput) process.stderr.write(chunk);
       });
     }
 
     child.on("error", (error) => {
+      options.signal?.removeEventListener("abort", cancel);
       const message = error.message;
       if (streamOutput) process.stderr.write(`Failed to start Bash: ${message}\n`);
       finish({ stdout, stderr, exitCode: null, signal: null, error: message });
     });
 
     child.on("close", (exitCode, signal) => {
-      finish({ stdout, stderr, exitCode, signal });
+      options.signal?.removeEventListener("abort", cancel);
+      const out = retainOutput(stdout);
+      const err = retainOutput(stderr);
+      finish({ stdout: out.text, stderr: err.text, exitCode, signal, truncated: truncated || out.truncated || err.truncated, cancelled: options.signal?.aborted ?? false });
     });
   });
 }

@@ -6,7 +6,31 @@ import {
   renderTerminalOutput,
   resetTerminalModes,
   resolveTerminalInvocation,
+  runTerminalCommand,
 } from "../../../src/tools/terminal.js";
+
+test("PTY cancellation terminates a long command without closing the parent", { timeout: 15000 }, async () => {
+  const controller = new AbortController();
+  const command = process.platform === "win32" ? 'Write-Output "pid:$PID ready"; Start-Sleep -Seconds 60' : 'echo "pid:$$ ready"; sleep 60';
+  const result = await runTerminalCommand(command, { streamOutput: false, signal: controller.signal, onInputReady() {}, onOutput: (text) => { if (text.includes("ready")) controller.abort(); } });
+  assert.equal(result.cancelled, true);
+  const pid = Number(/pid:(\d+)/.exec(result.stdout)?.[1]);
+  assert.ok(pid > 0);
+  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+});
+
+test("interactive PTY accepts routed input and cleans up its input owner", { timeout: 15000 }, async () => {
+  let write: ((input: string) => void) | undefined;
+  let submitted = false;
+  const result = await runTerminalCommand(process.platform === "win32" ? '$answer = Read-Host "answer"; Write-Output "received:$answer"' : 'printf "answer:"; read answer; echo "received:$answer"', {
+    streamOutput: false,
+    onInputReady(input) { write = input; },
+    onOutput(text) { if (!submitted && text.includes("answer")) { submitted = true; write?.("yes\r"); } },
+  });
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /received:yes/);
+  assert.equal(write, undefined);
+});
 
 test("terminal mode reset disables focus reporting and Windows input mode", () => {
   let windowsOutput = "";

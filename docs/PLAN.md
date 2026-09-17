@@ -4,6 +4,10 @@
 
 ## 当前目标
 
+完成终端交互改进：Ctrl+C 取消、跨重启输入历史、Shift+Enter 配置、统一紧凑命令输出与 `/outputs`。不新增 OS 沙箱，也不实现 Ctrl+R、任务队列或外部编辑器。
+
+权限管理第一阶段：Codex 官方文档摘录与对标、`/permissions`、模型工作目录文件查看和工具运行时审批。见 `architecture/PERMISSIONS.md`。本轮不宣称实现 OS 沙箱；pi/Grok Build 后续再比较。
+
 提供可持久化、可恢复、可继续对话的本地 Session：
 
 - 每个 session 使用独立 JSONL 文件保存可见 transcript 和模型 context。
@@ -15,6 +19,19 @@
 - 为 DeepSeek、OpenAI 和自定义兼容端点提供普通 function call 形式的网页搜索和公共页面读取，使模型可以回答依赖最新网络信息的问题。
 
 ## 已完成
+
+- [x] `/resume` 从会话恢复输入导航并清空草稿，召回斜杠命令不抢占方向键。
+- [x] 修复恢复上下文中的缺失工具结果；工具异常返回结构化结果，避免后续请求出现缺失 output 的 400。
+
+- [x] Ctrl+C 取消模型请求、审批等待和运行命令；取消后的工具调用补齐结果，下一轮可继续。
+- [x] 全局输入历史、上下键草稿恢复、多行粘贴和 `/history` 清理。
+- [x] `/terminal-setup` 显式确认、JSONC 保留、冲突拒绝、备份及过期预览检查。
+- [x] 运行时尾部预览、完成后折叠、`/outputs` 分页详情与可恢复命令元数据。
+- [ ] 真实 Windows Terminal 手动验收键位、复制、缩放、resize 和带凭据模型的完整流程。
+
+- [x] 应用层 ask/read-only/full-access 模式，完全访问二次确认，网页工具独立开关。
+- [x] `read_file` / `list_directory` 路径校验、内容上限、结构化失败返回。
+- [x] 权限独立窗口；切换不清空 context、不向 JSONL 写入授权。
 
 - [x] SessionStore、跨平台存储路径、串行追加和损坏文件隔离。
 - [x] Agent context 导入及增量持久化。

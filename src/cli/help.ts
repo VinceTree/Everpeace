@@ -12,12 +12,16 @@ Commands inside the agent:
   /model                    Switch the active model
   /models                   List registered models
   /status                   Show model, context, and token usage
+  /permissions              Manage file access, Bash approvals, and web tools
   /new                      Create and enter a new session
   /resume                   List and resume local sessions
   /logout                   Remove models and credentials
   /clear                    Start a fresh session on the next prompt
   /help                     Show this help
   /exit                     Exit Everpeace
+  /outputs                  Browse retained command output
+  /history                  Browse or clear global input history
+  /terminal-setup           Configure Windows Terminal Shift+Enter
 
 Environment:
   EVERPEACE_BASH_PATH       Bash executable path (default: bash from PATH)`;

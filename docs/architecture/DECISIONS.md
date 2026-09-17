@@ -2,6 +2,10 @@
 
 状态快照：2026-09-17。
 
+## 权限管理
+
+权限第一阶段详见 [PERMISSIONS.md](./PERMISSIONS.md)：`/permissions` 默认逐条审批 Bash；只读模式拒绝所有模型 Bash；完全访问经二次确认后免审批。文件工具始终限定工作目录，网页工具独立开关。权限仅存在当前进程，跨 new/clear/resume 保留，重启恢复默认，不从 JSONL 恢复；变更权限不重建 Agent 或丢失 context。这是应用层权限，不是 OS 沙箱。直接 `!` 保持原语义。
+
 ## Session 持久化
 
 - 每个 session 使用一个版本化 JSONL 文件，存放于平台应用状态目录；API Key 仍只进入系统 keyring。
@@ -59,6 +63,18 @@
 - 搜索页和目标页都有限时及响应体上限；页面正文最多向模型返回 30,000 字符。网络、解析和页面错误序列化为 function output，让模型可以解释失败或换用其他来源。
 - 网页内容是提示注入边界之外的不可信数据；系统指令要求模型不得执行网页中的指令，并在最终回答中列出实际采用的来源 URL。
 - 搜索和页面读取无需 Bash 确认，简短工具动作写入可恢复 timeline；完整 function call/output 继续按既有规则写入 Responses context。
+
+## 任务取消与输入输出
+
+- `/resume` 的输入导航从所选 timeline 中的 user 条目及 source=user 的命令输出恢复，不依赖新增全局历史文件；不将模型命令混入用户输入。不带来源的旧 tool 条目不能可靠区分用户与模型，故不推断。恢复成功清空草稿和导航索引，`/new`、`/clear` 回到全局输入导航。召回斜杠命令不自动打开候选菜单，编辑后恢复正常筛选。
+- Agent 构造及每轮开始时修复不完整 function call/output 配对：在后续用户消息前补 interrupted/结果未知，不重新执行工具，不伪造成功。修复仅用于内存请求上下文，不重写旧 JSONL；再次恢复会幂等修复。工具执行异常转为错误 output，取消仍停止整轮。
+
+- Ctrl+C 优先取消活动任务（含审批和子进程）；空闲有草稿时清空，否则退出。模型取消时为剩余 function calls 追加取消结果后停止，不留下未匹配调用。
+- Ink 独占 TUI stdin，通过 writer 将输入转发给直接 `!` PTY；模型 Bash 使用非交互管道。Windows Bash 取消使用 taskkill 进程树；PTY 先发送 ETX，500ms 后通过 node-pty 关闭。Unix Bash 当前使用进程组强制终止，PTY 先 ETX 后强制终止。
+- 输入历史独立于 Session 和模型 context，保存于 state 目录 input-history.json；保留最近 1,000 条、4 MiB，临时文件原子替换及跨进程文件锁。只记录主输入区提交，不记录登录向导字段；用户手输机密不自动脱敏。
+- output timeline 增加可选 command 元数据而不新增事件类型，兼容旧无元数据输出。运行时末尾五行，完成超过六行时展示前二后四；/outputs 在独立窗口分页查看保留输出，不能找回超限截断内容。
+- /terminal-setup 仅支持已识别的稳定版 Windows Terminal 设置路径。用户确认后备份并追加 Shift+Enter sendInput LF，不覆盖已有绑定；提示全局影响。Preview/其他安装布局暂不自动配置。
+- pnpm 对 node-pty 1.1.0 应用局部补丁：处理关闭控制台时进程枚举竞争，并在自然退出后释放输入 socket 和 conout worker。使用 pnpm 安装本仓库以应用补丁；发布前需另验打包安装，普通 npm 下游安装不会自动继承根项目 pnpm 补丁。
 
 ## 维护约束
 

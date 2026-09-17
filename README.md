@@ -65,7 +65,7 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.1.22) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.23) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -112,8 +112,13 @@ TUI commands:
 - `/model`: Switch to a registered model and reset the conversation context.
 - `/models`: List all registered models and credential states.
 - `/status`: Show the current model, provider, context window, and session token usage.
+- `/permissions`: Select read-only, ask-for-approval, or full-access mode and toggle web tools.
+- `/outputs`: Browse retained command output, with paged details and completion status.
+- `/history`: Browse or explicitly clear global input history (not sessions).
+- `/terminal-setup`: Preview and optionally configure Shift+Enter in stable Windows Terminal; confirmation creates a settings backup before applying a global key binding.
 - `/new`: Immediately create and enter a new local session.
 - `/resume`: List and resume local JSONL sessions.
+- After `/resume`, Up/Down browse that session's saved user prompts and direct commands with source metadata; Down past the newest entry returns to an empty draft. Recalled slash commands do not open the command menu until edited. `/history` still shows global input history.
 - `/logout`: Select and remove models with their operating system credentials.
 - `/clear`: End the current conversation and start a fresh session on the next prompt while retaining the active model.
 - `/help`, `/exit`: Show help or exit Everpeace.
@@ -121,7 +126,10 @@ TUI commands:
 
 Behavior notes:
 
-- Every command requested by the model requires confirmation.
+- Model Bash requires confirmation by default (`ask`). `read-only` denies all model Bash; `full-access` skips approvals after a second explicit confirmation.
+- `read_file` reads workspace UTF-8 files up to 128 KiB; `list_directory` lists up to 500 entries. Outside paths and resolved symlink escapes are rejected. File contents enter model context and persisted session data; avoid reading secrets.
+- Permissions last for this process across `/new`, `/clear`, and `/resume`; restarting resets to `ask` with web tools enabled. Changing permissions preserves context; JSONL never restores full access.
+- This is application-level permission management, not an OS sandbox. Approved Bash can access files and networks with your account permissions. Disabling web tools does not restrict shell networking, model API calls, or direct user commands. See [design and limits](docs/architecture/PERMISSIONS.md).
 - Web search and public page reads are read-only tool calls and do not require confirmation. Search queries are sent to Bing, with DuckDuckGo as a fallback; opening a result sends a request to that site.
 - Web page reads allow only public HTTP/HTTPS targets, validate redirects, block local/private network addresses, apply time and response-size limits, and treat returned content as untrusted data.
 - Search availability and result quality depend on the external search services and the current network connection. A failed web request is returned to the model so it can explain the limitation or try another source.
@@ -151,6 +159,8 @@ tests/unit/      # Unit tests organized by source domain
 
 ## Build and install
 
+Install from this repository with pnpm so the checked-in Windows node-pty fixes are applied. The GitHub Release distributes source; installing this project as an npm dependency does not inherit its pnpm patches.
+
 ```powershell
 pnpm build
 pnpm link --global
@@ -167,3 +177,7 @@ pnpm typecheck
 pnpm test
 pnpm build
 ```
+- Ctrl+C cancels the active model turn, approval wait, or shell command without exiting. When idle, it clears a nonempty draft; with an empty draft it exits.
+- Up/Down browse previous input at the first/last line and restore the current draft. Slash-menu selection takes precedence. Modified Enter inserts a newline when supported; multiline bracketed paste never submits automatically. Windows Terminal may require `/terminal-setup` to distinguish Shift+Enter from Enter.
+- Input history is shared across restarts: up to 1,000 entries / 4 MiB in `input-history.json` next to the sessions directory. Login wizard secrets are excluded, but manually typed secrets in prompts or commands are not automatically redacted. Clearing history does not remove session records.
+- Running shell output shows the last five rows; completed output shows a compact summary. `/outputs` displays retained output (up to 10,000 lines / 2 MiB per UI record); truncated data cannot be recovered there. Model Bash captures stdout/stderr separately, up to 1 MiB each, and has no interactive stdin. Direct `!` commands retain interactive input.

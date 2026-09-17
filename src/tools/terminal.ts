@@ -1,6 +1,8 @@
 import { spawn as spawnPty } from "node-pty";
 import xtermHeadless from "@xterm/headless";
 import type { BashResult } from "./bash.js";
+import { stopProcessTree } from "./process-cancel.js";
+import { retainOutput } from "./command-record.js";
 
 const MAX_CAPTURED_OUTPUT = 2 * 1024 * 1024;
 const MAX_SCROLLBACK_LINES = 10_000;
@@ -24,6 +26,8 @@ export function resetTerminalModes(
 }
 
 export interface TerminalCommandOptions {
+  onInputReady?(write: ((input: string) => void) | undefined): void;
+  signal?: AbortSignal;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
@@ -84,6 +88,7 @@ export function runTerminalCommand(
     : undefined;
 
   return new Promise((resolve) => {
+    if (options.signal?.aborted) { previewTerminal?.dispose(); resolve({ stdout: "", stderr: "", exitCode: null, signal: null, cancelled: true }); return; }
     let captured = "";
     let truncated = false;
     let previewTimer: ReturnType<typeof setTimeout> | undefined;
@@ -95,7 +100,9 @@ export function runTerminalCommand(
         clearTimeout(previewTimer);
         previewTimer = undefined;
       }
-      const rendered = readTerminalOutput(previewTerminal);
+      const retained = retainOutput(readTerminalOutput(previewTerminal));
+      truncated ||= retained.truncated || previewTerminal.buffer.active.length >= MAX_SCROLLBACK_LINES;
+      const rendered = retained.text;
       if (rendered && (force || rendered !== lastPreview)) {
         lastPreview = rendered;
         onOutput(rendered);
@@ -111,7 +118,7 @@ export function runTerminalCommand(
     const finish = (exitCode: number): void => {
       const resolveWithOutput = (output: string): void => {
         const finalOutput = truncated
-          ? `${output}\n[terminal output truncated after ${MAX_CAPTURED_OUTPUT} characters]`
+          ? `${output}\n[terminal output truncated; retained output only]`
           : output;
         if (onOutput && finalOutput && finalOutput !== lastPreview) {
           lastPreview = finalOutput;
@@ -123,6 +130,8 @@ export function runTerminalCommand(
           stderr: "",
           exitCode,
           signal: null,
+          cancelled: options.signal?.aborted ?? false,
+          truncated,
         });
       };
 
@@ -157,25 +166,39 @@ export function runTerminalCommand(
 
     const wasRaw = stdin.isRaw;
     const wasPaused = stdin.readableFlowing === false;
-    const forwardInput = (data: string | Buffer): void => child.write(data);
+    const forwardInput = (data: string | Buffer): void => {
+      const input = data.toString();
+      if (!input.includes("\u0003") && !options.signal?.aborted) child.write(input);
+    };
+    options.onInputReady?.((input) => { if (!options.signal?.aborted) child.write(input); });
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const cancel = () => {
+      child.write("\u0003");
+      killTimer = setTimeout(() => {
+        if (platform !== "win32") stopProcessTree(child.pid);
+        child.kill();
+      }, 500);
+    };
+    options.signal?.addEventListener("abort", cancel, { once: true });
+    if (options.signal?.aborted) cancel();
 
     try {
-      if (stdin.isTTY && typeof stdin.setRawMode === "function") stdin.setRawMode(true);
-      stdin.resume();
-      stdin.on("data", forwardInput);
+      if (!options.onInputReady) {
+        if (stdin.isTTY && typeof stdin.setRawMode === "function") stdin.setRawMode(true);
+        stdin.resume();
+        stdin.on("data", forwardInput);
+      }
     } catch {
       // The command can still run when stdin cannot be switched to raw mode.
     }
 
     const dataSubscription = child.onData((data) => {
+      if (previewTerminal) previewTerminal.write(data, schedulePreview);
       if (streamOutput) stdout.write(data);
       if (captured.length < MAX_CAPTURED_OUTPUT) {
         const remaining = MAX_CAPTURED_OUTPUT - captured.length;
         const accepted = data.slice(0, remaining);
         captured += accepted;
-        if (previewTerminal && accepted) {
-          previewTerminal.write(accepted, schedulePreview);
-        }
         if (data.length > remaining) truncated = true;
       } else {
         truncated = true;
@@ -183,13 +206,16 @@ export function runTerminalCommand(
     });
 
     child.onExit(({ exitCode }) => {
+      if (killTimer) clearTimeout(killTimer);
+      options.signal?.removeEventListener("abort", cancel);
       dataSubscription.dispose();
       stdin.off("data", forwardInput);
+      options.onInputReady?.(undefined);
       try {
-        if (stdin.isTTY && typeof stdin.setRawMode === "function") {
+        if (!options.onInputReady && stdin.isTTY && typeof stdin.setRawMode === "function") {
           stdin.setRawMode(wasRaw ?? false);
         }
-        if (wasPaused) stdin.pause();
+        if (!options.onInputReady && wasPaused) stdin.pause();
       } catch {
         // Ink reclaims stdin after terminal suspension even if restoration fails.
       }

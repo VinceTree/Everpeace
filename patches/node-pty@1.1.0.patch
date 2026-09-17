@@ -1,0 +1,62 @@
+diff --git a/lib/conpty_console_list_agent.js b/lib/conpty_console_list_agent.js
+index 8c4fca9022a6d6f015bca87f61625cde2278f428..70a1a971a8475083353ea5ee4146127e2f420774 100644
+--- a/lib/conpty_console_list_agent.js
++++ b/lib/conpty_console_list_agent.js
+@@ -10,7 +10,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
+ var utils_1 = require("./utils");
+ var getConsoleProcessList = utils_1.loadNativeModule('conpty_console_list').module.getConsoleProcessList;
+ var shellPid = parseInt(process.argv[2], 10);
+-var consoleProcessList = getConsoleProcessList(shellPid);
++// The shell can exit between cancellation and attaching this helper.
++var consoleProcessList = [];
++try {
++    consoleProcessList = getConsoleProcessList(shellPid);
++}
++catch (error) {
++    // A closed console has no remaining attached processes to report.
++}
+ process.send({ consoleProcessList: consoleProcessList });
+ process.exit(0);
+ //# sourceMappingURL=conpty_console_list_agent.js.map
+diff --git a/lib/windowsPtyAgent.js b/lib/windowsPtyAgent.js
+index a358ffb177357e177661033c1b092f9c9d0e5f5a..31d9f8cfec378d19d80c5ba715240ce71243ca94 100644
+--- a/lib/windowsPtyAgent.js
++++ b/lib/windowsPtyAgent.js
+@@ -243,6 +243,8 @@ var WindowsPtyAgent = /** @class */ (function () {
+         this._inSocket.readable = false;
+         this._outSocket.readable = false;
+         this._outSocket.destroy();
++        this._inSocket.destroy();
++        this._conoutSocketWorker.dispose();
+     };
+     return WindowsPtyAgent;
+ }());
+diff --git a/src/conpty_console_list_agent.ts b/src/conpty_console_list_agent.ts
+index 181ccabbbe9c4948a9725fb1db907a68e9de01fc..49b8bf020c4365e155fe2da448aafb850275af70 100644
+--- a/src/conpty_console_list_agent.ts
++++ b/src/conpty_console_list_agent.ts
+@@ -11,5 +11,11 @@ import { loadNativeModule } from './utils';
+ const getConsoleProcessList = loadNativeModule('conpty_console_list').module.getConsoleProcessList;
+ const shellPid = parseInt(process.argv[2], 10);
+-const consoleProcessList = getConsoleProcessList(shellPid);
++// The shell can exit between cancellation and attaching this helper.
++let consoleProcessList: number[] = [];
++try {
++  consoleProcessList = getConsoleProcessList(shellPid);
++} catch {
++  // A closed console has no remaining attached processes to report.
++}
+ process.send!({ consoleProcessList });
+ process.exit(0);
+diff --git a/src/windowsPtyAgent.ts b/src/windowsPtyAgent.ts
+index d7054449516f0c9a62af351c2caa17331206d530..31958af764e518ec72263a245b92b1f3a534ad57 100644
+--- a/src/windowsPtyAgent.ts
++++ b/src/windowsPtyAgent.ts
+@@ -246,5 +246,7 @@ export class WindowsPtyAgent {
+     this._inSocket.readable = false;
+     this._outSocket.readable = false;
+     this._outSocket.destroy();
++    this._inSocket.destroy();
++    this._conoutSocketWorker.dispose();
+   }
+ }
