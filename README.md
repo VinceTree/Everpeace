@@ -64,7 +64,7 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.1.20) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.21) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
