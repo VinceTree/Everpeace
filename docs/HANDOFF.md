@@ -1,6 +1,14 @@
 # Session Handoff
 
-状态快照：2026-09-17。分支 `main`，准备发布 v0.1.23，包含权限管理第一阶段、终端交互改进及恢复会话 Bug 修复。用户原有未跟踪 `benchmark/`、`test-me/` 未改动且不纳入发布。
+状态快照：2026-09-17。分支 `main`，v0.1.23 已发布，包含权限管理第一阶段、终端交互改进及恢复会话 Bug 修复。用户原有未跟踪 `benchmark/`、`test-me/` 未改动且不纳入发布。
+
+## 最新发布
+
+- 发布提交 `524dc453ec9e2f880630bcf10433db923293b5a0` 已推送至 `origin/main`。
+- Release workflow `35229886201` 已完成且 conclusion 为 `success`；`v0.1.23` GitHub Release 已发布，draft/prerelease 均为 false。
+- Release: https://github.com/VinceTree/Everpeace/releases/tag/v0.1.23
+- 发布前冻结锁文件安装、118 项测试、typecheck、build 通过；暂存 diff 检查发现补丁上下文空白后已调整补丁 hunk 并重建锁文件，复验 Windows PTY 六项测试及暂存 diff 检查通过。
+- 仅发布 GitHub 源码，不发布 npm 包；保留 pnpm 补丁安装要求和真实终端手动验收限制。
 
 ## 本轮终端交互改进
 
