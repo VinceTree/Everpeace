@@ -87,5 +87,6 @@ git diff --check
 - 用户可见命令、输出或安装方法变化时，同时更新 `README.md` 和 `README.zh-CN.md`。
 - Session 或 TUI 改动至少运行相关单测；交付前默认运行 `pnpm test`、`pnpm typecheck`、`pnpm build` 和 `git diff --check`。如果无法运行，必须明确说明原因和未验证范围。
 - 测试数量和 commit/hash 属于易变化状态，只记录在 `docs/HANDOFF.md`，不要固化在本文件。
+- Git commit message 必须聚焦本次实际改动，使用功能新增、功能优化、缺陷修复、测试补充或文档更新等具体表述。commit message 中禁止出现任何产品名称（包括但不限于 Codex、Pi、OMP），也禁止出现 `release`、`version`、“发布”、“版本”等措辞；即使提交伴随发版或版本号调整，也必须按实际功能变化命名，例如 `feat: add bounded command output previews`。
 - 未经用户明确要求，不提交、推送、打 tag 或创建 Release。
 - 发布时更新 `package.json` 版本及 README 中的展示版本，验证后提交并推送。`.github/workflows/release.yml` 会根据版本创建 `v<version>` tag 和 GitHub Release，必须确认 workflow 与 Release 实际成功。
