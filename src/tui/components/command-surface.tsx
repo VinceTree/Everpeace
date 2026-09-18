@@ -65,7 +65,7 @@ export function CommandSurface({
       <Box flexDirection="column" marginY={1}>
         {children}
       </Box>
-      {onBack ? <Text dimColor>Esc 返回 Session</Text> : null}
+      {onBack ? <Text dimColor>Esc to return to session</Text> : null}
     </Box>
   );
 }
@@ -98,7 +98,7 @@ export function StatusSurface({
   onBack(): void;
 }) {
   return (
-    <CommandSurface title="/status · Session 状态" onBack={onBack}>
+    <CommandSurface title="/status · Session status" onBack={onBack}>
       <StatusDetails snapshot={snapshot} />
     </CommandSurface>
   );

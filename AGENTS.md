@@ -35,7 +35,7 @@ git diff --check
 - 每个 session 使用一个版本化 JSONL 文件，默认放在平台应用状态目录；各 session 的追加写入需要串行化。
 - 可见 `timeline` 与 Responses API `context` 分开持久化。直接 `!` 命令可以出现在恢复后的界面中，但不能进入模型 context。
 - 没有活动 session 时，第一条普通问题先创建 session，再请求模型并持久化后续内容。
-- `/new` 要求已有活动模型，并立即创建和进入标题为“新 Session”的空 session；它不是 `/clear` 的别名。
+- `/new` 要求已有活动模型，并立即创建和进入标题为“New Session”的空 session；它不是 `/clear` 的别名。旧记录中的“新 Session”只在界面显示时翻译，不改写 JSONL。
 - `/new` 创建的记录使用持久化的 `title_pending: true`。第一条问题先提供可靠回退标题，再异步调用当前模型生成简短名称，不能阻塞正常回答。
 - `/clear` 只清屏并解除当前 session；下一条普通问题才创建新 session，同时保留当前模型。
 - `/resume` 全局列出所有 session，按最后活动时间倒序显示名称和时间，并恢复 timeline、context、模型及工作目录，然后继续写入原文件。
@@ -51,6 +51,7 @@ git diff --check
 - Ctrl+C 取消活动任务；空闲有草稿则清空，否则退出。TUI 的 PTY stdin 必须由 Ink 单一入口转发，不能同时注册原始 stdin 监听器。
 - `/outputs`、`/history`、`/terminal-setup` 都是独立命令窗口。output timeline 可带兼容性可选 command 元数据；直接 `!` 仍不进入模型 context。
 - 模型 Bash 运行时使用有界真实首五行/尾五行预览并随终端高度缩减；用户直接 `!` 继续优先显示最近五行。完成态折叠和 `/outputs` 保留现有语义。
+- TUI 宿主界面使用英文；模型等待状态包含 provider、耗时和 Ctrl+C 提示。assistant Markdown、代码围栏、shell 命令和严格识别的 unified diff 使用分层高亮；超大或未知内容必须安全退回纯文本，旧 JSONL 只做显示层翻译。
 - 输入历史单独持久化，不记录登录向导字段；配置终端按键必须预览、明确确认和备份，不能静默修改用户设置。
 
 - 保持 inline TUI 和终端原生 scrollback；不要切换到 alternate screen。

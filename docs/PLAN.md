@@ -1,5 +1,11 @@
 # Everpeace Current Plan
 
+
+## 历史显示上限
+
+已读取 `openai/codex` 源码并采用其 terminal resize-reflow 行数上限：VS Code 1,000、Windows Terminal 9,001、WezTerm 3,500、Alacritty 10,000、未知终端 1,000。普通 Codex transcript 没有全局记录数上限；其 5 turn / 100 item 参数只用于分页的远端 thread API，不能替代本项目完整本地 JSONL 恢复。Everpeace 删除自定义 200 条记录窗口，改按当前宽度估算源文本行数选择重放尾部；完整存档、context、输入导航和 outputs 不裁剪。
+
+
 状态快照：2026-09-18。
 
 ## 当前目标
@@ -7,6 +13,8 @@
 Codex 核心 Agent Loop TypeScript 适配已接入：独立轮次控制、逐工具结果持久化、采样重试和取消、完成判断、并发 turn 防护。上游来源与未移植模块见 `architecture/AGENT_LOOP.md`。
 
 完成终端交互改进：Ctrl+C 取消、跨重启输入历史、Shift+Enter 配置、统一紧凑命令输出与 `/outputs`。不新增 OS 沙箱，也不实现 Ctrl+R、任务队列或外部编辑器。
+
+完成英文优先的运行界面和富文本层：供应商感知等待状态、Agent 阶段切换、Markdown/代码高亮、命令卡片以及 Git 风格 unified diff；保持 inline、scrollback、首五/尾五实时预览和既有 Session schema。
 
 权限管理第一阶段：Codex 官方文档摘录与对标、`/permissions`、模型工作目录文件查看和工具运行时审批。见 `architecture/PERMISSIONS.md`。本轮不宣称实现 OS 沙箱；pi/Grok Build 后续再比较。
 
@@ -29,6 +37,9 @@ Codex 核心 Agent Loop TypeScript 适配已接入：独立轮次控制、逐工
 - [x] 全局输入历史、上下键草稿恢复、多行粘贴和 `/history` 清理。
 - [x] `/terminal-setup` 显式确认、JSONC 保留、冲突拒绝、备份及过期预览检查。
 - [x] 模型 Bash 运行时有界保留并展示真实首五行/尾五行，矮终端自适应缩减；直接 `!` 保持尾部预览，完成后折叠并由 `/outputs` 提供分页详情。
+- [x] TUI 宿主文案统一为英文，等待模型时按 provider 显示计时和中断提示，工具阶段显示 `Working`；旧系统/工具文案只在显示层翻译。
+- [x] 模型回复支持 GFM Markdown，代码围栏及 Bash/PowerShell 命令使用语法高亮，并为超大输入和未知语言提供纯文本降级。
+- [x] 命令使用 Running/Ran/You ran 分层卡片；标准 unified diff 在 transcript、实时输出和 `/outputs` 中显示新旧行号及增删高亮，并适配真彩、ANSI 与 `NO_COLOR`。
 - [ ] 真实 Windows Terminal 手动验收键位、复制、缩放、resize 和带凭据模型的完整流程。
 
 - [x] 应用层 ask/read-only/full-access 模式，完全访问二次确认，网页工具独立开关。

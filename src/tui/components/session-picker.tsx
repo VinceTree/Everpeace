@@ -4,6 +4,7 @@ import React from "react";
 import type { SessionSummary } from "../../storage/session-store.js";
 import { truncateEnd } from "../text-width.js";
 import { commandScreenWidth } from "./command-surface.js";
+import { translateLegacyUiText } from "../legacy-translation.js";
 
 export interface SessionPickerProps {
   sessions: SessionSummary[];
@@ -13,8 +14,8 @@ export interface SessionPickerProps {
 }
 
 function sessionLabel(session: SessionSummary, maximumWidth: number): string {
-  const timestamp = new Date(session.updated_at).toLocaleString();
-  return truncateEnd(`${session.title} — ${timestamp}`, maximumWidth);
+  const timestamp = new Date(session.updated_at).toLocaleString("en-US");
+  return truncateEnd(`${translateLegacyUiText(session.title)} — ${timestamp}`, maximumWidth);
 }
 
 export function SessionPicker({
@@ -31,7 +32,7 @@ export function SessionPicker({
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="#D4AF37" paddingX={1}>
-      <Text bold color="#D4AF37">恢复 Session</Text>
+      <Text bold color="#D4AF37">Resume session</Text>
       {notice ? <Text color="yellow">{notice}</Text> : null}
       <Select
         options={sessions.map((session) => ({
@@ -44,7 +45,7 @@ export function SessionPicker({
           if (session) onSelect(session);
         }}
       />
-      <Text dimColor>↑↓ 选择 · Enter 恢复 · Esc 返回 Session</Text>
+      <Text dimColor>↑↓ select · Enter resume · Esc to return to session</Text>
     </Box>
   );
 }

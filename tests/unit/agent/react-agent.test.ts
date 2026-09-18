@@ -319,7 +319,7 @@ test("agent searches the web without requesting Bash confirmation", async () => 
 
   await agent.runTurn("What is the latest TypeScript release?");
 
-  assert.deepEqual(toolActivity, ["搜索网页：latest TypeScript release"]);
+  assert.deepEqual(toolActivity, ["Searching the web: latest TypeScript release"]);
   const tools = requests[0]?.tools as Array<Record<string, unknown>>;
   assert.deepEqual(tools.map((tool) => tool.name), [
     "bash",

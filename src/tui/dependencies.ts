@@ -67,6 +67,9 @@ export function createDefaultTuiDependencies(
         ...(restore?.onUsage === undefined
           ? {}
           : { onUsage: restore.onUsage }),
+        ...(restore?.onPhase === undefined
+          ? {}
+          : { onPhase: restore.onPhase }),
       });
     },
     async generateSessionTitle(model, firstQuestion, signal) {

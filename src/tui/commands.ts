@@ -53,21 +53,21 @@ export function parseTuiInput(input: string): ParsedTuiInput {
   return { kind: "chat", text: trimmed };
 }
 
-export const TUI_HELP = `斜杠命令
-  /login   登录并立即启用一个模型
-  /model   切换已登录模型
-  /models  查看模型及凭据状态
-  /status  查看当前 Session、模型和 Token 使用状态
-  /permissions  管理文件读取、Bash 审批和网页工具权限
-  /new     立即创建并进入新 Session
-  /resume  查看并恢复本机 Session
-  /logout  删除模型和对应系统凭据
-  /clear   结束当前对话，下一次提问创建新 Session
-  /help    显示帮助
-  /exit    退出 Everpeace
-  /outputs 查看命令完整保留输出
-  /history 查看或清除全局输入历史
-  /terminal-setup 配置 Windows Terminal 换行键
+export const TUI_HELP = `Slash commands
+  /login   Sign in and activate a model
+  /model   Switch between signed-in models
+  /models  View models and credential status
+  /status  View session, model, and token usage
+  /permissions  Manage file, Bash, and web permissions
+  /new     Create and enter a new session
+  /resume  Find and resume a local session
+  /logout  Remove models and system credentials
+  /clear   End this conversation; the next message starts a session
+  /help    Show this help
+  /exit    Exit Everpeace
+  /outputs Browse retained command output
+  /history Browse or clear global input history
+  /terminal-setup Configure the Windows Terminal newline shortcut
 
-直接 Bash
-  !<command>  直接执行命令，不再确认`;
+Direct shell
+  !<command>  Run a command directly without confirmation`;

@@ -146,7 +146,6 @@ export class ReactAgent {
         });
       } else {
         signal?.throwIfAborted();
-        if (bashPermission(policy) === "allow") this.#io.writeTool?.(`! ${command}`);
         const result = await this.#io.runBash(command, signal);
         output = result.cancelled ? JSON.stringify({ status: "cancelled", stdout: result.stdout, stderr: result.stderr }) : serializeBashResult(result);
       }
@@ -160,7 +159,7 @@ export class ReactAgent {
       if (query === undefined) {
         output = JSON.stringify({ error: "Invalid web_search arguments" });
       } else {
-        this.#io.writeTool?.(`搜索网页：${query}`);
+        this.#io.writeTool?.(`Searching the web: ${query}`);
         output = await this.#runWebTool(
           () => this.#web.search(query, signal),
           signal,
@@ -171,7 +170,7 @@ export class ReactAgent {
       if (url === undefined) {
         output = JSON.stringify({ error: "Invalid web_fetch arguments" });
       } else {
-        this.#io.writeTool?.(`读取网页：${url}`);
+        this.#io.writeTool?.(`Reading web page: ${url}`);
         output = await this.#runWebTool(
           () => this.#web.fetch(url, signal),
           signal,

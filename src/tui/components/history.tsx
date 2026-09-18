@@ -3,6 +3,9 @@ import React from "react";
 import type { TimelineEntry } from "../types.js";
 import { Banner } from "./banner.js";
 import { StatusCard } from "./status-card.js";
+import { translateLegacyUiText } from "../legacy-translation.js";
+import { TUI_COLORS } from "../palette.js";
+import { HighlightedCommand, MarkdownText, RichOutput } from "./rich-text.js";
 
 export interface HistoryProps {
   entries: TimelineEntry[];
@@ -33,27 +36,35 @@ function HistoryLine({
   }
 
   if (entry.kind === "output") {
-    const lines = entry.text.split("\n");
-    const visible = lines.length > 6 ? [...lines.slice(0, 2), `... ${lines.length - 6} lines omitted (/outputs)`, ...lines.slice(-4)] : lines;
+    const statusColor = entry.command?.status === "completed"
+      ? TUI_COLORS.success
+      : entry.command?.status === "failed"
+        ? TUI_COLORS.error
+        : TUI_COLORS.warning;
+    const commandLabel = entry.command?.status === "cancelled"
+      ? entry.command.source === "user" ? "You cancelled" : "Cancelled"
+      : entry.command?.status === "failed"
+        ? entry.command.source === "user" ? "Your command failed" : "Failed"
+        : entry.command?.source === "user" ? "You ran" : "Ran";
     return (
-      <Box marginBottom={1} marginLeft={3} flexDirection="column">
-        {entry.command ? <Text dimColor wrap="truncate-end">{entry.command.shell} · {entry.command.status} · {(entry.command.durationMs / 1000).toFixed(1)}s{entry.command.truncated ? " · truncated" : ""}</Text> : null}
-        {visible.map((line, index) => (
-          <Box key={`${index}:${line}`} height={1} overflow="hidden">
-            <Text wrap="truncate-end">{line || " "}</Text>
-          </Box>
-        ))}
+      <Box marginBottom={1} paddingLeft={1} flexDirection="column">
+        {entry.command ? <>
+          <Text bold color={statusColor}>• {commandLabel} <Text color={TUI_COLORS.secondary}>{entry.command.shell}</Text> <Text dimColor>({(entry.command.durationMs / 1000).toFixed(1)}s{entry.command.truncated ? " · truncated" : ""})</Text></Text>
+          <HighlightedCommand command={entry.command.command} shell={entry.command.shell} />
+        </> : null}
+        {entry.text ? <Box marginTop={entry.command ? 1 : 0}><Text dimColor>└ </Text><RichOutput text={entry.text} maximumLines={{ head: 2, tail: 4 }} /></Box> : null}
       </Box>
     );
   }
 
   const styles = {
-    assistant: { marker: "•", color: "#9CA3AF" },
+    assistant: { marker: "•", color: TUI_COLORS.agent },
     system: { marker: "•", color: "gray" },
     tool: { marker: "•", color: "magenta" },
     error: { marker: "×", color: "red" },
   } as const;
   const style = styles[entry.kind];
+  const text = entry.kind === "assistant" ? entry.text : translateLegacyUiText(entry.text);
 
   return (
     <Box marginBottom={1} paddingLeft={1}>
@@ -62,7 +73,7 @@ function HistoryLine({
           {style.marker}
         </Text>
       </Box>
-      <Text wrap="wrap">{entry.text}</Text>
+      {entry.kind === "assistant" ? <MarkdownText text={text} /> : <Text wrap="wrap">{text}</Text>}
     </Box>
   );
 }

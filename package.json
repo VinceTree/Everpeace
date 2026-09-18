@@ -1,6 +1,6 @@
 {
   "name": "everpeace",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "description": "A terminal ReAct agent with persistent sessions, Bash, and web access.",
   "type": "module",
   "bin": {
@@ -31,6 +31,8 @@
     "@xterm/headless": "^6.0.0",
     "ink": "^7.1.1",
     "jsonc-parser": "^3.3.1",
+    "lowlight": "^3.3.0",
+    "marked": "^18.0.13",
     "node-pty": "^1.1.0",
     "openai": "^7.15.0",
     "proper-lockfile": "^4.1.2",

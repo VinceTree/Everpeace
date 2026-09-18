@@ -1,6 +1,20 @@
 # Session Handoff
 
+
+## 最新工作区补充：Codex 历史重放行数上限
+
+已读取 `openai/codex` 的 `7498521d288b9b3b96ffba4eedf089d8d6e06a84`：`codex-rs/tui/src/resize_reflow_cap.rs` 为 resize/replay 使用终端行数上限，VS Code 1,000、Windows Terminal 9,001、WezTerm 3,500、Alacritty 10,000、未知终端 1,000；普通 transcript 没有全局记录数上限。`app_server_session/history.rs` 的 5 turn / 100 item / 400 scan 是远端 paginated thread API 的加载参数，不适用于必须完整恢复本地 JSONL 的 Everpeace。
+
+已删除自定义的 200 条 timeline 窗口，改为按 `WT_SESSION`、`TERM_PROGRAM` 和 VS Code 注入环境解析上述行数上限，再依据当前列宽、换行和常见双宽字符估算 source-backed replay 尾部。单条超长记录保持原子显示；完整 Session、context、输入导航和 `/outputs` 不裁剪。窗口起点改变仍通过同步清屏重放，`/clear` 现在抑制由新 banner ID 造成的重复重放。新增环境选择、换行、源数据保留与 TUI 集成回归。
+
+本次 `history-window` 单测 4/4、`app.test.tsx` 32/32、完整 `pnpm test` 148/148、`pnpm typecheck`、`pnpm build` 和 `git diff --check` 均通过。首次完整测试的 Bash 取消 15 秒超时未在单独运行或完整重跑中复现；此前 node_modules `EPERM` 也未复现。提交、推送和 v0.1.26 发布仍待验证。
+
+
 状态快照：2026-09-18。分支 `main`，v0.1.25 已发布：在既有 Agent Loop、权限、终端交互和恢复会话基础上新增模型 Bash 实时首尾预览。远端 `main` 与现有标签的提交标题已按具体功能语义统一，旧 SHA 不再作为远端分支或标签依据；改写前完整历史保存在本机 `.git/commit-message-rewrite-backup.bundle`。用户原有未跟踪 `.patch-node-pty/`、`benchmark/`、`test-me/` 未改动且不纳入发布。
+
+v0.1.26 候选改动在此基础上完成英文优先 TUI 与富文本显示：宿主界面全部使用英文，Agent sampling/tools phase 分别驱动 provider 感知的 `Waiting for …` 计时状态与 `Working`；assistant 回复支持 GFM Markdown 和代码高亮；Bash/PowerShell 命令使用 Running/Ran/You ran 分层卡片；标准 unified diff 在 transcript、实时预览和 `/outputs` 中显示新旧行号及增删高亮。旧 JSONL 不迁移，已知旧中文 system/tool/error 文案和“新 Session”标题只在显示层翻译，用户与 assistant 内容保持原文。新增 `marked`、`lowlight` 运行时依赖，package 与 README 展示号已调整为 0.1.26。
+
+本轮没有改变 Responses context、Session schema、权限语义、inline/scrollback、直接 PTY 输入或首五/尾五缓冲。新命令不再额外持久化重复的 `! command` 和成功提示；可选 command 元数据继续提供来源、状态、耗时和审计信息，旧记录仍可恢复。
 
 ## 最新发布
 
@@ -136,16 +150,17 @@ Everpeace 需要提供完整的本地 Session 工作流：
 
 ## 5. 验证结果
 
-- `pnpm test`：131/131 通过（新增模型 Bash 真实首五/尾五缓冲、CRLF/UTF-8/超长单行、高度自适应、直接 `!` 尾部预览及完成态折叠回归；保留 Codex 核心循环相关覆盖）。
+- `pnpm test`：148/148 通过（包含 provider 等待/工具阶段、英文 TUI、GFM Markdown、语言别名、代码高亮安全上限、Codex 行数重放上限、严格/显式/多文件 diff、CRLF 行号、明暗/ANSI/NO_COLOR 配色及旧文案显示翻译；保留模型 Bash 首五/尾五、PTY、Session 和 Agent loop 回归）。
 - `pnpm typecheck`：通过。
 - `pnpm build`：通过。
 - `git diff --check`：通过，仅有 Windows LF/CRLF 提示。
+- 源码英文扫描仅在 `legacy-translation.ts` 的兼容匹配表中保留中文；这些字符串不用于新 UI。
 - 尚未在带真实模型凭据的 Windows Terminal 中手工完成 slash command 独立窗口、`/status`、`/new` 与 `/resume` 全流程验收。
 - 尚未在真实 TUI 中让 `deepseek-flash` 自主完成一次 `web_search` → `web_fetch` → 带来源回答的端到端验收；工具执行器的真实网络冒烟已通过。
 
 ## 6. 下一步
 
-优先在真实 Windows Terminal 验收 Ctrl+C、上下历史、Shift+Enter（必要时通过 `/terminal-setup` 确认配置）、多行粘贴、交互 `!` 和 `/outputs`，再验收 `/permissions` 三种模式、完全访问二次确认、文件查看和网页禁用。后续对标 pi/Grok Build，并单独设计 OS 沙箱，不把当前应用层审批等同于系统隔离。
+优先在真实 Windows Terminal 的深色和浅色主题中验收英文等待状态、Markdown、Bash/PowerShell 高亮、长 unified diff、`NO_COLOR` 降级、Ctrl+C、上下历史、Shift+Enter（必要时通过 `/terminal-setup` 确认配置）、多行粘贴、交互 `!` 和 `/outputs`，再验收 `/permissions` 三种模式、完全访问二次确认、文件查看和网页禁用。后续对标 pi/Grok Build，并单独设计 OS 沙箱，不把当前应用层审批等同于系统隔离。
 
 1. 在真实 Windows Terminal 中运行 `pnpm dev`。
 2. 完成一次真实模型问答后执行 `/status`，确认窗口水平、垂直居中且不显示 banner、历史、Prompt 或全局状态栏，核对各状态字段，并确认 Esc 完整恢复同一个 Session。

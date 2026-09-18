@@ -1,5 +1,8 @@
 # Everpeace
 
+终端 transcript 对齐 Codex 的 resize/reflow 行数上限：同步重放按终端保留尾部，VS Code 为 1,000 行、Windows Terminal 为 9,001 行、WezTerm 为 3,500 行、Alacritty 为 10,000 行，其他终端为 1,000 行。Ink 不提供最终布局测量，因此按源文本和当前终端宽度估算行数。Session JSONL、模型上下文、输入导航和 `/outputs` 继续保留完整数据。
+
+
 [English](./README.md) | **简体中文**
 
 Everpeace 是一个具备较强编程能力、带交互式 TUI 的通用 ReAct agent，支持 DeepSeek、OpenAI 和自定义 OpenAI-compatible API。所选模型可以搜索网页、读取公共页面并请求调用 Bash；你也可以用 `!<command>` 直接运行本地命令。
@@ -65,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.1.25) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.26) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -92,6 +95,10 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 
 对于依赖当前信息或冷门资料的问题，模型可以先调用 `web_search`，再使用 `web_fetch` 读取有价值的来源。搜索和网页读取不需要 Bash 确认；function call 及结果会保留在可恢复的模型上下文中，TUI transcript 则显示简短的工具动作。模型会被要求在最终回答中列出实际采用的来源 URL。
 
+TUI 自身界面现统一使用英文。任务运行时会显示按供应商识别的状态，例如 `Waiting for DeepSeek (3s • ctrl+c to interrupt)`，进入工具调度阶段后切换为 `Working`。模型回复支持 GitHub Flavored Markdown，包括标题、列表、强调、链接、表格、行内代码和 fenced code；代码块及 Bash/PowerShell 命令使用语言感知的终端高亮，超大内容会安全退回纯文本。
+
+命令与对话正文使用不同层级展示：运行中显示 `Running`，完成的模型命令显示 `Ran`，用户直接命令显示 `You ran`，并附带状态色、shell、耗时和保留输出。模型 `diff` 代码块及命令输出中的标准 unified diff 会显示新旧行号、青色文件/hunk 标题、绿色新增和红色删除；真彩终端使用随明暗背景调整的底色，低色彩及 `NO_COLOR` 环境仍保留结构标记。恢复旧 Session 时，已知旧中文系统/工具提示只在显示层翻译，不改写 JSONL，也不翻译用户或模型正文。
+
 输入区域会直接跟随终端的当前可用宽度，并预留最后一列防止 Windows Terminal 自动换行；启动时的 model/directory 信息框与 Codex 一样把内容区限制为 56 格（含内边距和边框共 60 列），每行预先裁剪，在窄终端中只缩短、不换行。输入区只有显式换行才会增高，过长输入会在当前行内水平裁剪，不会因 Ctrl + 滚轮缩放而自动折行。
 
 TUI 使用原生 inline 模式，普通滚轮可以浏览已完成的 Everpeace 会话；Ctrl + 滚轮改变字号后，会采用 Codex 的 75ms 尾随延迟进行同步、基于源状态的重绘，完整恢复启动信息与会话，并且不会暴露清屏后的中间空帧。
@@ -113,7 +120,7 @@ TUI 命令：
 - `/models`：查看所有模型和凭据状态。
 - `/status`：查看当前模型、供应商、context window 和 session token 使用量。
 - `/permissions`：选择只读、逐条审批或完全访问模式，并开关网页工具。
-- `/outputs`：浏览命令状态及保留的输出，支持分页查看详情。
+- `/outputs`：分页浏览保留输出、已高亮的命令及 unified diff。
 - `/history`：浏览或明确确认后清空全局输入历史，不删除 Session。
 - `/terminal-setup`：预览并可选配置稳定版 Windows Terminal 的 Shift+Enter；确认后先备份设置，再新增全局按键绑定。
 - `/new`：立即创建并进入一个新的本地 session。

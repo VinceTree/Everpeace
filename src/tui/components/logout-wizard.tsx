@@ -30,7 +30,7 @@ export function LogoutWizard({
 
   const submitSelection = (ids: string[]) => {
     if (ids.length === 0) {
-      setError("至少选择一个模型");
+      setError("Select at least one model");
       return;
     }
     setSelectedIds(ids);
@@ -52,7 +52,7 @@ export function LogoutWizard({
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="#D4AF37" paddingX={1}>
       <Text bold color="#D4AF37">
-        /logout · 注销模型
+        /logout · Remove models
       </Text>
       {error ? <Text color="red">{error}</Text> : null}
 
@@ -66,19 +66,19 @@ export function LogoutWizard({
             visibleOptionCount={Math.min(8, models.length)}
             onSubmit={submitSelection}
           />
-          <Text dimColor>↑↓ 移动 · Space 勾选 · Enter 继续 · Esc 返回 Session</Text>
+          <Text dimColor>↑↓ move · Space select · Enter continue · Esc to return to session</Text>
         </>
       ) : null}
 
       {step === "confirm" ? (
         <Box flexDirection="column">
-          <Text>删除 {selectedIds.length} 个模型及对应系统凭据？</Text>
+          <Text>Remove {selectedIds.length} model{selectedIds.length === 1 ? "" : "s"} and associated system credentials?</Text>
           <ConfirmInput defaultChoice="cancel" onConfirm={remove} onCancel={onCancel} />
-          <Text dimColor>Esc 返回 Session</Text>
+          <Text dimColor>Esc to return to session</Text>
         </Box>
       ) : null}
 
-      {step === "deleting" ? <Spinner label="正在删除模型与凭据" /> : null}
+      {step === "deleting" ? <Spinner label="Removing models and credentials" /> : null}
     </Box>
   );
 }

@@ -1,6 +1,7 @@
 import { ConfirmInput } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import React from "react";
+import { HighlightedCommand } from "./rich-text.js";
 
 export interface BashConfirmationProps {
   command: string;
@@ -15,10 +16,10 @@ export function BashConfirmation({
 }: BashConfirmationProps) {
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
-      <Text color="yellow">模型请求执行 Bash：</Text>
-      <Text>{command}</Text>
+      <Text color="yellow">The model wants to run Bash:</Text>
+      <HighlightedCommand command={command} shell="Bash" />
       <Box>
-        <Text>是否执行？ </Text>
+        <Text>Run this command? </Text>
         <ConfirmInput defaultChoice="cancel" onConfirm={onConfirm} onCancel={onCancel} />
       </Box>
     </Box>

@@ -20,7 +20,7 @@ test("Banner renders Codex-style startup model and directory details", () => {
   const frame = view.lastFrame() ?? "";
   assert.match(frame, /Everpeace Agent/);
   assert.match(frame, /v0\.1\.19/);
-  assert.match(frame, /长平/);
+  assert.match(frame, /Peace through order/);
   assert.match(frame, /model:\s+deepseek-flash\s+\/model to change/);
   assert.match(frame, /directory: C:\\workspace/);
   assert.doesNotMatch(frame, /工作空间|当前模型|登录状态|SQLite|MEMORY/);

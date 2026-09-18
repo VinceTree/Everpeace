@@ -1,5 +1,11 @@
 # Architecture Decisions
 
+
+## 有界历史显示
+
+聊天渲染及 resize、恢复、命令返回重放按 Codex 的 terminal resize-reflow 行数上限选择尾部：VS Code 1,000、Windows Terminal 9,001、WezTerm 3,500、Alacritty 10,000、未知终端 1,000。`WT_SESSION`、`TERM_PROGRAM` 和 VS Code 注入环境用于检测。Ink 不提供最终布局的行数，所以按源文本、宽度、换行及常见双宽字符估算；单条超长记录保持原子显示。窗口起点变化后复用同步终端重放，清除已输出的旧 scrollback；不能仅对 Ink Static 数组 slice，否则终端仍有旧输出。完整内存 timeline、JSONL、context、输入导航和 outputs 不裁剪。上游普通 transcript 没有通用的记录数上限；上游 `INITIAL_HISTORY_TURN_LIMIT=5`、`HISTORY_ITEM_PAGE_LIMIT=100` 和扫描上限仅适用于其分页的远端 thread 历史加载，不迁移到本地 JSONL 恢复。
+
+
 状态快照：2026-09-18。
 
 ## 权限管理
@@ -28,7 +34,7 @@
 ## Session 生命周期
 
 - 默认采用延迟创建：没有活动 session 时，第一次普通提问先建档再请求模型。
-- `/new` 是显式立即创建：要求已有活动模型，写入临时标题“新 Session”并立刻切换到新 timeline/context；创建提示只显示在当前 UI。
+- `/new` 是显式立即创建：要求已有活动模型，写入临时标题“New Session”并立刻切换到新 timeline/context；旧记录中的“新 Session”只在选择器显示层翻译，不改写 JSONL；创建提示只显示在当前 UI。
 - `/clear` 不等同于 `/new`：它只清屏并解除当前 session，下一次普通提问才创建文件。
 - 切换 session 不需要丢弃确认，因为所有活动内容持续写入本地文件。
 
@@ -65,6 +71,12 @@
 - 搜索和页面读取无需 Bash 确认，简短工具动作写入可恢复 timeline；完整 function call/output 继续按既有规则写入 Responses context。
 
 ## 任务取消与输入输出
+
+- TUI 自有文案使用英文；用户和 assistant 正文保持原文。已知旧 system/tool/error timeline 文案在渲染时映射为英文，持久化文件与 Responses context 均不迁移、不改写。
+- Agent loop 的 `sampling` / `tools` phase 通过构造回调进入 TUI：sampling 显示按官方 base URL 识别的 provider（兼容端点退回官方 model ID）、累计等待秒数及 Ctrl+C 提示，tools 显示 `Working`。阶段状态不持久化。
+- assistant timeline 以 GFM token 渲染标题、列表、强调、链接、表格和代码；代码语言由围栏或 shell 元数据确定。高亮限制为 512 KiB、10,000 行、单行 4 KiB，未知语言、越界内容或解析失败退回纯文本。原始 Markdown 仍是唯一持久化内容。
+- 模型命令、用户直接命令分别以 Ran/You ran 卡片显示；失败和取消保留文本状态而不只依赖颜色。新命令不再额外写入重复 `! command` 和成功提示，审计信息继续由 output timeline 的可选 command 元数据承担，旧 timeline 保持可读。
+- unified diff 只有在显式 `diff`/`patch` 围栏或严格识别到文件头+hunk 的命令输出时启用。展示 old/new 行号、hunk/file gutter 及增删色；真彩配色根据 `COLORFGBG` 选择明暗背景，ANSI256/16 与 `NO_COLOR` 降级仍保留 `+`/`-`/gutter。该功能只渲染已有内容，不自动采集 Git 或文件快照。
 
 - `/resume` 的输入导航从所选 timeline 中的 user 条目及 source=user 的命令输出恢复，不依赖新增全局历史文件；不将模型命令混入用户输入。不带来源的旧 tool 条目不能可靠区分用户与模型，故不推断。恢复成功清空草稿和导航索引，`/new`、`/clear` 回到全局输入导航。召回斜杠命令不自动打开候选菜单，编辑后恢复正常筛选。
 - Agent 构造及每轮开始时修复不完整 function call/output 配对：在后续用户消息前补 interrupted/结果未知，不重新执行工具，不伪造成功。修复仅用于内存请求上下文，不重写旧 JSONL；再次恢复会幂等修复。工具执行异常转为错误 output，取消仍停止整轮。

@@ -266,7 +266,7 @@ test("Ctrl+C cancels direct commands, retains details, and accepts the next inpu
     view.stdin.write("/outputs");
     await tick();
     view.stdin.write("\r");
-    await waitFor(() => (view.lastFrame() ?? "").includes("Esc 返回 Session"));
+    await waitFor(() => (view.lastFrame() ?? "").includes("Esc to return to session"));
     await tick();
     view.stdin.write("\r");
     await waitFor(() => lastBorderedSurface(view.lastFrame() ?? "").includes("line 0"));
@@ -329,6 +329,83 @@ test("TUI accepts chat and renders the assistant response", async () => {
   view.unmount();
 });
 
+test("history below the Codex row cap stays visible and remains persisted", async () => {
+  const model: RegisteredModel = { id: "window", model_name: "test-model", base_url: "https://example.com", api_key: "test" };
+  const fixture = createFixture({
+    initial: [model],
+    createAgent: (_model, io) => ({
+      async runTurn() {
+        for (let index = 0; index < 205; index++) io.writeAssistant(`window-reply-${index}.`);
+      },
+    }),
+  });
+  let replays = 0;
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => { replays++; update(); }} />);
+  try {
+    await tick();
+    view.stdin.write("fill history");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("window-reply-204."));
+    await tick();
+    assert.equal(replays, 0);
+    assert.match(view.lastFrame() ?? "", /window-reply-0\./);
+    const session = [...fixture.sessionStore.sessions.values()][0];
+    assert.equal(session?.timeline.filter((entry) => entry.kind === "assistant").length, 205);
+    view.stdin.write("/help");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Slash commands"));
+    view.stdin.write("\u001b");
+    await waitFor(() => (view.lastFrame() ?? "").includes("window-reply-204."));
+    assert.match(view.lastFrame() ?? "", /window-reply-0\./);
+  } finally {
+    view.unmount();
+  }
+});
+
+test("active turns show provider-aware English sampling and tool phases", async () => {
+  const model: RegisteredModel = {
+    id: "model-waiting",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  let continueToTools: (() => void) | undefined;
+  let finishTurn: (() => void) | undefined;
+  const fixture = createFixture({
+    initial: [model],
+    createAgent: (_model, io, restore) => ({
+      async runTurn() {
+        restore?.onPhase?.("sampling");
+        await new Promise<void>((resolve) => { continueToTools = resolve; });
+        restore?.onPhase?.("tools");
+        await new Promise<void>((resolve) => { finishTurn = resolve; });
+        restore?.onPhase?.("completed");
+        io.writeAssistant("done");
+      },
+    }),
+  });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("show progress");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => /Waiting for DeepSeek \(\d+s • ctrl\+c to interrupt\)/u.test(view.lastFrame() ?? ""));
+  continueToTools?.();
+  await waitFor(() => /Working \(\d+s • ctrl\+c to interrupt\)/u.test(view.lastFrame() ?? ""));
+  finishTurn?.();
+  await waitFor(() => (view.lastFrame() ?? "").includes("done"));
+  view.unmount();
+});
+
 test("/status renders provider, context, and zero usage without creating a session", async () => {
   const model: RegisteredModel = {
     id: "model-1",
@@ -356,8 +433,8 @@ test("/status renders provider, context, and zero usage without creating a sessi
   await waitFor(() => (view.lastFrame() ?? "").includes("Context window:"));
 
   const frame = lastBorderedSurface(view.lastFrame() ?? "");
-  assert.match(frame, /\/status · Session 状态/);
-  assert.match(frame, /Esc 返回 Session/);
+  assert.match(frame, /\/status · Session status/);
+  assert.match(frame, /Esc to return to session/);
   assert.doesNotMatch(frame, /Ask Everpeace to do anything/);
   assert.doesNotMatch(frame, /Everpeace Agent/);
   assert.match(frame, /Model:\s+deepseek-flash/);
@@ -378,7 +455,7 @@ test("/status renders provider, context, and zero usage without creating a sessi
   view.stdin.write("\u001B");
   await new Promise((resolve) => setTimeout(resolve, 30));
   await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything"));
-  assert.doesNotMatch(view.lastFrame() ?? "", /\/status · Session 状态/);
+  assert.doesNotMatch(view.lastFrame() ?? "", /\/status · Session status/);
   assert.equal(replayCalls, 2);
   view.unmount();
 });
@@ -543,17 +620,17 @@ test("slash command surfaces close back to chat while direct commands remain per
   assert.deepEqual(session.timeline.map((entry) => entry.kind), persistedKinds);
 
   for (const [command, output] of [
-    ["/help", "斜杠命令"],
+    ["/help", "Slash commands"],
     ["/models", "[ready]"],
     ["/status", "Input tokens:"],
-    ["/wat", "未知命令：/wat"],
+    ["/wat", "Unknown command: /wat"],
   ] as const) {
     view.stdin.write(command);
     await tick();
     view.stdin.write("\r");
     await waitFor(() => (view.lastFrame() ?? "").includes(output));
     const commandFrame = lastBorderedSurface(view.lastFrame() ?? "");
-    assert.match(commandFrame, /Esc 返回 Session/);
+    assert.match(commandFrame, /Esc to return to session/);
     assert.doesNotMatch(commandFrame, /persist this chat/);
     assert.doesNotMatch(commandFrame, /echo: persist this chat/);
     assert.doesNotMatch(commandFrame, /Ask Everpeace to do anything/);
@@ -572,13 +649,11 @@ test("slash command surfaces close back to chat while direct commands remain per
   view.stdin.write("!echo kept");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("Command completed successfully"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("You ran"));
   assert.deepEqual(session.timeline.map((entry) => entry.kind), [
     "user",
     "assistant",
-    "tool",
     "output",
-    "system",
   ]);
   view.unmount();
 });
@@ -608,10 +683,10 @@ test("Esc cancels an in-flight slash command load without reopening its window",
   view.stdin.write("/models");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("正在读取模型注册表"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Reading model registry"));
   const loadingFrame = lastBorderedSurface(view.lastFrame() ?? "");
   assert.doesNotMatch(loadingFrame, /Everpeace Agent/);
-  assert.match(loadingFrame, /Esc 返回 Session/);
+  assert.match(loadingFrame, /Esc to return to session/);
 
   await tick();
   view.stdin.write("\u001B");
@@ -726,7 +801,7 @@ test("repeated terminal resizes preserve history and keep one non-wrapping promp
   view.stdin.write("/status");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("/status · Session 状态"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("/status · Session status"));
   Object.defineProperty(view.stdout, "columns", {
     configurable: true,
     value: 64,
@@ -736,7 +811,7 @@ test("repeated terminal resizes preserve history and keep one non-wrapping promp
     setTimeout(resolve, RESIZE_REDRAW_DEBOUNCE_MS + 30),
   );
   const commandFrame = lastBorderedSurface(view.lastFrame() ?? "");
-  assert.match(commandFrame, /\/status · Session 状态/);
+  assert.match(commandFrame, /\/status · Session status/);
   assert.doesNotMatch(commandFrame, /history-before-resize/);
   assert.doesNotMatch(commandFrame, /Everpeace Agent/);
   const narrowTopBorder = commandFrame.split("\n")[0] ?? "";
@@ -883,11 +958,11 @@ test("Tab completes a slash command without executing it", async () => {
       .filter((line) => line === "/model").length,
     1,
   );
-  assert.doesNotMatch(completedFrame, /切换当前模型/);
+  assert.doesNotMatch(completedFrame, /Switch the active model/);
 
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("切换当前模型"));
-  assert.match(view.lastFrame() ?? "", /Esc 返回 Session/);
+  await waitFor(() => (view.lastFrame() ?? "").includes("Switch the active model"));
+  assert.match(view.lastFrame() ?? "", /Esc to return to session/);
   assert.doesNotMatch(lastBorderedSurface(view.lastFrame() ?? ""), /Everpeace Agent/);
   view.unmount();
 });
@@ -922,8 +997,8 @@ test("Escape dismisses slash suggestions until editing resumes and Enter execute
   await tick();
   assert.deepEqual(visibleSlashCommandLines(view.lastFrame() ?? ""), ["/resume"]);
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("没有可恢复的 Session"));
-  assert.match(view.lastFrame() ?? "", /Esc 返回 Session/);
+  await waitFor(() => (view.lastFrame() ?? "").includes("No sessions are available to resume"));
+  assert.match(view.lastFrame() ?? "", /Esc to return to session/);
   assert.doesNotMatch(lastBorderedSurface(view.lastFrame() ?? ""), /Everpeace Agent/);
   await tick();
   view.stdin.write("\u001B");
@@ -952,8 +1027,8 @@ test("/login masks the API Key, registers one model, and activates it", async ()
   view.stdin.write("/login");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("模型登录"));
-  assert.match(view.lastFrame() ?? "", /Esc 返回 Session/);
+  await waitFor(() => (view.lastFrame() ?? "").includes("Model sign-in"));
+  assert.match(view.lastFrame() ?? "", /Esc to return to session/);
   assert.doesNotMatch(lastBorderedSurface(view.lastFrame() ?? ""), /Everpeace Agent/);
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("API Key"));
@@ -964,7 +1039,7 @@ test("/login masks the API Key, registers one model, and activates it", async ()
   await waitFor(() => (view.lastFrame() ?? "").includes("deepseek-flash"));
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("已登录并启用"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Signed in and enabled"));
 
   assert.deepEqual(seenKeys, ["sk-tui-secret"]);
   assert.doesNotMatch(view.frames.join("\n"), /sk-tui-secret/);
@@ -1008,13 +1083,13 @@ test("model-requested Bash waits for confirmation", async () => {
   view.stdin.write("run pwd");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("是否执行"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Run this command?"));
   assert.equal(ranBash, false);
   view.stdin.write("y");
   await waitFor(() => (view.lastFrame() ?? "").includes("done"));
 
   assert.equal(ranBash, true);
-  assert.match(view.lastFrame() ?? "", /Bash completed successfully/);
+  assert.match(view.lastFrame() ?? "", /• Ran Bash/);
   view.unmount();
 });
 
@@ -1060,7 +1135,7 @@ test("model Bash streams head and tail output and adapts to terminal height", as
   view.stdin.write("run a long command");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("是否执行"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Run this command?"));
   view.stdin.write("y");
   await waitFor(() => (view.lastFrame() ?? "").includes("… +10 lines"));
 
@@ -1135,7 +1210,7 @@ test("direct commands use the native terminal runner", async () => {
   const streamingFrame = view.lastFrame() ?? "";
   assert.match(streamingFrame, /Everpeace Agent/);
   assert.match(streamingFrame, /NAME    SIZE/);
-  assert.match(streamingFrame, /正在执行终端命令/);
+  assert.match(streamingFrame, /Command is still running/);
 
   finishCommand?.({
     stdout: "NAME    SIZE\nfile-a  10",
@@ -1143,7 +1218,7 @@ test("direct commands use the native terminal runner", async () => {
     exitCode: 0,
     signal: null,
   });
-  await waitFor(() => (view.lastFrame() ?? "").includes("Command completed successfully"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("You ran"));
 
   assert.equal(directCommand, "ls");
   assert.match(view.lastFrame() ?? "", /NAME    SIZE\n\s+file-a  10/);
@@ -1175,13 +1250,13 @@ test("startup model picker activates the selected registered model", async () =>
   );
 
   await tick();
-  assert.match(view.lastFrame() ?? "", /选择本次会话模型/);
+  assert.match(view.lastFrame() ?? "", /Choose a model for this session/);
   view.stdin.write("\u001B[B");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("对话上下文已重置"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("conversation context was reset"));
 
-  assert.match(view.lastFrame() ?? "", /对话上下文已重置/);
+  assert.match(view.lastFrame() ?? "", /conversation context was reset/);
   assert.match(view.lastFrame() ?? "", /deepseek-v4-pro/);
   view.unmount();
 });
@@ -1206,19 +1281,19 @@ test("/logout removes the active model and returns to logged-out chat", async ()
   view.stdin.write("/logout");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("注销模型"));
-  assert.match(view.lastFrame() ?? "", /Esc 返回 Session/);
+  await waitFor(() => (view.lastFrame() ?? "").includes("Remove models"));
+  assert.match(view.lastFrame() ?? "", /Esc to return to session/);
   assert.doesNotMatch(lastBorderedSurface(view.lastFrame() ?? ""), /Everpeace Agent/);
   await tick();
   view.stdin.write(" ");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("删除 1 个模型"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Remove 1 model"));
   await tick();
   view.stdin.write("y");
-  await waitFor(() => (view.lastFrame() ?? "").includes("已删除 1 个模型"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Removed 1 model"));
 
-  assert.match(view.lastFrame() ?? "", /未选择模型/);
+  assert.match(view.lastFrame() ?? "", /No model selected/);
   view.unmount();
 });
 
@@ -1285,9 +1360,9 @@ test("the first chat creates one session and generates its title without blockin
   view.stdin.write("/help");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("斜杠命令"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Slash commands"));
   assert.equal(fixture.sessionStore.sessions.size, 0);
-  assert.match(view.lastFrame() ?? "", /Esc 返回 Session/);
+  assert.match(view.lastFrame() ?? "", /Esc to return to session/);
   await tick();
   view.stdin.write("\u001B");
   await new Promise((resolve) => setTimeout(resolve, 30));
@@ -1334,12 +1409,12 @@ test("/new immediately creates and enters a session that is named by its first q
   view.stdin.write("/new");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("已创建新 Session"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("New session created"));
 
   assert.equal(fixture.sessionStore.sessions.size, 1);
   const session = [...fixture.sessionStore.sessions.values()][0];
   assert.ok(session);
-  assert.equal(session.summary.title, "新 Session");
+  assert.equal(session.summary.title, "New Session");
   assert.equal(session.summary.title_pending, true);
   assert.deepEqual(session.timeline, []);
 
@@ -1371,7 +1446,7 @@ test("/new requires an active model and does not create an unusable session", as
   view.stdin.write("/new");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("尚未启用模型"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("No model is active"));
 
   assert.equal(fixture.sessionStore.sessions.size, 0);
   view.unmount();
@@ -1404,7 +1479,7 @@ test("/new leaves the previous session intact and writes subsequent chat only to
   view.stdin.write("/new");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("已创建新 Session"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("New session created"));
   view.stdin.write("new conversation");
   await tick();
   view.stdin.write("\r");
@@ -1455,10 +1530,10 @@ test("a pending session resumed before its first question is named without dupli
   view.stdin.write("/resume");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("新 Session"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("New Session"));
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => !(view.lastFrame() ?? "").includes("恢复 Session"));
+  await waitFor(() => !(view.lastFrame() ?? "").includes("Resume session"));
   view.stdin.write("first after resume");
   await tick();
   view.stdin.write("\r");
@@ -1603,7 +1678,7 @@ test("/resume asks for a replacement model and preserves the restored context", 
   await waitFor(() => (view.lastFrame() ?? "").includes("Needs replacement"));
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("请选择替代模型"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("choose a replacement"));
   await tick();
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("remember this"));

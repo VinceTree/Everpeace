@@ -15,7 +15,7 @@ export function StatusBar({ modelName, workspacePath }: StatusBarProps) {
       justifyContent="space-between"
     >
       <Text color={modelName ? "green" : "yellow"} wrap="truncate-end">
-        {modelName ?? "未选择模型"}
+        {modelName ?? "No model selected"}
       </Text>
       <Text dimColor wrap="truncate-middle">
         {workspacePath}

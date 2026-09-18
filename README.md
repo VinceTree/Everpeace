@@ -1,5 +1,8 @@
 # Everpeace
 
+The terminal transcript mirrors Codex's resize-reflow row caps. Source-backed replay keeps a terminal-specific tail: VS Code 1,000 rows, Windows Terminal 9,001, WezTerm 3,500, Alacritty 10,000, and 1,000 for other terminals. The estimate uses source text and the current terminal width because Ink does not expose final layout measurements. Session JSONL, model context, input navigation and `/outputs` retain their complete data.
+
+
 **English** | [简体中文](./README.zh-CN.md)
 
 Everpeace is a general-purpose ReAct agent with strong coding abilities and an interactive TUI. It supports DeepSeek, OpenAI, and custom OpenAI-compatible APIs. The selected model can search the web, read public pages, and request Bash tool calls. You can also run a local command directly with `!<command>`.
@@ -65,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.1.25) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.26) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -92,6 +95,10 @@ Run this command? y
 
 For questions that depend on current or niche information, the model can call `web_search` and then use `web_fetch` to read promising sources. Search and page reads do not require Bash confirmation. Their function calls and results remain in the recoverable model context, while concise tool activity is shown in the TUI transcript. The model is instructed to cite the source URLs it used.
 
+The TUI's own interface is English throughout. While a turn is active, a provider-aware status such as `Waiting for DeepSeek (3s • ctrl+c to interrupt)` changes to `Working` during tool dispatch. Assistant replies render GitHub-flavored Markdown, including headings, lists, emphasis, links, tables, inline code, and fenced code. Fenced code and Bash/PowerShell commands use language-aware terminal highlighting with bounded-size safety fallbacks.
+
+Commands are visually separate from conversation text: active commands show `Running`, completed model commands show `Ran`, and direct commands show `You ran`, with status color, shell, duration, and retained output underneath. Standard unified diffs in assistant `diff` fences or command output include old/new line gutters, cyan headers, green additions, and red deletions. True-color terminals receive light/dark-aware backgrounds; lower-color and `NO_COLOR` environments retain structural markers without requiring color. Restored legacy UI messages are translated for display without modifying session JSONL or translating user/assistant content.
+
 The input area follows the terminal's available width and reserves the final column to prevent Windows Terminal from wrapping automatically. The startup model/directory panel uses Codex's 56-cell inner-width cap (60 columns including padding and borders), pre-truncates every row, and shrinks in narrower terminals without wrapping. The composer grows only for explicit newlines; long input is horizontally clipped instead of wrapping when the terminal font size changes.
 
 The TUI runs inline, so the normal scroll wheel can browse the completed Everpeace conversation. After Ctrl + scroll wheel changes the font size, Everpeace performs a synchronized source-backed redraw after Codex's 75 ms trailing delay, restoring the complete banner and conversation without exposing an empty intermediate frame.
@@ -113,7 +120,7 @@ TUI commands:
 - `/models`: List all registered models and credential states.
 - `/status`: Show the current model, provider, context window, and session token usage.
 - `/permissions`: Select read-only, ask-for-approval, or full-access mode and toggle web tools.
-- `/outputs`: Browse retained command output, with paged details and completion status.
+- `/outputs`: Browse retained command output with paged details, highlighted commands, and unified-diff rendering.
 - `/history`: Browse or explicitly clear global input history (not sessions).
 - `/terminal-setup`: Preview and optionally configure Shift+Enter in stable Windows Terminal; confirmation creates a settings backup before applying a global key binding.
 - `/new`: Immediately create and enter a new local session.

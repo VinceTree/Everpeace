@@ -157,7 +157,7 @@ export function Prompt({
   >();
   const placeholder = activeModelName
     ? "Ask Everpeace to do anything"
-    : "输入 /login 开始";
+    : "Enter /login to get started";
   const updateState = (operation: (current: ComposerState) => ComposerState) => {
     const current = stateRef.current;
     const next = operation(current);

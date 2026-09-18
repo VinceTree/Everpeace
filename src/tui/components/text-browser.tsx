@@ -3,10 +3,12 @@ import { Text, useInput, useWindowSize } from "ink";
 import React, { useEffect, useMemo, useState } from "react";
 import { CommandSurface } from "./command-surface.js";
 import { textWidth } from "../text-width.js";
+import type { CommandRecord } from "../../tools/command-record.js";
+import { HighlightedCommand, RichOutput } from "./rich-text.js";
 
 export function TextBrowser({ title, entries, onBack, onClear }: {
   title: string;
-  entries: Array<{ label: string; text: string }>;
+  entries: Array<{ command?: CommandRecord; label: string; text: string }>;
   onBack(): void;
   onClear?: () => Promise<void>;
 }) {
@@ -18,7 +20,8 @@ export function TextBrowser({ title, entries, onBack, onClear }: {
   const page = Math.max(1, rows - 10);
   const width = Math.max(1, Math.min(80, columns - 2) - 4);
   const selectedText = selected === undefined ? "" : entries[selected]?.text ?? "";
-  const lines = useMemo(() => selectedText.split("\n").flatMap((line) => {
+  const selectedCommand = selected === undefined ? undefined : entries[selected]?.command;
+  const lines = useMemo(() => selectedCommand ? selectedText.split("\n") : selectedText.split("\n").flatMap((line) => {
     const wrapped: string[] = [];
     let current = "";
     for (const character of line) {
@@ -27,7 +30,7 @@ export function TextBrowser({ title, entries, onBack, onClear }: {
     }
     wrapped.push(current);
     return wrapped;
-  }), [selectedText, width]);
+  }), [selectedCommand, selectedText, width]);
   useEffect(() => setOffset((current) => Math.min(current, Math.max(0, lines.length - page))), [lines.length, page]);
   useInput((_input, key) => {
     if (selected === undefined) return;
@@ -48,7 +51,11 @@ export function TextBrowser({ title, entries, onBack, onClear }: {
       void onClear?.().then(onBack).catch((e: unknown) => { setError(String(e)); setClearing(false); });
     }} /></> : selected !== undefined ? <>
       <Text>{`${offset + 1}-${Math.min(lines.length, offset + page)} / ${lines.length}`}</Text>
-      {lines.slice(offset, offset + page).map((line, index) => <Text key={index} wrap="wrap">{line || " "}</Text>)}
+      {selectedCommand ? <>
+        <Text dimColor>{selectedCommand.shell} · {selectedCommand.status} · {selectedCommand.durationMs}ms{selectedCommand.truncated ? " · truncated" : ""}</Text>
+        <HighlightedCommand command={selectedCommand.command} shell={selectedCommand.shell} />
+      </> : null}
+      {selectedCommand ? <RichOutput text={selectedText} range={{ start: offset, count: page }} /> : lines.slice(offset, offset + page).map((line, index) => <Text key={index} wrap="wrap">{line || " "}</Text>)}
     </> : entries.length || onClear ? <Select visibleOptionCount={Math.min(8, page)} options={[
       ...entries.map((entry, index) => ({ label: entry.label.replace(/\s+/g, " ").slice(0, Math.max(1, Math.floor((width - 3) / 2))), value: String(index) })),
       ...(onClear ? [{ label: "Clear history...", value: "clear" }] : []),

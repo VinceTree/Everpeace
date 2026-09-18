@@ -76,12 +76,12 @@ export function Banner({ version, modelName, workspacePath }: BannerProps) {
 ░█▀▀░▀▄▀░█▀▀░█▀▄░█▀▀░█▀▀░█▀█░█░░░█▀▀
 ░▀▀▀░░▀░░▀▀▀░▀░▀░▀░░░▀▀▀░▀░▀░▀▀▀░▀▀▀`}</Text>
           <Text color={GOLD}>{`╔══════════════════╗
-║  長 安 · 司 矩   ║
+║ PEACE · ORDER    ║
 ╚══════════════════╝`}</Text>
         </Box>
       ) : (
         <Text bold color={CYAN}>
-          EVERPEACE <Text color={GOLD}>· 長安司矩</Text>
+          EVERPEACE <Text color={GOLD}>· PEACE THROUGH ORDER</Text>
         </Text>
       )}
 
@@ -90,7 +90,7 @@ export function Banner({ version, modelName, workspacePath }: BannerProps) {
         <Text bold>Everpeace Agent </Text>
         <Text dimColor>(v{version})</Text>
         <Text color={GOLD}> · </Text>
-        <Text dimColor>天下长平，以规司矩</Text>
+        <Text dimColor>Peace through order</Text>
       </Box>
 
       {sessionCard ? (

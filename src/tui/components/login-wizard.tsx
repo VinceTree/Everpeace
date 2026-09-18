@@ -138,7 +138,7 @@ export function LoginWizard({
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="#D4AF37" paddingX={1}>
       <Text bold color="#D4AF37">
-        /login · 模型登录
+        /login · Model sign-in
       </Text>
 
       {error ? <Text color="red">{error}</Text> : null}
@@ -171,18 +171,18 @@ export function LoginWizard({
         <Box>
           <Text color="#4EC9B0">API Key ❯ </Text>
           <PasswordInput
-            placeholder="输入内容不会显示"
+            placeholder="Input is hidden"
             onChange={setApiKey}
             onSubmit={loadModels}
           />
         </Box>
       ) : null}
 
-      {step === "loading" ? <Spinner label="正在加载模型列表" /> : null}
+      {step === "loading" ? <Spinner label="Loading model list" /> : null}
 
       {step === "model" ? (
         <Box flexDirection="column">
-          <Text dimColor>选择一个模型，名称保持服务端原始 ID：</Text>
+          <Text dimColor>Choose a model. Names retain the server's original IDs:</Text>
           <Select
             options={models.map((model) => ({ label: model, value: model }))}
             visibleOptionCount={Math.min(8, models.length)}
@@ -191,10 +191,10 @@ export function LoginWizard({
         </Box>
       ) : null}
 
-      {step === "saving" ? <Spinner label="正在安全保存凭据并启用模型" /> : null}
+      {step === "saving" ? <Spinner label="Securely saving credentials and enabling model" /> : null}
 
       {step !== "saving" ? (
-        <Text dimColor>Enter 确认 · Esc 返回 Session</Text>
+        <Text dimColor>Enter confirm · Esc to return to session</Text>
       ) : null}
     </Box>
   );
