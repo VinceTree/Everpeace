@@ -83,3 +83,30 @@ test("failed persistence prevents tool side effects and incomplete responses are
   await assert.rejects(runAgentLoop(incomplete.options), /incomplete/);
   assert.equal(executed, false);
 });
+
+test("steering checkpoints skip unstarted tools and preserve every function output", async () => {
+  let samples = 0;
+  let steer = false;
+  const f = fixture({
+    async sample() {
+      samples++;
+      if (samples === 1) return { output: [call("a"), call("b")], output_text: "" };
+      return { output: [], output_text: "corrected" };
+    },
+    async dispatch(item) {
+      if (item.call_id === "a") steer = true;
+      return "ok";
+    },
+    async applySteering() {
+      if (!steer) return 0;
+      steer = false;
+      return 1;
+    },
+  });
+  await runAgentLoop(f.options);
+  assert.deepEqual(
+    f.records.filter((item) => item.type === "function_call_output").map((item) => item.call_id),
+    ["a", "b"],
+  );
+  assert.match(String(f.records.find((item) => item.type === "function_call_output" && item.call_id === "b")?.output), /steered/);
+});

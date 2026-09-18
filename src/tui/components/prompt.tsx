@@ -31,6 +31,7 @@ export interface PromptProps {
   history?: readonly string[];
   onEmptyInterrupt?(): void;
   activeModelName: string | undefined;
+  placeholder?: string;
   disabled?: boolean;
   onSubmit(value: string): void;
 }
@@ -144,6 +145,7 @@ export function Prompt({
   onEmptyInterrupt,
   editorRef,
   historyNavigationRef,
+  placeholder: placeholderOverride,
 }: PromptProps) {
   const localNavigation = useRef<{ index: number | undefined; draft: string }>({ index: undefined, draft: "" });
   const navigation = historyNavigationRef ?? localNavigation;
@@ -155,9 +157,9 @@ export function Prompt({
   const [dismissedSlashCommandValue, setDismissedSlashCommandValue] = useState<
     string | undefined
   >();
-  const placeholder = activeModelName
+  const placeholder = placeholderOverride ?? (activeModelName
     ? "Ask Everpeace to do anything"
-    : "Enter /login to get started";
+    : "Enter /login to get started");
   const updateState = (operation: (current: ComposerState) => ComposerState) => {
     const current = stateRef.current;
     const next = operation(current);

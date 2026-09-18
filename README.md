@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.1.26) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.27) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -95,7 +95,7 @@ Run this command? y
 
 For questions that depend on current or niche information, the model can call `web_search` and then use `web_fetch` to read promising sources. Search and page reads do not require Bash confirmation. Their function calls and results remain in the recoverable model context, while concise tool activity is shown in the TUI transcript. The model is instructed to cite the source URLs it used.
 
-The TUI's own interface is English throughout. While a turn is active, a provider-aware status such as `Waiting for DeepSeek (3s • ctrl+c to interrupt)` changes to `Working` during tool dispatch. Assistant replies render GitHub-flavored Markdown, including headings, lists, emphasis, links, tables, inline code, and fenced code. Fenced code and Bash/PowerShell commands use language-aware terminal highlighting with bounded-size safety fallbacks.
+The TUI's own interface is English throughout. While a turn is active, a provider-aware status such as `Waiting for DeepSeek (3s • ctrl+c to interrupt)` changes to `Working` during tool dispatch. Responses-capable providers stream assistant text and tool progress live; compatible buffered endpoints still show phase, approval, and command previews. Assistant replies render GitHub-flavored Markdown, including headings, lists, emphasis, links, tables, inline code, and fenced code. Fenced code and Bash/PowerShell commands use language-aware terminal highlighting with bounded-size safety fallbacks.
 
 Commands are visually separate from conversation text: active commands show `Running`, completed model commands show `Ran`, and direct commands show `You ran`, with status color, shell, duration, and retained output underneath. Standard unified diffs in assistant `diff` fences or command output include old/new line gutters, cyan headers, green additions, and red deletions. True-color terminals receive light/dark-aware backgrounds; lower-color and `NO_COLOR` environments retain structural markers without requiring color. Restored legacy UI messages are translated for display without modifying session JSONL or translating user/assistant content.
 
@@ -119,7 +119,7 @@ TUI commands:
 - `/model`: Switch to a registered model and reset the conversation context.
 - `/models`: List all registered models and credential states.
 - `/status`: Show the current model, provider, context window, and session token usage.
-- `/permissions`: Select read-only, ask-for-approval, or full-access mode and toggle web tools.
+- `/permissions`: Select read-only, ask-for-approval, workspace-write, or full-access mode and toggle web tools.
 - `/outputs`: Browse retained command output with paged details, highlighted commands, and unified-diff rendering.
 - `/history`: Browse or explicitly clear global input history (not sessions).
 - `/terminal-setup`: Preview and optionally configure Shift+Enter in stable Windows Terminal; confirmation creates a settings backup before applying a global key binding.
@@ -135,11 +135,11 @@ Behavior notes:
 
 - The core turn loop adapts Codex's sampling/tool/follow-up flow in TypeScript, with per-tool result persistence, cancellable request retries, and overlapping-turn protection. It is not the complete Codex runtime; see [source mapping and scope](docs/architecture/AGENT_LOOP.md).
 
-- Model Bash requires confirmation by default (`ask`). `read-only` denies all model Bash; `full-access` skips approvals after a second explicit confirmation.
+- Permission profiles follow the Codex split between workspace scope and approvals: `read-only` allows workspace reads but asks before Bash or web access; `ask` asks before every Bash or web call; `workspace-write` allows current-workspace edits without prompts but asks before web access; and `full-access` skips tool approvals after a second explicit confirmation.
 - `read_file` reads workspace UTF-8 files up to 128 KiB; `list_directory` lists up to 500 entries. Outside paths and resolved symlink escapes are rejected. File contents enter model context and persisted session data; avoid reading secrets.
-- Permissions last for this process across `/new`, `/clear`, and `/resume`; restarting resets to `ask` with web tools enabled. Changing permissions preserves context; JSONL never restores full access.
+- Permissions last for this process across `/new`, `/clear`, and `/resume`; restarting resets to `workspace-write` with web tools enabled. Changing permissions preserves context; JSONL never restores full access.
 - This is application-level permission management, not an OS sandbox. Approved Bash can access files and networks with your account permissions. Disabling web tools does not restrict shell networking, model API calls, or direct user commands. See [design and limits](docs/architecture/PERMISSIONS.md).
-- Web search and public page reads are read-only tool calls and do not require confirmation. Search queries are sent to Bing, with DuckDuckGo as a fallback; opening a result sends a request to that site.
+- `read-only`, `ask`, and `workspace-write` require approval before each web request; `full-access` skips that prompt. Search queries are sent to Bing, with DuckDuckGo as a fallback; opening a result sends a request to that site.
 - Web page reads allow only public HTTP/HTTPS targets, validate redirects, block local/private network addresses, apply time and response-size limits, and treat returned content as untrusted data.
 - Search availability and result quality depend on the external search services and the current network connection. A failed web request is returned to the model so it can explain the limitation or try another source.
 - A direct `!<command>` is user-authored, requires no second confirmation, and is not added to model context.
@@ -151,6 +151,8 @@ Behavior notes:
 - Bash commands run with the current user's permissions and have no additional sandbox.
 - Every Bash call runs in a separate process, so `cd` and temporary environment variables do not persist between calls.
 - The TUI requires an interactive terminal and reports an error when its input or output is redirected.
+
+While a model turn is running, the composer stays available with the `Add guidance while working` placeholder. Submitted messages are recorded immediately and applied at the next safe checkpoint: sampling is interrupted when possible, while an already-running tool is allowed to checkpoint its result first. The model then continues with the durable context and your correction. `Ctrl+C` still cancels the active turn immediately; any submitted guidance is retained in the session context for the next turn. Elapsed time uses `s`, then `m s`, then `h m s` after the corresponding thresholds.
 
 ## Project structure
 

@@ -12,7 +12,7 @@ Commands inside the agent:
   /model                    Switch the active model
   /models                   List registered models
   /status                   Show model, context, and token usage
-  /permissions              Manage file access, Bash approvals, and web tools
+  /permissions              Select read-only, ask, workspace-write, or full-access tools
   /new                      Create and enter a new session
   /resume                   List and resume local sessions
   /logout                   Remove models and credentials

@@ -31,7 +31,7 @@ import {
 import type { BashOutputPreview, BashResult } from "../tools/bash.js";
 import { selectAgentOutputPreview } from "./command-output-preview.js";
 import { parseTuiInput, TUI_HELP } from "./commands.js";
-import { BashConfirmation } from "./components/bash-confirmation.js";
+import { ApprovalConfirmation } from "./components/approval-confirmation.js";
 import {
   CommandInfoSurface,
   CommandLoadingSurface,
@@ -88,8 +88,14 @@ type View =
 type CommandView = Exclude<View, { kind: "chat" }>;
 
 interface PendingConfirmation {
-  command: string;
+  kind: "bash" | "web";
+  request: string;
   resolve(accepted: boolean): void;
+}
+
+interface QueuedGuidance {
+  text: string;
+  timelineRecorded: boolean;
 }
 
 // Codex uses a short trailing reflow: the live composer follows the viewport
@@ -132,6 +138,16 @@ function toSessionModel(model: RegisteredModel): SessionModelRef {
 function fallbackSessionTitle(firstQuestion: string): string {
   const normalized = firstQuestion.replace(/\s+/g, " ").trim();
   return truncateEnd(normalized || "Untitled Session", 60);
+}
+
+export function formatElapsed(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const remaining = total % 60;
+  if (hours > 0) return `${hours}h ${minutes}m ${remaining}s`;
+  if (minutes > 0) return `${minutes}m ${remaining}s`;
+  return `${remaining}s`;
 }
 
 function commandOutput(result: BashResult): string {
@@ -273,6 +289,9 @@ export function EverpeaceApp({
   const [agentPhase, setAgentPhase] = useState<LoopPhase>();
   const [turnStartedAt, setTurnStartedAt] = useState<number>();
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [queuedGuidanceCount, setQueuedGuidanceCount] = useState(0);
+  const [liveAssistant, setLiveAssistant] = useState("");
+  const [liveToolStatus, setLiveToolStatus] = useState<string>();
   const [terminalBusy, setTerminalBusy] = useState(false);
   const [terminalOutput, setTerminalOutput] = useState<string>();
   const [agentTerminalPreview, setAgentTerminalPreview] = useState<BashOutputPreview>();
@@ -283,6 +302,8 @@ export function EverpeaceApp({
   const historyNavigationRef = useRef<{ index: number | undefined; draft: string }>({ index: undefined, draft: "" });
   const directController = useRef<AbortController | undefined>(undefined);
   const commandInput = useRef<((input: string) => void) | undefined>(undefined);
+  const queuedGuidance = useRef<QueuedGuidance[]>([]);
+  const runChatRef = useRef<((text: string, timelineRecorded?: boolean) => Promise<void>) | undefined>(undefined);
   useEffect(() => {
     let active = true;
     void dependencies.inputHistory?.load().then((entries) => { if (active) setInputHistory((current) => [...entries, ...current].slice(-1000)); }).catch(() => undefined);
@@ -307,6 +328,13 @@ export function EverpeaceApp({
     const timer = setInterval(update, 1000);
     return () => clearInterval(timer);
   }, [turnStartedAt]);
+
+  const clearQueuedGuidance = useCallback(() => {
+    queuedGuidance.current = [];
+    setQueuedGuidanceCount(0);
+    setLiveAssistant("");
+    setLiveToolStatus(undefined);
+  }, []);
 
   const appendText = useCallback((
     kind: HistoryKind,
@@ -414,7 +442,10 @@ export function EverpeaceApp({
       const pending = confirmationRef.current;
       confirmationRef.current = undefined;
       setConfirmation(undefined);
-      if (!accepted) append("system", `Bash command rejected: ${pending?.command ?? "unknown command"}`);
+      if (!accepted) {
+        const label = pending?.kind === "web" ? "Web request rejected" : "Bash command rejected";
+        append("system", `${label}: ${pending?.request ?? "unknown request"}`);
+      }
       pending?.resolve(accepted);
     },
     [append],
@@ -423,7 +454,18 @@ export function EverpeaceApp({
   const requestBashConfirmation = useCallback(
     (command: string): Promise<boolean> => {
       return new Promise((resolve) => {
-        const pending = { command, resolve };
+        const pending = { kind: "bash" as const, request: command, resolve };
+        confirmationRef.current = pending;
+        setConfirmation(pending);
+      });
+    },
+    [],
+  );
+
+  const requestWebConfirmation = useCallback(
+    (request: string): Promise<boolean> => {
+      return new Promise((resolve) => {
+        const pending = { kind: "web" as const, request, resolve };
         confirmationRef.current = pending;
         setConfirmation(pending);
       });
@@ -488,15 +530,34 @@ export function EverpeaceApp({
     () => ({
       getPermissions: () => ({ ...permissions.current }),
       confirmBash: requestBashConfirmation,
+      confirmWeb: requestWebConfirmation,
       runBash: executeBash,
       writeAssistant(text) {
+        setLiveAssistant("");
         append("assistant", text);
       },
+      writeAssistantDelta(text) {
+        setLiveAssistant((current) => current + text);
+      },
       writeTool(text) {
+        setLiveToolStatus(text);
         append("tool", text);
       },
+            onToolProgress(event) {
+              const detail = event.detail?.replace(/\s+/g, " ").trim();
+              const suffix = detail ? ` ${truncateEnd(detail, 160)}` : "";
+              if (event.phase === "approval") {
+                setLiveToolStatus(`Waiting for approval: ${event.name}${suffix}`);
+              } else if (event.phase === "streaming") {
+                setLiveToolStatus(`Preparing ${event.name}${suffix}`);
+              } else if (event.phase === "started") {
+                setLiveToolStatus(`${event.name}${detail ? `: ${truncateEnd(detail, 160)}` : ""}`);
+        } else if (event.phase === "finished") {
+          setLiveToolStatus(`${event.name} finished`);
+        }
+      },
     }),
-    [append, executeBash, requestBashConfirmation],
+    [append, executeBash, requestBashConfirmation, requestWebConfirmation],
   );
 
   const agent = useMemo(
@@ -521,12 +582,30 @@ export function EverpeaceApp({
             onPhase(phase) {
               setAgentPhase(phase);
             },
+            onEvent(event) {
+              if (event.type === "sampling_started") {
+                setLiveAssistant("");
+                setLiveToolStatus(undefined);
+              } else if (event.type === "retrying") {
+                setLiveAssistant("");
+                setLiveToolStatus(`Retrying model request (attempt ${event.attempt})`);
+              } else if (event.type === "steering_applied") {
+                setQueuedGuidanceCount((current) => Math.max(0, current - event.count));
+                setLiveAssistant("");
+                setLiveToolStatus("Guidance applied; continuing with the updated task");
+              } else if (event.type === "tool_started") {
+                setLiveToolStatus(`Preparing ${event.call.name}`);
+              } else if (event.type === "tool_finished") {
+                setLiveToolStatus(`${event.call.name} finished`);
+              }
+            },
           }),
     [activeModel, agentIo, dependencies, sessionContext, sessionEpoch],
   );
 
   const activateModel = useCallback(
     (model: RegisteredModel, message = `Enabled model ${model.model_name}`) => {
+      clearQueuedGuidance();
       abortController.current?.abort();
       const sessionId = activeSessionId.current;
       if (sessionId !== undefined) {
@@ -544,7 +623,7 @@ export function EverpeaceApp({
         appendTransient("system", `${message}; conversation context was reset.`);
       });
     },
-    [appendTransient, dependencies.sessionStore, returnToChat],
+    [appendTransient, clearQueuedGuidance, dependencies.sessionStore, returnToChat],
   );
 
   const showModels = useCallback(async () => {
@@ -692,6 +771,7 @@ export function EverpeaceApp({
           ),
         ];
 
+        clearQueuedGuidance();
         abortController.current?.abort();
         activeSessionId.current = loaded.summary.id;
         sessionTitlePending.current = loaded.summary.title_pending;
@@ -725,7 +805,7 @@ export function EverpeaceApp({
         throw error;
       }
     },
-    [dependencies, onReplayOutput, workspacePath],
+    [clearQueuedGuidance, dependencies, onReplayOutput, workspacePath],
   );
 
   const chooseSession = useCallback(
@@ -851,6 +931,7 @@ export function EverpeaceApp({
       return;
     }
 
+    clearQueuedGuidance();
     setBusyLabel("Creating a new session");
     const message = "New session created. Its title will be generated after your first message.";
     try {
@@ -888,9 +969,10 @@ export function EverpeaceApp({
     } finally {
       setBusyLabel(undefined);
     }
-  }, [activeModel, dependencies.sessionStore, onReplayOutput, openInfo, workspacePath]);
+  }, [activeModel, clearQueuedGuidance, dependencies.sessionStore, onReplayOutput, openInfo, workspacePath]);
 
   const clearConversation = useCallback(() => {
+    clearQueuedGuidance();
     setResumedInputHistory(undefined);
     editorRef.current = createComposerState();
     historyNavigationRef.current = { index: undefined, draft: "" };
@@ -912,7 +994,7 @@ export function EverpeaceApp({
       setTimelineEpoch((current) => current + 1);
       setSessionEpoch((current) => current + 1);
     });
-  }, [activeModel, onReplayOutput]);
+  }, [activeModel, clearQueuedGuidance, onReplayOutput]);
 
   const showStatus = useCallback(() => {
     const metadata = activeModel
@@ -943,7 +1025,7 @@ export function EverpeaceApp({
   ]);
 
   const runChat = useCallback(
-    async (text: string) => {
+    async (text: string, timelineRecorded = false) => {
       if (abortController.current || directController.current) return;
       if (!agent || !activeModel) {
         append("error", "No model is active. Use /login or /model first.");
@@ -966,6 +1048,7 @@ export function EverpeaceApp({
           startTitleGeneration(session.id, activeModel, text);
         } catch (error) {
           append("error", `Session creation failed: ${error instanceof Error ? error.message : String(error)}`);
+          clearQueuedGuidance();
           setBusyLabel(undefined);
           abortController.current = undefined;
           return;
@@ -982,13 +1065,14 @@ export function EverpeaceApp({
           startTitleGeneration(sessionId, activeModel, text);
         } catch (error) {
           append("error", `Session initialization failed: ${error instanceof Error ? error.message : String(error)}`);
+          clearQueuedGuidance();
           setBusyLabel(undefined);
           abortController.current = undefined;
           return;
         }
       }
 
-      append("user", text);
+      if (!timelineRecorded) append("user", text);
       const metadata = resolveModelStatusMetadata(activeModel.base_url, activeModel.model_name);
       const waitingTarget = metadata.provider === "OpenAI-compatible"
         ? activeModel.model_name
@@ -996,6 +1080,8 @@ export function EverpeaceApp({
       setAgentPhase("sampling");
       setTurnStartedAt(Date.now());
       setBusyLabel(`Waiting for ${waitingTarget}`);
+      setLiveAssistant("");
+      setLiveToolStatus(undefined);
       try {
         await agent.runTurn(text, controller.signal);
       } catch (error) {
@@ -1005,14 +1091,36 @@ export function EverpeaceApp({
           append("error", `Model request failed: ${error instanceof Error ? error.message : String(error)}`);
         }
       } finally {
-        if (abortController.current === controller) abortController.current = undefined;
+        const ownsController = abortController.current === controller;
+        if (ownsController) abortController.current = undefined;
         setBusyLabel(undefined);
         setAgentPhase(undefined);
         setTurnStartedAt(undefined);
+        setLiveAssistant("");
+        setLiveToolStatus(undefined);
+        if (controller.signal.aborted && queuedGuidance.current.length === 0) {
+          setQueuedGuidanceCount(0);
+        }
+        if (ownsController) {
+          const next = queuedGuidance.current.shift();
+          setQueuedGuidanceCount(queuedGuidance.current.length);
+          if (next) {
+            // Let React render the completed turn before starting the queued
+            // guidance, keeping the transcript and spinner ordering stable.
+            queueMicrotask(() => void runChatRef.current?.(next.text, next.timelineRecorded));
+          }
+        }
       }
     },
-    [activeModel, agent, append, dependencies.sessionStore, startTitleGeneration, workspacePath],
+    [activeModel, agent, append, clearQueuedGuidance, dependencies.sessionStore, startTitleGeneration, workspacePath],
   );
+
+  useEffect(() => {
+    runChatRef.current = runChat;
+    return () => {
+      if (runChatRef.current === runChat) runChatRef.current = undefined;
+    };
+  }, [runChat]);
 
   const runDirectBash = useCallback(
     async (command: string) => {
@@ -1037,6 +1145,19 @@ export function EverpeaceApp({
     [append, executeTerminalCommand],
   );
 
+  const queueGuidance = useCallback((text: string) => {
+    const timelineRecorded = activeSessionId.current !== undefined;
+    if (timelineRecorded) append("user", text);
+    if (confirmationRef.current) finishConfirmation(false);
+    if (agent?.requestSteering?.(text)) {
+      setQueuedGuidanceCount((current) => current + 1);
+      setLiveToolStatus("Guidance received; applying at the next safe checkpoint");
+      return;
+    }
+    queuedGuidance.current.push({ text, timelineRecorded });
+    setQueuedGuidanceCount(queuedGuidance.current.length);
+  }, [agent, append, finishConfirmation]);
+
   const handleSubmit = useCallback(
     (input: string) => {
       const parsed = parseTuiInput(input);
@@ -1047,10 +1168,15 @@ export function EverpeaceApp({
       setInputKey((current) => current + 1);
 
       if (parsed.kind === "chat") {
-        void runChat(parsed.text);
+        if (abortController.current) queueGuidance(parsed.text);
+        else void runChat(parsed.text);
         return;
       }
       if (parsed.kind === "bash") {
+        if (abortController.current) {
+          appendTransient("system", "A model turn is active. Add guidance as a message or press Ctrl+C first.");
+          return;
+        }
         void runDirectBash(parsed.command);
         return;
       }
@@ -1083,12 +1209,14 @@ export function EverpeaceApp({
       createNewSession,
       enterCommandView,
       exit,
+      appendTransient,
       openLogout,
       openModelPicker,
       openResume,
       openInfo,
       runChat,
       runDirectBash,
+      queueGuidance,
       showModels,
       showStatus,
     ],
@@ -1181,6 +1309,7 @@ export function EverpeaceApp({
   useEffect(
     () => () => {
       abortController.current?.abort();
+      queuedGuidance.current = [];
       titleControllers.current.forEach((controller) => controller.abort());
       titleControllers.current.clear();
       confirmationRef.current?.resolve(false);
@@ -1311,24 +1440,72 @@ export function EverpeaceApp({
       />
 
       {confirmation ? (
-        <BashConfirmation
-          command={confirmation.command}
-          onConfirm={() => finishConfirmation(true)}
-          onCancel={() => finishConfirmation(false)}
-        />
+        <Box flexDirection="column">
+          <ApprovalConfirmation
+            kind={confirmation.kind}
+            request={confirmation.request}
+            onConfirm={() => finishConfirmation(true)}
+            onCancel={() => finishConfirmation(false)}
+          />
+          {turnStartedAt !== undefined ? <Text dimColor>Waiting for approval · {formatElapsed(elapsedSeconds)}</Text> : null}
+          {liveAssistant ? <Box marginLeft={2}><RichOutput text={liveAssistant} /></Box> : null}
+          {liveToolStatus ? <Text color={TUI_COLORS.secondary}>• {liveToolStatus}</Text> : null}
+          <Prompt
+            key={`prompt-${inputKey}`}
+            activeModelName={activeModel?.model_name}
+            placeholder="Add guidance while waiting for approval"
+            history={resumedInputHistory ?? inputHistory}
+            editorRef={editorRef}
+            historyNavigationRef={historyNavigationRef}
+            onEmptyInterrupt={() => abortController.current?.abort()}
+            onSubmit={handleSubmit}
+          />
+        </Box>
       ) : terminalBusy ? (
         <Box flexDirection="column">
           <Text bold color={activeCommand?.cancelling ? TUI_COLORS.warning : TUI_COLORS.status} wrap="truncate-end">
-            • {activeCommand?.cancelling ? "Cancelling" : "Running"} <Text color={TUI_COLORS.secondary}>{activeCommand?.shell}</Text>
+            • {activeCommand?.cancelling ? "Cancelling" : "Running"} <Text color={TUI_COLORS.secondary}>{activeCommand?.shell}</Text>{turnStartedAt === undefined ? "" : ` (${formatElapsed(elapsedSeconds)})`}
           </Text>
           {activeCommand ? <HighlightedCommand command={activeCommand.command} shell={activeCommand.shell} /> : null}
           <TerminalActivity
             output={terminalOutput}
             agentPreview={activeCommand?.source === "model" ? agentTerminalPreview : undefined}
           />
+          {activeCommand?.source === "model" ? (
+            <>
+              {liveAssistant ? <Box marginLeft={2}><RichOutput text={liveAssistant} /></Box> : null}
+              {liveToolStatus ? <Text color={TUI_COLORS.secondary}>• {liveToolStatus}</Text> : null}
+              {queuedGuidanceCount > 0 ? <Text dimColor>{queuedGuidanceCount} guidance message{queuedGuidanceCount === 1 ? "" : "s"} pending</Text> : null}
+              <Prompt
+                key={`prompt-${inputKey}`}
+                activeModelName={activeModel?.model_name}
+                placeholder="Add guidance while working"
+                history={resumedInputHistory ?? inputHistory}
+                editorRef={editorRef}
+                historyNavigationRef={historyNavigationRef}
+                onEmptyInterrupt={() => abortController.current?.abort()}
+                onSubmit={handleSubmit}
+              />
+            </>
+          ) : null}
         </Box>
       ) : busyLabel ? (
-        <Spinner label={`${agentPhase === "tools" ? "Working" : busyLabel}${turnStartedAt === undefined ? "" : ` (${elapsedSeconds}s • ctrl+c to interrupt)`}`} />
+        <Box flexDirection="column">
+          <Spinner label={`${agentPhase === "tools" ? "Working" : busyLabel}${turnStartedAt === undefined ? "" : ` (${formatElapsed(elapsedSeconds)} • ctrl+c to interrupt)`}`} />
+          {liveAssistant ? <Box marginLeft={2}><RichOutput text={liveAssistant} /></Box> : null}
+          {liveToolStatus ? <Text color={TUI_COLORS.secondary}>• {liveToolStatus}</Text> : null}
+          {queuedGuidanceCount > 0 ? <Text dimColor>{queuedGuidanceCount} guidance message{queuedGuidanceCount === 1 ? "" : "s"} pending</Text> : null}
+          <Prompt
+            key={`prompt-${inputKey}`}
+            activeModelName={activeModel?.model_name}
+            placeholder="Add guidance while working"
+            history={resumedInputHistory ?? inputHistory}
+            editorRef={editorRef}
+            historyNavigationRef={historyNavigationRef}
+            onEmptyInterrupt={() => abortController.current?.abort()}
+            onSubmit={handleSubmit}
+          />
+        </Box>
       ) : (
         <Prompt
           key={`prompt-${inputKey}`}

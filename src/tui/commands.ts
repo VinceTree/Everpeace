@@ -58,7 +58,7 @@ export const TUI_HELP = `Slash commands
   /model   Switch between signed-in models
   /models  View models and credential status
   /status  View session, model, and token usage
-  /permissions  Manage file, Bash, and web permissions
+  /permissions  Select read-only, ask, workspace-write, or full-access tools
   /new     Create and enter a new session
   /resume  Find and resume a local session
   /logout  Remove models and system credentials

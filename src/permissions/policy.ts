@@ -1,4 +1,8 @@
-export type PermissionMode = "read-only" | "ask" | "full-access";
+/**
+ * User-facing permission profiles. The names mirror Codex's practical
+ * profiles while keeping the policy process-local for this application.
+ */
+export type PermissionMode = "read-only" | "ask" | "workspace-write" | "full-access";
 
 export interface PermissionPolicy {
   mode: PermissionMode;
@@ -6,10 +10,17 @@ export interface PermissionPolicy {
 }
 
 export function defaultPermissions(): PermissionPolicy {
-  return { mode: "ask", web: true };
+  // Codex's useful default is autonomous work in the current workspace. The
+  // explicit `ask` profile remains available for command-by-command review.
+  return { mode: "workspace-write", web: true };
 }
 
 export function bashPermission(policy: PermissionPolicy): "deny" | "ask" | "allow" {
-  if (policy.mode === "read-only") return "deny";
+  if (policy.mode === "read-only" || policy.mode === "ask") return "ask";
+  return "allow";
+}
+
+export function webPermission(policy: PermissionPolicy): "deny" | "ask" | "allow" {
+  if (!policy.web) return "deny";
   return policy.mode === "full-access" ? "allow" : "ask";
 }

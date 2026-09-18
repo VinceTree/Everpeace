@@ -1,5 +1,22 @@
 # Session Handoff
 
+## 最新工作区补充：实时进度、运行中 steering 与分段计时
+
+状态快照：2026-09-18。本轮将 Responses 请求改为 SSE 优先、buffered fallback：支持流式的端点逐步显示 assistant 文字，工具审批、开始/结束、重试和 steering 状态即时进入 TUI；不支持 SSE 的兼容端点继续使用原有阶段和命令预览。增量只在当前 UI 保留，完整 assistant/tool 结果仍按原顺序持久化。
+
+运行中的 Prompt 继续可用。真实 `ReactAgent` 收到 guidance 后会中止当前 sampling，在已落盘上下文上继续；工具已启动时先保存工具结果，未启动的后续 function call 写入 `steered` output，再带着新消息继续。Ctrl+C 时会将已接收的待处理 guidance 保存进 context，避免遗留到下一次无关任务。旧测试替身没有 steering 接口时保留 FIFO 下一轮兼容行为。耗时从 `Ns` 自动切换为 `Nm Ns` 和 `Nh Nm Ns`。
+
+新增 Agent loop、Responses stream、steering、取消保留 guidance、计时格式回归测试。定向 Agent/TUI 测试 58/58（Agent 23/23、TUI 35/35）。最终 `pnpm typecheck`、`pnpm build` 和 `git diff --check` 通过。完整 `pnpm test` 为 157 项通过、1 项取消：既有 Windows Git Bash `Bash abort stops a running child` 15 秒超时；未见本轮新增测试失败。真实 Windows Terminal 与真实流式供应商验收待完成。
+
+
+## 最新工作区补充：运行中交互与 Codex 风格权限 profile
+
+状态快照：2026-09-18。模型工作期间始终显示 guidance composer。此前普通消息按 FIFO 在当前轮结束后执行；现已由上方最新补充改为真实 Agent 在采样/工具安全检查点执行 steering。Ctrl+C 仍立即取消当前轮次。直接 `!` 运行交互式 PTY 时继续独占 stdin，避免把键盘输入同时送给 composer 和子进程。
+
+`/permissions` 现提供四档 profile：`read-only`（工作区读取直接可用，Bash/web 逐项审批）、`ask`（Bash/web 每次审批）、`workspace-write`（默认，当前 workspace 内 Bash 无逐条审批，web 仍逐项审批）和 `full-access`（二次确认后跳过工具审批）。网页审批通过统一确认窗口处理，关闭 web 仍是独立 deny 开关。权限仍是进程内应用层策略，不是 OS sandbox；workspace-write 不能阻止恶意 Bash 通过 `cd` 或网络访问越界，文档继续明确这一限制。
+
+新增运行中 guidance、四档 profile、网页审批和权限映射回归测试。定向测试 51/51、typecheck 和 build 已通过；完整 `pnpm test` 为 151/152，通过项未见本轮新增失败，唯一取消项仍是既有 Windows Git Bash 进程树终止 15 秒超时。真实 Windows Terminal 验收仍待完成。
+
 
 ## 最新工作区补充：Codex 历史重放行数上限
 
@@ -157,7 +174,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 
 ## 5. 验证结果
 
-- `pnpm test`：148/148 通过（包含 provider 等待/工具阶段、英文 TUI、GFM Markdown、语言别名、代码高亮安全上限、Codex 行数重放上限、严格/显式/多文件 diff、CRLF 行号、明暗/ANSI/NO_COLOR 配色及旧文案显示翻译；保留模型 Bash 首五/尾五、PTY、Session 和 Agent loop 回归）。
+- `pnpm test`：本轮 157/158 通过，1 项因既有 Windows Git Bash `Bash abort stops a running child` 15 秒超时而取消；新增权限 profile、网页审批、Responses stream 和运行中 guidance 回归均通过。其他 Bash、PTY、Session、Agent loop、TUI 和富文本回归通过。
 - `pnpm typecheck`：通过。
 - `pnpm build`：通过。
 - `git diff --check`：通过，仅有 Windows LF/CRLF 提示。

@@ -14,8 +14,8 @@
 
 - Everpeace 是 Node.js 22+、TypeScript、ESM 项目，使用 `pnpm@10.22.0`。
 - CLI/TUI 入口位于 `src/cli/`；界面使用 React + Ink，并保持 inline terminal 模式。
-- Agent 是 Responses API 驱动的 ReAct 循环，支持需确认的 Bash、无需确认的只读网页搜索和公共网页读取。
-- `/permissions` 管理进程内应用层权限：默认 ask 逐条审批 Bash，read-only 禁用模型 Bash，full-access 经二次确认后免审批；网页工具可独立禁用。当前没有 OS 沙箱，不得声称等同于 Codex Auto。
+- Agent 是 Responses API 驱动的 ReAct 循环，支持按权限 profile 审批 Bash、网页搜索和公共网页读取。
+- `/permissions` 管理进程内应用层权限：`read-only` 允许工作区读取但对 Bash/web 逐条审批，`ask` 对 Bash/web 逐条审批，默认 `workspace-write` 在当前 workspace 内免逐条 Bash 审批但 web 仍需审批，`full-access` 经二次确认后免工具审批；网页工具可独立禁用。当前没有 OS 沙箱，不得声称等同于 Codex Auto。
 - `read_file`、`list_directory` 始终限定当前工作目录。权限不从 JSONL 恢复，切换权限不得重建 Agent 或丢失 context；直接 `!` 仍由用户主动执行。对标与安全限制见 `docs/architecture/PERMISSIONS.md`。
 - 支持官方供应商和兼容端点；模型名称必须保留供应商返回的官方 model ID。
 - API Key 只由 `AuthStorage` 和系统 keyring 管理，不得写入注册表 JSON、session JSONL、日志、测试快照或 UI。
@@ -49,8 +49,9 @@ git diff --check
 ## TUI 与终端不变量
 
 - Ctrl+C 取消活动任务；空闲有草稿则清空，否则退出。TUI 的 PTY stdin 必须由 Ink 单一入口转发，不能同时注册原始 stdin 监听器。
+- 模型轮次运行期间保留 guidance composer；真实 Agent 支持时补充消息立即进入 transcript，并在采样/工具结果安全检查点应用，未启动调用补齐 `steered` output；Ctrl+C 时持久化已提交的待处理 guidance。无 steering 接口的替身继续 FIFO 排队。直接 `!` 的交互式 PTY 运行期间继续独占 stdin。
 - `/outputs`、`/history`、`/terminal-setup` 都是独立命令窗口。output timeline 可带兼容性可选 command 元数据；直接 `!` 仍不进入模型 context。
-- 模型 Bash 运行时使用有界真实首五行/尾五行预览并随终端高度缩减；用户直接 `!` 继续优先显示最近五行。完成态折叠和 `/outputs` 保留现有语义。
+- Responses SSE 可用时模型文字、审批、工具状态和重试实时展示，不可用时回退 buffered 阶段显示。模型 Bash 运行时使用有界真实首五行/尾五行预览并随终端高度缩减；用户直接 `!` 继续优先显示最近五行。完成态折叠和 `/outputs` 保留现有语义。
 - TUI 宿主界面使用英文；模型等待状态包含 provider、耗时和 Ctrl+C 提示。assistant Markdown、代码围栏、shell 命令和严格识别的 unified diff 使用分层高亮；超大或未知内容必须安全退回纯文本，旧 JSONL 只做显示层翻译。
 - 输入历史单独持久化，不记录登录向导字段；配置终端按键必须预览、明确确认和备份，不能静默修改用户设置。
 

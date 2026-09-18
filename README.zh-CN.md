@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.1.26) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.27) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -95,7 +95,7 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 
 对于依赖当前信息或冷门资料的问题，模型可以先调用 `web_search`，再使用 `web_fetch` 读取有价值的来源。搜索和网页读取不需要 Bash 确认；function call 及结果会保留在可恢复的模型上下文中，TUI transcript 则显示简短的工具动作。模型会被要求在最终回答中列出实际采用的来源 URL。
 
-TUI 自身界面现统一使用英文。任务运行时会显示按供应商识别的状态，例如 `Waiting for DeepSeek (3s • ctrl+c to interrupt)`，进入工具调度阶段后切换为 `Working`。模型回复支持 GitHub Flavored Markdown，包括标题、列表、强调、链接、表格、行内代码和 fenced code；代码块及 Bash/PowerShell 命令使用语言感知的终端高亮，超大内容会安全退回纯文本。
+TUI 自身界面现统一使用英文。任务运行时会显示按供应商识别的状态，例如 `Waiting for DeepSeek (3s • ctrl+c to interrupt)`，进入工具调度阶段后切换为 `Working`。支持 Responses 流式端点时，模型文字和工具进度会即时显示；兼容的 buffered 端点仍显示阶段、审批和命令预览。模型回复支持 GitHub Flavored Markdown，包括标题、列表、强调、链接、表格、行内代码和 fenced code；代码块及 Bash/PowerShell 命令使用语言感知的终端高亮，超大内容会安全退回纯文本。
 
 命令与对话正文使用不同层级展示：运行中显示 `Running`，完成的模型命令显示 `Ran`，用户直接命令显示 `You ran`，并附带状态色、shell、耗时和保留输出。模型 `diff` 代码块及命令输出中的标准 unified diff 会显示新旧行号、青色文件/hunk 标题、绿色新增和红色删除；真彩终端使用随明暗背景调整的底色，低色彩及 `NO_COLOR` 环境仍保留结构标记。恢复旧 Session 时，已知旧中文系统/工具提示只在显示层翻译，不改写 JSONL，也不翻译用户或模型正文。
 
@@ -119,7 +119,7 @@ TUI 命令：
 - `/model`：切换已注册模型，切换后重置对话上下文。
 - `/models`：查看所有模型和凭据状态。
 - `/status`：查看当前模型、供应商、context window 和 session token 使用量。
-- `/permissions`：选择只读、逐条审批或完全访问模式，并开关网页工具。
+- `/permissions`：选择只读、逐条审批、工作区写入或完全访问模式，并开关网页工具。
 - `/outputs`：分页浏览保留输出、已高亮的命令及 unified diff。
 - `/history`：浏览或明确确认后清空全局输入历史，不删除 Session。
 - `/terminal-setup`：预览并可选配置稳定版 Windows Terminal 的 Shift+Enter；确认后先备份设置，再新增全局按键绑定。
@@ -135,11 +135,11 @@ TUI 命令：
 
 - 核心循环已适配 Codex 的采样、工具执行、后续采样流程，提供逐工具结果保存、可取消的请求重试和并发轮次防护。这不是完整 Codex runtime，详见 [源码对应与移植范围](docs/architecture/AGENT_LOOP.md)。
 
-- 默认 `ask` 模式逐条确认模型 Bash；`read-only` 拒绝所有模型 Bash；`full-access` 经二次明确确认后免审批。
+- 权限档位按 Codex 的工作区范围与审批职责划分：`read-only` 可直接读取当前工作区，但 Bash 和网页请求需要审批；`ask` 对每次 Bash 和网页请求审批；`workspace-write` 在当前工作区内自动读写，但网页请求需要审批；`full-access` 二次明确确认后跳过工具审批。
 - 模型可以用 `read_file` 查看工作目录内不超过 128 KiB 的 UTF-8 文件，用 `list_directory` 列出最多 500 个目录项。拒绝目录外路径和符号链接越界。文件正文会进入模型 context 和 Session 文件，请避免读取机密。
-- 权限在当前进程内跨 `/new`、`/clear`、`/resume` 保留，重启恢复逐条审批、网页工具开启；切换权限不丢失 context，恢复 JSONL 不会恢复完全访问授权。
+- 权限在当前进程内跨 `/new`、`/clear`、`/resume` 保留，重启恢复 `workspace-write`、网页工具开启；切换权限不丢失 context，恢复 JSONL 不会恢复完全访问授权。
 - 当前是应用层权限，不是 OS 沙箱。获批 Bash 仍拥有当前系统账户的文件和网络权限；关闭网页工具不限制 Bash 网络、模型 API 或直接 `!` 命令。详见 [对标与安全限制](docs/architecture/PERMISSIONS.md)。
-- 网页搜索和公共页面读取属于只读工具调用，不需要确认。搜索词会先发送给 Bing，失败时回退到 DuckDuckGo；打开搜索结果时会向对应网站发送请求。
+- `read-only`、`ask` 和 `workspace-write` 会在每个网页请求前审批；`full-access` 跳过该确认。搜索词会先发送给 Bing，失败时回退到 DuckDuckGo；打开搜索结果时会向对应网站发送请求。
 - 网页读取只允许公共 HTTP/HTTPS 地址，会逐次检查重定向、阻止本机和内网地址，并限制超时与响应大小；返回内容始终作为不可信数据处理。
 - 搜索可用性和结果质量取决于外部搜索服务及当前网络。联网失败会作为工具结果返回模型，由模型说明限制或尝试其他来源。
 - `!<command>` 是用户直接输入的本机终端命令，不会再次确认，也不会加入模型上下文。
@@ -151,6 +151,8 @@ TUI 命令：
 - Bash 命令使用当前用户权限运行，没有额外沙箱。
 - 每次 Bash 调用都是独立进程，`cd` 和临时环境变量不会在调用间保留。
 - TUI 需要交互式终端；重定向或管道环境下会直接给出错误提示。
+
+模型工作期间输入框不会消失，会显示 `Add guidance while working`。此时提交的补充信息会立即写入 transcript，并在下一个安全检查点应用：采样通常会被中止，已经运行的工具先保存结果，再用当前上下文继续执行修正后的计划；`Ctrl+C` 仍会立即取消当前轮次，已提交的纠正会保留在 session context 供下一轮使用。耗时少于一分钟显示秒，超过一分钟显示分钟和秒，超过一小时显示小时、分钟和秒。
 
 ## 项目结构
 

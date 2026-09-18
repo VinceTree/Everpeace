@@ -104,7 +104,8 @@ test("permissions are checked at execution time and changing policy retains agen
     } } },
     io: {
       getPermissions: () => policy,
-      async confirmBash() { throw new Error("Must not prompt"); },
+      async confirmBash() { return false; },
+      async confirmWeb() { return false; },
       async runBash() { ran++; return bashResult("ok"); },
       writeAssistant() {},
     },
@@ -112,7 +113,7 @@ test("permissions are checked at execution time and changing policy retains agen
   });
   await agent.runTurn("inspect");
   assert.equal(ran, 0);
-  assert.ok(outputs.every((output) => output.includes("denied")));
+  assert.ok(outputs.every((output) => output.includes("denied") || output.includes("rejected")));
   policy = { mode: "full-access", web: false };
   await agent.runTurn("continue");
   assert.equal(ran, 1);
@@ -182,6 +183,7 @@ test("agent confirms, runs Bash, and returns its output to the model", async () 
     client,
     model: "deepseek-flash",
     io: {
+      getPermissions: () => ({ mode: "ask", web: true }),
       async confirmBash(command) {
         commands.push(command);
         return true;
@@ -237,6 +239,7 @@ test("agent tells the model when the user rejects Bash", async () => {
     client,
     model: "deepseek-flash",
     io: {
+      getPermissions: () => ({ mode: "ask", web: true }),
       async confirmBash() {
         return false;
       },
@@ -258,6 +261,7 @@ test("agent tells the model when the user rejects Bash", async () => {
 test("agent searches the web without requesting Bash confirmation", async () => {
   const requests: Array<Record<string, unknown>> = [];
   const toolActivity: string[] = [];
+  const webApprovals: string[] = [];
   const responses = [
     {
       id: "response-search",
@@ -288,6 +292,10 @@ test("agent searches the web without requesting Bash confirmation", async () => 
     io: {
       async confirmBash() {
         throw new Error("Web search must not request Bash confirmation");
+      },
+      async confirmWeb() {
+        webApprovals.push("search");
+        return true;
       },
       async runBash() {
         throw new Error("Web search must not run Bash");
@@ -320,6 +328,7 @@ test("agent searches the web without requesting Bash confirmation", async () => 
   await agent.runTurn("What is the latest TypeScript release?");
 
   assert.deepEqual(toolActivity, ["Searching the web: latest TypeScript release"]);
+  assert.deepEqual(webApprovals, ["search"]);
   const tools = requests[0]?.tools as Array<Record<string, unknown>>;
   assert.deepEqual(tools.map((tool) => tool.name), [
     "bash",
@@ -366,6 +375,9 @@ test("agent returns web failures to the model as tool output", async () => {
     io: {
       async confirmBash() {
         return false;
+      },
+      async confirmWeb() {
+        return true;
       },
       async runBash() {
         return bashResult("");
@@ -607,4 +619,120 @@ test("agent reports unavailable usage without failing compatible endpoints", asy
   await agent.runTurn("hello");
 
   assert.deepEqual(usage, [null]);
+});
+
+test("agent consumes Responses stream deltas and reconstructs tool calls", async () => {
+  const deltas: string[] = [];
+  const assistants: string[] = [];
+  const calls: string[] = [];
+  const toolProgress: string[] = [];
+  let request = 0;
+  const agent = new ReactAgent({
+    model: "streaming-test",
+    client: {
+      responses: {
+        async create() { throw new Error("buffered path should not be used"); },
+        async *stream() {
+          request++;
+          if (request === 1) {
+            yield { type: "response.output_text.delta", delta: "I will " };
+            yield { type: "response.output_text.delta", delta: "inspect." };
+            yield { type: "response.output_item.added", output_index: 0, item: { id: "fc-stream", type: "function_call", name: "bash", arguments: "" } };
+            yield { type: "response.function_call_arguments.delta", output_index: 0, item_id: "fc-stream", delta: '{"command":"pwd"}' };
+            yield { type: "response.output_item.done", output_index: 0, item: { type: "function_call", name: "bash", call_id: "stream-call", arguments: '{"command":"pwd"}' } };
+          } else {
+            yield { type: "response.output_text.delta", delta: "Done" };
+          }
+          yield { type: "response.completed", response: { id: `response-${request}`, output: request === 1 ? [{ type: "function_call", name: "bash", call_id: "stream-call", arguments: '{"command":"pwd"}' }] : [], output_text: request === 1 ? "I will inspect." : "Done" } };
+        },
+      },
+    },
+    io: {
+      async confirmBash() { return true; },
+      async runBash(command) { calls.push(command); return bashResult("ok"); },
+      writeAssistant(text) { assistants.push(text); },
+      writeAssistantDelta(text) { deltas.push(text); },
+      onToolProgress(event) { toolProgress.push(`${event.phase}:${event.name}:${event.detail ?? ""}`); },
+    },
+  });
+  await agent.runTurn("inspect");
+  assert.deepEqual(deltas, ["I will ", "inspect.", "Done"]);
+  assert.deepEqual(assistants, ["I will inspect.", "Done"]);
+  assert.deepEqual(calls, ["pwd"]);
+  assert.ok(toolProgress.some((event) => event.includes('streaming:bash:{"command":"pwd"}')));
+});
+
+test("agent applies guidance by stopping sampling and continuing with durable context", async () => {
+  let request = 0;
+  let started!: () => void;
+  const ready = new Promise<void>((resolve) => { started = resolve; });
+  const inputs: Array<Record<string, unknown>[]> = [];
+  const agent = new ReactAgent({
+    model: "steering-test",
+    client: {
+      responses: {
+        async create() { throw new Error("buffered path should not be used"); },
+        async *stream(params, options) {
+          inputs.push(params.input as Record<string, unknown>[]);
+          request++;
+          if (request === 1) {
+            started();
+            await new Promise<never>((_resolve, reject) => {
+              options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true });
+            });
+          }
+          yield { type: "response.completed", response: { id: `response-${request}`, output: [], output_text: "corrected" } };
+        },
+      },
+    },
+    io: {
+      async confirmBash() { return true; },
+      async runBash() { return bashResult(""); },
+      writeAssistant() {},
+    },
+  });
+  const turn = agent.runTurn("start");
+  await ready;
+  assert.equal(agent.requestSteering("use the safer approach"), true);
+  await turn;
+  assert.ok(inputs[1]?.some((item) => item.role === "user" && item.content === "use the safer approach"));
+});
+
+test("guidance submitted before Ctrl+C is checkpointed for the next turn", async () => {
+  const controller = new AbortController();
+  let started!: () => void;
+  const ready = new Promise<void>((resolve) => { started = resolve; });
+  let request = 0;
+  let nextInput: Record<string, unknown>[] = [];
+  const agent = new ReactAgent({
+    model: "steering-cancel-test",
+    client: {
+      responses: {
+        async create() { throw new Error("buffered path should not be used"); },
+        async *stream(params, options) {
+          request++;
+          if (request === 1) {
+            started();
+            await new Promise<never>((_resolve, reject) => {
+              options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true });
+            });
+          }
+          nextInput = params.input as Record<string, unknown>[];
+          yield { type: "response.completed", response: { id: "done", output: [], output_text: "done" } };
+        },
+      },
+    },
+    io: {
+      async confirmBash() { return true; },
+      async runBash() { return bashResult(""); },
+      writeAssistant() {},
+    },
+  });
+  const turn = agent.runTurn("start", controller.signal);
+  await ready;
+  agent.requestSteering("keep the correction");
+  controller.abort();
+  await assert.rejects(turn, /abort/i);
+  await agent.runTurn("continue");
+  assert.ok(nextInput.some((item) => item.role === "user" && item.content === "keep the correction"));
 });

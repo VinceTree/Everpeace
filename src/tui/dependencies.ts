@@ -1,6 +1,11 @@
 import { createRequire } from "node:module";
 import { promises as fs } from "node:fs";
-import { ReactAgent, type AgentIO, type ResponsesClientLike } from "../agent/react-agent.js";
+import {
+  ReactAgent,
+  type AgentIO,
+  type ResponseStreamLike,
+  type ResponsesClientLike,
+} from "../agent/react-agent.js";
 import {
   createProviderClient,
   listOfficialModelIds,
@@ -50,12 +55,29 @@ export function createDefaultTuiDependencies(
       return listOfficialModelIds(createProviderClient(baseUrl, apiKey), signal);
     },
     createAgent(model: RegisteredModel, io: AgentIO, restore) {
+      const providerClient = createProviderClient(
+        model.base_url,
+        model.api_key,
+      );
+      const client: ResponsesClientLike = {
+        responses: {
+          create(params, options) {
+            return providerClient.responses.create(
+              params as never,
+              options as never,
+            ) as never;
+          },
+          async stream(params, options) {
+            return await providerClient.responses.create(
+              { ...params, stream: true } as never,
+              options as never,
+            ) as unknown as ResponseStreamLike;
+          },
+        },
+      };
       return new ReactAgent({
         workspacePath: process.cwd(),
-        client: createProviderClient(
-          model.base_url,
-          model.api_key,
-        ) as unknown as ResponsesClientLike,
+        client,
         model: model.model_name,
         io,
         ...(restore?.initialContext === undefined
@@ -70,6 +92,9 @@ export function createDefaultTuiDependencies(
         ...(restore?.onPhase === undefined
           ? {}
           : { onPhase: restore.onPhase }),
+        ...(restore?.onEvent === undefined
+          ? {}
+          : { onEvent: restore.onEvent }),
       });
     },
     async generateSessionTitle(model, firstQuestion, signal) {

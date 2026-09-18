@@ -26,6 +26,7 @@ import {
 } from "../../../src/status/model-status.js";
 import {
   EverpeaceApp,
+  formatElapsed,
   RESIZE_REDRAW_DEBOUNCE_MS,
 } from "../../../src/tui/app.js";
 import {
@@ -33,6 +34,15 @@ import {
   type SlashCommand,
 } from "../../../src/tui/commands.js";
 import { textWidth } from "../../../src/tui/text-width.js";
+
+test("formats active turn elapsed time with useful units", () => {
+  assert.equal(formatElapsed(0), "0s");
+  assert.equal(formatElapsed(59), "59s");
+  assert.equal(formatElapsed(60), "1m 0s");
+  assert.equal(formatElapsed(65), "1m 5s");
+  assert.equal(formatElapsed(3600), "1h 0m 0s");
+  assert.equal(formatElapsed(3723), "1h 2m 3s");
+});
 import type {
   AgentRestoreOptions,
   AgentSession,
@@ -403,6 +413,93 @@ test("active turns show provider-aware English sampling and tool phases", async 
   await waitFor(() => /Working \(\d+s • ctrl\+c to interrupt\)/u.test(view.lastFrame() ?? ""));
   finishTurn?.();
   await waitFor(() => (view.lastFrame() ?? "").includes("done"));
+  view.unmount();
+});
+
+test("running turns keep a guidance composer and drain queued corrections", async () => {
+  const model: RegisteredModel = {
+    id: "model-guidance",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const calls: string[] = [];
+  let releaseFirst: (() => void) | undefined;
+  const fixture = createFixture({
+    initial: [model],
+    createAgent: (_model, io) => ({
+      async runTurn(input) {
+        calls.push(input);
+        if (calls.length === 1) {
+          await new Promise<void>((resolve) => { releaseFirst = resolve; });
+        }
+        io.writeAssistant(`done: ${input}`);
+      },
+    }),
+  });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("start task");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Add guidance while working"));
+  view.stdin.write("use the safer approach");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("1 guidance message pending"));
+  assert.match(view.lastFrame() ?? "", /use the safer approach/);
+  releaseFirst?.();
+  await waitFor(() => (view.lastFrame() ?? "").includes("done: use the safer approach"));
+  assert.deepEqual(calls, ["start task", "use the safer approach"]);
+  view.unmount();
+});
+
+test("running composer sends guidance to agents with live steering support", async () => {
+  const model: RegisteredModel = {
+    id: "model-live-steering",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  let release: (() => void) | undefined;
+  const corrections: string[] = [];
+  const fixture = createFixture({
+    initial: [model],
+    createAgent: (_model, io, restore) => ({
+      async runTurn() {
+        await new Promise<void>((resolve) => { release = resolve; });
+        restore?.onEvent?.({ type: "steering_applied", count: corrections.length });
+        io.writeAssistant(`applied ${corrections.join("; ")}`);
+      },
+      requestSteering(text) { corrections.push(text); return true; },
+    }),
+  });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+  await tick();
+  view.stdin.write("start task");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Add guidance while working"));
+  view.stdin.write("avoid the unsafe command");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("1 guidance message pending"));
+  assert.deepEqual(corrections, ["avoid the unsafe command"]);
+  release?.();
+  await waitFor(() => (view.lastFrame() ?? "").includes("applied avoid the unsafe command"));
   view.unmount();
 });
 
@@ -1080,6 +1177,14 @@ test("model-requested Bash waits for confirmation", async () => {
   );
 
   await tick();
+  view.stdin.write("/permissions");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("OS sandbox: unavailable"));
+  view.stdin.write("\u001B[A");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
   view.stdin.write("run pwd");
   await tick();
   view.stdin.write("\r");
@@ -1132,6 +1237,14 @@ test("model Bash streams head and tail output and adapts to terminal height", as
   );
 
   await tick();
+  view.stdin.write("/permissions");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("OS sandbox: unavailable"));
+  view.stdin.write("\u001B[A");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
   view.stdin.write("run a long command");
   await tick();
   view.stdin.write("\r");
@@ -1795,11 +1908,15 @@ test("/permissions is transient and changes the live policy without rebuilding t
   const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
   await tick();
   const before = created;
-  assert.equal(io?.getPermissions?.().mode, "ask");
+  assert.equal(io?.getPermissions?.().mode, "workspace-write");
   view.stdin.write("/permissions");
   await tick();
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("OS sandbox: unavailable"));
+  view.stdin.write("\u001B[A");
+  await tick();
+  view.stdin.write("\u001B[A");
+  await tick();
   assert.doesNotMatch(lastBorderedSurface(view.lastFrame() ?? ""), /Ask Everpeace/);
   await tick();
   view.stdin.write("\r");

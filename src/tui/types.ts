@@ -1,5 +1,5 @@
 import type { AgentIO } from "../agent/react-agent.js";
-import type { LoopPhase } from "../agent/agent-loop.js";
+import type { LoopEvent, LoopPhase } from "../agent/agent-loop.js";
 import type { CommandRecord } from "../tools/command-record.js";
 import type { InputHistoryStore } from "../storage/input-history.js";
 import type {
@@ -17,6 +17,7 @@ import type {
 
 export interface AgentSession {
   runTurn(userInput: string, signal?: AbortSignal): Promise<void>;
+  requestSteering?(text: string): boolean;
 }
 
 export interface AgentRestoreOptions {
@@ -24,6 +25,7 @@ export interface AgentRestoreOptions {
   onContextAppend?(items: readonly Record<string, unknown>[]): Promise<void>;
   onUsage?(usage: TokenUsageSample | null): Promise<void>;
   onPhase?(phase: LoopPhase): void;
+  onEvent?(event: LoopEvent): void;
 }
 
 export interface TuiModelRegistry {

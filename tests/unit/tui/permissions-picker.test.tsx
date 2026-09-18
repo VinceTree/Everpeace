@@ -15,6 +15,8 @@ test("full access requires a second explicit confirmation and Escape cancels it"
   await tick();
   view.stdin.write("\u001B[B");
   await tick();
+  view.stdin.write("\u001B[B");
+  await tick();
   view.stdin.write("\r");
   await tick();
   assert.match(view.lastFrame() ?? "", /without approval/);

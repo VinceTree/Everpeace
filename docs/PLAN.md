@@ -8,6 +8,10 @@
 
 状态快照：2026-09-18。
 
+## 实时 Agent 进度与运行中纠正
+
+已完成 Responses SSE 优先、buffered fallback、实时 assistant delta/工具状态、运行中 safe-checkpoint steering 及分段耗时显示。流式增量和阶段状态只存在当前 TUI，不写入 Session JSONL；采样中的 guidance 会中止当前采样，工具执行中的 guidance 在结果落盘后生效，未执行的调用补齐 `steered` output。Ctrl+C 时已提交的待处理 guidance 会持久化到模型 context。
+
 ## 当前目标
 
 Codex 核心 Agent Loop TypeScript 适配已接入：独立轮次控制、逐工具结果持久化、采样重试和取消、完成判断、并发 turn 防护。上游来源与未移植模块见 `architecture/AGENT_LOOP.md`。
@@ -16,7 +20,7 @@ Codex 核心 Agent Loop TypeScript 适配已接入：独立轮次控制、逐工
 
 完成英文优先的运行界面和富文本层：供应商感知等待状态、Agent 阶段切换、Markdown/代码高亮、命令卡片以及 Git 风格 unified diff；保持 inline、scrollback、首五/尾五实时预览和既有 Session schema。
 
-权限管理第一阶段：Codex 官方文档摘录与对标、`/permissions`、模型工作目录文件查看和工具运行时审批。见 `architecture/PERMISSIONS.md`。本轮不宣称实现 OS 沙箱；pi/Grok Build 后续再比较。
+权限管理第一阶段：Codex 官方文档摘录与对标、`/permissions`、模型工作目录文件查看和工具运行时审批。当前已补齐四档 profile：`read-only`、`ask`、`workspace-write`（默认）和 `full-access`，并按工具分别处理 Bash/web 审批。见 `architecture/PERMISSIONS.md`。本轮不宣称实现 OS 沙箱；pi/Grok Build 后续再比较。
 
 提供可持久化、可恢复、可继续对话的本地 Session：
 
@@ -43,6 +47,7 @@ Codex 核心 Agent Loop TypeScript 适配已接入：独立轮次控制、逐工
 - [ ] 真实 Windows Terminal 手动验收键位、复制、缩放、resize 和带凭据模型的完整流程。
 
 - [x] 应用层 ask/read-only/full-access 模式，完全访问二次确认，网页工具独立开关。
+- [x] Codex 风格 workspace-write 默认档位；read-only/ask 对 Bash 和网页请求逐项审批。
 - [x] `read_file` / `list_directory` 路径校验、内容上限、结构化失败返回。
 - [x] 权限独立窗口；切换不清空 context、不向 JSONL 写入授权。
 
@@ -64,6 +69,9 @@ Codex 核心 Agent Loop TypeScript 适配已接入：独立轮次控制、逐工
 - [x] 新增 `web_search` 和 `web_fetch`，支持搜索结果摘要、网页正文提取、来源 URL、失败降级和取消信号。
 - [x] 网页读取限制为公共 HTTP/HTTPS，逐次验证重定向并阻止 localhost、内网和链路本地地址。
 - [x] 搜索采用 Bing 优先、DuckDuckGo 回退，不额外要求搜索服务 API Key。
+- [x] 模型轮次运行期间保留 guidance composer；补充消息立即写入 transcript，并在采样/工具安全检查点应用。
+- [x] Responses 流式文字和工具进度即时显示；不支持流式的兼容端点回退到 buffered 阶段/审批/命令预览。
+- [x] 运行中 guidance 在 safe checkpoint 应用并保留完整 function output 配对；计时显示 `s`、`m s`、`h m s`。
 
 ## 验收与后续
 

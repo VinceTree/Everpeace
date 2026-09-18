@@ -10,7 +10,7 @@
 
 ## 权限管理
 
-权限第一阶段详见 [PERMISSIONS.md](./PERMISSIONS.md)：`/permissions` 默认逐条审批 Bash；只读模式拒绝所有模型 Bash；完全访问经二次确认后免审批。文件工具始终限定工作目录，网页工具独立开关。权限仅存在当前进程，跨 new/clear/resume 保留，重启恢复默认，不从 JSONL 恢复；变更权限不重建 Agent 或丢失 context。这是应用层权限，不是 OS 沙箱。直接 `!` 保持原语义。
+权限第一阶段详见 [PERMISSIONS.md](./PERMISSIONS.md)：`/permissions` 提供 `read-only`、`ask`、`workspace-write`（默认）和 `full-access` 四档 profile。只读档允许工作区读取，但 Bash/web 逐项审批；ask 档对每个 Bash/web 请求审批；workspace-write 档允许当前工作区内无提示工作，但网页请求仍逐项审批；完全访问经二次确认后免审批。文件工具始终限定工作目录，网页工具独立开关。权限仅存在当前进程，跨 new/clear/resume 保留，重启恢复默认，不从 JSONL 恢复；变更权限不重建 Agent 或丢失 context。这是应用层权限，不是 OS 沙箱。直接 `!` 保持原语义。
 
 ## Session 持久化
 
@@ -72,8 +72,10 @@
 
 ## 任务取消与输入输出
 
+- 模型轮次运行时保留一个可编辑 guidance composer。用户提交的普通消息立即写入可恢复 transcript；真实 Agent 支持时会中止当前 sampling，并在已持久化上下文的安全检查点应用 guidance，工具执行中的消息等待当前工具结果落盘后生效，未启动调用补齐 `steered` output。Ctrl+C 取消时先将待处理 guidance 写入模型 context，避免遗留给未来轮次。旧 AgentSession 替身仍按 FIFO 下一轮兼容。模型 Bash 的非交互输出不会夺取输入焦点。直接 `!` 运行时仍将 stdin 独占给 PTY，Ctrl+C 取消当前命令。
+
 - TUI 自有文案使用英文；用户和 assistant 正文保持原文。已知旧 system/tool/error timeline 文案在渲染时映射为英文，持久化文件与 Responses context 均不迁移、不改写。
-- Agent loop 的 `sampling` / `tools` phase 通过构造回调进入 TUI：sampling 显示按官方 base URL 识别的 provider（兼容端点退回官方 model ID）、累计等待秒数及 Ctrl+C 提示，tools 显示 `Working`。阶段状态不持久化。
+- Agent loop 的 `sampling` / `tools` phase 及 `LoopEvent` 通过构造回调进入 TUI：Responses SSE 的文字 delta、审批、工具开始/结束、重试和 steering 都即时展示，兼容端点退回 buffered 阶段显示。阶段状态和增量内容不持久化；耗时小于一分钟显示秒，超过一分钟显示 `m+s`，超过一小时显示 `h+m+s`。
 - assistant timeline 以 GFM token 渲染标题、列表、强调、链接、表格和代码；代码语言由围栏或 shell 元数据确定。高亮限制为 512 KiB、10,000 行、单行 4 KiB，未知语言、越界内容或解析失败退回纯文本。原始 Markdown 仍是唯一持久化内容。
 - 模型命令、用户直接命令分别以 Ran/You ran 卡片显示；失败和取消保留文本状态而不只依赖颜色。新命令不再额外写入重复 `! command` 和成功提示，审计信息继续由 output timeline 的可选 command 元数据承担，旧 timeline 保持可读。
 - unified diff 只有在显式 `diff`/`patch` 围栏或严格识别到文件头+hunk 的命令输出时启用。展示 old/new 行号、hunk/file gutter 及增删色；真彩配色根据 `COLORFGBG` 选择明暗背景，ANSI256/16 与 `NO_COLOR` 降级仍保留 `+`/`-`/gutter。该功能只渲染已有内容，不自动采集 Git 或文件快照。
