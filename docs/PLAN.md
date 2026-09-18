@@ -59,7 +59,7 @@ Codex 核心 Agent Loop TypeScript 适配已接入：独立轮次控制、逐工
 - 自动验证目标：完整测试、类型检查、构建和 diff 检查全部通过；最新实际结果记录在 `HANDOFF.md`。
 - 待在真实 Windows Terminal 中验证 `/new` → 首问命名 → 退出 → `/resume` → 继续聊天。
 - 待使用真实 OpenAI、DeepSeek 和自定义兼容端点复验 `/status` usage 返回、context 映射、居中与窄终端排版，以及 Esc 返回原 Session。
-- v0.1.24 已发布；Release workflow、annotated tag 和 GitHub Release 均已确认成功。
+- v0.1.25 已发布；Release workflow、annotated tag 和 GitHub Release 均已确认成功。
 
 ## 文档规则
 
