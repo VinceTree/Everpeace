@@ -1,12 +1,12 @@
 # Session Handoff
 
-状态快照：2026-09-18。分支 `main`，v0.1.25 已发布：在既有 Agent Loop、权限、终端交互和恢复会话基础上新增模型 Bash 实时首尾预览。用户原有未跟踪 `.patch-node-pty/`、`benchmark/`、`test-me/` 未改动且不纳入发布。
+状态快照：2026-09-18。分支 `main`，v0.1.25 已发布：在既有 Agent Loop、权限、终端交互和恢复会话基础上新增模型 Bash 实时首尾预览。远端 `main` 与现有标签的提交标题已按具体功能语义统一，旧 SHA 不再作为远端分支或标签依据；改写前完整历史保存在本机 `.git/commit-message-rewrite-backup.bundle`。用户原有未跟踪 `.patch-node-pty/`、`benchmark/`、`test-me/` 未改动且不纳入发布。
 
 ## 最新发布
 
 v0.1.25 为模型 Bash 增加 1 MiB 有界实时缓冲，保留真实首五行和尾五行并按终端高度自适应展示；直接 `!`、完成态折叠、`/outputs`、模型 context 和 JSONL 语义保持不变。
 
-- 发布提交 `4a760b86b08c03d1cb332127c2ac3910ac2364c9` 已推送至 `origin/main`；annotated tag `v0.1.25` 已解析到该提交。
+- 发布提交 `8f88cc1d69e2334378a9a3c3e8eb5c71d9270c8d` 已推送至 `origin/main`；annotated tag `v0.1.25` 已解析到该提交。
 - Release workflow `35300619208` 已完成且 conclusion 为 `success`；`v0.1.25` Release 已发布，draft/prerelease 均为 false。
 - Release: https://github.com/VinceTree/Everpeace/releases/tag/v0.1.25
 - 发布前 131 项测试、typecheck、build 及暂存 diff 检查全部通过。
@@ -15,12 +15,12 @@ v0.1.25 为模型 Bash 增加 1 MiB 有界实时缓冲，保留真实首五行�
 
 v0.1.24 已接入 Codex 核心 Agent Loop 的 TypeScript 适配。详见 `architecture/AGENT_LOOP.md`。保留既有端点、权限、Session 和工具接口，不新增 OS 沙箱或完整 Codex 服务。包含上游 Apache-2.0 许可证及改动说明。
 
-- 发布提交 `c508473ea1b8f475139a2bc7ec85d27463aea8cc` 已推送至 `origin/main`。
+- 发布提交 `fd4b84ced48b9dd2aa06f5f23577fbc39e100466` 已推送至 `origin/main`。
 - Release workflow `35232398930` 已完成且 conclusion 为 `success`；`v0.1.24` Release 已发布，draft/prerelease 均为 false。
 - Release: https://github.com/VinceTree/Everpeace/releases/tag/v0.1.24
 - 发布前 124 项测试、typecheck、build 及暂存 diff 检查全部通过。
 
-- 发布提交 `524dc453ec9e2f880630bcf10433db923293b5a0` 已推送至 `origin/main`。
+- 发布提交 `4ab700f8407c4bb66bcce72f90286c456c9f0b03` 已推送至 `origin/main`。
 - Release workflow `35229886201` 已完成且 conclusion 为 `success`；`v0.1.23` GitHub Release 已发布，draft/prerelease 均为 false。
 - Release: https://github.com/VinceTree/Everpeace/releases/tag/v0.1.23
 - 发布前冻结锁文件安装、118 项测试、typecheck、build 通过；暂存 diff 检查发现补丁上下文空白后已调整补丁 hunk 并重建锁文件，复验 Windows PTY 六项测试及暂存 diff 检查通过。
