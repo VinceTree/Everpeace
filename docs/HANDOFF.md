@@ -7,16 +7,23 @@
 
 已删除自定义的 200 条 timeline 窗口，改为按 `WT_SESSION`、`TERM_PROGRAM` 和 VS Code 注入环境解析上述行数上限，再依据当前列宽、换行和常见双宽字符估算 source-backed replay 尾部。单条超长记录保持原子显示；完整 Session、context、输入导航和 `/outputs` 不裁剪。窗口起点改变仍通过同步清屏重放，`/clear` 现在抑制由新 banner ID 造成的重复重放。新增环境选择、换行、源数据保留与 TUI 集成回归。
 
-本次 `history-window` 单测 4/4、`app.test.tsx` 32/32、完整 `pnpm test` 148/148、`pnpm typecheck`、`pnpm build` 和 `git diff --check` 均通过。首次完整测试的 Bash 取消 15 秒超时未在单独运行或完整重跑中复现；此前 node_modules `EPERM` 也未复现。提交、推送和 v0.1.26 发布仍待验证。
+本次 `history-window` 单测 4/4、`app.test.tsx` 32/32、完整 `pnpm test` 148/148、`pnpm typecheck`、`pnpm build` 和 `git diff --check` 均通过。首次完整测试的 Bash 取消 15 秒超时未在单独运行或完整重跑中复现；此前 node_modules `EPERM` 也未复现。v0.1.26 已提交、推送和发布，详见下方最新发布。
 
 
-状态快照：2026-09-18。分支 `main`，v0.1.25 已发布：在既有 Agent Loop、权限、终端交互和恢复会话基础上新增模型 Bash 实时首尾预览。远端 `main` 与现有标签的提交标题已按具体功能语义统一，旧 SHA 不再作为远端分支或标签依据；改写前完整历史保存在本机 `.git/commit-message-rewrite-backup.bundle`。用户原有未跟踪 `.patch-node-pty/`、`benchmark/`、`test-me/` 未改动且不纳入发布。
+状态快照：2026-09-18。分支 `main`，v0.1.26 已发布：在既有 Agent Loop、权限、终端交互和恢复会话基础上完成英文优先 TUI、富文本显示和 Codex 对齐的历史重放行数上限。远端 `main` 与现有标签的提交标题已按具体功能语义统一，旧 SHA 不再作为远端分支或标签依据；改写前完整历史保存在本机 `.git/commit-message-rewrite-backup.bundle`。用户原有未跟踪 `.patch-node-pty/`、`benchmark/`、`test-me/` 未改动且不纳入发布。
 
 v0.1.26 候选改动在此基础上完成英文优先 TUI 与富文本显示：宿主界面全部使用英文，Agent sampling/tools phase 分别驱动 provider 感知的 `Waiting for …` 计时状态与 `Working`；assistant 回复支持 GFM Markdown 和代码高亮；Bash/PowerShell 命令使用 Running/Ran/You ran 分层卡片；标准 unified diff 在 transcript、实时预览和 `/outputs` 中显示新旧行号及增删高亮。旧 JSONL 不迁移，已知旧中文 system/tool/error 文案和“新 Session”标题只在显示层翻译，用户与 assistant 内容保持原文。新增 `marked`、`lowlight` 运行时依赖，package 与 README 展示号已调整为 0.1.26。
 
 本轮没有改变 Responses context、Session schema、权限语义、inline/scrollback、直接 PTY 输入或首五/尾五缓冲。新命令不再额外持久化重复的 `! command` 和成功提示；可选 command 元数据继续提供来源、状态、耗时和审计信息，旧记录仍可恢复。
 
 ## 最新发布
+
+v0.1.26 增加英文优先 TUI、Markdown/代码/命令/diff 的富文本渲染，并将 transcript resize/replay 由固定 200 条记录改为 Codex 对齐的终端行数上限。
+
+- 发布提交 `9f9213718fc0b9d2c3b473d755bd6c0b62ff9445` 已推送至 `origin/main`；annotated tag `v0.1.26` 的 tag object 为 `28e96b77237d2e19d23924b3853ba7f42018de51`，解析到该提交。
+- Release workflow `35322141963` 已完成且 conclusion 为 `success`；`v0.1.26` Release 已发布，draft/prerelease 均为 false。
+- Release: https://github.com/VinceTree/Everpeace/releases/tag/v0.1.26
+- 发布前 148 项测试、typecheck、build 及 diff 检查全部通过。
 
 v0.1.25 为模型 Bash 增加 1 MiB 有界实时缓冲，保留真实首五行和尾五行并按终端高度自适应展示；直接 `!`、完成态折叠、`/outputs`、模型 context 和 JSONL 语义保持不变。
 
