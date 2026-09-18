@@ -258,6 +258,7 @@ test("Ctrl+C cancels direct commands, retains details, and accepts the next inpu
     view.stdin.write("\r");
     await waitFor(() => (view.lastFrame() ?? "").includes("Running"));
     assert.doesNotMatch(view.lastFrame() ?? "", /line 0\n/);
+    assert.match(view.lastFrame() ?? "", /line 19/u);
     view.stdin.write("\u0003");
     await waitFor(() => cancelled && (view.lastFrame() ?? "").includes("Ask Everpeace"));
     assert.match(view.lastFrame() ?? "", /cancelled/);
@@ -1014,6 +1015,89 @@ test("model-requested Bash waits for confirmation", async () => {
 
   assert.equal(ranBash, true);
   assert.match(view.lastFrame() ?? "", /Bash completed successfully/);
+  view.unmount();
+});
+
+test("model Bash streams head and tail output and adapts to terminal height", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  let finishBash: ((result: BashResult) => void) | undefined;
+  const output = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n");
+  const fixture = createFixture({
+    initial: [model],
+    createAgent: (_model, io) => ({
+      async runTurn() {
+        if (await io.confirmBash("long-output")) {
+          await io.runBash("long-output");
+          io.writeAssistant("done");
+        }
+      },
+    }),
+  });
+  fixture.dependencies.runBash = async (_command, _signal, onOutput) => {
+    onOutput?.({
+      headLines: ["line 1", "line 2", "line 3", "line 4", "line 5"],
+      tailLines: ["line 16", "line 17", "line 18", "line 19", "line 20"],
+      omittedLines: 10,
+    });
+    return new Promise((resolve) => {
+      finishBash = resolve;
+    });
+  };
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write("run a long command");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("是否执行"));
+  view.stdin.write("y");
+  await waitFor(() => (view.lastFrame() ?? "").includes("… +10 lines"));
+
+  const fullHeightFrame = view.lastFrame() ?? "";
+  for (const line of ["line 1", "line 5", "line 16", "line 20"]) {
+    assert.match(fullHeightFrame, new RegExp(`\\b${line}\\b`, "u"));
+  }
+  assert.doesNotMatch(fullHeightFrame, /\bline 6\b/u);
+
+  Object.defineProperty(view.stdout, "rows", {
+    configurable: true,
+    value: 8,
+  });
+  view.stdout.emit("resize");
+  await waitFor(() => (view.lastFrame() ?? "").includes("… +16 lines"));
+
+  const shortHeightFrame = view.lastFrame() ?? "";
+  for (const line of ["line 1", "line 2", "line 19", "line 20"]) {
+    assert.match(shortHeightFrame, new RegExp(`\\b${line}\\b`, "u"));
+  }
+  assert.doesNotMatch(shortHeightFrame, /\bline 3\b/u);
+  assert.doesNotMatch(shortHeightFrame, /\bline 18\b/u);
+
+  finishBash?.({
+    stdout: output,
+    stderr: "",
+    exitCode: 0,
+    signal: null,
+  });
+  await waitFor(() => (view.lastFrame() ?? "").includes("done"));
+
+  const completedFrame = view.lastFrame() ?? "";
+  assert.match(completedFrame, /\bline 1\b/u);
+  assert.match(completedFrame, /\bline 2\b/u);
+  assert.match(completedFrame, /\bline 17\b/u);
+  assert.match(completedFrame, /\bline 20\b/u);
+  assert.match(completedFrame, /lines omitted \(\/outputs\)/u);
   view.unmount();
 });
 

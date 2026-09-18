@@ -1,6 +1,12 @@
 import { spawn } from "node:child_process";
+import {
+  BashOutputPreviewBuffer,
+  type BashOutputPreview,
+} from "./bash-output-preview.js";
 import { stopProcessTree } from "./process-cancel.js";
 import { retainOutput } from "./command-record.js";
+
+export type { BashOutputPreview } from "./bash-output-preview.js";
 
 export interface BashResult {
   truncated?: boolean;
@@ -14,7 +20,7 @@ export interface BashResult {
 
 export interface BashOptions {
   signal?: AbortSignal;
-  onOutput?(output: string): void;
+  onOutput?(output: BashOutputPreview): void;
   bashPath?: string;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -96,9 +102,15 @@ export function runBash(
     let settled = false;
     let truncated = false;
     let previewTimer: ReturnType<typeof setTimeout> | undefined;
+    const previewOutput = options.onOutput
+      ? new BashOutputPreviewBuffer()
+      : undefined;
     const preview = () => {
-      if (!options.onOutput || previewTimer) return;
-      previewTimer = setTimeout(() => { previewTimer = undefined; options.onOutput?.(stdout + stderr); }, 80);
+      if (!options.onOutput || !previewOutput || previewTimer) return;
+      previewTimer = setTimeout(() => {
+        previewTimer = undefined;
+        options.onOutput?.(previewOutput.snapshot());
+      }, 80);
     };
 
     const finish = (result: BashResult): void => {
@@ -132,6 +144,7 @@ export function runBash(
     if (child.stdout) {
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (chunk: string) => {
+        previewOutput?.push(chunk);
         stdout += chunk;
         const retained = retainOutput(stdout, 1024 * 1024);
         stdout = retained.text;
@@ -144,6 +157,7 @@ export function runBash(
     if (child.stderr) {
       child.stderr.setEncoding("utf8");
       child.stderr.on("data", (chunk: string) => {
+        previewOutput?.push(chunk);
         stderr += chunk;
         const retained = retainOutput(stderr, 1024 * 1024);
         stderr = retained.text;

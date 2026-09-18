@@ -65,7 +65,7 @@ $env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.1.24) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.25) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -182,4 +182,4 @@ pnpm build
 - Ctrl+C cancels the active model turn, approval wait, or shell command without exiting. When idle, it clears a nonempty draft; with an empty draft it exits.
 - Up/Down browse previous input at the first/last line and restore the current draft. Slash-menu selection takes precedence. Modified Enter inserts a newline when supported; multiline bracketed paste never submits automatically. Windows Terminal may require `/terminal-setup` to distinguish Shift+Enter from Enter.
 - Input history is shared across restarts: up to 1,000 entries / 4 MiB in `input-history.json` next to the sessions directory. Login wizard secrets are excluded, but manually typed secrets in prompts or commands are not automatically redacted. Clearing history does not remove session records.
-- Running shell output shows the last five rows; completed output shows a compact summary. `/outputs` displays retained output (up to 10,000 lines / 2 MiB per UI record); truncated data cannot be recovered there. Model Bash captures stdout/stderr separately, up to 1 MiB each, and has no interactive stdin. Direct `!` commands retain interactive input.
+- While model-requested Bash is running, its bounded live preview shows up to the first five and last five rows with an omission count, shrinking symmetrically on short terminals. Direct `!` commands continue to prioritize the latest five rows, and completed output keeps its compact summary. `/outputs` displays retained output (up to 10,000 lines / 2 MiB per UI record); truncated data cannot be recovered there. Model Bash captures stdout/stderr separately, up to 1 MiB each, and has no interactive stdin. Direct `!` commands retain interactive input.

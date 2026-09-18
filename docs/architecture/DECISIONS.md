@@ -1,6 +1,6 @@
 # Architecture Decisions
 
-状态快照：2026-09-17。
+状态快照：2026-09-18。
 
 ## 权限管理
 
@@ -72,7 +72,7 @@
 - Ctrl+C 优先取消活动任务（含审批和子进程）；空闲有草稿时清空，否则退出。模型取消时为剩余 function calls 追加取消结果后停止，不留下未匹配调用。
 - Ink 独占 TUI stdin，通过 writer 将输入转发给直接 `!` PTY；模型 Bash 使用非交互管道。Windows Bash 取消使用 taskkill 进程树；PTY 先发送 ETX，500ms 后通过 node-pty 关闭。Unix Bash 当前使用进程组强制终止，PTY 先 ETX 后强制终止。
 - 输入历史独立于 Session 和模型 context，保存于 state 目录 input-history.json；保留最近 1,000 条、4 MiB，临时文件原子替换及跨进程文件锁。只记录主输入区提交，不记录登录向导字段；用户手输机密不自动脱敏。
-- output timeline 增加可选 command 元数据而不新增事件类型，兼容旧无元数据输出。运行时末尾五行，完成超过六行时展示前二后四；/outputs 在独立窗口分页查看保留输出，不能找回超限截断内容。
+- output timeline 增加可选 command 元数据而不新增事件类型，兼容旧无元数据输出。模型 Bash 的实时回调使用独立 1 MiB 有界缓冲，按到达顺序保留真实首五行、尾五行和省略行数；正常终端展示 5+5，矮终端按可用高度首尾缩减。该缓冲只服务当前 UI，不改变最终 `BashResult`、模型 context 或 JSONL。用户直接 `!` 继续显示最近五行；完成超过六行时展示前二后四；`/outputs` 在独立窗口分页查看保留输出，不能找回超限截断内容。
 - /terminal-setup 仅支持已识别的稳定版 Windows Terminal 设置路径。用户确认后备份并追加 Shift+Enter sendInput LF，不覆盖已有绑定；提示全局影响。Preview/其他安装布局暂不自动配置。
 - pnpm 对 node-pty 1.1.0 应用局部补丁：处理关闭控制台时进程枚举竞争，并在自然退出后释放输入 socket 和 conout worker。使用 pnpm 安装本仓库以应用补丁；发布前需另验打包安装，普通 npm 下游安装不会自动继承根项目 pnpm 补丁。
 

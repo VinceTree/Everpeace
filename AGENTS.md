@@ -50,6 +50,7 @@ git diff --check
 
 - Ctrl+C 取消活动任务；空闲有草稿则清空，否则退出。TUI 的 PTY stdin 必须由 Ink 单一入口转发，不能同时注册原始 stdin 监听器。
 - `/outputs`、`/history`、`/terminal-setup` 都是独立命令窗口。output timeline 可带兼容性可选 command 元数据；直接 `!` 仍不进入模型 context。
+- 模型 Bash 运行时使用有界真实首五行/尾五行预览并随终端高度缩减；用户直接 `!` 继续优先显示最近五行。完成态折叠和 `/outputs` 保留现有语义。
 - 输入历史单独持久化，不记录登录向导字段；配置终端按键必须预览、明确确认和备份，不能静默修改用户设置。
 
 - 保持 inline TUI 和终端原生 scrollback；不要切换到 alternate screen。

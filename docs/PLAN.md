@@ -1,6 +1,6 @@
 # Everpeace Current Plan
 
-状态快照：2026-09-17。
+状态快照：2026-09-18。
 
 ## 当前目标
 
@@ -28,7 +28,7 @@ Codex 核心 Agent Loop TypeScript 适配已接入：独立轮次控制、逐工
 - [x] Ctrl+C 取消模型请求、审批等待和运行命令；取消后的工具调用补齐结果，下一轮可继续。
 - [x] 全局输入历史、上下键草稿恢复、多行粘贴和 `/history` 清理。
 - [x] `/terminal-setup` 显式确认、JSONC 保留、冲突拒绝、备份及过期预览检查。
-- [x] 运行时尾部预览、完成后折叠、`/outputs` 分页详情与可恢复命令元数据。
+- [x] 模型 Bash 运行时有界保留并展示真实首五行/尾五行，矮终端自适应缩减；直接 `!` 保持尾部预览，完成后折叠并由 `/outputs` 提供分页详情。
 - [ ] 真实 Windows Terminal 手动验收键位、复制、缩放、resize 和带凭据模型的完整流程。
 
 - [x] 应用层 ask/read-only/full-access 模式，完全访问二次确认，网页工具独立开关。
@@ -59,7 +59,7 @@ Codex 核心 Agent Loop TypeScript 适配已接入：独立轮次控制、逐工
 - 自动验证目标：完整测试、类型检查、构建和 diff 检查全部通过；最新实际结果记录在 `HANDOFF.md`。
 - 待在真实 Windows Terminal 中验证 `/new` → 首问命名 → 退出 → `/resume` → 继续聊天。
 - 待使用真实 OpenAI、DeepSeek 和自定义兼容端点复验 `/status` usage 返回、context 映射、居中与窄终端排版，以及 Esc 返回原 Session。
-- v0.1.22 已发布；Release workflow、annotated tag 和 GitHub Release 均已确认成功。
+- v0.1.24 已发布；Release workflow、annotated tag 和 GitHub Release 均已确认成功。
 
 ## 文档规则
 

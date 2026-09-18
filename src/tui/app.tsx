@@ -27,7 +27,8 @@ import {
   resolveModelStatusMetadata,
   type StatusSnapshot,
 } from "../status/model-status.js";
-import type { BashResult } from "../tools/bash.js";
+import type { BashOutputPreview, BashResult } from "../tools/bash.js";
+import { selectAgentOutputPreview } from "./command-output-preview.js";
 import { parseTuiInput, TUI_HELP } from "./commands.js";
 import { BashConfirmation } from "./components/bash-confirmation.js";
 import {
@@ -155,22 +156,79 @@ function commandOutput(result: BashResult): string {
     .join("\n");
 }
 
-function TerminalActivity({ output }: { output: string | undefined }) {
+async function renderBashOutputPreview(
+  preview: BashOutputPreview,
+): Promise<BashOutputPreview> {
+  const renderLines = async (lines: readonly string[]): Promise<string[]> => {
+    if (lines.length === 0) return [];
+    const rendered = await renderTerminalOutput(lines.join("\n"));
+    return rendered.length > 0 ? rendered.split("\n") : [];
+  };
+
+  if (preview.omittedLines === 0) {
+    return {
+      headLines: await renderLines([
+        ...preview.headLines,
+        ...preview.tailLines,
+      ]),
+      tailLines: [],
+      omittedLines: 0,
+    };
+  }
+
+  const [headLines, tailLines] = await Promise.all([
+    renderLines(preview.headLines),
+    renderLines(preview.tailLines),
+  ]);
+  return { headLines, tailLines, omittedLines: preview.omittedLines };
+}
+
+function TerminalActivity({
+  output,
+  agentPreview,
+}: {
+  output: string | undefined;
+  agentPreview: BashOutputPreview | undefined;
+}) {
   const { rows } = useWindowSize();
+  const maximumOutputLines = Math.max(1, Math.min(10, rows - 4));
   const allLines = output ? output.split("\n") : [];
-  const maximumOutputLines = Math.max(1, Math.min(5, rows - 4));
-  const hiddenLineCount = Math.max(0, allLines.length - maximumOutputLines);
+  const directOutputLines = Math.min(5, maximumOutputLines);
+  const hiddenLineCount = Math.max(0, allLines.length - directOutputLines);
   const visibleLines = allLines.slice(hiddenLineCount);
+  const selectedAgentPreview = selectAgentOutputPreview(
+    agentPreview,
+    maximumOutputLines,
+  );
+  const isAgentPreview = agentPreview !== undefined;
+  const headLines = isAgentPreview
+    ? selectedAgentPreview.headLines
+    : [];
+  const tailLines = isAgentPreview
+    ? selectedAgentPreview.tailLines
+    : visibleLines;
+  const omittedLines = isAgentPreview
+    ? selectedAgentPreview.omittedLines
+    : hiddenLineCount;
 
   return (
     <Box flexDirection="column">
-      {hiddenLineCount > 0 ? (
+      {headLines.map((line, index) => (
+        <Box key={`head:${index}:${line}`} marginLeft={3} height={1} overflow="hidden">
+          <Text wrap="truncate-end">{line || " "}</Text>
+        </Box>
+      ))}
+      {omittedLines > 0 ? (
         <Box marginLeft={3} height={1}>
-          <Text dimColor>… {hiddenLineCount} earlier lines</Text>
+          <Text dimColor>
+            {isAgentPreview
+              ? `… +${omittedLines} lines`
+              : `… ${omittedLines} earlier lines`}
+          </Text>
         </Box>
       ) : null}
-      {visibleLines.map((line, index) => (
-        <Box key={`${hiddenLineCount + index}:${line}`} marginLeft={3} height={1} overflow="hidden">
+      {tailLines.map((line, index) => (
+        <Box key={`tail:${index}:${line}`} marginLeft={3} height={1} overflow="hidden">
           <Text wrap="truncate-end">{line || " "}</Text>
         </Box>
       ))}
@@ -234,7 +292,8 @@ export function EverpeaceApp({
   const [busyLabel, setBusyLabel] = useState<string>();
   const [terminalBusy, setTerminalBusy] = useState(false);
   const [terminalOutput, setTerminalOutput] = useState<string>();
-  const [activeCommand, setActiveCommand] = useState<{ command: string; shell: string; cancelling?: boolean }>();
+  const [agentTerminalPreview, setAgentTerminalPreview] = useState<BashOutputPreview>();
+  const [activeCommand, setActiveCommand] = useState<{ command: string; shell: string; source: "model" | "user"; cancelling?: boolean }>();
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [resumedInputHistory, setResumedInputHistory] = useState<string[]>();
   const editorRef = useRef(createComposerState());
@@ -375,18 +434,21 @@ export function EverpeaceApp({
   const executeBash = useCallback(
     async (command: string, signal?: AbortSignal): Promise<BashResult> => {
       const started = Date.now();
-      setActiveCommand({ command, shell: "Bash" });
+      setActiveCommand({ command, shell: "Bash", source: "model" });
       let generation = 0;
       let finished = false;
       setTerminalBusy(true);
       setTerminalOutput(undefined);
-      const preview = (output: string) => {
+      setAgentTerminalPreview(undefined);
+      const preview = (output: BashOutputPreview) => {
         const id = ++generation;
-        void renderTerminalOutput(output).then((clean) => { if (!finished && id === generation) setTerminalOutput(clean); });
+        void renderBashOutputPreview(output).then((clean) => {
+          if (!finished && id === generation) setAgentTerminalPreview(clean);
+        });
       };
       let result: BashResult;
       try { result = await dependencies.runBash(command, signal, preview); }
-      finally { finished = true; setTerminalBusy(false); setTerminalOutput(undefined); setActiveCommand(undefined); }
+      finally { finished = true; setTerminalBusy(false); setTerminalOutput(undefined); setAgentTerminalPreview(undefined); setActiveCommand(undefined); }
       if (result === undefined) throw new Error("Bash did not return a result");
       const output = await renderTerminalOutput(commandOutput(result));
       const retained = retainOutput(output);
@@ -405,7 +467,8 @@ export function EverpeaceApp({
     ): Promise<BashResult> => {
       const started = Date.now();
       const shell = process.platform === "win32" ? "PowerShell" : "Bash";
-      setActiveCommand({ command, shell });
+      setActiveCommand({ command, shell, source: "user" });
+      setAgentTerminalPreview(undefined);
       terminalCommandRunning.current = true;
       let result: BashResult;
       try {
@@ -1246,7 +1309,10 @@ export function EverpeaceApp({
       ) : terminalBusy ? (
         <Box flexDirection="column">
           <Text wrap="truncate-end">{activeCommand?.cancelling ? "Cancelling" : "Running"} {activeCommand?.shell}: {activeCommand?.command}</Text>
-          <TerminalActivity output={terminalOutput} />
+          <TerminalActivity
+            output={terminalOutput}
+            agentPreview={activeCommand?.source === "model" ? agentTerminalPreview : undefined}
+          />
         </Box>
       ) : busyLabel ? (
         <Spinner label={busyLabel} />

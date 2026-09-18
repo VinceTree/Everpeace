@@ -1,8 +1,10 @@
 # Session Handoff
 
-状态快照：2026-09-17。分支 `main`，v0.1.24 已发布，新增 Codex 核心 Agent Loop TypeScript 适配，保留权限管理、终端交互及恢复会话修复。用户原有未跟踪 `benchmark/`、`test-me/` 未改动且不纳入发布。
+状态快照：2026-09-18。分支 `main`，正在准备 v0.1.25：在既有 Agent Loop、权限、终端交互和恢复会话基础上新增模型 Bash 实时首尾预览。用户原有未跟踪 `.patch-node-pty/`、`benchmark/`、`test-me/` 未改动且不纳入发布。
 
 ## 最新发布
+
+正在准备 v0.1.25：模型 Bash 运行时以 1 MiB 有界缓冲保留真实首五行和尾五行，按终端高度自适应展示；直接 `!`、完成态折叠、`/outputs`、模型 context 和 JSONL 语义保持不变。
 
 v0.1.24 已接入 Codex 核心 Agent Loop 的 TypeScript 适配。详见 `architecture/AGENT_LOOP.md`。保留既有端点、权限、Session 和工具接口，不新增 OS 沙箱或完整 Codex 服务。包含上游 Apache-2.0 许可证及改动说明。
 
@@ -27,7 +29,7 @@ v0.1.24 已接入 Codex 核心 Agent Loop 的 TypeScript 适配。详见 `archit
 - Ctrl+C 取消活动模型请求、审批或命令；空闲时先清草稿，空输入退出。模型取消补齐待处理 function outputs，下一轮仍可使用。
 - 全局输入历史跨进程重启保存，支持上下键恢复与草稿还原；`/history` 浏览和明确确认后清理。多行粘贴不会提交，编辑状态和历史导航在 Prompt 重挂载后保留。
 - `/terminal-setup` 预览稳定版 Windows Terminal Shift+Enter 设置，明确确认后备份和修改 JSONC，拒绝冲突及过期预览。本轮没有修改用户真实终端设置。
-- 模型 Bash 与直接 `!` 使用统一紧凑命令记录：运行时末尾五行，完成后折叠；`/outputs` 分页查看保留输出。output timeline 可选 command 元数据兼容旧文件；直接命令不进入模型 context。
+- 模型 Bash 新增独立 1 MiB 有界实时缓冲：即使超大输出也保留真实首五行和尾五行，正常终端显示 5+5 及省略数量，矮终端首尾自适应缩减。用户直接 `!` 仍显示最近五行；完成态前二后四折叠、`/outputs`、最终工具结果、模型 context 和 JSONL 均保持原语义。
 - 直接 PTY 支持 Ink 转发交互输入；取消会释放输入所有权。修复 node-pty 1.1.0 Windows 控制台退出竞争和自然退出 worker/socket 泄漏，以 pnpm 补丁形式保存。
 - 新增覆盖真实 PTY 取消与 PID 结束、Read-Host 输入、下一轮 TUI 可用、输出截断和 UTF-8 边界、Session 元数据、输入历史并发写入、Shift+Enter 和粘贴、终端设置备份与冲突的测试。
 - 采用兼容性可选 output 元数据而非新增 timeline 类型；模型 Bash 非交互，用户 `!` 保留交互；Unix Bash 当前直接终止进程组。Preview/其他 Windows Terminal 安装路径不自动修改。
@@ -129,7 +131,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 
 ## 5. 验证结果
 
-- `pnpm test`：124/124 通过（新增 Codex 核心循环 follow-up、逐结果保存、重试不重跑工具、取消退避、持久化失败阻止副作用及并发 turn 回归）。
+- `pnpm test`：131/131 通过（新增模型 Bash 真实首五/尾五缓冲、CRLF/UTF-8/超长单行、高度自适应、直接 `!` 尾部预览及完成态折叠回归；保留 Codex 核心循环相关覆盖）。
 - `pnpm typecheck`：通过。
 - `pnpm build`：通过。
 - `git diff --check`：通过，仅有 Windows LF/CRLF 提示。
@@ -146,7 +148,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 4. 使用自定义兼容端点或缺少 usage 的响应，确认未知 provider/context 显示 `N/A` 且 TUI 不崩溃。
 5. 退出并 `/resume`，确认本轮 slash command 面板内容不会恢复；再次执行 `/status`，确认累计 usage 已恢复，同时复验旧版本保存的 status 卡片仍可读取。
 6. 验证跨工作目录恢复、原模型缺失时选择替代模型，以及 `/clear` 仍在下一次提问时才建档。
-7. 同时复验 Ctrl+滚轮缩放、普通滚轮、`! Get-ChildItem` 流式输出、单一 prompt 和窄终端 resize。
+7. 同时复验 Ctrl+滚轮缩放、普通滚轮、`! Get-ChildItem` 尾部流式输出、模型 Bash 的 5+5 首尾预览、单一 prompt 和窄终端 resize。
 8. 在真实终端输入 `/`，复验八项候选窗口滚动、逐字筛选、Enter 执行和 Tab 补全；再打开 `/help`、`/models`、`/status` 及各 picker，确认所有独立窗口居中、完全隐藏历史并可用 Esc 返回。
 9. 在真实 TUI 中询问一个明确依赖最新信息的问题，确认 `deepseek-flash` 会显示搜索/读取动作、引用来源，并能从单个来源失败中恢复。
 10. 后续功能改动继续同步更新版本计划、测试状态和相关 docs。

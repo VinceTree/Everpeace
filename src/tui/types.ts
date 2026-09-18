@@ -8,7 +8,7 @@ import type {
   StoredModelRegistration,
 } from "../storage/model-registry.js";
 import type { SessionStoreLike } from "../storage/session-store.js";
-import type { BashResult } from "../tools/bash.js";
+import type { BashOutputPreview, BashResult } from "../tools/bash.js";
 import type {
   StatusSnapshot,
   TokenUsageSample,
@@ -53,7 +53,11 @@ export interface TuiDependencies {
     signal?: AbortSignal,
   ): Promise<string>;
   changeWorkspace(workspacePath: string): Promise<string>;
-  runBash(command: string, signal?: AbortSignal, onOutput?: (output: string) => void): Promise<BashResult>;
+  runBash(
+    command: string,
+    signal?: AbortSignal,
+    onOutput?: (output: BashOutputPreview) => void,
+  ): Promise<BashResult>;
   runTerminalCommand(
     command: string,
     onOutput?: (output: string) => void,
