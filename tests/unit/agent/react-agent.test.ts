@@ -258,6 +258,113 @@ test("agent tells the model when the user rejects Bash", async () => {
   assert.match(String(toolOutput.output), /rejected/);
 });
 
+test("agent exposes MCP tools, keeps approval separate, and returns MCP output", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const approvals: string[] = [];
+  const calls: string[] = [];
+  const responses = [
+    {
+      id: "mcp-tool",
+      output_text: "",
+      output: [{
+        type: "function_call",
+        name: "mcp__calendar__list",
+        arguments: '{"day":"today"}',
+        call_id: "mcp-1",
+      }],
+    },
+    { id: "mcp-done", output_text: "done", output: [] },
+  ];
+  const agent = new ReactAgent({
+    model: "test",
+    client: { responses: { async create(params) {
+      requests.push(params);
+      return responses.shift()!;
+    } } },
+    mcp: {
+      async ensureReady() {
+        return {
+          tools: [{ type: "function", name: "mcp__calendar__list", description: "List events", parameters: { type: "object" } }],
+          instructions: "Calendar MCP instructions.",
+          servers: [],
+        };
+      },
+      toolInfo(name) {
+        return name === "mcp__calendar__list"
+          ? { callableName: name, serverName: "calendar", toolName: "list" }
+          : undefined;
+      },
+      async call(name, args) {
+        calls.push(`${name}:${args}`);
+        return JSON.stringify({ content: [{ type: "text", text: "meeting" }] });
+      },
+    },
+    io: {
+      getPermissions: () => ({ mode: "workspace-write", web: false }),
+      async confirmBash() { return false; },
+      async confirmMcp(request) { approvals.push(request); return true; },
+      async runBash() { return bashResult(""); },
+      writeAssistant() {},
+    },
+  });
+
+  await agent.runTurn("list my meetings");
+
+  assert.equal(approvals.length, 1);
+  assert.match(approvals[0]!, /calendar\/list/u);
+  assert.deepEqual(calls, ['mcp__calendar__list:{"day":"today"}']);
+  assert.match(String(requests[0]?.instructions), /Calendar MCP instructions/u);
+  const tools = requests[0]?.tools as Array<{ name: string }>;
+  assert.ok(tools.some((tool) => tool.name === "mcp__calendar__list"));
+  assert.match(JSON.stringify(requests[1]?.input), /meeting/u);
+});
+
+test("agent progressively loads matching skills and injects explicit skill instructions for one turn", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const reads: string[] = [];
+  const responses = [
+    {
+      id: "skill-tool",
+      output_text: "",
+      output: [{ type: "function_call", name: "read_skill", arguments: '{"name":"demo"}', call_id: "skill-1" }],
+    },
+    { id: "skill-done", output_text: "done", output: [] },
+  ];
+  const agent = new ReactAgent({
+    model: "test",
+    client: { responses: { async create(params) {
+      requests.push(params);
+      return responses.shift()!;
+    } } },
+    skills: {
+      async prepareTurn(input) {
+        assert.equal(input, "use $demo");
+        return {
+          skills: [{ name: "demo", description: "Demo tasks", path: "/skills/demo/SKILL.md", directory: "/skills/demo", scope: "user" }],
+          errors: [],
+          conflictedNames: [],
+          instructions: "Available skill: demo.",
+          explicitInstructions: "Full explicit demo instructions.",
+          explicitNames: ["demo"],
+        };
+      },
+      async read(args) { reads.push(args); return JSON.stringify({ status: "ok", data: { contents: "skill body" } }); },
+    },
+    io: {
+      async confirmBash() { return false; },
+      async runBash() { return bashResult(""); },
+      writeAssistant() {},
+    },
+  });
+
+  await agent.runTurn("use $demo");
+
+  assert.deepEqual(reads, ['{"name":"demo"}']);
+  assert.match(String(requests[0]?.instructions), /Full explicit demo instructions/u);
+  assert.ok((requests[0]?.tools as Array<{ name: string }>).some((tool) => tool.name === "read_skill"));
+  assert.match(JSON.stringify(requests[1]?.input), /skill body/u);
+});
+
 test("agent searches the web without requesting Bash confirmation", async () => {
   const requests: Array<Record<string, unknown>> = [];
   const toolActivity: string[] = [];

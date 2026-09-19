@@ -24,3 +24,17 @@ export function webPermission(policy: PermissionPolicy): "deny" | "ask" | "allow
   if (!policy.web) return "deny";
   return policy.mode === "full-access" ? "allow" : "ask";
 }
+
+export function mcpPermission(policy: PermissionPolicy): "ask" | "allow" {
+  // MCP servers can perform side effects outside the workspace. Keep this
+  // approval surface separate from both Bash and the built-in web toggle.
+  return policy.mode === "full-access" ? "allow" : "ask";
+}
+
+export function codexSandboxProfile(
+  policy: PermissionPolicy,
+): ":read-only" | ":workspace" | ":danger-full-access" {
+  if (policy.mode === "read-only") return ":read-only";
+  if (policy.mode === "full-access") return ":danger-full-access";
+  return ":workspace";
+}

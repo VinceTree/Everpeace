@@ -12,8 +12,8 @@ const PAGE_TEXT_LIMIT = 30_000;
 const REQUEST_TIMEOUT_MS = 20_000;
 const REDIRECT_LIMIT = 5;
 
-type FetchLike = typeof globalThis.fetch;
-type HostLookup = (
+export type FetchLike = typeof globalThis.fetch;
+export type HostLookup = (
   hostname: string,
 ) => Promise<readonly { address: string; family: number }[]>;
 
@@ -373,7 +373,7 @@ export function isPublicIpAddress(address: string): boolean {
   return false;
 }
 
-async function validatePublicUrl(url: URL, resolveHostname: HostLookup): Promise<void> {
+export async function validatePublicUrl(url: URL, resolveHostname: HostLookup): Promise<void> {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("Only HTTP and HTTPS URLs can be fetched");
   }

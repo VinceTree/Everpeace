@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runBash } from "../../../src/tools/bash.js";
+import { resolveBashLaunch, runBash } from "../../../src/tools/bash.js";
 
 test("Bash abort stops a running child and leaves the next command usable", { timeout: 15000 }, async () => {
   const controller = new AbortController();
@@ -48,4 +48,33 @@ test("runBash can attach directly to the current terminal", async () => {
   assert.equal(result.stderr, "");
   assert.equal(result.exitCode, 0);
   assert.equal(result.signal, null);
+});
+
+test("sandboxed Bash is routed through the pinned Codex CLI and native profile", () => {
+  const launch = resolveBashLaunch("echo safe", {
+    cwd: "C:\\workspace",
+    bashPath: "/bin/custom-bash",
+    sandbox: {
+      permissionProfile: ":workspace",
+      readableRoots: ["C:\\skills"],
+      codexCliPath: "C:\\codex\\bin\\codex.js",
+    },
+  });
+  assert.equal(launch.command, process.execPath);
+  assert.deepEqual(launch.args.slice(0, 8), [
+    "C:\\codex\\bin\\codex.js",
+    "sandbox",
+    "-P",
+    ":workspace",
+    "-C",
+    "C:\\workspace",
+    "--sandbox-state-readable-root",
+    "C:\\skills",
+  ]);
+  assert.equal(launch.args[8], "--");
+  if (process.platform === "win32") {
+    assert.deepEqual(launch.args.slice(9), ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "echo safe"]);
+  } else {
+    assert.deepEqual(launch.args.slice(9), ["/bin/custom-bash", "-c", "echo safe"]);
+  }
 });

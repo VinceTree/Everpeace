@@ -4,6 +4,8 @@ export const SLASH_COMMANDS = [
   "/models",
   "/status",
   "/permissions",
+  "/mcp",
+  "/skills",
   "/new",
   "/resume",
   "/logout",
@@ -59,6 +61,8 @@ export const TUI_HELP = `Slash commands
   /models  View models and credential status
   /status  View session, model, and token usage
   /permissions  Select read-only, ask, workspace-write, or full-access tools
+  /mcp     Refresh and inspect Codex MCP servers and tools
+  /skills  Create, install, inspect, and use local skills
   /new     Create and enter a new session
   /resume  Find and resume a local session
   /logout  Remove models and system credentials

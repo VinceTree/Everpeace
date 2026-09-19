@@ -755,6 +755,33 @@ test("slash command surfaces close back to chat while direct commands remain per
   view.unmount();
 });
 
+test("/mcp refreshes status and /skills opens the transient Skill manager", async () => {
+  const model: RegisteredModel = { id: "capabilities", model_name: "test", base_url: "https://example.com/v1", api_key: "secret" };
+  const fixture = createFixture({ initial: [model] });
+  let mcpLoads = 0;
+  fixture.dependencies.getMcpStatus = async () => { mcpLoads++; return "calendar · stdio · ready · 2 tools"; };
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+
+  await tick();
+  view.stdin.write("/mcp");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("calendar · stdio · ready"));
+  assert.equal(mcpLoads, 1);
+  await tick();
+  view.stdin.write("\u001B");
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything"));
+
+  view.stdin.write("/skills");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Create a skill"));
+  assert.match(view.lastFrame() ?? "", /Install from URL/u);
+  assert.match(view.lastFrame() ?? "", /View installed skills/u);
+  view.unmount();
+});
+
 test("Esc cancels an in-flight slash command load without reopening its window", async () => {
   const model: RegisteredModel = {
     id: "model-1",
@@ -1180,7 +1207,7 @@ test("model-requested Bash waits for confirmation", async () => {
   view.stdin.write("/permissions");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("OS sandbox: unavailable"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Codex native OS enforcement"));
   view.stdin.write("\u001B[A");
   await tick();
   view.stdin.write("\r");
@@ -1194,7 +1221,35 @@ test("model-requested Bash waits for confirmation", async () => {
   await waitFor(() => (view.lastFrame() ?? "").includes("done"));
 
   assert.equal(ranBash, true);
-  assert.match(view.lastFrame() ?? "", /• Ran Bash/);
+  assert.match(view.lastFrame() ?? "", /• Ran (?:PowerShell|Bash)/);
+  view.unmount();
+});
+
+test("model-requested MCP calls use their own approval surface", async () => {
+  const model: RegisteredModel = { id: "mcp-model", model_name: "test", base_url: "https://example.com/v1", api_key: "secret" };
+  let called = false;
+  const fixture = createFixture({
+    initial: [model],
+    createAgent: (_model, io) => ({
+      async runTurn() {
+        if (await io.confirmMcp?.('calendar/list {"day":"today"}')) {
+          called = true;
+          io.writeAssistant("mcp done");
+        }
+      },
+    }),
+  });
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+
+  await tick();
+  view.stdin.write("use calendar");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Allow this MCP tool call?"));
+  assert.equal(called, false);
+  view.stdin.write("y");
+  await waitFor(() => (view.lastFrame() ?? "").includes("mcp done"));
+  assert.equal(called, true);
   view.unmount();
 });
 
@@ -1218,7 +1273,7 @@ test("model Bash streams head and tail output and adapts to terminal height", as
       },
     }),
   });
-  fixture.dependencies.runBash = async (_command, _signal, onOutput) => {
+  fixture.dependencies.runBash = async (_command, _policy, _signal, onOutput) => {
     onOutput?.({
       headLines: ["line 1", "line 2", "line 3", "line 4", "line 5"],
       tailLines: ["line 16", "line 17", "line 18", "line 19", "line 20"],
@@ -1240,7 +1295,7 @@ test("model Bash streams head and tail output and adapts to terminal height", as
   view.stdin.write("/permissions");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("OS sandbox: unavailable"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Codex native OS enforcement"));
   view.stdin.write("\u001B[A");
   await tick();
   view.stdin.write("\r");
@@ -1912,7 +1967,7 @@ test("/permissions is transient and changes the live policy without rebuilding t
   view.stdin.write("/permissions");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("OS sandbox: unavailable"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Codex native OS enforcement"));
   view.stdin.write("\u001B[A");
   await tick();
   view.stdin.write("\u001B[A");

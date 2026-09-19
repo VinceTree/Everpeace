@@ -7,12 +7,14 @@ Usage:
   everpeace logout          Remove registered models and their credentials
 
 Commands inside the agent:
-  !<command>                Run a Bash command directly
+  !<command>                Run a native shell command directly
   /login                    Login and activate one model
   /model                    Switch the active model
   /models                   List registered models
   /status                   Show model, context, and token usage
   /permissions              Select read-only, ask, workspace-write, or full-access tools
+  /mcp                      Refresh and inspect Codex MCP servers and tools
+  /skills                   Create, install, inspect, and use local skills
   /new                      Create and enter a new session
   /resume                   List and resume local sessions
   /logout                   Remove models and credentials
@@ -24,4 +26,4 @@ Commands inside the agent:
   /terminal-setup           Configure Windows Terminal Shift+Enter
 
 Environment:
-  EVERPEACE_BASH_PATH       Bash executable path (default: bash from PATH)`;
+  EVERPEACE_BASH_PATH       macOS/Linux model Bash path (default: bash from PATH)`;

@@ -1,7 +1,7 @@
 {
   "name": "everpeace",
-  "version": "0.1.27",
-  "description": "A terminal ReAct agent with persistent sessions, Bash, and web access.",
+  "version": "0.1.28",
+  "description": "A sandboxed terminal ReAct agent with persistent sessions, MCP, skills, and web access.",
   "type": "module",
   "bin": {
     "everpeace": "dist/cli/index.js"
@@ -27,8 +27,11 @@
   "packageManager": "pnpm@10.22.0",
   "dependencies": {
     "@inkjs/ui": "^2.0.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@napi-rs/keyring": "^2.1.0",
+    "@openai/codex": "0.155.1",
     "@xterm/headless": "^6.0.0",
+    "fflate": "^0.8.2",
     "ink": "^7.1.1",
     "jsonc-parser": "^3.3.1",
     "lowlight": "^3.3.0",
@@ -36,7 +39,8 @@
     "node-pty": "^1.1.0",
     "openai": "^7.15.0",
     "proper-lockfile": "^4.1.2",
-    "react": "^19.3.0"
+    "react": "^19.3.0",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

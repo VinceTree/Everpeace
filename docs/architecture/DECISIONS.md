@@ -6,11 +6,17 @@
 聊天渲染及 resize、恢复、命令返回重放按 Codex 的 terminal resize-reflow 行数上限选择尾部：VS Code 1,000、Windows Terminal 9,001、WezTerm 3,500、Alacritty 10,000、未知终端 1,000。`WT_SESSION`、`TERM_PROGRAM` 和 VS Code 注入环境用于检测。Ink 不提供最终布局的行数，所以按源文本、宽度、换行及常见双宽字符估算；单条超长记录保持原子显示。窗口起点变化后复用同步终端重放，清除已输出的旧 scrollback；不能仅对 Ink Static 数组 slice，否则终端仍有旧输出。完整内存 timeline、JSONL、context、输入导航和 outputs 不裁剪。上游普通 transcript 没有通用的记录数上限；上游 `INITIAL_HISTORY_TURN_LIMIT=5`、`HISTORY_ITEM_PAGE_LIMIT=100` 和扫描上限仅适用于其分页的远端 thread 历史加载，不迁移到本地 JSONL 恢复。
 
 
-状态快照：2026-09-18。
+状态快照：2026-09-19。
 
 ## 权限管理
 
-权限第一阶段详见 [PERMISSIONS.md](./PERMISSIONS.md)：`/permissions` 提供 `read-only`、`ask`、`workspace-write`（默认）和 `full-access` 四档 profile。只读档允许工作区读取，但 Bash/web 逐项审批；ask 档对每个 Bash/web 请求审批；workspace-write 档允许当前工作区内无提示工作，但网页请求仍逐项审批；完全访问经二次确认后免审批。文件工具始终限定工作目录，网页工具独立开关。权限仅存在当前进程，跨 new/clear/resume 保留，重启恢复默认，不从 JSONL 恢复；变更权限不重建 Agent 或丢失 context。这是应用层权限，不是 OS 沙箱。直接 `!` 保持原语义。
+权限实现详见 [PERMISSIONS.md](./PERMISSIONS.md)：`/permissions` 提供 `read-only`、`ask`、`workspace-write`（默认）和 `full-access` 四档 profile。模型 shell 分别映射到固定版本 Codex CLI 的 `:read-only`、`:workspace` 或 `:danger-full-access`，sandbox 初始化失败时禁止回退为宿主直跑。文件工具始终限定工作目录，内置网页工具保留独立开关，MCP 使用另一条审批面。权限仅存在当前进程，跨 new/clear/resume 保留，重启恢复默认，不从 JSONL 恢复；变更权限不重建 Agent 或丢失 context。用户直接 `!` 继续走原生 PTY，不进入模型 sandbox 或 context。
+
+## Codex Sandbox、MCP 与 Skills
+
+完整边界见 [CODEX_CAPABILITIES.md](./CODEX_CAPABILITIES.md)。sandbox 复用 `@openai/codex@0.155.1` 的平台后端而非复制 Rust 实现；Windows 模型 shell 固定用 PowerShell，其他平台用 Bash。MCP 复用 `codex mcp` 配置，以官方 TypeScript SDK 连接 stdio/Streamable HTTP，非 full-access 工具调用逐次审批。主机 Skills 扫描 Codex 项目/用户/admin/system 根，只把无名称冲突的 metadata catalog 预载到 instructions，显式 `$name` 在本轮完整注入，隐式匹配通过受路径约束的 `read_skill` 渐进读取。`/mcp` 是 transient 状态窗口；`/skills` 是不进入 session timeline/context 的多步管理向导，可在每次操作中选择项目或用户作用域，AI 创建单个 `SKILL.md`，或从公开 HTTPS GitHub/Git/SKILL.md/ZIP 来源先暂存、校验和预览，再明确确认安装。创建/安装不得覆盖任一发现根的同名 Skill，重复名称在解决前不得自动或显式调用。三者均不改变 JSONL schema；当前不包含完整 Plugin、OAuth、远端 Skill provider 或 managed-policy runtime，Skill 管理也不包含私有认证、更新或删除。
+
+Git Skill 来源采用 shallow、no-checkout 克隆：先读取有界 Git tree 和候选 `SKILL.md` metadata，同名打包副本按规范 `skills/<name>` 路径优先去重，预检候选文件类型、数量和字节数后才 sparse checkout。该顺序避免 Windows 在无关深层路径上提前失败，也防止为了一个 Skill 展开整个仓库工作树；它不改变公开 HTTPS、无认证、超时、无覆盖和显式确认边界。
 
 ## Session 持久化
 

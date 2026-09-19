@@ -6,7 +6,7 @@
 已读取 `openai/codex` 源码并采用其 terminal resize-reflow 行数上限：VS Code 1,000、Windows Terminal 9,001、WezTerm 3,500、Alacritty 10,000、未知终端 1,000。普通 Codex transcript 没有全局记录数上限；其 5 turn / 100 item 参数只用于分页的远端 thread API，不能替代本项目完整本地 JSONL 恢复。Everpeace 删除自定义 200 条记录窗口，改按当前宽度估算源文本行数选择重放尾部；完整存档、context、输入导航和 outputs 不裁剪。
 
 
-状态快照：2026-09-18。
+状态快照：2026-09-19。
 
 ## 实时 Agent 进度与运行中纠正
 
@@ -16,11 +16,11 @@
 
 Codex 核心 Agent Loop TypeScript 适配已接入：独立轮次控制、逐工具结果持久化、采样重试和取消、完成判断、并发 turn 防护。上游来源与未移植模块见 `architecture/AGENT_LOOP.md`。
 
-完成终端交互改进：Ctrl+C 取消、跨重启输入历史、Shift+Enter 配置、统一紧凑命令输出与 `/outputs`。不新增 OS 沙箱，也不实现 Ctrl+R、任务队列或外部编辑器。
+完成终端交互改进：Ctrl+C 取消、跨重启输入历史、Shift+Enter 配置、统一紧凑命令输出与 `/outputs`。仍不实现 Ctrl+R、任务队列或外部编辑器。
 
 完成英文优先的运行界面和富文本层：供应商感知等待状态、Agent 阶段切换、Markdown/代码高亮、命令卡片以及 Git 风格 unified diff；保持 inline、scrollback、首五/尾五实时预览和既有 Session schema。
 
-权限管理第一阶段：Codex 官方文档摘录与对标、`/permissions`、模型工作目录文件查看和工具运行时审批。当前已补齐四档 profile：`read-only`、`ask`、`workspace-write`（默认）和 `full-access`，并按工具分别处理 Bash/web 审批。见 `architecture/PERMISSIONS.md`。本轮不宣称实现 OS 沙箱；pi/Grok Build 后续再比较。
+Codex sandbox、MCP 与 Skills 接入：模型 shell 通过固定版本 Codex CLI 进入平台原生 sandbox，MCP 从 `codex mcp` 配置发现并连接 stdio/Streamable HTTP tools，Skills 按项目/用户根发现并渐进加载；`/mcp` 提供瞬时状态窗口，`/skills` 提供创建、公开 URL 安装、查看和显式调用管理向导。实现与完整 Codex runtime 的边界见 `architecture/CODEX_CAPABILITIES.md`，权限映射见 `architecture/PERMISSIONS.md`。
 
 提供可持久化、可恢复、可继续对话的本地 Session：
 
@@ -47,9 +47,16 @@ Codex 核心 Agent Loop TypeScript 适配已接入：独立轮次控制、逐工
 - [ ] 真实 Windows Terminal 手动验收键位、复制、缩放、resize 和带凭据模型的完整流程。
 
 - [x] 应用层 ask/read-only/full-access 模式，完全访问二次确认，网页工具独立开关。
-- [x] Codex 风格 workspace-write 默认档位；read-only/ask 对 Bash 和网页请求逐项审批。
+- [x] Codex 风格 workspace-write 默认档位；read-only/ask 对模型 shell 和网页请求逐项审批，MCP 使用独立审批面。
 - [x] `read_file` / `list_directory` 路径校验、内容上限、结构化失败返回。
 - [x] 权限独立窗口；切换不清空 context、不向 JSONL 写入授权。
+- [x] 模型 shell 映射 Codex `:read-only`、`:workspace`、`:danger-full-access`，sandbox 不可用时失败关闭；直接 `!` 保持原生 PTY。
+- [x] MCP stdio/Streamable HTTP 工具发现、命名空间、调用、超时、取消、单服务器故障隔离和独立审批；`/mcp` 可刷新状态。
+- [x] Codex 主机 Skill roots、frontmatter 校验、metadata catalog、同名冲突隔离、显式 `$name`、隐式 `read_skill` 与相对资源约束。
+- [x] `/skills` 管理向导：项目/用户作用域、AI 单文件创建与校验、完整手动编辑、公开 GitHub/Git/SKILL.md/ZIP 暂存预览、显式安装确认、已安装内容查看和 `$name` 回填。
+- [x] Skill 安装安全边界：仅公开 HTTPS、逐重定向公共地址校验、Git 重定向关闭、超时和大小/条目上限、路径穿越/符号链接/特殊文件拒绝、无覆盖暂存安装。
+- [x] 大型 Git Skill 来源先无检出克隆并检查有界仓库树，只检出按名称去重后的候选目录；Windows 长路径不再被无关仓库副本触发，单个受限 Skill 可包含最多 5,000 个条目。
+- [ ] 后续单独设计 MCP OAuth/resources/prompts/elicitation、Codex Plugin/远端 Skill provider、managed policy 和 prefix rules；当前不得宣称完整 runtime 等价。
 
 - [x] SessionStore、跨平台存储路径、串行追加和损坏文件隔离。
 - [x] Agent context 导入及增量持久化。
@@ -78,7 +85,7 @@ Codex 核心 Agent Loop TypeScript 适配已接入：独立轮次控制、逐工
 - 自动验证目标：完整测试、类型检查、构建和 diff 检查全部通过；最新实际结果记录在 `HANDOFF.md`。
 - 待在真实 Windows Terminal 中验证 `/new` → 首问命名 → 退出 → `/resume` → 继续聊天。
 - 待使用真实 OpenAI、DeepSeek 和自定义兼容端点复验 `/status` usage 返回、context 映射、居中与窄终端排版，以及 Esc 返回原 Session。
-- v0.1.27 已发布；发布提交、远端 annotated tag 和 GitHub Release 均已确认，workflow run ID 尚未记录。
+- v0.1.27 已发布；v0.1.28 已完成 sandbox、MCP、Skills 管理和大型 Git Skill 安装修复，等待推送并确认自动 tag 与 GitHub Release。
 
 ## 文档规则
 

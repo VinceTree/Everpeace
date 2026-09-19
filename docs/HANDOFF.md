@@ -1,5 +1,28 @@
 # Session Handoff
 
+## 最新修复：大型 Git Skill URL 安装
+
+状态快照：2026-09-19。修复 `/skills` 使用 `https://github.com/Imbad0202/academic-research-skills-codex` 时在 Windows 临时目录完整 checkout 5,088 个仓库路径，并因无关的深层打包副本触发 `Filename too long` 的问题。
+
+本批次已把 `package.json` 与中英文 README 展示号提升到 `0.1.28`，等待推送后由 Release workflow 创建对应 tag 和 GitHub Release。
+
+- Git 来源改为 shallow、no-checkout clone，启用 Git long-path 配置；随后读取有界 `ls-tree` 和候选 `SKILL.md`，同名打包副本优先保留规范 `skills/<name>` 路径，预检 symlink/gitlink、文件数量、单文件及总字节数后才 sparse checkout 候选目录。Git stderr 失败信息去除 checkout 进度噪声。
+- 远端安全限额按阶段拆分：ZIP 10,000 项、来源遍历 10,000 项、单个 Skill 5,000 项、Git tree 20,000 tracked entries、候选最多 100；继续保留 50 MiB 包总量、10 MiB 单文件、512 KiB `SKILL.md`、60 秒 Git 准备、公开 HTTPS、无认证和无覆盖语义。
+- 已用真实网络分别复验仓库根 URL 和 `tree/main/skills/academic-research-suite` URL，均成功返回唯一 `academic-research-suite` 候选并预览 2,531 个文件，不再出现 Windows 长路径错误。当前用户根已经存在同名 Skill，因此未执行覆盖安装；既有无覆盖保护保持不变。
+- 新增超过旧 2,000 项但仍在新安全边界内的 ZIP 回归，以及 no-checkout/long-path Git 参数和 NUL 分隔 tree 解析回归。完整 `pnpm test` 为 179/179 通过，`pnpm typecheck`、`pnpm build`、`git diff --check` 均通过；diff 检查仅报告既有 Windows LF/CRLF 提示。
+
+## 最新工作区补充：Codex sandbox、MCP 与 Skills 管理
+
+状态快照：2026-09-19。已按 OpenAI 官方文档和 `openai/codex` 提交 `78245b47af2a7aafcabe025828ceecca69db4df1` 接入三条能力；详细源码映射、支持范围和未覆盖能力见 `architecture/CODEX_CAPABILITIES.md`。
+
+- 固定运行时依赖 `@openai/codex@0.155.1`。所有模型 shell 调用经 `codex sandbox` 执行：read-only → `:read-only`，ask/workspace-write → `:workspace`，full-access → `:danger-full-access`；sandbox 缺失或启动失败时不回退宿主执行。Windows restricted token 下 Git Bash/MSYS 会报 `E_ACCESSDENIED`，因此 Windows 模型命令改用 PowerShell；直接 `!` 仍为原生交互 PTY。
+- 新增 MCP runtime：从 `codex mcp list/get --json` 读取同一份配置，以官方 TypeScript SDK 连接 stdio/Streamable HTTP，支持静态/环境 header、bearer env、超时、tool filter、server instructions、命名空间、取消和单服务器错误隔离。除 full-access 外 MCP 调用逐次独立审批；`/mcp` 刷新并显示状态。OAuth 凭据复用、header helper、resources/prompts/elicitation/tasks 尚未接入。
+- Codex 主机 Skill catalog 扫描项目逐层 `.agents/skills`、项目 `.codex/skills`、`$CODEX_HOME/skills`、`~/.agents/skills` 和 admin 根；校验 YAML frontmatter，限制扫描/文件/catalog 大小。显式 `$name` 只在本轮注入完整 `SKILL.md`，隐式命中通过 `read_skill` 分页读取并约束相对资源；同名冲突保留在管理列表中，但不会进入模型 catalog，也不能通过 `$name` 或 `read_skill` 静默选择。
+- `/skills` 已从只读状态页扩展为管理向导：可逐次选择项目/用户作用域；根据自然语言由当前模型生成单个 `SKILL.md`，并支持 AI 校验改进、完整手动编辑、确认保存；也可从公开 HTTPS GitHub/Git 仓库、直接 `SKILL.md` 或 ZIP 暂存来源，多个 Skill 时选择一个，预览完整内容后选择作用域并明确确认安装；已安装列表可查看全文并回填 `$name`。
+- URL 安装限制为公开来源，拒绝 URL 凭据、私网/本机目标、路径穿越、符号链接和特殊文件，限制重定向、超时、下载/解压大小及条目数，并采用目标根内 staging + rename；任一发现根已有同名 Skill 或目标存在时拒绝覆盖。私有认证、更新、删除、Plugin/远端 runtime provider 和 `[[skills.config]]` 尚未接入。
+- 没有改变 Session JSONL schema。MCP function call/result 继续进入既有 context；连接 header/token/env 不进入模型 instructions、transcript 或 session。Skill catalog、连接和权限授权均不从 JSONL 恢复。
+- 已完成 Windows 本地 sandbox PowerShell 冒烟、空 MCP 配置冒烟、真实 stdio MCP 握手/工具调用测试，以及 sandbox 路由、权限映射、Skill 发现/激活/同名冲突/路径逃逸、创建/远端暂存/安装和 `/skills` 三条 TUI 流程回归。完整测试、typecheck、build 和 diff 检查结果见下方“验证结果”。
+
 ## 最新发布确认：v0.1.27
 
 状态快照：2026-09-19。`v0.1.27` GitHub Release 已创建成功。发布提交 `abd7084adfaea58401b1bde8fdef1c1294e09d53` 已推送至 `origin/main`；远端 annotated tag `v0.1.27` 的 tag object 为 `5d330293c610f3e6aedafaaba5ae7ec6f9a9dae6`，解析到该发布提交。Release workflow run ID 尚未记录。
@@ -17,7 +40,7 @@
 
 状态快照：2026-09-18。模型工作期间始终显示 guidance composer。此前普通消息按 FIFO 在当前轮结束后执行；现已由上方最新补充改为真实 Agent 在采样/工具安全检查点执行 steering。Ctrl+C 仍立即取消当前轮次。直接 `!` 运行交互式 PTY 时继续独占 stdin，避免把键盘输入同时送给 composer 和子进程。
 
-`/permissions` 现提供四档 profile：`read-only`（工作区读取直接可用，Bash/web 逐项审批）、`ask`（Bash/web 每次审批）、`workspace-write`（默认，当前 workspace 内 Bash 无逐条审批，web 仍逐项审批）和 `full-access`（二次确认后跳过工具审批）。网页审批通过统一确认窗口处理，关闭 web 仍是独立 deny 开关。权限仍是进程内应用层策略，不是 OS sandbox；workspace-write 不能阻止恶意 Bash 通过 `cd` 或网络访问越界，文档继续明确这一限制。
+`/permissions` 现提供四档 profile：`read-only`（工作区读取直接可用，模型 shell/web 逐项审批）、`ask`（模型 shell/web 每次审批）、`workspace-write`（默认，当前 workspace 内模型 shell 无逐条审批，web 仍逐项审批）和 `full-access`（二次确认后跳过工具审批）。这是 v0.1.27 发布时的历史状态；上方最新工作区改动已补入 Codex OS sandbox 和独立 MCP 审批面。
 
 新增运行中 guidance、四档 profile、网页审批和权限映射回归测试。定向测试 51/51、typecheck 和 build 已通过；完整 `pnpm test` 为 151/152，通过项未见本轮新增失败，唯一取消项仍是既有 Windows Git Bash 进程树终止 15 秒超时。真实 Windows Terminal 验收仍待完成。
 
@@ -93,10 +116,10 @@ v0.1.24 已接入 Codex 核心 Agent Loop 的 TypeScript 适配。详见 `archit
 ## 本轮权限管理
 
 - Codex 官方权限、沙箱、规则与 CLI 文档已读取；摘录、来源和实现差异见 `architecture/PERMISSIONS.md`。pi/Grok Build 尚未对标。
-- 新增 `/permissions` 独立命令窗口：默认 ask 逐条审批；read-only 禁止模型 Bash；full-access 二次确认后免审批；网页工具独立开关。
+- `/permissions` 独立命令窗口保留四档审批语义；模型 shell 现进一步映射 Codex 原生 profile，full-access 仍要求二次确认；网页工具独立开关，MCP 独立审批。
 - 新增 `read_file` 和 `list_directory`，工作目录范围校验、realpath 越界检查、UTF-8/大小/目录项上限。结果进入 context，错误返回模型。
 - 权限进程内保留，重启复位；不从 JSONL 恢复权限，不重建 Agent，不改变 Session schema。直接 `!` 保持原语义。
-- 当前仅应用层权限，未实现 OS 沙箱、Codex Auto、命令前缀授权或持久配置。获批 Bash 仍拥有宿主用户权限。路径检查不抵御恶意并发替换，详见安全限制文档。
+- 已接入固定 Codex CLI 的 OS sandbox，但仍不是完整 Codex runtime 或 Codex Auto；命令前缀授权、managed policy、持久权限和网络代理策略未实现。full-access 有宿主用户权限，路径竞态限制仍见安全文档。
 - 修正等待 Bash 确认时 Ctrl+C 未解除等待的问题，并在执行工具前检查取消信号。
 - 待真实 Windows Terminal 验收权限选择、完全访问确认/取消、只读文件查看、关闭联网，以及跨目录恢复后的文件根目录。
 
@@ -178,6 +201,11 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - `src/tui/components/session-picker.tsx`：名称和时间选择列表。
 - `src/tui/dependencies.ts`：默认 SessionStore、标题模型请求及目录切换。
 - `src/tools/web.ts`：Bing/DuckDuckGo 搜索、网页读取、正文提取、大小/超时限制和 SSRF 防护。
+- `src/codex/cli.ts`、`src/tools/bash.ts`：固定 Codex CLI、sandbox profile 路由、平台 shell 与输出/取消。
+- `src/mcp/runtime.ts`：Codex MCP 配置、连接、tool catalog、调用和状态。
+- `src/skills/catalog.ts`：Codex 主机 Skill roots、frontmatter、同名冲突、catalog、显式激活和资源读取。
+- `src/skills/manager.ts`：项目/用户 Skill 写入、公开 GitHub/Git/SKILL.md/ZIP 暂存、校验、预览准备及无覆盖安装。
+- `src/tui/components/skill-wizard.tsx`：`/skills` 创建、安装和查看三入口向导，完整编辑/预览、作用域选择、确认与 `$name` 回填。
 - `tests/unit/tools/web.test.ts`：搜索解析、正文提取、重定向验证和私网阻断回归。
 - `src/tui/commands.ts`、`src/tui/components/prompt.tsx`：slash command 筛选、菜单渲染和键盘交互。
 - `tests/unit/status/model-status.test.ts`、`tests/unit/tui/status-card.test.tsx`：映射、累计和卡片布局回归。
@@ -185,7 +213,8 @@ Everpeace 需要提供完整的本地 Session 工作流：
 
 ## 5. 验证结果
 
-- `pnpm test`：本轮 157/158 通过，1 项因既有 Windows Git Bash `Bash abort stops a running child` 15 秒超时而取消；新增权限 profile、网页审批、Responses stream 和运行中 guidance 回归均通过。其他 Bash、PTY、Session、Agent loop、TUI 和富文本回归通过。
+- `pnpm install --frozen-lockfile`：通过。
+- `pnpm test`：最终重跑 179/179 通过；覆盖真实 stdio MCP 握手/调用、Skill catalog 与同名冲突、创建、直接 `SKILL.md`、多 Skill ZIP 选择、超过旧 2,000 项的受限 Skill 包、Git no-checkout/tree 解析、路径逃逸/私网阻断、Codex sandbox 路由、MCP/Skill Agent 路由及 `/skills` 三条 TUI 流程，既有 Bash、PTY、Session、Agent loop、stream、steering 和富文本回归也通过。此前一次运行命中过已知 Windows PTY 取消超时，后续完整重跑均通过。
 - `pnpm typecheck`：通过。
 - `pnpm build`：通过。
 - `git diff --check`：通过，仅有 Windows LF/CRLF 提示。
@@ -195,7 +224,7 @@ Everpeace 需要提供完整的本地 Session 工作流：
 
 ## 6. 下一步
 
-优先在真实 Windows Terminal 的深色和浅色主题中验收英文等待状态、Markdown、Bash/PowerShell 高亮、长 unified diff、`NO_COLOR` 降级、Ctrl+C、上下历史、Shift+Enter（必要时通过 `/terminal-setup` 确认配置）、多行粘贴、交互 `!` 和 `/outputs`，再验收 `/permissions` 三种模式、完全访问二次确认、文件查看和网页禁用。后续对标 pi/Grok Build，并单独设计 OS 沙箱，不把当前应用层审批等同于系统隔离。
+优先在真实 Windows Terminal 中用真实模型验收 `workspace-write`/`read-only` sandbox、PowerShell 语法提示、`/mcp`、MCP 审批、`/skills` 创建/安装/查看和 `$skill-name`，同时复验英文等待状态、Markdown、长 unified diff、Ctrl+C、交互 `!` 和 `/outputs`。后续对标 pi/Grok Build，并单独设计 MCP OAuth/resources/prompts、私有/认证 Skill 来源、Skill 更新删除、Plugin/远端 runtime provider、managed policy 和 prefix rules；当前实现不得描述为完整 Codex runtime。
 
 1. 在真实 Windows Terminal 中运行 `pnpm dev`。
 2. 完成一次真实模型问答后执行 `/status`，确认窗口水平、垂直居中且不显示 banner、历史、Prompt 或全局状态栏，核对各状态字段，并确认 Esc 完整恢复同一个 Session。
@@ -205,8 +234,10 @@ Everpeace 需要提供完整的本地 Session 工作流：
 6. 验证跨工作目录恢复、原模型缺失时选择替代模型，以及 `/clear` 仍在下一次提问时才建档。
 7. 同时复验 Ctrl+滚轮缩放、普通滚轮、`! Get-ChildItem` 尾部流式输出、模型 Bash 的 5+5 首尾预览、单一 prompt 和窄终端 resize。
 8. 在真实终端输入 `/`，复验八项候选窗口滚动、逐字筛选、Enter 执行和 Tab 补全；再打开 `/help`、`/models`、`/status` 及各 picker，确认所有独立窗口居中、完全隐藏历史并可用 Esc 返回。
-9. 在真实 TUI 中询问一个明确依赖最新信息的问题，确认 `deepseek-flash` 会显示搜索/读取动作、引用来源，并能从单个来源失败中恢复。
-10. 后续功能改动继续同步更新版本计划、测试状态和相关 docs。
+9. 配置一个真实 stdio MCP server，执行 `/mcp` 后让模型调用 tool，确认非 full-access 会审批、拒绝不会重试、结果可恢复；再验证一个需要 bearer env 的 Streamable HTTP server。
+10. 用 `/skills` 分别在项目/用户作用域创建 Skill，并从公开 GitHub folder、直接 `SKILL.md` 和多 Skill ZIP 安装；确认预览/确认、重复名称拒绝、Esc 清理以及 View → `$name` 回填，再分别验证显式和 description 隐式匹配、引用资源约束及下一轮不自动延续。
+11. 在真实 TUI 中询问一个明确依赖最新信息的问题，确认 `deepseek-flash` 会显示搜索/读取动作、引用来源，并能从单个来源失败中恢复。
+12. 后续功能改动继续同步更新版本计划、测试状态和相关 docs。
 
 ## 7. 继续遵守的约束
 

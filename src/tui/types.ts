@@ -10,6 +10,8 @@ import type {
 } from "../storage/model-registry.js";
 import type { SessionStoreLike } from "../storage/session-store.js";
 import type { BashOutputPreview, BashResult } from "../tools/bash.js";
+import type { PermissionPolicy } from "../permissions/policy.js";
+import type { SkillManagerLike } from "../skills/manager.js";
 import type {
   StatusSnapshot,
   TokenUsageSample,
@@ -59,9 +61,15 @@ export interface TuiDependencies {
   changeWorkspace(workspacePath: string): Promise<string>;
   runBash(
     command: string,
+    policy: PermissionPolicy,
     signal?: AbortSignal,
     onOutput?: (output: BashOutputPreview) => void,
   ): Promise<BashResult>;
+  getMcpStatus?(): Promise<string>;
+  getSkillsStatus?(): Promise<string>;
+  skillManager?: SkillManagerLike;
+  generateSkillDraft?(model: RegisteredModel, description: string, signal?: AbortSignal): Promise<string>;
+  reviseSkillDraft?(model: RegisteredModel, skillMarkdown: string, signal?: AbortSignal): Promise<string>;
   runTerminalCommand(
     command: string,
     onOutput?: (output: string) => void,

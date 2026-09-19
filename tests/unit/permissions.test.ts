@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   bashPermission,
+  codexSandboxProfile,
   defaultPermissions,
+  mcpPermission,
   webPermission,
 } from "../../src/permissions/policy.js";
 
@@ -11,6 +13,15 @@ test("workspace-write is the friction-free current-workspace default", () => {
   assert.deepEqual(policy, { mode: "workspace-write", web: true });
   assert.equal(bashPermission(policy), "allow");
   assert.equal(webPermission(policy), "ask");
+  assert.equal(mcpPermission(policy), "ask");
+  assert.equal(codexSandboxProfile(policy), ":workspace");
+});
+
+test("permission modes map to Codex native sandbox profiles", () => {
+  assert.equal(codexSandboxProfile({ mode: "read-only", web: true }), ":read-only");
+  assert.equal(codexSandboxProfile({ mode: "ask", web: true }), ":workspace");
+  assert.equal(codexSandboxProfile({ mode: "full-access", web: true }), ":danger-full-access");
+  assert.equal(mcpPermission({ mode: "full-access", web: false }), "allow");
 });
 
 test("read-only and ask profiles gate Bash and web requests", () => {

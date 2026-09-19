@@ -47,6 +47,7 @@ import { ModelPicker } from "./components/model-picker.js";
 import { Prompt } from "./components/prompt.js";
 import { SessionPicker } from "./components/session-picker.js";
 import { StatusBar } from "./components/status-bar.js";
+import { SkillWizard } from "./components/skill-wizard.js";
 import { HighlightedCommand, RichOutput } from "./components/rich-text.js";
 import { TUI_COLORS } from "./palette.js";
 import { truncateEnd } from "./text-width.js";
@@ -61,6 +62,7 @@ type View =
   | { kind: "input-history" }
   | { kind: "terminal-setup" }
   | { kind: "permissions" }
+  | { kind: "skills" }
   | { kind: "chat" }
   | { kind: "login" }
   | {
@@ -88,7 +90,7 @@ type View =
 type CommandView = Exclude<View, { kind: "chat" }>;
 
 interface PendingConfirmation {
-  kind: "bash" | "web";
+  kind: "bash" | "web" | "mcp";
   request: string;
   resolve(accepted: boolean): void;
 }
@@ -443,8 +445,12 @@ export function EverpeaceApp({
       confirmationRef.current = undefined;
       setConfirmation(undefined);
       if (!accepted) {
-        const label = pending?.kind === "web" ? "Web request rejected" : "Bash command rejected";
-        append("system", `${label}: ${pending?.request ?? "unknown request"}`);
+        const label = pending?.kind === "web"
+          ? "Web request rejected"
+          : pending?.kind === "mcp"
+            ? "MCP tool call rejected"
+            : "Shell command rejected";
+        append("system", pending?.kind === "mcp" ? label : `${label}: ${pending?.request ?? "unknown request"}`);
       }
       pending?.resolve(accepted);
     },
@@ -473,10 +479,21 @@ export function EverpeaceApp({
     [],
   );
 
+  const requestMcpConfirmation = useCallback(
+    (request: string): Promise<boolean> => {
+      return new Promise((resolve) => {
+        const pending = { kind: "mcp" as const, request, resolve };
+        confirmationRef.current = pending;
+        setConfirmation(pending);
+      });
+    },
+    [],
+  );
+
   const executeBash = useCallback(
     async (command: string, signal?: AbortSignal): Promise<BashResult> => {
       const started = Date.now();
-      setActiveCommand({ command, shell: "Bash", source: "model" });
+      setActiveCommand({ command, shell: process.platform === "win32" ? "PowerShell · Codex sandbox" : "Bash · Codex sandbox", source: "model" });
       let generation = 0;
       let finished = false;
       setTerminalBusy(true);
@@ -489,12 +506,12 @@ export function EverpeaceApp({
         });
       };
       let result: BashResult;
-      try { result = await dependencies.runBash(command, signal, preview); }
+      try { result = await dependencies.runBash(command, permissions.current, signal, preview); }
       finally { finished = true; setTerminalBusy(false); setTerminalOutput(undefined); setAgentTerminalPreview(undefined); setActiveCommand(undefined); }
       if (result === undefined) throw new Error("Bash did not return a result");
       const output = await renderTerminalOutput(commandOutput(result));
       const retained = retainOutput(output);
-      appendCommand(retained.text, { id: randomUUID(), command, shell: "Bash", workspace: workspacePath, source: "model", status: result.cancelled ? "cancelled" : result.error || result.exitCode !== 0 ? "failed" : "completed", durationMs: Date.now() - started, truncated: retained.truncated || result.truncated === true });
+      appendCommand(retained.text, { id: randomUUID(), command, shell: process.platform === "win32" ? "PowerShell" : "Bash", workspace: workspacePath, source: "model", status: result.cancelled ? "cancelled" : result.error || result.exitCode !== 0 ? "failed" : "completed", durationMs: Date.now() - started, truncated: retained.truncated || result.truncated === true });
       return result;
     },
     [appendCommand, dependencies, workspacePath],
@@ -531,6 +548,7 @@ export function EverpeaceApp({
       getPermissions: () => ({ ...permissions.current }),
       confirmBash: requestBashConfirmation,
       confirmWeb: requestWebConfirmation,
+      confirmMcp: requestMcpConfirmation,
       runBash: executeBash,
       writeAssistant(text) {
         setLiveAssistant("");
@@ -557,7 +575,7 @@ export function EverpeaceApp({
         }
       },
     }),
-    [append, executeBash, requestBashConfirmation, requestWebConfirmation],
+    [append, executeBash, requestBashConfirmation, requestMcpConfirmation, requestWebConfirmation],
   );
 
   const agent = useMemo(
@@ -665,6 +683,20 @@ export function EverpeaceApp({
     replaceCommandView,
     startCommandLoad,
   ]);
+
+  const showMcp = useCallback(async () => {
+    const operation = startCommandLoad("/mcp · MCP servers", "Connecting to MCP servers");
+    try {
+      const text = dependencies.getMcpStatus
+        ? await dependencies.getMcpStatus()
+        : "MCP runtime is unavailable in this integration.";
+      if (!isCurrentCommandOperation(operation)) return;
+      replaceCommandView(infoView("/mcp · MCP servers", text));
+    } catch (error) {
+      if (!isCurrentCommandOperation(operation)) return;
+      replaceCommandView(infoView("/mcp · Could not load", error instanceof Error ? error.message : String(error), "error"));
+    }
+  }, [dependencies, isCurrentCommandOperation, replaceCommandView, startCommandLoad]);
 
   const openModelPicker = useCallback(async () => {
     const operation = startCommandLoad(
@@ -1194,6 +1226,8 @@ export function EverpeaceApp({
       if (parsed.command === "/models") void showModels();
       if (parsed.command === "/status") showStatus();
       if (parsed.command === "/permissions") enterCommandView({ kind: "permissions" });
+      if (parsed.command === "/mcp") void showMcp();
+      if (parsed.command === "/skills") enterCommandView({ kind: "skills" });
       if (parsed.command === "/outputs") enterCommandView({ kind: "outputs" });
       if (parsed.command === "/history") enterCommandView({ kind: "input-history" });
       if (parsed.command === "/terminal-setup") enterCommandView({ kind: "terminal-setup" });
@@ -1218,6 +1252,7 @@ export function EverpeaceApp({
       runDirectBash,
       queueGuidance,
       showModels,
+      showMcp,
       showStatus,
     ],
   );
@@ -1357,6 +1392,18 @@ export function EverpeaceApp({
               permissions.current = policy;
               returnToChat();
             }}
+            onBack={returnToChat}
+          />
+        ) : view.kind === "skills" ? (
+          <SkillWizard
+            {...(dependencies.skillManager ? { manager: dependencies.skillManager } : {})}
+            {...(activeModel ? { activeModel } : {})}
+            {...(dependencies.generateSkillDraft ? { generateDraft: dependencies.generateSkillDraft } : {})}
+            {...(dependencies.reviseSkillDraft ? { reviseDraft: dependencies.reviseSkillDraft } : {})}
+            onUse={(name) => returnToChat(() => {
+              editorRef.current = createComposerState(`$${name} `);
+              historyNavigationRef.current = { index: undefined, draft: "" };
+            })}
             onBack={returnToChat}
           />
         ) : view.kind === "login" ? (

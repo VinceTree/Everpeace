@@ -5,15 +5,15 @@ The terminal transcript mirrors Codex's resize-reflow row caps. Source-backed re
 
 **English** | [简体中文](./README.zh-CN.md)
 
-Everpeace is a general-purpose ReAct agent with strong coding abilities and an interactive TUI. It supports DeepSeek, OpenAI, and custom OpenAI-compatible APIs. The selected model can search the web, read public pages, and request Bash tool calls. You can also run a local command directly with `!<command>`.
+Everpeace is a general-purpose ReAct agent with strong coding abilities and an interactive TUI. It supports DeepSeek, OpenAI, and custom OpenAI-compatible APIs. The selected model can use a Codex-sandboxed shell, search the web, call configured MCP tools, and load local Codex skills. You can also run a local command directly with `!<command>`.
 
-API keys are never read from environment variables or written to the project or configuration JSON. Everpeace stores keys in the operating system credential store. Its local model registry contains only the model name, base URL, and credential reference.
+Model API keys are never read from environment variables or written to the project or configuration JSON. Everpeace stores them in the operating system credential store. Its local model registry contains only the model name, base URL, and credential reference. Separately, user-configured MCP servers may reference bearer tokens or headers through environment-variable names, following Codex MCP configuration.
 
 ## Requirements
 
 - Node.js 22+
 - pnpm
-- Bash on macOS/Linux, or Git Bash/WSL Bash on Windows
+- Bash on macOS/Linux; Windows model commands use the system PowerShell inside the Codex sandbox
 - An API key for DeepSeek, OpenAI, or a compatible service
 - Outbound HTTPS access to Bing or DuckDuckGo and any public pages the agent reads
 
@@ -59,16 +59,16 @@ pnpm dev -- models
 pnpm dev -- logout
 ```
 
-If `bash` is not in `PATH`, configure it explicitly:
+On macOS/Linux, if `bash` is not in `PATH`, configure it explicitly:
 
 ```powershell
-$env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
+$env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ```
 
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.1.27) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.28) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -120,6 +120,8 @@ TUI commands:
 - `/models`: List all registered models and credential states.
 - `/status`: Show the current model, provider, context window, and session token usage.
 - `/permissions`: Select read-only, ask-for-approval, workspace-write, or full-access mode and toggle web tools.
+- `/mcp`: Reload Codex MCP configuration, connect enabled servers, and inspect server/tool status.
+- `/skills`: Create, install, inspect, and explicitly invoke local Skills.
 - `/outputs`: Browse retained command output with paged details, highlighted commands, and unified-diff rendering.
 - `/history`: Browse or explicitly clear global input history (not sessions).
 - `/terminal-setup`: Preview and optionally configure Shift+Enter in stable Windows Terminal; confirmation creates a settings backup before applying a global key binding.
@@ -131,14 +133,26 @@ TUI commands:
 - `/help`, `/exit`: Show help or exit Everpeace.
 - `!<command>`: Run a command directly in the native system shell (PowerShell on Windows, Bash on macOS/Linux) without confirmation. PTY-formatted output streams into the TUI history without suspending or refreshing the whole interface.
 
+MCP uses the same Codex configuration rather than an Everpeace-specific credential file. Configure servers with `pnpm exec codex mcp add ...` or an equivalent installed Codex CLI, then run `/mcp`. This release supports stdio and Streamable HTTP tools, including static/environment headers and bearer-token environment variables. Codex OAuth credential reuse, header helpers, resources, prompts, elicitation, and tasks are not yet exposed.
+
+Skills are discovered from `.agents/skills` between the workspace and repository root, the project `.codex/skills`, `$CODEX_HOME/skills`, `~/.agents/skills`, and the platform admin root. Mention `$skill-name` to activate one explicitly for the current turn; otherwise the model can match catalog descriptions and call `read_skill`. Skill metadata is preloaded, while complete instructions and referenced files are read only when needed.
+
+`/skills` is an interactive manager with three flows:
+
+- **Create**: choose project or user scope, describe the workflow, let the active model draft one `SKILL.md`, then validate/improve it with AI, edit the complete file manually, or confirm and save it.
+- **Install from URL**: enter a public HTTPS GitHub repository/folder, Git repository root, direct `SKILL.md`, or ZIP URL. Everpeace downloads into temporary staging, validates every discovered package, lets you choose one when the source contains several, previews the complete `SKILL.md` with source and file count, then requires scope selection and explicit confirmation before installation. Git sources are cloned without a working-tree checkout first; Everpeace inspects the bounded repository tree and checks out only validated candidate Skill directories, avoiding unrelated deep paths in large repositories.
+- **View installed Skills**: inspect complete instructions and select **Use in next prompt** to prefill `$skill-name` in the composer.
+
+Project installs go to the repository root's `.agents/skills`; user installs go to `$CODEX_HOME/skills` (normally `~/.codex/skills`). Existing names are never overwritten, and duplicate names across discovered roots are marked as conflicts and withheld from automatic or explicit activation until resolved. URL installation is public-only, accepts no embedded credentials, validates every redirect against local/private addresses, applies download/extraction/file limits, rejects path traversal and symbolic links, and installs through a temporary directory. Private repositories, authenticated downloads, updates, and deletion are outside the current flow. See [Codex capability mapping](docs/architecture/CODEX_CAPABILITIES.md).
+
 Behavior notes:
 
 - The core turn loop adapts Codex's sampling/tool/follow-up flow in TypeScript, with per-tool result persistence, cancellable request retries, and overlapping-turn protection. It is not the complete Codex runtime; see [source mapping and scope](docs/architecture/AGENT_LOOP.md).
 
-- Permission profiles follow the Codex split between workspace scope and approvals: `read-only` allows workspace reads but asks before Bash or web access; `ask` asks before every Bash or web call; `workspace-write` allows current-workspace edits without prompts but asks before web access; and `full-access` skips tool approvals after a second explicit confirmation.
+- Permission profiles keep sandbox scope separate from approvals: `read-only` asks before model shell, web, and MCP calls and uses Codex `:read-only`; `ask` asks before each call and uses `:workspace` after shell approval; `workspace-write` runs model shell in `:workspace` without per-command prompts while web and MCP still ask; `full-access` selects `:danger-full-access` after a second explicit confirmation.
 - `read_file` reads workspace UTF-8 files up to 128 KiB; `list_directory` lists up to 500 entries. Outside paths and resolved symlink escapes are rejected. File contents enter model context and persisted session data; avoid reading secrets.
 - Permissions last for this process across `/new`, `/clear`, and `/resume`; restarting resets to `workspace-write` with web tools enabled. Changing permissions preserves context; JSONL never restores full access.
-- This is application-level permission management, not an OS sandbox. Approved Bash can access files and networks with your account permissions. Disabling web tools does not restrict shell networking, model API calls, or direct user commands. See [design and limits](docs/architecture/PERMISSIONS.md).
+- Model shell commands are launched through the pinned `@openai/codex@0.155.1` native OS sandbox and fail closed if that runtime cannot start. Windows model commands use PowerShell because Git Bash/MSYS cannot initialize inside the restricted token; macOS/Linux use Bash. Direct `!` commands remain outside the model sandbox. See [design and limits](docs/architecture/PERMISSIONS.md).
 - `read-only`, `ask`, and `workspace-write` require approval before each web request; `full-access` skips that prompt. Search queries are sent to Bing, with DuckDuckGo as a fallback; opening a result sends a request to that site.
 - Web page reads allow only public HTTP/HTTPS targets, validate redirects, block local/private network addresses, apply time and response-size limits, and treat returned content as untrusted data.
 - Search availability and result quality depend on the external search services and the current network connection. A failed web request is returned to the model so it can explain the limitation or try another source.
@@ -148,8 +162,7 @@ Behavior notes:
 - Remote custom base URLs must use HTTPS; HTTP is allowed only for local endpoints.
 - Everpeace fails closed if the operating system credential store is unavailable and never falls back to plaintext storage.
 - Linux uses the persistent Secret Service and does not fall back to an in-memory kernel keyring.
-- Bash commands run with the current user's permissions and have no additional sandbox.
-- Every Bash call runs in a separate process, so `cd` and temporary environment variables do not persist between calls.
+- Every model shell call runs in a separate Codex sandbox process, so `cd` and temporary environment variables do not persist between calls. `full-access` intentionally retains the current user's authority.
 - The TUI requires an interactive terminal and reports an error when its input or output is redirected.
 
 While a model turn is running, the composer stays available with the `Add guidance while working` placeholder. Submitted messages are recorded immediately and applied at the next safe checkpoint: sampling is interrupted when possible, while an already-running tool is allowed to checkpoint its result first. The model then continues with the durable context and your correction. `Ctrl+C` still cancels the active turn immediately; any submitted guidance is retained in the session context for the next turn. Elapsed time uses `s`, then `m s`, then `h m s` after the corresponding thresholds.
@@ -160,7 +173,10 @@ While a model turn is running, the composer stays available with the `Add guidan
 src/
 ├─ cli/          # CLI entry point and login/models/logout/run commands
 ├─ agent/        # ReAct loop and session state
+├─ codex/        # Pinned Codex CLI launcher
+├─ mcp/          # Codex-configured MCP client runtime
 ├─ providers/    # DeepSeek, OpenAI, and compatible endpoint adapters
+├─ skills/       # Codex host skill discovery and progressive reads
 ├─ storage/      # Operating system credentials and model registry
 ├─ tui/          # Ink views, state machine, login wizard, and composer
 └─ tools/        # Agent tool definitions and executors
@@ -191,4 +207,4 @@ pnpm build
 - Ctrl+C cancels the active model turn, approval wait, or shell command without exiting. When idle, it clears a nonempty draft; with an empty draft it exits.
 - Up/Down browse previous input at the first/last line and restore the current draft. Slash-menu selection takes precedence. Modified Enter inserts a newline when supported; multiline bracketed paste never submits automatically. Windows Terminal may require `/terminal-setup` to distinguish Shift+Enter from Enter.
 - Input history is shared across restarts: up to 1,000 entries / 4 MiB in `input-history.json` next to the sessions directory. Login wizard secrets are excluded, but manually typed secrets in prompts or commands are not automatically redacted. Clearing history does not remove session records.
-- While model-requested Bash is running, its bounded live preview shows up to the first five and last five rows with an omission count, shrinking symmetrically on short terminals. Direct `!` commands continue to prioritize the latest five rows, and completed output keeps its compact summary. `/outputs` displays retained output (up to 10,000 lines / 2 MiB per UI record); truncated data cannot be recovered there. Model Bash captures stdout/stderr separately, up to 1 MiB each, and has no interactive stdin. Direct `!` commands retain interactive input.
+- While a model-requested shell command is running, its bounded live preview shows up to the first five and last five rows with an omission count, shrinking symmetrically on short terminals. Direct `!` commands continue to prioritize the latest five rows, and completed output keeps its compact summary. `/outputs` displays retained output (up to 10,000 lines / 2 MiB per UI record); truncated data cannot be recovered there. Model shell commands capture stdout/stderr separately, up to 1 MiB each, and have no interactive stdin. Direct `!` commands retain interactive input.

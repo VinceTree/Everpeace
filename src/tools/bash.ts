@@ -5,6 +5,7 @@ import {
 } from "./bash-output-preview.js";
 import { stopProcessTree } from "./process-cancel.js";
 import { retainOutput } from "./command-record.js";
+import { codexCliLaunch } from "../codex/cli.js";
 
 export type { BashOutputPreview } from "./bash-output-preview.js";
 
@@ -31,19 +32,28 @@ export interface BashOptions {
    * be captured in the returned result.
    */
   terminal?: boolean;
+  sandbox?: {
+    permissionProfile: ":read-only" | ":workspace" | ":danger-full-access";
+    readableRoots?: readonly string[];
+    codexCliPath?: string;
+  };
 }
 
 export const BASH_TOOL_DEFINITION = {
   type: "function",
   name: "bash",
   description:
-    "Run one Bash command in the user's current working directory. Use it to inspect files, run programs, and complete coding tasks.",
+    process.platform === "win32"
+      ? "Run one PowerShell command in the user's current working directory through the Codex Windows sandbox. Use PowerShell syntax."
+      : "Run one Bash command in the user's current working directory through the Codex OS sandbox.",
   parameters: {
     type: "object",
     properties: {
       command: {
         type: "string",
-        description: "The complete command to pass to bash -c.",
+        description: process.platform === "win32"
+          ? "The complete command to pass to PowerShell -Command."
+          : "The complete command to pass to bash -c.",
       },
     },
     required: ["command"],
@@ -86,6 +96,30 @@ export function resolveBashPath(env: NodeJS.ProcessEnv = process.env): string {
   return env.EVERPEACE_BASH_PATH?.trim() || "bash";
 }
 
+export function resolveBashLaunch(
+  command: string,
+  options: BashOptions = {},
+): { command: string; args: string[] } {
+  const env = options.env ?? process.env;
+  const bashPath = options.bashPath ?? resolveBashPath(env);
+  if (!options.sandbox) return { command: bashPath, args: ["-c", command] };
+  const cwd = options.cwd ?? process.cwd();
+  const sandboxCommand = process.platform === "win32"
+    ? { command: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command] }
+    : { command: bashPath, args: ["-c", command] };
+  return codexCliLaunch([
+    "sandbox",
+    "-P",
+    options.sandbox.permissionProfile,
+    "-C",
+    cwd,
+    ...(options.sandbox.readableRoots?.flatMap((root) => ["--sandbox-state-readable-root", root]) ?? []),
+    "--",
+    sandboxCommand.command,
+    ...sandboxCommand.args,
+  ], options.sandbox.codexCliPath ? { codexCliPath: options.sandbox.codexCliPath } : {});
+}
+
 export function runBash(
   command: string,
   options: BashOptions = {},
@@ -94,6 +128,7 @@ export function runBash(
   const bashPath = options.bashPath ?? resolveBashPath(env);
   const streamOutput = options.streamOutput ?? true;
   const terminal = options.terminal ?? false;
+  const cwd = options.cwd ?? process.cwd();
 
   return new Promise((resolve) => {
     if (options.signal?.aborted) { resolve({ stdout: "", stderr: "", exitCode: null, signal: null, cancelled: true }); return; }
@@ -122,9 +157,10 @@ export function runBash(
 
     let child;
     try {
-      child = spawn(bashPath, ["-c", command], {
+      const launch = resolveBashLaunch(command, options);
+      child = spawn(launch.command, launch.args, {
         detached: process.platform !== "win32",
-        cwd: options.cwd ?? process.cwd(),
+        cwd,
         env,
         shell: false,
         stdio: terminal ? "inherit" : ["ignore", "pipe", "pipe"],
@@ -132,7 +168,7 @@ export function runBash(
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (streamOutput) process.stderr.write(`Failed to start Bash: ${message}\n`);
+      if (streamOutput) process.stderr.write(`Failed to start ${options.sandbox ? "Codex sandbox" : "Bash"}: ${message}\n`);
       finish({ stdout, stderr, exitCode: null, signal: null, error: message });
       return;
     }
@@ -170,7 +206,7 @@ export function runBash(
     child.on("error", (error) => {
       options.signal?.removeEventListener("abort", cancel);
       const message = error.message;
-      if (streamOutput) process.stderr.write(`Failed to start Bash: ${message}\n`);
+      if (streamOutput) process.stderr.write(`Failed to start ${options.sandbox ? "Codex sandbox" : "Bash"}: ${message}\n`);
       finish({ stdout, stderr, exitCode: null, signal: null, error: message });
     });
 

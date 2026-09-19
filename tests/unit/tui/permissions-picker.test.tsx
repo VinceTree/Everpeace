@@ -19,7 +19,7 @@ test("full access requires a second explicit confirmation and Escape cancels it"
   await tick();
   view.stdin.write("\r");
   await tick();
-  assert.match(view.lastFrame() ?? "", /without approval/);
+  assert.match(view.lastFrame() ?? "", /danger-full-access profile and skips tool approvals/);
   assert.equal(changes.length, 0);
   view.stdin.write("\u001B");
   await tick();

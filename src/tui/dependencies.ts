@@ -17,12 +17,41 @@ import { runBash } from "../tools/bash.js";
 import { runTerminalCommand } from "../tools/terminal.js";
 import type { TuiDependencies, TuiModelRegistry } from "./types.js";
 import { truncateEnd } from "./text-width.js";
+import { codexSandboxProfile, type PermissionPolicy } from "../permissions/policy.js";
+import { McpRuntime, formatMcpStatus } from "../mcp/runtime.js";
+import { SkillCatalog, formatSkillsStatus } from "../skills/catalog.js";
+import {
+  SkillManager,
+  normalizeGeneratedSkillMarkdown,
+  validateManagedSkillMarkdown,
+} from "../skills/manager.js";
 
 const require = createRequire(import.meta.url);
 const packageJson = require("../../package.json") as { version?: unknown };
 
 function packageVersion(): string {
   return typeof packageJson.version === "string" ? packageJson.version : "0.0.0";
+}
+
+async function requestSkillDraft(
+  model: RegisteredModel,
+  instructions: string,
+  input: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const client = createProviderClient(model.base_url, model.api_key);
+  const response = await client.responses.create(
+    {
+      model: model.model_name,
+      instructions,
+      input,
+      store: false,
+    },
+    signal ? { signal } : undefined,
+  );
+  const draft = normalizeGeneratedSkillMarkdown(response.output_text);
+  validateManagedSkillMarkdown(draft);
+  return draft;
 }
 
 export function sanitizeSessionTitle(value: string): string {
@@ -45,12 +74,17 @@ export function createDefaultTuiDependencies(
   registry: TuiModelRegistry,
 ): TuiDependencies {
   const sessionStore = new SessionStore();
+  const version = packageVersion();
+  const skills = new SkillCatalog(process.cwd());
+  const skillManager = new SkillManager({ workspacePath: process.cwd(), catalog: skills });
+  const mcp = new McpRuntime({ workspacePath: process.cwd(), version });
   return {
     registry,
-    version: packageVersion(),
+    version,
     workspacePath: process.cwd(),
     sessionStore,
     inputHistory: new InputHistory(),
+    skillManager,
     async listModels(baseUrl, apiKey, signal) {
       return listOfficialModelIds(createProviderClient(baseUrl, apiKey), signal);
     },
@@ -80,6 +114,8 @@ export function createDefaultTuiDependencies(
         client,
         model: model.model_name,
         io,
+        mcp,
+        skills,
         ...(restore?.initialContext === undefined
           ? {}
           : { initialHistory: restore.initialContext }),
@@ -119,10 +155,43 @@ export function createDefaultTuiDependencies(
       const stats = await fs.stat(workspacePath);
       if (!stats.isDirectory()) throw new Error(`Session workspace is not a directory: ${workspacePath}`);
       process.chdir(workspacePath);
+      skills.setWorkspace(process.cwd());
+      skillManager.setWorkspace(process.cwd());
+      await mcp.setWorkspace(process.cwd());
       return process.cwd();
     },
-    runBash(command, signal, onOutput) {
-      return runBash(command, { streamOutput: false, ...(signal ? { signal } : {}), ...(onOutput ? { onOutput } : {}) });
+    runBash(command, policy: PermissionPolicy, signal, onOutput) {
+      return runBash(command, {
+        streamOutput: false,
+        sandbox: {
+          permissionProfile: codexSandboxProfile(policy),
+          readableRoots: skills.readableRoots(),
+        },
+        ...(signal ? { signal } : {}),
+        ...(onOutput ? { onOutput } : {}),
+      });
+    },
+    async getMcpStatus() {
+      return formatMcpStatus(await mcp.refresh());
+    },
+    async getSkillsStatus() {
+      return formatSkillsStatus(await skills.refresh());
+    },
+    generateSkillDraft(model, description, signal) {
+      return requestSkillDraft(
+        model,
+        "Create one concise Codex SKILL.md for the requested workflow. Return only the complete SKILL.md, without a Markdown code fence or commentary. It must begin with YAML frontmatter containing a lowercase hyphenated name (maximum 64 characters) and a discriminating description that states what the skill does and when it applies. The body should contain only task-specific workflow, non-obvious constraints, and useful decision criteria. Do not create or refer to extra files, scripts, assets, or placeholders.",
+        description,
+        signal,
+      );
+    },
+    reviseSkillDraft(model, skillMarkdown, signal) {
+      return requestSkillDraft(
+        model,
+        "Validate and improve the supplied Codex SKILL.md. Correct invalid frontmatter, vague routing, generic advice, contradictions, and unnecessary verbosity while preserving the intended workflow. Return only the complete revised SKILL.md, without a Markdown code fence or commentary. Keep it self-contained and do not add references to files, scripts, or assets.",
+        skillMarkdown,
+        signal,
+      );
     },
     runTerminalCommand(command, onOutput, signal, onInputReady) {
       return runTerminalCommand(command, {

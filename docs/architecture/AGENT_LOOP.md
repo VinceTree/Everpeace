@@ -28,6 +28,6 @@ Apache-2.0 许可证与改动归属位于 `third_party/codex/`，随构建包包
 
 上游是 Rust async runtime、流式 Responses 事件及多服务 Session；本地现在优先使用 Responses SSE，并在兼容端点不提供流式接口时回退到 buffered `create`。没有复制 Codex prompt、UI、账户登录或内部私有服务。
 
-当前未移植：并行工具调度、自动 context compaction、hook、MCP、多 Agent、系统沙箱及完整流中断重试。循环提供 `LoopEvent`、流式文字 delta 和 safe-checkpoint steering：采样中的纠正会停止当前 SSE，工具执行中的纠正在工具结果持久化后生效；未启动的 function call 会写入 `steered` output，保证后续请求上下文完整。Ctrl+C 取消时，已提交但尚未应用的纠正会先写入模型 context，避免遗留到未来轮次。实时增量只属于当前 UI，不写入 JSONL。
+当前未移植：并行工具调度、自动 context compaction、hook、多 Agent 及完整流中断重试。模型 shell 已通过固定版本 Codex CLI 接入平台 sandbox；MCP tools 和主机 Skills 已作为现有 function-call 调度器的扩展接入，但不等同于 Codex 的完整 MCP/Plugin/Skill provider runtime，边界见 [CODEX_CAPABILITIES.md](./CODEX_CAPABILITIES.md)。循环提供 `LoopEvent`、流式文字 delta 和 safe-checkpoint steering：采样中的纠正会停止当前 SSE，工具执行中的纠正在工具结果持久化后生效；未启动的 function call 会写入 `steered` output，保证后续请求上下文完整。Ctrl+C 取消时，已提交但尚未应用的纠正会先写入模型 context，避免遗留到未来轮次。实时增量只属于当前 UI，不写入 JSONL。
 
 自动测试使用模拟 Responses 与现有真实工具回归；不声称已验证真实供应商完整端到端或与 Codex 全功能等价。

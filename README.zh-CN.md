@@ -5,15 +5,15 @@
 
 [English](./README.md) | **简体中文**
 
-Everpeace 是一个具备较强编程能力、带交互式 TUI 的通用 ReAct agent，支持 DeepSeek、OpenAI 和自定义 OpenAI-compatible API。所选模型可以搜索网页、读取公共页面并请求调用 Bash；你也可以用 `!<command>` 直接运行本地命令。
+Everpeace 是一个具备较强编程能力、带交互式 TUI 的通用 ReAct agent，支持 DeepSeek、OpenAI 和自定义 OpenAI-compatible API。所选模型可以使用 Codex sandbox 中的 shell、搜索网页、调用已配置的 MCP tool，并加载本机 Codex Skill；你也可以用 `!<command>` 直接运行本地命令。
 
-API Key 不从环境变量读取，也不会写入项目或配置 JSON。Everpeace 使用操作系统凭据库保存 Key，并在本地模型注册表中只保存模型名、base URL 和凭据引用。
+模型 API Key 不从环境变量读取，也不会写入项目或配置 JSON。Everpeace 使用操作系统凭据库保存 Key，并在本地模型注册表中只保存模型名、base URL 和凭据引用。用户自行配置的 MCP server 可按 Codex MCP 配置通过环境变量名引用 bearer token 或 header；两类凭据边界彼此独立。
 
 ## 需求
 
 - Node.js 22+
 - pnpm
-- macOS/Linux 上的 Bash，或 Windows 上的 Git Bash/WSL Bash
+- macOS/Linux 上的 Bash；Windows 模型命令在 Codex sandbox 内使用系统 PowerShell
 - DeepSeek、OpenAI 或兼容服务的 API Key
 - 能够通过 HTTPS 访问 Bing 或 DuckDuckGo，以及 Agent 需要读取的公共网页
 
@@ -59,16 +59,16 @@ pnpm dev -- models
 pnpm dev -- logout
 ```
 
-如果 `bash` 不在 `PATH` 中，可以显式配置：
+macOS/Linux 上如果 `bash` 不在 `PATH` 中，可以显式配置：
 
 ```powershell
-$env:EVERPEACE_BASH_PATH="D:\GitBash\Git\usr\bin\bash.exe"
+$env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ```
 
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.1.27) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.1.28) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -120,6 +120,8 @@ TUI 命令：
 - `/models`：查看所有模型和凭据状态。
 - `/status`：查看当前模型、供应商、context window 和 session token 使用量。
 - `/permissions`：选择只读、逐条审批、工作区写入或完全访问模式，并开关网页工具。
+- `/mcp`：重新加载 Codex MCP 配置、连接已启用服务器并查看 tool 状态。
+- `/skills`：创建、安装、查看并显式调用本地 Skills。
 - `/outputs`：分页浏览保留输出、已高亮的命令及 unified diff。
 - `/history`：浏览或明确确认后清空全局输入历史，不删除 Session。
 - `/terminal-setup`：预览并可选配置稳定版 Windows Terminal 的 Shift+Enter；确认后先备份设置，再新增全局按键绑定。
@@ -131,14 +133,26 @@ TUI 命令：
 - `/help`、`/exit`：显示帮助或退出。
 - `!<command>`：直接运行当前系统的命令行（Windows 使用 PowerShell，macOS/Linux 使用 Bash），不再次确认；PTY 排版结果会流式写入 TUI 历史，不再暂停或整页刷新交互界面。
 
+MCP 复用 Codex 配置，不另建 Everpeace 凭据文件。使用 `pnpm exec codex mcp add ...` 或其他已安装 Codex CLI 配置服务器，再运行 `/mcp`。当前支持 stdio 和 Streamable HTTP tools，以及静态/环境 header 和 bearer-token 环境变量；尚未暴露 Codex OAuth 凭据复用、header helper、resources、prompts、elicitation 和 tasks。
+
+Skills 从工作区到仓库根的 `.agents/skills`、项目 `.codex/skills`、`$CODEX_HOME/skills`、`~/.agents/skills` 和平台管理员根发现。输入 `$skill-name` 可在当前轮显式激活；否则模型可按 catalog description 匹配并调用 `read_skill`。默认只预载 metadata，命中后才读取完整说明与引用文件。
+
+`/skills` 是包含三条流程的交互式管理器：
+
+- **创建**：选择项目或用户作用域，描述工作流，由当前模型生成单个 `SKILL.md`；之后可让 AI 校验并改进、手动编辑完整文件，或确认保存。
+- **从 URL 安装**：输入公开 HTTPS GitHub 仓库/文件夹、Git 仓库根、直接 `SKILL.md` 或 ZIP URL。Everpeace 先下载到临时暂存区并校验所有发现的包；同一来源包含多个 Skill 时先选择一个，再预览完整 `SKILL.md`、来源和文件数量，最后选择作用域并明确确认后安装。Git 来源先执行不生成工作区文件的克隆，在有界仓库树中定位候选后只检出已校验的 Skill 目录，避免大型仓库中无关的深层路径导致安装失败。
+- **查看已安装 Skill**：查看完整说明，选择 **Use in next prompt** 后把 `$skill-name` 回填到主输入框。
+
+项目安装写入仓库根 `.agents/skills`，用户安装写入 `$CODEX_HOME/skills`（通常为 `~/.codex/skills`）。已有名称不会被覆盖；发现根中存在同名 Skill 时会标记冲突，并在解决前禁止自动或显式激活。URL 安装仅支持公开来源，不接受 URL 内嵌凭据；每次重定向都检查本机/私网地址，并限制下载、解压、条目和单文件大小，拒绝路径穿越及符号链接，通过临时目录完成安装。私有仓库、认证下载、更新和删除暂不属于当前流程。详见 [Codex 能力映射](docs/architecture/CODEX_CAPABILITIES.md)。
+
 行为说明：
 
 - 核心循环已适配 Codex 的采样、工具执行、后续采样流程，提供逐工具结果保存、可取消的请求重试和并发轮次防护。这不是完整 Codex runtime，详见 [源码对应与移植范围](docs/architecture/AGENT_LOOP.md)。
 
-- 权限档位按 Codex 的工作区范围与审批职责划分：`read-only` 可直接读取当前工作区，但 Bash 和网页请求需要审批；`ask` 对每次 Bash 和网页请求审批；`workspace-write` 在当前工作区内自动读写，但网页请求需要审批；`full-access` 二次明确确认后跳过工具审批。
+- 权限档位把 sandbox 范围与审批分开：`read-only` 对模型 shell、网页和 MCP 逐项审批，并使用 Codex `:read-only`；`ask` 逐项审批，shell 获批后使用 `:workspace`；`workspace-write` 在 `:workspace` 内免逐条 shell 审批，网页和 MCP 仍需审批；`full-access` 二次明确确认后选择 `:danger-full-access` 并跳过工具审批。
 - 模型可以用 `read_file` 查看工作目录内不超过 128 KiB 的 UTF-8 文件，用 `list_directory` 列出最多 500 个目录项。拒绝目录外路径和符号链接越界。文件正文会进入模型 context 和 Session 文件，请避免读取机密。
 - 权限在当前进程内跨 `/new`、`/clear`、`/resume` 保留，重启恢复 `workspace-write`、网页工具开启；切换权限不丢失 context，恢复 JSONL 不会恢复完全访问授权。
-- 当前是应用层权限，不是 OS 沙箱。获批 Bash 仍拥有当前系统账户的文件和网络权限；关闭网页工具不限制 Bash 网络、模型 API 或直接 `!` 命令。详见 [对标与安全限制](docs/architecture/PERMISSIONS.md)。
+- 模型 shell 通过固定的 `@openai/codex@0.155.1` 原生 OS sandbox 启动，运行时无法启动则失败关闭。Windows 模型命令使用 PowerShell，因为 Git Bash/MSYS 无法在 restricted token 内初始化；macOS/Linux 使用 Bash。直接 `!` 不进入模型 sandbox。详见 [对标与安全限制](docs/architecture/PERMISSIONS.md)。
 - `read-only`、`ask` 和 `workspace-write` 会在每个网页请求前审批；`full-access` 跳过该确认。搜索词会先发送给 Bing，失败时回退到 DuckDuckGo；打开搜索结果时会向对应网站发送请求。
 - 网页读取只允许公共 HTTP/HTTPS 地址，会逐次检查重定向、阻止本机和内网地址，并限制超时与响应大小；返回内容始终作为不可信数据处理。
 - 搜索可用性和结果质量取决于外部搜索服务及当前网络。联网失败会作为工具结果返回模型，由模型说明限制或尝试其他来源。
@@ -148,8 +162,7 @@ TUI 命令：
 - 远程自定义 base URL 必须使用 HTTPS；只有本机地址可使用 HTTP。
 - 系统凭据库不可用时会直接失败，不会降级为明文存储。
 - Linux 使用持久化的 Secret Service；如果不可用，不会回退到仅存于内存的 kernel keyring。
-- Bash 命令使用当前用户权限运行，没有额外沙箱。
-- 每次 Bash 调用都是独立进程，`cd` 和临时环境变量不会在调用间保留。
+- 每次模型 shell 调用都使用独立 Codex sandbox 进程，`cd` 和临时环境变量不会在调用间保留；`full-access` 按设计保留当前用户权限。
 - TUI 需要交互式终端；重定向或管道环境下会直接给出错误提示。
 
 模型工作期间输入框不会消失，会显示 `Add guidance while working`。此时提交的补充信息会立即写入 transcript，并在下一个安全检查点应用：采样通常会被中止，已经运行的工具先保存结果，再用当前上下文继续执行修正后的计划；`Ctrl+C` 仍会立即取消当前轮次，已提交的纠正会保留在 session context 供下一轮使用。耗时少于一分钟显示秒，超过一分钟显示分钟和秒，超过一小时显示小时、分钟和秒。
@@ -160,7 +173,10 @@ TUI 命令：
 src/
 ├─ cli/          # CLI 入口以及 login/models/logout/run 命令
 ├─ agent/        # ReAct 循环和会话状态
+├─ codex/        # 固定 Codex CLI 启动器
+├─ mcp/          # 读取 Codex 配置的 MCP client runtime
 ├─ providers/    # DeepSeek、OpenAI 及兼容端点适配
+├─ skills/       # Codex 主机 Skill 发现与渐进读取
 ├─ storage/      # 系统凭据与模型注册表
 ├─ tui/          # Ink 页面、状态机、登录向导和交互组件
 └─ tools/        # Agent 工具定义和执行器
@@ -191,4 +207,4 @@ pnpm build
 - Ctrl+C 中断正在运行的模型任务、审批等待或命令，不退出程序；空闲时有草稿则清空，输入为空则退出。
 - 在首行/末行使用上下键浏览历史并恢复草稿，斜杠菜单选择优先。终端支持时 Shift+Enter 换行；多行括号粘贴不会自动提交。Windows Terminal 无法区分 Shift+Enter 与 Enter 时，可运行 `/terminal-setup`。
 - 输入历史跨重启共享，最多 1,000 条 / 4 MiB，保存于 sessions 目录旁的 `input-history.json`。登录向导密钥不记录，但手动输入在提问或命令中的机密不会自动脱敏；清空输入历史不会删除 Session 记录。
-- 模型请求的 Bash 运行时通过有界预览展示最前五行和最后五行及省略数量，终端高度不足时对称缩减；用户直接 `!` 仍优先展示最新五行，完成后的长输出继续折叠。`/outputs` 查看保留内容，每条 UI 记录最多 10,000 行 / 2 MiB，已截断内容不可恢复。模型 Bash 分别保留最多 1 MiB 的 stdout/stderr，不提供交互 stdin；用户直接 `!` 命令仍支持交互输入。
+- 模型请求的 shell 命令运行时通过有界预览展示最前五行和最后五行及省略数量，终端高度不足时对称缩减；用户直接 `!` 仍优先展示最新五行，完成后的长输出继续折叠。`/outputs` 查看保留内容，每条 UI 记录最多 10,000 行 / 2 MiB，已截断内容不可恢复。模型 shell 分别保留最多 1 MiB 的 stdout/stderr，不提供交互 stdin；用户直接 `!` 命令仍支持交互输入。

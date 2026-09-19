@@ -14,8 +14,9 @@
 
 - Everpeace 是 Node.js 22+、TypeScript、ESM 项目，使用 `pnpm@10.22.0`。
 - CLI/TUI 入口位于 `src/cli/`；界面使用 React + Ink，并保持 inline terminal 模式。
-- Agent 是 Responses API 驱动的 ReAct 循环，支持按权限 profile 审批 Bash、网页搜索和公共网页读取。
-- `/permissions` 管理进程内应用层权限：`read-only` 允许工作区读取但对 Bash/web 逐条审批，`ask` 对 Bash/web 逐条审批，默认 `workspace-write` 在当前 workspace 内免逐条 Bash 审批但 web 仍需审批，`full-access` 经二次确认后免工具审批；网页工具可独立禁用。当前没有 OS 沙箱，不得声称等同于 Codex Auto。
+- Agent 是 Responses API 驱动的 ReAct 循环，支持按权限 profile 审批模型 shell、网页搜索、公共网页读取和 MCP tools，并按需加载 Codex 主机 Skills。
+- `/permissions` 管理进程内审批策略：`read-only` 允许工作区读取但对模型 shell/web/MCP 逐条审批，`ask` 对三者逐条审批，默认 `workspace-write` 免逐条 shell 审批但 web/MCP 仍需审批，`full-access` 经二次确认后免工具审批；网页工具可独立禁用。模型 shell 分别进入固定 `@openai/codex` CLI 的 `:read-only`、`:workspace` 或 `:danger-full-access` profile，失败时不得回退宿主直跑；直接 `!` 不进 sandbox。仍不得声称等同于 Codex Auto 或完整 Codex runtime。
+- MCP 从 `codex mcp` 配置加载 stdio/Streamable HTTP tools；`/mcp` 刷新状态。Skills 扫描项目/用户/admin/system 根，显式 `$name` 只作用当前轮，隐式匹配通过 `read_skill` 渐进读取；同名冲突不得进入 catalog 或按名称读取。`/skills` 提供 AI 创建单文件 Skill、手动编辑、公开 HTTPS URL 暂存/预览/确认安装、已安装内容查看及 `$name` 回填；Git 来源先 no-checkout clone 并检查有界 tree，只 sparse checkout 已校验的候选目录。项目目标为仓库根 `.agents/skills`，用户目标为 `$CODEX_HOME/skills`，不得覆盖既有名称。完整支持范围和限制见 `docs/architecture/CODEX_CAPABILITIES.md`。
 - `read_file`、`list_directory` 始终限定当前工作目录。权限不从 JSONL 恢复，切换权限不得重建 Agent 或丢失 context；直接 `!` 仍由用户主动执行。对标与安全限制见 `docs/architecture/PERMISSIONS.md`。
 - 支持官方供应商和兼容端点；模型名称必须保留供应商返回的官方 model ID。
 - API Key 只由 `AuthStorage` 和系统 keyring 管理，不得写入注册表 JSON、session JSONL、日志、测试快照或 UI。
@@ -40,7 +41,7 @@ git diff --check
 - `/clear` 只清屏并解除当前 session；下一条普通问题才创建新 session，同时保留当前模型。
 - `/resume` 全局列出所有 session，按最后活动时间倒序显示名称和时间，并恢复 timeline、context、模型及工作目录，然后继续写入原文件。
 - `/status` 打开 Codex 风格独立命令窗口，显示当前模型、base URL 对应供应商、context window 和 session 累计 token；窗口隐藏 banner、历史、composer 和全局状态栏，Esc 原子恢复原 Session，窗口不写入 session timeline 或模型 context。
-- 信息型 slash command 和选择型 picker/wizard 都使用独立命令窗口；`/new`、`/clear`、`/exit` 保持立即动作。这些界面都不进入可恢复 timeline，命令造成的真实状态变化仍按各自语义持久化，普通聊天、Agent 工具输出和直接 `!` 命令继续写入可恢复 timeline。
+- 信息型 slash command 和选择型 picker/wizard 都使用独立命令窗口；`/mcp` 使用可取消的 transient 加载/信息窗口，`/skills` 使用可取消的多步管理向导；`/new`、`/clear`、`/exit` 保持立即动作。这些界面都不进入可恢复 timeline，命令造成的真实状态变化仍按各自语义持久化，普通聊天、Agent 工具输出和直接 `!` 命令继续写入可恢复 timeline。
 - 主 Agent 的 Responses usage 按 session 持久累计；标题请求不计入。切换模型保留累计 token，但在新模型完成响应前重置或未知当前 context 占用。
 - 原模型缺失时允许用户选择替代模型并保留 context；原工作目录不存在时拒绝恢复并保持当前会话不变。
 - JSONL 损坏必须按文件隔离；只允许忽略不完整的最后一行。旧记录缺少 `title_pending` 时按 `false` 处理。
@@ -72,6 +73,10 @@ git diff --check
 - `src/agent/react-agent.ts`：ReAct 循环、初始 context 和增量持久化 callback。
 - `src/agent/agent-loop.ts`：Codex 核心控制流程的 TypeScript 适配，采样、结果记录、工具执行、后续采样与终止；来源和边界见 `docs/architecture/AGENT_LOOP.md`。
 - `src/tools/web.ts`：网页搜索、公共网页读取、正文提取、大小/超时限制和 SSRF 防护。
+- `src/codex/cli.ts`、`src/tools/bash.ts`：固定 Codex CLI 解析、sandbox profile 启动、失败关闭和模型 shell 输出。
+- `src/mcp/runtime.ts`：Codex MCP 配置读取、stdio/Streamable HTTP 连接、工具目录和调用。
+- `src/skills/catalog.ts`：主机 Skill roots、frontmatter、同名冲突、catalog、显式激活和资源读取。
+- `src/skills/manager.ts`、`src/tui/components/skill-wizard.tsx`：Skill 创建、公开 URL 安全暂存/安装、作用域选择、预览确认和管理界面。
 - `src/tui/app.tsx`：TUI 状态机、session 生命周期、`/new`、`/resume`、命名和目录切换。
 - `src/tui/components/session-picker.tsx`：session 选择界面。
 - `src/tui/dependencies.ts`：默认依赖、SessionStore、标题请求和工作目录切换。
