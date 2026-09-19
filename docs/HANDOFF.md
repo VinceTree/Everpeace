@@ -1,5 +1,9 @@
 # Session Handoff
 
+## 最新发布确认：v0.1.27
+
+状态快照：2026-09-19。`v0.1.27` GitHub Release 已创建成功。发布提交 `abd7084adfaea58401b1bde8fdef1c1294e09d53` 已推送至 `origin/main`；远端 annotated tag `v0.1.27` 的 tag object 为 `5d330293c610f3e6aedafaaba5ae7ec6f9a9dae6`，解析到该发布提交。Release workflow run ID 尚未记录。
+
 ## 最新工作区补充：实时进度、运行中 steering 与分段计时
 
 状态快照：2026-09-18。本轮将 Responses 请求改为 SSE 优先、buffered fallback：支持流式的端点逐步显示 assistant 文字，工具审批、开始/结束、重试和 steering 状态即时进入 TUI；不支持 SSE 的兼容端点继续使用原有阶段和命令预览。增量只在当前 UI 保留，完整 assistant/tool 结果仍按原顺序持久化。
@@ -34,6 +38,13 @@ v0.1.26 候选改动在此基础上完成英文优先 TUI 与富文本显示：�
 本轮没有改变 Responses context、Session schema、权限语义、inline/scrollback、直接 PTY 输入或首五/尾五缓冲。新命令不再额外持久化重复的 `! command` 和成功提示；可选 command 元数据继续提供来源、状态、耗时和审计信息，旧记录仍可恢复。
 
 ## 最新发布
+
+v0.1.27 增加 Responses SSE 实时进度、运行中 safe-checkpoint steering、分段耗时显示和 Codex 风格四档权限 profile，并保留兼容端点的 buffered fallback。
+
+- 发布提交 `abd7084adfaea58401b1bde8fdef1c1294e09d53` 已推送至 `origin/main`；annotated tag `v0.1.27` 的 tag object 为 `5d330293c610f3e6aedafaaba5ae7ec6f9a9dae6`，解析到该提交。
+- `v0.1.27` GitHub Release 已创建成功；workflow run ID 尚未记录。
+- Release: https://github.com/VinceTree/Everpeace/releases/tag/v0.1.27
+- 发布记录对应的自动验证为 157 项通过、1 项因既有 Windows Git Bash 取消测试超时而取消；typecheck、build 和 diff 检查通过。
 
 v0.1.26 增加英文优先 TUI、Markdown/代码/命令/diff 的富文本渲染，并将 transcript resize/replay 由固定 200 条记录改为 Codex 对齐的终端行数上限。
 
