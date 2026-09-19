@@ -28,12 +28,12 @@ import {
   EverpeaceApp,
   formatElapsed,
   RESIZE_REDRAW_DEBOUNCE_MS,
-} from "../../../src/tui/app.js";
+} from "../../../src/tui/app/app.js";
 import {
   SLASH_COMMANDS,
   type SlashCommand,
-} from "../../../src/tui/commands.js";
-import { textWidth } from "../../../src/tui/text-width.js";
+} from "../../../src/tui/commands/slash-commands.js";
+import { textWidth } from "../../../src/tui/rendering/text-width.js";
 
 test("formats active turn elapsed time with useful units", () => {
   assert.equal(formatElapsed(0), "0s");
@@ -48,7 +48,7 @@ import type {
   AgentSession,
   TuiDependencies,
   TuiModelRegistry,
-} from "../../../src/tui/types.js";
+} from "../../../src/tui/app/types.js";
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 

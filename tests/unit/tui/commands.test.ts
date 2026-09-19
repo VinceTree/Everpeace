@@ -4,7 +4,7 @@ import {
   filterSlashCommands,
   parseTuiInput,
   SLASH_COMMANDS,
-} from "../../../src/tui/commands.js";
+} from "../../../src/tui/commands/slash-commands.js";
 
 test("filterSlashCommands matches a single leading command token by prefix", () => {
   assert.deepEqual(filterSlashCommands("/"), [...SLASH_COMMANDS]);

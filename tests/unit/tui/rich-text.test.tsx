@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { render } from "ink-testing-library";
 import React from "react";
-import { MarkdownText, RichOutput } from "../../../src/tui/components/rich-text.js";
-import { History } from "../../../src/tui/components/history.js";
-import { translateLegacyUiText } from "../../../src/tui/legacy-translation.js";
+import { MarkdownText, RichOutput } from "../../../src/tui/rendering/rich-text.js";
+import { History } from "../../../src/tui/components/conversation/history.js";
+import { translateLegacyUiText } from "../../../src/tui/rendering/legacy-translation.js";
 
 test("Markdown renders headings, lists, links, tables, and highlighted fences", () => {
   const view = render(<MarkdownText text={"# Heading\n\n- **bold** item\n- [x] complete\n\n[docs](https://example.com)\n\n| Key | Value |\n| --- | --- |\n| a | b |\n\n```ts\nconst value = 1;\n```"} />);

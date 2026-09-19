@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { diffPalette } from "../../../src/tui/palette.js";
-import { diffLanguage, parseUnifiedDiff } from "../../../src/tui/unified-diff.js";
+import { diffPalette } from "../../../src/tui/rendering/palette.js";
+import { diffLanguage, parseUnifiedDiff } from "../../../src/tui/rendering/unified-diff.js";
 
 const sample = "diff --git a/src/demo.ts b/src/demo.ts\r\nindex 123..456 100644\r\n--- a/src/demo.ts\r\n+++ b/src/demo.ts\r\n@@ -2,2 +2,2 @@\r\n-old\r\n+new\r\n same";
 

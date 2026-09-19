@@ -65,7 +65,7 @@ Windows 的 Codex restricted-token backend 可以运行系统 PowerShell，但 G
 
 项目创建/安装目标固定为项目根 `.agents/skills/<name>`，用户目标为 `$CODEX_HOME/skills/<name>`。写入先复制到同一目标根的隐藏 staging 目录，重新校验后 rename；任何发现根已经存在同名 Skill或目标目录已存在时都拒绝覆盖。catalog 发现多个同名 Skill 时保留可见冲突记录，但从模型 metadata catalog 中排除该名称，`$name` 和 `read_skill` 也返回歧义错误，避免作用域优先级静默选择错误内容。
 
-远端安装边界为：仅 HTTPS、URL 不得包含凭据或 fragment；普通下载每次重定向都重新执行公共地址/DNS 校验，最多 5 次、30 秒和 20 MiB；Git clone 关闭 HTTP 重定向、启用 Windows long-path 支持、浅克隆且整个准备阶段限制 60 秒。ZIP 最多 10,000 项，来源遍历最多 10,000 项，单个 Skill 最多 5,000 项；Git tree 最多 20,000 个 tracked entries 和 100 个候选。解压或单包总量限制 50 MiB、单文件 10 MiB、`SKILL.md` 512 KiB，并在 checkout 前拒绝候选中的 symlink、gitlink 和其他特殊条目；文件系统校验继续拒绝绝对路径、`..` 穿越、符号链接和特殊文件。取消、失败、返回菜单或离开向导时清理临时准备目录。当前不支持私有仓库、认证 URL、更新和删除。
+远端安装边界为：仅 HTTPS、URL 不得包含凭据或 fragment；普通下载每次重定向都重新执行公共地址/DNS 校验，最多 5 次、30 秒和 20 MiB；Git clone 关闭 HTTP 重定向、启用 Windows long-path 支持、浅克隆且整个准备阶段限制 60 秒。ZIP 最多 10,000 项，来源遍历最多 10,000 项，单个 Skill 最多 5,000 项；Git tree 最多 20,000 个 tracked entries，最多读取 500 个 `SKILL.md` 清单，并在按名称优先保留规范目录后限制为 100 个不同候选。解压或单包总量限制 50 MiB、单文件 10 MiB、`SKILL.md` 512 KiB，并在 checkout 前拒绝候选中的 symlink、gitlink 和其他特殊条目；文件系统校验继续拒绝绝对路径、`..` 穿越、符号链接和特殊文件。取消、失败、返回菜单或离开向导时清理临时准备目录。当前不支持私有仓库、认证 URL、更新和删除。
 
 当前仍只把已安装内容作为主机文件 Skill 使用；没有接入 Codex plugins、orchestrator/executor Skill provider、远端资源 authority、动态 selector、`agents/openai.yaml` UI metadata 或 `[[skills.config]]` 开关。Skill 内容和 MCP 返回内容都属于用户启用的扩展数据，不能改变应用权限，也不能绕过 sandbox 或审批。
 

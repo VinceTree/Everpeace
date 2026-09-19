@@ -18,6 +18,7 @@ const SOURCE_ENTRY_LIMIT = 10_000;
 const SKILL_ENTRY_LIMIT = 5_000;
 const GIT_TREE_ENTRY_LIMIT = 20_000;
 const GIT_TREE_OUTPUT_LIMIT_BYTES = 8 * 1024 * 1024;
+const GIT_MANIFEST_LIMIT = 500;
 const GIT_CANDIDATE_LIMIT = 100;
 const REDIRECT_LIMIT = 5;
 const NETWORK_TIMEOUT_MS = 30_000;
@@ -31,7 +32,7 @@ export interface GitTreeEntry {
   path: string;
 }
 
-interface GitSkillCandidate {
+export interface GitSkillCandidate {
   directory: string;
   name: string;
 }
@@ -395,6 +396,16 @@ function compareGitCandidates(left: GitSkillCandidate, right: GitSkillCandidate)
   return a[0] - b[0] || a[1] - b[1] || a[2].localeCompare(b[2]);
 }
 
+export function selectGitSkillCandidates(candidates: readonly GitSkillCandidate[]): GitSkillCandidate[] {
+  const selected = [...candidates]
+    .sort(compareGitCandidates)
+    .filter((candidate, index, all) => all.findIndex((item) => item.name === candidate.name) === index);
+  if (selected.length > GIT_CANDIDATE_LIMIT) {
+    throw new Error(`Git Skill source contains more than ${GIT_CANDIDATE_LIMIT} distinct candidate Skills`);
+  }
+  return selected;
+}
+
 function conciseGitError(stderr: string, code: number | null): string {
   const lines = stderr
     .replace(/\r/gu, "\n")
@@ -639,8 +650,8 @@ export class SkillManager implements SkillManagerLike {
         return !subpath || entry.path === `${subpath}/SKILL.md` || entry.path.startsWith(`${subpath}/`);
       });
       if (manifests.length === 0) throw new Error("No valid SKILL.md was found in this Git source");
-      if (manifests.length > GIT_CANDIDATE_LIMIT) {
-        throw new Error(`Git Skill source contains more than ${GIT_CANDIDATE_LIMIT} candidate Skills`);
+      if (manifests.length > GIT_MANIFEST_LIMIT) {
+        throw new Error(`Git Skill source contains more than ${GIT_MANIFEST_LIMIT} SKILL.md files`);
       }
 
       const gitCandidates: GitSkillCandidate[] = [];
@@ -654,10 +665,7 @@ export class SkillManager implements SkillManagerLike {
         const metadata = validateManagedSkillMarkdown(markdown, manifest.path);
         gitCandidates.push({ directory: posix.dirname(manifest.path), name: metadata.name });
       }
-      gitCandidates.sort(compareGitCandidates);
-      const selected = gitCandidates.filter(
-        (candidate, index, all) => all.findIndex((item) => item.name === candidate.name) === index,
-      );
+      const selected = selectGitSkillCandidates(gitCandidates);
 
       for (const candidate of selected) {
         const files = tree.filter((entry) => isWithinGitDirectory(entry.path, candidate.directory));

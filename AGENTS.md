@@ -16,7 +16,7 @@
 - CLI/TUI 入口位于 `src/cli/`；界面使用 React + Ink，并保持 inline terminal 模式。
 - Agent 是 Responses API 驱动的 ReAct 循环，支持按权限 profile 审批模型 shell、网页搜索、公共网页读取和 MCP tools，并按需加载 Codex 主机 Skills。
 - `/permissions` 管理进程内审批策略：`read-only` 允许工作区读取但对模型 shell/web/MCP 逐条审批，`ask` 对三者逐条审批，默认 `workspace-write` 免逐条 shell 审批但 web/MCP 仍需审批，`full-access` 经二次确认后免工具审批；网页工具可独立禁用。模型 shell 分别进入固定 `@openai/codex` CLI 的 `:read-only`、`:workspace` 或 `:danger-full-access` profile，失败时不得回退宿主直跑；直接 `!` 不进 sandbox。仍不得声称等同于 Codex Auto 或完整 Codex runtime。
-- MCP 从 `codex mcp` 配置加载 stdio/Streamable HTTP tools；`/mcp` 刷新状态。Skills 扫描项目/用户/admin/system 根，显式 `$name` 只作用当前轮，隐式匹配通过 `read_skill` 渐进读取；同名冲突不得进入 catalog 或按名称读取。`/skills` 提供 AI 创建单文件 Skill、手动编辑、公开 HTTPS URL 暂存/预览/确认安装、已安装内容查看及 `$name` 回填；Git 来源先 no-checkout clone 并检查有界 tree，只 sparse checkout 已校验的候选目录。项目目标为仓库根 `.agents/skills`，用户目标为 `$CODEX_HOME/skills`，不得覆盖既有名称。完整支持范围和限制见 `docs/architecture/CODEX_CAPABILITIES.md`。
+- MCP 从 `codex mcp` 配置加载 stdio/Streamable HTTP tools；`/mcp` 刷新状态。Skills 扫描项目/用户/admin/system 根，显式 `$name` 只作用当前轮，隐式匹配通过 `read_skill` 渐进读取；同名冲突不得进入 catalog 或按名称读取。`/skills` 提供 AI 创建单文件 Skill、手动编辑、公开 HTTPS URL 暂存/预览/确认安装、已安装内容查看及 `$name` 回填；Git 来源先 no-checkout clone 并检查有界 tree，同名镜像清单优先保留规范 `skills/<name>` 目录，100 个候选限制在名称去重后执行，只 sparse checkout 已校验的候选目录。项目目标为仓库根 `.agents/skills`，用户目标为 `$CODEX_HOME/skills`，不得覆盖既有名称。完整支持范围和限制见 `docs/architecture/CODEX_CAPABILITIES.md`。
 - `read_file`、`list_directory` 始终限定当前工作目录。权限不从 JSONL 恢复，切换权限不得重建 Agent 或丢失 context；直接 `!` 仍由用户主动执行。对标与安全限制见 `docs/architecture/PERMISSIONS.md`。
 - 支持官方供应商和兼容端点；模型名称必须保留供应商返回的官方 model ID。
 - API Key 只由 `AuthStorage` 和系统 keyring 管理，不得写入注册表 JSON、session JSONL、日志、测试快照或 UI。
@@ -76,10 +76,11 @@ git diff --check
 - `src/codex/cli.ts`、`src/tools/bash.ts`：固定 Codex CLI 解析、sandbox profile 启动、失败关闭和模型 shell 输出。
 - `src/mcp/runtime.ts`：Codex MCP 配置读取、stdio/Streamable HTTP 连接、工具目录和调用。
 - `src/skills/catalog.ts`：主机 Skill roots、frontmatter、同名冲突、catalog、显式激活和资源读取。
-- `src/skills/manager.ts`、`src/tui/components/skill-wizard.tsx`：Skill 创建、公开 URL 安全暂存/安装、作用域选择、预览确认和管理界面。
-- `src/tui/app.tsx`：TUI 状态机、session 生命周期、`/new`、`/resume`、命名和目录切换。
-- `src/tui/components/session-picker.tsx`：session 选择界面。
-- `src/tui/dependencies.ts`：默认依赖、SessionStore、标题请求和工作目录切换。
+- `src/skills/manager.ts`、`src/tui/components/wizards/skill-wizard.tsx`：Skill 创建、公开 URL 安全暂存/安装、作用域选择、预览确认和管理界面。
+- `src/tui/app/app.tsx`：TUI 状态机、session 生命周期、`/new`、`/resume`、命名和目录切换。
+- `src/tui/components/navigation/session-picker.tsx`：session 选择界面。
+- `src/tui/app/dependencies.ts`：默认依赖、SessionStore、标题请求和工作目录切换。
+- `docs/architecture/TUI_STRUCTURE.md`：TUI 源码目录职责和依赖方向。
 - `src/storage/auth-storage.ts`：凭据和模型注册信息边界。
 - `tests/unit/storage/session-store.test.ts`：session 存储及兼容性回归。
 - `tests/unit/tui/app.test.tsx`：TUI 与完整 session 流程回归。

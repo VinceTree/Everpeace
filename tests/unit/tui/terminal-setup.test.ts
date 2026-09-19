@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parse } from "jsonc-parser";
-import { prepareTerminalSettings, applyTerminalSettings } from "../../../src/tui/terminal-setup.js";
+import { prepareTerminalSettings, applyTerminalSettings } from "../../../src/tui/terminal/settings.js";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";

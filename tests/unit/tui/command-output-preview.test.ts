@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { selectAgentOutputPreview } from "../../../src/tui/command-output-preview.js";
+import { selectAgentOutputPreview } from "../../../src/tui/rendering/command-output-preview.js";
 
 const fullPreview = {
   headLines: ["line 1", "line 2", "line 3", "line 4", "line 5"],

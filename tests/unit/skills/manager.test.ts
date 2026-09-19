@@ -8,6 +8,7 @@ import { SkillCatalog } from "../../../src/skills/catalog.js";
 import {
   buildGitCloneArguments,
   parseGitTreeEntries,
+  selectGitSkillCandidates,
   SkillManager,
   normalizeGeneratedSkillMarkdown,
   validateManagedSkillMarkdown,
@@ -123,6 +124,31 @@ test("Git preparation uses a no-checkout clone and parses bounded repository tre
     { mode: "100644", type: "blob", size: 123, path: "skills/demo/SKILL.md" },
     { mode: "100755", type: "blob", size: 456, path: "skills/demo/scripts/run.sh" },
   ]);
+});
+
+test("Git candidate limits apply after mirrored Skill manifests are deduplicated", () => {
+  const canonical = Array.from({ length: 83 }, (_, index) => ({
+    directory: `skills/demo-${index}`,
+    name: `demo-${index}`,
+  }));
+  const mirrored = canonical.slice(0, 53).map((candidate) => ({
+    directory: `skills/skills-codex/${candidate.name}`,
+    name: candidate.name,
+  }));
+  const reviewed = canonical.slice(0, 53).map((candidate) => ({
+    directory: `skills/skills-codex-review/${candidate.name}`,
+    name: candidate.name,
+  }));
+
+  const selected = selectGitSkillCandidates([...mirrored, ...reviewed, ...canonical]);
+  assert.equal(selected.length, 83);
+  assert.ok(selected.every((candidate) => candidate.directory === `skills/${candidate.name}`));
+
+  const distinct = Array.from({ length: 101 }, (_, index) => ({
+    directory: `skills/distinct-${index}`,
+    name: `distinct-${index}`,
+  }));
+  assert.throws(() => selectGitSkillCandidates(distinct), /more than 100 distinct candidate Skills/u);
 });
 
 test("remote sources reject traversal, private destinations, and HTTPS downgrades", async (t) => {

@@ -9,7 +9,7 @@ import type {
   SkillInstallResult,
   SkillManagerLike,
 } from "../../../src/skills/manager.js";
-import { SkillWizard } from "../../../src/tui/components/skill-wizard.js";
+import { SkillWizard } from "../../../src/tui/components/wizards/skill-wizard.js";
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 30));
 

@@ -6,7 +6,7 @@ import {
   MAX_HIGHLIGHT_LINE_BYTES,
   normalizeLanguage,
   shellLanguage,
-} from "../../../src/tui/syntax-highlight.js";
+} from "../../../src/tui/rendering/syntax-highlight.js";
 
 test("syntax highlighting resolves common aliases and emits styled spans", () => {
   assert.equal(normalizeLanguage("ts title=demo"), "typescript");

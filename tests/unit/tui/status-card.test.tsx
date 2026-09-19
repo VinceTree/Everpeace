@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   createStatusCard,
-} from "../../../src/tui/components/status-card.js";
-import { textWidth } from "../../../src/tui/text-width.js";
+} from "../../../src/tui/components/screens/status-card.js";
+import { textWidth } from "../../../src/tui/rendering/text-width.js";
 
 const snapshot = {
   version: "0.1.20",

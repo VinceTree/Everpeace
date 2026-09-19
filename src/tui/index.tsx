@@ -1,9 +1,9 @@
 import { render } from "ink";
 import React from "react";
 import { resetTerminalModes } from "../tools/terminal.js";
-import { EverpeaceApp } from "./app.js";
-import { createDefaultTuiDependencies } from "./dependencies.js";
-import type { TuiDependencies, TuiModelRegistry } from "./types.js";
+import { EverpeaceApp } from "./app/app.js";
+import { createDefaultTuiDependencies } from "./app/dependencies.js";
+import type { TuiDependencies, TuiModelRegistry } from "./app/types.js";
 
 export interface RunTuiOptions {
   registry: TuiModelRegistry;

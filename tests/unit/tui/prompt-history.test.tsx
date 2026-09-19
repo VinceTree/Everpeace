@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import React from "react";
 import { render } from "ink-testing-library";
-import { Prompt } from "../../../src/tui/components/prompt.js";
+import { Prompt } from "../../../src/tui/composer/prompt.js";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 30));
 

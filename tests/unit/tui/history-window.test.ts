@@ -9,8 +9,8 @@ import {
   estimatedTimelineEntryRows,
   terminalResizeReflowMaxRows,
   visibleHistory,
-} from "../../../src/tui/history-window.js";
-import type { TimelineEntry } from "../../../src/tui/types.js";
+} from "../../../src/tui/rendering/history-window.js";
+import type { TimelineEntry } from "../../../src/tui/app/types.js";
 
 test("history window retains source entries below Codex's row cap", () => {
   const source: TimelineEntry[] = Array.from({ length: 205 }, (_, id) => ({ id, kind: "assistant", text: `reply ${id}` }));

@@ -5,8 +5,8 @@ import React from "react";
 import {
   Banner,
   createSessionCard,
-} from "../../../src/tui/components/banner.js";
-import { textWidth } from "../../../src/tui/text-width.js";
+} from "../../../src/tui/components/conversation/banner.js";
+import { textWidth } from "../../../src/tui/rendering/text-width.js";
 
 test("Banner renders Codex-style startup model and directory details", () => {
   const view = render(

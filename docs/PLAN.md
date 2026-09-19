@@ -44,6 +44,7 @@ Codex sandbox、MCP 与 Skills 接入：模型 shell 通过固定版本 Codex CL
 - [x] TUI 宿主文案统一为英文，等待模型时按 provider 显示计时和中断提示，工具阶段显示 `Working`；旧系统/工具文案只在显示层翻译。
 - [x] 模型回复支持 GFM Markdown，代码围栏及 Bash/PowerShell 命令使用语法高亮，并为超大输入和未知语言提供纯文本降级。
 - [x] 命令使用 Running/Ran/You ran 分层卡片；标准 unified diff 在 transcript、实时输出和 `/outputs` 中显示新旧行号及增删高亮，并适配真彩、ANSI 与 `NO_COLOR`。
+- [x] `src/tui` 按应用编排、命令、输入、渲染、终端操作及 conversation/feedback/navigation/screens/wizards 组件职责分层，目录调整不改变运行语义。
 - [ ] 真实 Windows Terminal 手动验收键位、复制、缩放、resize 和带凭据模型的完整流程。
 
 - [x] 应用层 ask/read-only/full-access 模式，完全访问二次确认，网页工具独立开关。
@@ -56,6 +57,7 @@ Codex sandbox、MCP 与 Skills 接入：模型 shell 通过固定版本 Codex CL
 - [x] `/skills` 管理向导：项目/用户作用域、AI 单文件创建与校验、完整手动编辑、公开 GitHub/Git/SKILL.md/ZIP 暂存预览、显式安装确认、已安装内容查看和 `$name` 回填。
 - [x] Skill 安装安全边界：仅公开 HTTPS、逐重定向公共地址校验、Git 重定向关闭、超时和大小/条目上限、路径穿越/符号链接/特殊文件拒绝、无覆盖暂存安装。
 - [x] 大型 Git Skill 来源先无检出克隆并检查有界仓库树，只检出按名称去重后的候选目录；Windows 长路径不再被无关仓库副本触发，单个受限 Skill 可包含最多 5,000 个条目。
+- [x] Git 仓库的原始 `SKILL.md` 清单上限与去重后的 100 个不同候选上限分离；包含大量同名平台/评审镜像副本的来源不会在名称去重前被错误拒绝。
 - [ ] 后续单独设计 MCP OAuth/resources/prompts/elicitation、Codex Plugin/远端 Skill provider、managed policy 和 prefix rules；当前不得宣称完整 runtime 等价。
 
 - [x] SessionStore、跨平台存储路径、串行追加和损坏文件隔离。

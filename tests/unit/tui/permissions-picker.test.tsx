@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { render } from "ink-testing-library";
 import React from "react";
-import { PermissionsPicker } from "../../../src/tui/components/permissions-picker.js";
+import { PermissionsPicker } from "../../../src/tui/components/navigation/permissions-picker.js";
 import type { PermissionPolicy } from "../../../src/permissions/policy.js";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 30));

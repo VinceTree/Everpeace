@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.1.28) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.0) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -140,7 +140,7 @@ Skills are discovered from `.agents/skills` between the workspace and repository
 `/skills` is an interactive manager with three flows:
 
 - **Create**: choose project or user scope, describe the workflow, let the active model draft one `SKILL.md`, then validate/improve it with AI, edit the complete file manually, or confirm and save it.
-- **Install from URL**: enter a public HTTPS GitHub repository/folder, Git repository root, direct `SKILL.md`, or ZIP URL. Everpeace downloads into temporary staging, validates every discovered package, lets you choose one when the source contains several, previews the complete `SKILL.md` with source and file count, then requires scope selection and explicit confirmation before installation. Git sources are cloned without a working-tree checkout first; Everpeace inspects the bounded repository tree and checks out only validated candidate Skill directories, avoiding unrelated deep paths in large repositories.
+- **Install from URL**: enter a public HTTPS GitHub repository/folder, Git repository root, direct `SKILL.md`, or ZIP URL. Everpeace downloads into temporary staging, validates every discovered package, lets you choose one when the source contains several, previews the complete `SKILL.md` with source and file count, then requires scope selection and explicit confirmation before installation. Git sources are cloned without a working-tree checkout first; Everpeace inspects the bounded repository tree, collapses mirrored packages with the same Skill name in favor of canonical `skills/<name>` directories, and checks out only validated candidate directories. Repositories may therefore contain more manifest files than distinct installable Skills without failing the candidate limit.
 - **View installed Skills**: inspect complete instructions and select **Use in next prompt** to prefill `$skill-name` in the composer.
 
 Project installs go to the repository root's `.agents/skills`; user installs go to `$CODEX_HOME/skills` (normally `~/.codex/skills`). Existing names are never overwritten, and duplicate names across discovered roots are marked as conflicts and withheld from automatic or explicit activation until resolved. URL installation is public-only, accepts no embedded credentials, validates every redirect against local/private addresses, applies download/extraction/file limits, rejects path traversal and symbolic links, and installs through a temporary directory. Private repositories, authenticated downloads, updates, and deletion are outside the current flow. See [Codex capability mapping](docs/architecture/CODEX_CAPABILITIES.md).

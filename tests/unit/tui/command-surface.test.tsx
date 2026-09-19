@@ -7,8 +7,8 @@ import {
   CommandScreen,
   CommandSurface,
   commandScreenWidth,
-} from "../../../src/tui/components/command-surface.js";
-import { textWidth } from "../../../src/tui/text-width.js";
+} from "../../../src/tui/components/screens/command-surface.js";
+import { textWidth } from "../../../src/tui/rendering/text-width.js";
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 

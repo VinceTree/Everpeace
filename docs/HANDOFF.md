@@ -1,5 +1,21 @@
 # Session Handoff
 
+## 最新整理：TUI 源码职责分层
+
+状态快照：2026-09-19。`src/tui` 原先把应用编排、命令、渲染工具和 18 个不同职责的组件集中在根目录及单一 `components` 目录；现已按职责整理为 `app`、`commands`、`composer`、`rendering`、`terminal`，并把组件划分为 `conversation`、`feedback`、`navigation`、`screens` 和 `wizards`。目录说明和依赖方向见 `architecture/TUI_STRUCTURE.md`。
+
+本批次已把 `package.json` 与中英文 README 展示号提升到 `0.2.0`；远端 workflow、tag 与 GitHub Release 状态将在推送后回填。
+
+- `index.tsx` 继续作为公开入口，`app/app.tsx` 保留完整状态机；本轮只移动模块、更新内部与测试导入，并为少量底层模块补职责注释，没有改变 Session schema、TUI 行为或用户可见命令。
+- 定向 TUI 测试 80/80、完整 `pnpm test` 180/180 通过，`pnpm typecheck`、`pnpm build` 和 tracked/new-file diff 检查均通过；diff 检查仅报告既有 Windows LF/CRLF 提示。
+
+## 最新修复：含镜像副本的 Git Skill 仓库安装
+
+状态快照：2026-09-19。`https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep` 当前 Git tree 包含 189 个 `SKILL.md`：83 个规范 `skills/<name>` 包，以及 `skills/skills-codex*` 下 106 个同名平台/评审镜像副本。旧实现虽然会按 metadata 名称去重并优先规范目录，却在读取 metadata 前把 100 个限制错误地应用到原始清单数，因此直接报 `Git Skill source contains more than 100 candidate Skills`。
+
+- Git 原始清单扫描新增独立 500 项上限；100 项安全限制改为只对按 Skill 名称去重后的不同候选生效，规范 `skills/<name>` 目录仍优先于镜像副本。
+- 新增 189 个清单归并为 83 个候选以及 101 个不同候选仍被拒绝的回归测试。已用真实仓库根 URL 完成只暂存不安装的网络冒烟，成功返回 83 个名称唯一的候选。完整 `pnpm test` 为 180/180 通过，`pnpm typecheck`、`pnpm build` 和 `git diff --check` 均通过；diff 检查仅报告既有 Windows LF/CRLF 提示。
+
 ## 最新修复：大型 Git Skill URL 安装
 
 状态快照：2026-09-19。修复 `/skills` 使用 `https://github.com/Imbad0202/academic-research-skills-codex` 时在 Windows 临时目录完整 checkout 5,088 个仓库路径，并因无关的深层打包副本触发 `Filename too long` 的问题。
@@ -202,19 +218,19 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - `src/storage/session-store.ts`：JSONL schema、路径、读写、列表、恢复与兼容逻辑。
 - `src/agent/react-agent.ts`：初始 context 和增量持久化 callback。
 - `src/status/model-status.ts`：Base URL/provider/context 映射、usage 累加与 status snapshot 类型。
-- `src/tui/app.tsx`：session 生命周期、`/new`、`/resume`、命名和工作目录切换。
-- `src/tui/components/command-surface.tsx`：独立命令窗口、80 列自适应居中布局、可取消加载状态、Esc 返回和 `/status` 容器。
-- `src/tui/components/status-card.tsx`：共享状态字段、旧 timeline 状态卡兼容、临时面板详情和窄终端截断。
-- `src/tui/components/session-picker.tsx`：名称和时间选择列表。
-- `src/tui/dependencies.ts`：默认 SessionStore、标题模型请求及目录切换。
+- `src/tui/app/app.tsx`：session 生命周期、`/new`、`/resume`、命名和工作目录切换。
+- `src/tui/components/screens/command-surface.tsx`：独立命令窗口、80 列自适应居中布局、可取消加载状态、Esc 返回和 `/status` 容器。
+- `src/tui/components/screens/status-card.tsx`：共享状态字段、旧 timeline 状态卡兼容、临时面板详情和窄终端截断。
+- `src/tui/components/navigation/session-picker.tsx`：名称和时间选择列表。
+- `src/tui/app/dependencies.ts`：默认 SessionStore、标题模型请求及目录切换。
 - `src/tools/web.ts`：Bing/DuckDuckGo 搜索、网页读取、正文提取、大小/超时限制和 SSRF 防护。
 - `src/codex/cli.ts`、`src/tools/bash.ts`：固定 Codex CLI、sandbox profile 路由、平台 shell 与输出/取消。
 - `src/mcp/runtime.ts`：Codex MCP 配置、连接、tool catalog、调用和状态。
 - `src/skills/catalog.ts`：Codex 主机 Skill roots、frontmatter、同名冲突、catalog、显式激活和资源读取。
 - `src/skills/manager.ts`：项目/用户 Skill 写入、公开 GitHub/Git/SKILL.md/ZIP 暂存、校验、预览准备及无覆盖安装。
-- `src/tui/components/skill-wizard.tsx`：`/skills` 创建、安装和查看三入口向导，完整编辑/预览、作用域选择、确认与 `$name` 回填。
+- `src/tui/components/wizards/skill-wizard.tsx`：`/skills` 创建、安装和查看三入口向导，完整编辑/预览、作用域选择、确认与 `$name` 回填。
 - `tests/unit/tools/web.test.ts`：搜索解析、正文提取、重定向验证和私网阻断回归。
-- `src/tui/commands.ts`、`src/tui/components/prompt.tsx`：slash command 筛选、菜单渲染和键盘交互。
+- `src/tui/commands/slash-commands.ts`、`src/tui/composer/prompt.tsx`：slash command 筛选、菜单渲染和键盘交互。
 - `tests/unit/status/model-status.test.ts`、`tests/unit/tui/status-card.test.tsx`：映射、累计和卡片布局回归。
 - `tests/unit/storage/session-store.test.ts`、`tests/unit/agent/react-agent.test.ts`、`tests/unit/tui/app.test.tsx`：存储、usage 回调和完整 TUI 流程回归。
 
