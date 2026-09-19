@@ -4,7 +4,7 @@
 
 状态快照：2026-09-19。修复 `/skills` 使用 `https://github.com/Imbad0202/academic-research-skills-codex` 时在 Windows 临时目录完整 checkout 5,088 个仓库路径，并因无关的深层打包副本触发 `Filename too long` 的问题。
 
-本批次已把 `package.json` 与中英文 README 展示号提升到 `0.1.28`，等待推送后由 Release workflow 创建对应 tag 和 GitHub Release。
+本批次已把 `package.json` 与中英文 README 展示号提升到 `0.1.28`。发布提交 `29817b995bd83a87b556bfba9084818533078961` 已推送至 `origin/main`；Release workflow `35444192023` conclusion 为 `success`。远端 annotated tag `v0.1.28` 的 tag object 为 `dcdd27bea1565400e8fbd4ec311e466c4913ae28`，解析到该发布提交；GitHub Release 已发布，draft/prerelease 均为 false。
 
 - Git 来源改为 shallow、no-checkout clone，启用 Git long-path 配置；随后读取有界 `ls-tree` 和候选 `SKILL.md`，同名打包副本优先保留规范 `skills/<name>` 路径，预检 symlink/gitlink、文件数量、单文件及总字节数后才 sparse checkout 候选目录。Git stderr 失败信息去除 checkout 进度噪声。
 - 远端安全限额按阶段拆分：ZIP 10,000 项、来源遍历 10,000 项、单个 Skill 5,000 项、Git tree 20,000 tracked entries、候选最多 100；继续保留 50 MiB 包总量、10 MiB 单文件、512 KiB `SKILL.md`、60 秒 Git 准备、公开 HTTPS、无认证和无覆盖语义。
@@ -61,6 +61,13 @@ v0.1.26 候选改动在此基础上完成英文优先 TUI 与富文本显示：�
 本轮没有改变 Responses context、Session schema、权限语义、inline/scrollback、直接 PTY 输入或首五/尾五缓冲。新命令不再额外持久化重复的 `! command` 和成功提示；可选 command 元数据继续提供来源、状态、耗时和审计信息，旧记录仍可恢复。
 
 ## 最新发布
+
+v0.1.28 增加平台原生 sandbox 路由、MCP tool runtime、Skills 发现/渐进读取及 `/skills` 创建/URL 安装/查看工作流，并修复大型 Git Skill 在 Windows 上因无关深层路径和旧条目上限导致的安装失败。
+
+- 发布提交 `29817b995bd83a87b556bfba9084818533078961` 已推送至 `origin/main`；annotated tag `v0.1.28` 的 tag object 为 `dcdd27bea1565400e8fbd4ec311e466c4913ae28`，解析到该提交。
+- Release workflow `35444192023` 已完成且 conclusion 为 `success`；`v0.1.28` Release 已发布，draft/prerelease 均为 false。
+- Release: https://github.com/VinceTree/Everpeace/releases/tag/v0.1.28
+- 发布前冻结锁文件安装、179 项测试、typecheck、build 和 diff 检查全部通过；真实 GitHub 仓库根 URL 与 folder URL 均完成候选预览冒烟。
 
 v0.1.27 增加 Responses SSE 实时进度、运行中 safe-checkpoint steering、分段耗时显示和 Codex 风格四档权限 profile，并保留兼容端点的 buffered fallback。
 

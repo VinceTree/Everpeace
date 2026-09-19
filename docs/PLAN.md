@@ -85,7 +85,7 @@ Codex sandbox、MCP 与 Skills 接入：模型 shell 通过固定版本 Codex CL
 - 自动验证目标：完整测试、类型检查、构建和 diff 检查全部通过；最新实际结果记录在 `HANDOFF.md`。
 - 待在真实 Windows Terminal 中验证 `/new` → 首问命名 → 退出 → `/resume` → 继续聊天。
 - 待使用真实 OpenAI、DeepSeek 和自定义兼容端点复验 `/status` usage 返回、context 映射、居中与窄终端排版，以及 Esc 返回原 Session。
-- v0.1.27 已发布；v0.1.28 已完成 sandbox、MCP、Skills 管理和大型 Git Skill 安装修复，等待推送并确认自动 tag 与 GitHub Release。
+- v0.1.28 已发布：发布提交、远端 annotated tag、Release workflow `35444192023` 和非 draft/prerelease GitHub Release 均已确认。
 
 ## 文档规则
 
