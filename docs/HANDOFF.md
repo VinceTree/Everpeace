@@ -4,7 +4,7 @@
 
 状态快照：2026-09-19。`src/tui` 原先把应用编排、命令、渲染工具和 18 个不同职责的组件集中在根目录及单一 `components` 目录；现已按职责整理为 `app`、`commands`、`composer`、`rendering`、`terminal`，并把组件划分为 `conversation`、`feedback`、`navigation`、`screens` 和 `wizards`。目录说明和依赖方向见 `architecture/TUI_STRUCTURE.md`。
 
-本批次已把 `package.json` 与中英文 README 展示号提升到 `0.2.0`；远端 workflow、tag 与 GitHub Release 状态将在推送后回填。
+本批次已把 `package.json` 与中英文 README 展示号提升到 `0.2.0`。提交 `c8f96a06b4d59d2f217c595c1214fbea741c7cf9` 已推送至 `origin/main`；Release workflow `35445879162` conclusion 为 `success`，远端 `v0.2.0` tag 解析到该提交，GitHub Release 已发布且 draft/prerelease 均为 false。
 
 - `index.tsx` 继续作为公开入口，`app/app.tsx` 保留完整状态机；本轮只移动模块、更新内部与测试导入，并为少量底层模块补职责注释，没有改变 Session schema、TUI 行为或用户可见命令。
 - 定向 TUI 测试 80/80、完整 `pnpm test` 180/180 通过，`pnpm typecheck`、`pnpm build` 和 tracked/new-file diff 检查均通过；diff 检查仅报告既有 Windows LF/CRLF 提示。
@@ -77,6 +77,13 @@ v0.1.26 候选改动在此基础上完成英文优先 TUI 与富文本显示：�
 本轮没有改变 Responses context、Session schema、权限语义、inline/scrollback、直接 PTY 输入或首五/尾五缓冲。新命令不再额外持久化重复的 `! command` 和成功提示；可选 command 元数据继续提供来源、状态、耗时和审计信息，旧记录仍可恢复。
 
 ## 最新发布
+
+v0.2.0 修复包含大量镜像 Skill 清单的 Git 仓库被旧候选上限误拒绝的问题，并按应用编排、命令、输入、渲染、终端和组件职责重新组织 TUI 源码目录；用户可见行为与 Session schema 保持不变。
+
+- 提交 `c8f96a06b4d59d2f217c595c1214fbea741c7cf9` 已推送至 `origin/main`；远端 `v0.2.0` tag 解析到该提交。
+- Release workflow `35445879162` 已完成且 conclusion 为 `success`；`v0.2.0` Release 已发布，draft/prerelease 均为 false。
+- Release: https://github.com/VinceTree/Everpeace/releases/tag/v0.2.0
+- 发布前冻结锁文件安装、180 项测试、typecheck、build 和 diff 检查全部通过；真实大型 Git Skill URL 冒烟返回 83 个去重候选。
 
 v0.1.28 增加平台原生 sandbox 路由、MCP tool runtime、Skills 发现/渐进读取及 `/skills` 创建/URL 安装/查看工作流，并修复大型 Git Skill 在 Windows 上因无关深层路径和旧条目上限导致的安装失败。
 
