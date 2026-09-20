@@ -98,6 +98,31 @@ test("installed Skill list can prefill an explicit invocation", async () => {
   view.unmount();
 });
 
+test("installed Skill list presents metadata before opening the full document", async () => {
+  const entry: ManagedSkill = {
+    name: "demo-skill",
+    description: "Handle deterministic demo tasks by checking inputs, choosing the stable workflow, validating the result, and reporting useful next steps.",
+    path: "/skills/demo-skill/SKILL.md",
+    directory: "/skills/demo-skill",
+    scope: "project",
+    conflict: false,
+    usable: true,
+    skillMarkdown,
+  };
+  const view = render(<SkillWizard manager={manager({ async list() { return [entry]; } })} onUse={() => {}} onBack={() => {}} />);
+  await tick();
+  view.stdin.write("\u001B[B");
+  await tick();
+  view.stdin.write("\u001B[B");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => {
+    const frame = view.lastFrame() ?? "";
+    return frame.includes("Installed Skills") && frame.includes("checking inputs") && frame.includes("validating the result") && frame.includes("ready to use") && !frame.includes("/skills/demo-skill/SKILL.md");
+  }, () => view.lastFrame() ?? "");
+  view.unmount();
+});
+
 test("URL installation previews one candidate and requires scope plus confirmation", async () => {
   const prepared: PreparedSkillInstall = {
     id: "prepared",

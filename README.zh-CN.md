@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.2.0) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.1) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -141,7 +141,7 @@ Skills 从工作区到仓库根的 `.agents/skills`、项目 `.codex/skills`、`
 
 - **创建**：选择项目或用户作用域，描述工作流，由当前模型生成单个 `SKILL.md`；之后可让 AI 校验并改进、手动编辑完整文件，或确认保存。
 - **从 URL 安装**：输入公开 HTTPS GitHub 仓库/文件夹、Git 仓库根、直接 `SKILL.md` 或 ZIP URL。Everpeace 先下载到临时暂存区并校验所有发现的包；同一来源包含多个 Skill 时先选择一个，再预览完整 `SKILL.md`、来源和文件数量，最后选择作用域并明确确认后安装。Git 来源先执行不生成工作区文件的克隆，在有界仓库树中定位候选；同名镜像包优先保留规范 `skills/<name>` 目录，再只检出已校验的候选目录。因此，仓库内 `SKILL.md` 文件数可以多于不同的可安装 Skill 数，而不会提前触发候选数量限制。
-- **查看已安装 Skill**：查看完整说明，选择 **Use in next prompt** 后把 `$skill-name` 回填到主输入框。
+- **查看已安装 Skill**：先在可扫描目录中查看名称、作用域、可用/冲突状态和两行描述，再打开完整说明；选择 **Use in next prompt** 后把 `$skill-name` 回填到主输入框。
 
 项目安装写入仓库根 `.agents/skills`，用户安装写入 `$CODEX_HOME/skills`（通常为 `~/.codex/skills`）。已有名称不会被覆盖；发现根中存在同名 Skill 时会标记冲突，并在解决前禁止自动或显式激活。URL 安装仅支持公开来源，不接受 URL 内嵌凭据；每次重定向都检查本机/私网地址，并限制下载、解压、条目和单文件大小，拒绝路径穿越及符号链接，通过临时目录完成安装。私有仓库、认证下载、更新和删除暂不属于当前流程。详见 [Codex 能力映射](docs/architecture/CODEX_CAPABILITIES.md)。
 

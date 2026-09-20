@@ -1,5 +1,13 @@
 # Session Handoff
 
+## 最新优化：已安装 Skill 查看界面
+
+状态快照：2026-09-20。`/skills` 的 View installed Skills 流程已从单行 `Select` 改为可扫描的四行目录：名称与作用域、最多两行描述、ready/conflict/unavailable 状态；列表和详情不再显示路径，把终端空间留给辨识信息。顶部显示总数和当前位置，支持上下翻页、Home/End、Enter 进入详情。详情页先展示 Skill 名称、描述、作用域和状态，再分页阅读完整 `SKILL.md`，原有 `$name` 回填、Esc 返回和冲突保护保持不变。
+
+- 参考 OMP 的轻量 metadata catalog 思路，列表只承担发现和选择，完整 Skill 内容延迟到详情页展示。
+- 新增 `installed Skill list presents metadata before opening the full document` 回归；定向 Skill TUI 测试 4/4、完整 `pnpm test` 181/181、typecheck 和 diff 检查通过。
+- 工作区展示号已提升至 `0.2.1`；本次只提交并推送代码，不创建 tag 或 GitHub Release。
+
 ## 最新整理：TUI 源码职责分层
 
 状态快照：2026-09-19。`src/tui` 原先把应用编排、命令、渲染工具和 18 个不同职责的组件集中在根目录及单一 `components` 目录；现已按职责整理为 `app`、`commands`、`composer`、`rendering`、`terminal`，并把组件划分为 `conversation`、`feedback`、`navigation`、`screens` 和 `wizards`。目录说明和依赖方向见 `architecture/TUI_STRUCTURE.md`。
@@ -7,7 +15,7 @@
 本批次已把 `package.json` 与中英文 README 展示号提升到 `0.2.0`。提交 `c8f96a06b4d59d2f217c595c1214fbea741c7cf9` 已推送至 `origin/main`；Release workflow `35445879162` conclusion 为 `success`，远端 `v0.2.0` tag 解析到该提交，GitHub Release 已发布且 draft/prerelease 均为 false。
 
 - `index.tsx` 继续作为公开入口，`app/app.tsx` 保留完整状态机；本轮只移动模块、更新内部与测试导入，并为少量底层模块补职责注释，没有改变 Session schema、TUI 行为或用户可见命令。
-- 定向 TUI 测试 80/80、完整 `pnpm test` 180/180 通过，`pnpm typecheck`、`pnpm build` 和 tracked/new-file diff 检查均通过；diff 检查仅报告既有 Windows LF/CRLF 提示。
+- 定向 TUI 测试 80/80、完整 `pnpm test` 181/181 通过，`pnpm typecheck`、`pnpm build` 和 tracked/new-file diff 检查均通过；diff 检查仅报告既有 Windows LF/CRLF 提示。
 
 ## 最新修复：含镜像副本的 Git Skill 仓库安装
 

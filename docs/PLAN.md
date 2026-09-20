@@ -54,7 +54,7 @@ Codex sandbox、MCP 与 Skills 接入：模型 shell 通过固定版本 Codex CL
 - [x] 模型 shell 映射 Codex `:read-only`、`:workspace`、`:danger-full-access`，sandbox 不可用时失败关闭；直接 `!` 保持原生 PTY。
 - [x] MCP stdio/Streamable HTTP 工具发现、命名空间、调用、超时、取消、单服务器故障隔离和独立审批；`/mcp` 可刷新状态。
 - [x] Codex 主机 Skill roots、frontmatter 校验、metadata catalog、同名冲突隔离、显式 `$name`、隐式 `read_skill` 与相对资源约束。
-- [x] `/skills` 管理向导：项目/用户作用域、AI 单文件创建与校验、完整手动编辑、公开 GitHub/Git/SKILL.md/ZIP 暂存预览、显式安装确认、已安装内容查看和 `$name` 回填。
+- [x] `/skills` 管理向导：项目/用户作用域、AI 单文件创建与校验、完整手动编辑、公开 GitHub/Git/SKILL.md/ZIP 暂存预览、显式安装确认、带作用域/状态/两行描述的已安装 Skill 目录、完整内容查看和 `$name` 回填。
 - [x] Skill 安装安全边界：仅公开 HTTPS、逐重定向公共地址校验、Git 重定向关闭、超时和大小/条目上限、路径穿越/符号链接/特殊文件拒绝、无覆盖暂存安装。
 - [x] 大型 Git Skill 来源先无检出克隆并检查有界仓库树，只检出按名称去重后的候选目录；Windows 长路径不再被无关仓库副本触发，单个受限 Skill 可包含最多 5,000 个条目。
 - [x] Git 仓库的原始 `SKILL.md` 清单上限与去重后的 100 个不同候选上限分离；包含大量同名平台/评审镜像副本的来源不会在名称去重前被错误拒绝。

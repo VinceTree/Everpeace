@@ -23,8 +23,9 @@ import {
   moveComposerVertically,
   type ComposerState,
 } from "../../composer/editor.js";
-import { CommandSurface } from "../screens/command-surface.js";
+import { CommandSurface, commandScreenWidth } from "../screens/command-surface.js";
 import { RichOutput } from "../../rendering/rich-text.js";
+import { textWidth, truncateEnd } from "../../rendering/text-width.js";
 
 type State =
   | { kind: "menu" }
@@ -60,6 +61,146 @@ function scopeOptions() {
     { label: "Current project · .agents/skills", value: "project" },
     { label: "User · $CODEX_HOME/skills", value: "user" },
   ];
+}
+
+function skillScopeLabel(scope: ManagedSkill["scope"]): string {
+  if (scope === "repo") return "repo";
+  if (scope === "admin") return "admin";
+  if (scope === "system") return "system";
+  return scope;
+}
+
+function skillStatus(skill: ManagedSkill): string {
+  if (skill.conflict) return "conflict · resolve duplicate before use";
+  if (!skill.usable) return "unavailable · inspect the source or path";
+  return "ready to use";
+}
+
+function wrapSkillDescription(value: string, width: number, maximumLines = 2): string[] {
+  const words = (value.trim() || "No description provided.").split(/\s+/u);
+  const lines: string[] = [];
+  let current = "";
+  let consumed = 0;
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (textWidth(candidate) <= width) {
+      current = candidate;
+      consumed += 1;
+      continue;
+    }
+    if (current) lines.push(current);
+    if (lines.length >= maximumLines) break;
+    current = textWidth(word) <= width ? word : truncateEnd(word, width);
+    consumed += 1;
+  }
+  if (lines.length < maximumLines && current) lines.push(current);
+
+  const hasMore = consumed < words.length;
+  if (hasMore && lines.length > 0) {
+    lines[lines.length - 1] = truncateEnd(lines[lines.length - 1]!, Math.max(1, width - 1)) + "…";
+  }
+  while (lines.length < maximumLines) lines.push("");
+  return lines;
+}
+
+function InstalledSkillList({
+  skills,
+  onSelect,
+}: {
+  skills: readonly ManagedSkill[];
+  onSelect(skill: ManagedSkill): void;
+}) {
+  const { columns, rows } = useWindowSize();
+  const [selected, setSelected] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const width = Math.max(24, commandScreenWidth(columns) - 4);
+  const itemHeight = 4;
+  const visibleCount = Math.max(1, Math.min(skills.length, Math.floor(Math.max(6, rows - 14) / itemHeight)));
+
+  useEffect(() => {
+    setSelected((current) => Math.min(current, Math.max(0, skills.length - 1)));
+  }, [skills.length]);
+
+  useEffect(() => {
+    setOffset((current) => Math.min(current, Math.max(0, skills.length - visibleCount)));
+  }, [skills.length, visibleCount]);
+
+  useInput((_input, key) => {
+    if (!skills.length) return;
+    if (key.upArrow) setSelected((current) => Math.max(0, current - 1));
+    if (key.downArrow) setSelected((current) => Math.min(skills.length - 1, current + 1));
+    if (key.pageUp) setSelected((current) => Math.max(0, current - visibleCount));
+    if (key.pageDown) setSelected((current) => Math.min(skills.length - 1, current + visibleCount));
+    if (key.home) setSelected(0);
+    if (key.end) setSelected(skills.length - 1);
+    if (key.return) {
+      const skill = skills[selected];
+      if (skill) onSelect(skill);
+    }
+  });
+
+  useEffect(() => {
+    if (selected < offset) setOffset(selected);
+    else if (selected >= offset + visibleCount) setOffset(selected - visibleCount + 1);
+  }, [selected, offset, visibleCount]);
+
+  if (!skills.length) {
+    return (
+      <Box flexDirection="column" marginTop={1}>
+        <Text color="#D4AF37" bold>No installed Skills</Text>
+        <Text dimColor>Create one or install a public Skill to see it here.</Text>
+      </Box>
+    );
+  }
+
+  const nameWidth = Math.max(12, width - 20);
+  const descriptionWidth = Math.max(10, width - 5);
+  const visibleSkills = skills.slice(offset, offset + visibleCount);
+  return (
+    <Box flexDirection="column">
+      <Box justifyContent="space-between">
+        <Text bold color="#D4AF37">Installed Skills</Text>
+        <Text dimColor>{`${selected + 1}/${skills.length}`}</Text>
+      </Box>
+      <Text dimColor>Browse a Skill to inspect its instructions and invoke it.</Text>
+      <Box flexDirection="column" marginTop={1}>
+        {visibleSkills.map((skill, index) => {
+          const absoluteIndex = offset + index;
+          const isSelected = absoluteIndex === selected;
+          const statusColor = skill.conflict || !skill.usable ? "yellow" : "green";
+          return (
+            <Box key={`${skill.name}-${skill.path}`} flexDirection="column" marginBottom={1}>
+              <Text>
+                <Text color={isSelected ? "#4EC9B0" : "#6A9955"}>{isSelected ? "› " : "  "}</Text>
+                <Text bold {...(isSelected ? { color: "#4EC9B0" } : {})}>{truncateEnd(skill.name, nameWidth)}</Text>
+                <Text dimColor>{` · ${skillScopeLabel(skill.scope)}`}</Text>
+                {skill.conflict ? <Text color="yellow">{" · conflict"}</Text> : null}
+              </Text>
+              {wrapSkillDescription(skill.description, descriptionWidth).map((line, lineIndex) => (
+                <Text key={`${skill.name}-description-${lineIndex}`} dimColor>{`  ${line}`}</Text>
+              ))}
+              <Text color={statusColor}>{`  ${skillStatus(skill)}`}</Text>
+            </Box>
+          );
+        })}
+      </Box>
+      <Text dimColor>{`↑↓ browse · Enter inspect · PgUp/PgDn jump · ${offset + 1}-${Math.min(skills.length, offset + visibleCount)} shown`}</Text>
+    </Box>
+  );
+}
+
+function SkillIdentity({ skill }: { skill: ManagedSkill }) {
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Box justifyContent="space-between">
+        <Text bold color="#4EC9B0">{skill.name}</Text>
+        <Text dimColor>{skillScopeLabel(skill.scope)}</Text>
+      </Box>
+      <Text>{skill.description || "No description provided."}</Text>
+      <Text dimColor>{skillStatus(skill)}</Text>
+    </Box>
+  );
 }
 
 function PagedSkill({ markdown, footer }: { markdown: string; footer?: React.ReactNode }) {
@@ -321,12 +462,14 @@ export function SkillWizard({ manager, activeModel, generateDraft, reviseDraft, 
         }} />
       </> : null}
 
-      {state.kind === "skills-list" ? state.skills.length > 0 ? <Select visibleOptionCount={Math.min(8, state.skills.length)} options={state.skills.map((skill, index) => ({ label: `${skill.name} · ${skill.scope}${skill.conflict ? " · conflict" : ""}`, value: String(index) }))} onChange={(index) => setState({ kind: "skill-detail", skill: state.skills[Number(index)]! })} /> : <Text>No Skills were found.</Text> : null}
+      {state.kind === "skills-list" ? <InstalledSkillList skills={state.skills} onSelect={(skill) => setState({ kind: "skill-detail", skill })} /> : null}
 
-      {state.kind === "skill-detail" ? <PagedSkill markdown={state.skill.skillMarkdown} footer={<>
-        <Text dimColor>{`${state.skill.scope} · ${state.skill.path}`}</Text>
-        {state.skill.conflict ? <Text color="yellow">This name is ambiguous. Resolve duplicate installations before using it.</Text> : <Select options={[{ label: "Use in next prompt", value: "use" }, { label: "Back to list", value: "back" }]} onChange={(value) => value === "use" ? onUse(state.skill.name) : loadSkills()} />}
-      </>} /> : null}
+      {state.kind === "skill-detail" ? <>
+        <SkillIdentity skill={state.skill} />
+        <PagedSkill markdown={state.skill.skillMarkdown} footer={<>
+          {state.skill.conflict ? <Text color="yellow">This name is ambiguous. Resolve duplicate installations before using it.</Text> : <Select options={[{ label: "Use in next prompt", value: "use" }, { label: "Back to list", value: "back" }]} onChange={(value) => value === "use" ? onUse(state.skill.name) : loadSkills()} />}
+        </>} />
+      </> : null}
 
       {state.kind === "loading" ? <Spinner label={state.label} /> : null}
       {state.kind === "success" ? <><Text bold>{state.title}</Text><Text>{state.text}</Text><Select options={[{ label: "Back to Skill manager", value: "back" }]} onChange={returnToMenu} /></> : null}
