@@ -288,6 +288,22 @@ test("session list is global, newest-first, and isolates corrupt files", async (
   }
 });
 
+test("session store permanently deletes selected sessions without touching others", async () => {
+  const fixture = await createFixture();
+  try {
+    const first = await fixture.store.create({ title: "one", titlePending: false, workspacePath: "C:\\one", model });
+    const second = await fixture.store.create({ title: "two", titlePending: false, workspacePath: "C:\\two", model });
+    const third = await fixture.store.create({ title: "three", titlePending: false, workspacePath: "C:\\three", model });
+    await fixture.store.deleteMany([first.id, third.id, first.id]);
+    assert.deepEqual((await fixture.store.list()).sessions.map((session) => session.id), [second.id]);
+    await assert.rejects(() => fixture.store.load(first.id), /ENOENT/u);
+    assert.equal((await fixture.store.load(second.id)).summary.title, "two");
+    await fixture.store.deleteMany(["missing-session"]);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("session load ignores only an incomplete final JSONL line", async () => {
   const fixture = await createFixture();
   try {

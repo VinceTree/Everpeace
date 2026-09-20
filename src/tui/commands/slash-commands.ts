@@ -76,7 +76,7 @@ export const TUI_HELP = `Slash commands
   /goal    Create, inspect, pause, or resume a session goal
   /compact Compact the model context
   /new     Create and enter a new session
-  /resume  Find and resume a local session
+  /resume  Find, resume, or permanently batch-delete local sessions
   /logout  Remove models and system credentials
   /clear   End this conversation; the next message starts a session
   /help    Show this help

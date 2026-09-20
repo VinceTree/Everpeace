@@ -116,6 +116,7 @@ export interface SessionStoreLike {
     preserveContext: boolean,
   ): Promise<void>;
   list(): Promise<SessionListResult>;
+  deleteMany(sessionIds: readonly string[]): Promise<void>;
   load(sessionId: string): Promise<LoadedSession>;
   setGoal(sessionId: string, goal: SessionGoal): Promise<void>;
   updateGoal(sessionId: string, patch: Partial<Pick<SessionGoal, "status" | "tokens_used" | "usage_complete" | "time_used_seconds" | "blocked_streak" | "updated_at">>): Promise<void>;
@@ -441,6 +442,7 @@ export class SessionStore implements SessionStoreLike {
   readonly #now: () => Date;
   readonly #createId: () => string;
   readonly #writeQueues = new Map<string, Promise<void>>();
+  readonly #deletedSessionIds = new Set<string>();
 
   constructor(options: SessionStoreOptions = {}) {
     this.#directory = options.directory ?? defaultSessionDirectory();
@@ -477,6 +479,7 @@ export class SessionStore implements SessionStoreLike {
         } finally {
           await handle.close();
         }
+        this.#deletedSessionIds.delete(id);
         return {
           id,
           title: input.title,
@@ -607,6 +610,23 @@ export class SessionStore implements SessionStoreLike {
     return { sessions, skipped };
   }
 
+  async deleteMany(sessionIds: readonly string[]): Promise<void> {
+    const uniqueIds = [...new Set(sessionIds)];
+    uniqueIds.forEach((sessionId) => this.#assertSessionId(sessionId));
+    uniqueIds.forEach((sessionId) => this.#deletedSessionIds.add(sessionId));
+    await Promise.all(uniqueIds.map((sessionId) => {
+      const previous = this.#writeQueues.get(sessionId) ?? Promise.resolve();
+      const next = previous
+        .catch(() => undefined)
+        .then(() => fs.rm(this.#filePath(sessionId), { force: true }));
+      this.#writeQueues.set(sessionId, next);
+      void next.finally(() => {
+        if (this.#writeQueues.get(sessionId) === next) this.#writeQueues.delete(sessionId);
+      }).catch(() => undefined);
+      return next;
+    }));
+  }
+
   async load(sessionId: string): Promise<LoadedSession> {
     this.#assertSessionId(sessionId);
     const pending = this.#writeQueues.get(sessionId);
@@ -619,6 +639,9 @@ export class SessionStore implements SessionStoreLike {
 
   #append(sessionId: string, event: SessionEvent): Promise<void> {
     this.#assertSessionId(sessionId);
+    if (this.#deletedSessionIds.has(sessionId)) {
+      return Promise.reject(new Error("Session has been deleted"));
+    }
     const serialized = `${JSON.stringify(event)}\n`;
     const previous = this.#writeQueues.get(sessionId) ?? Promise.resolve();
     const next = previous

@@ -174,6 +174,9 @@ function createMemorySessionStore(): MemorySessionStore {
         skipped: 0,
       };
     },
+    async deleteMany(sessionIds) {
+      for (const sessionId of sessionIds) sessions.delete(sessionId);
+    },
     async load(sessionId) {
       const session = requireSession(sessionId);
       return {
@@ -1870,6 +1873,23 @@ test("/resume restores transcript, workspace, context, and continues the same se
   const loaded = await fixture.sessionStore.load(summary.id);
   assert.match(loaded.timeline.at(-1)?.text ?? "", /continued: continue now/);
   assert.deepEqual(loaded.context.at(-1), { role: "user", content: "continue now" });
+  view.unmount();
+});
+
+test("/resume exposes batch session deletion", async () => {
+  const model: RegisteredModel = { id: "model-1", model_name: "deepseek-flash", base_url: "https://api.deepseek.com", api_key: "secret" };
+  const fixture = createFixture({ initial: [model] });
+  const first = await fixture.sessionStore.create({ title: "First", titlePending: false, workspacePath: "C:\\workspace", model: toSessionModelForTest(model) });
+  const second = await fixture.sessionStore.create({ title: "Second", titlePending: false, workspacePath: "C:\\workspace", model: toSessionModelForTest(model) });
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+  await tick();
+  view.stdin.write("/resume");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Resume session"));
+  assert.match(view.lastFrame() ?? "", /Delete sessions\.\.\./u);
+  assert.match(view.lastFrame() ?? "", /First/u);
+  assert.match(view.lastFrame() ?? "", /Second/u);
   view.unmount();
 });
 

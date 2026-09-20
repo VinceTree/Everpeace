@@ -1,5 +1,9 @@
 # Session Handoff
 
+## 最新功能：`/resume` 批量删除 Session
+
+状态快照：2026-09-20。`/resume` 的 Session 列表现在支持 `MultiSelect` 批量勾选并永久删除本地 JSONL 记录，删除前显示二次确认；删除当前活动 Session 会清理内存状态并返回聊天界面，其他 Session 只刷新列表。新增 SessionStore 和 TUI 回归；完整 `pnpm test` 206/206、`pnpm typecheck`、`pnpm build` 和 `git diff --check` 均通过。展示号同步升至 `0.2.7`；本次提交使用 `[skip ci]`，不更新远程 Release。
+
 ## 最新修复：Banner 長安司矩对齐
 
 状态快照：2026-09-20。参考 `question/image.png` 保留金色双线框与“長安 · 司矩”样式，并改用终端单元格宽度计算左右留白；中文双宽字符现在在框内视觉居中。新增 Banner 回归，确认左右留白只差一个单元格。展示号同步升至 `0.2.6`；本批次随 `main` 推送触发自动发布流程。

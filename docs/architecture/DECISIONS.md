@@ -27,6 +27,8 @@
 Git Skill 来源采用 shallow、no-checkout 克隆：先读取有界 Git tree 和候选 `SKILL.md` metadata，同名打包副本按规范 `skills/<name>` 路径优先去重，预检候选文件类型、数量和字节数后才 sparse checkout。原始 `SKILL.md` 清单数与去重后的不同 Skill 候选数使用独立上限，100 个候选限制只对去重结果生效，避免同一仓库中的 Codex/评审镜像副本在实际候选未超限时被提前拒绝。该顺序避免 Windows 在无关深层路径上提前失败，也防止为了一个 Skill 展开整个仓库工作树；它不改变公开 HTTPS、无认证、超时、无覆盖和显式确认边界。
 
 ## Session 持久化
+
+`/resume` 的批量删除是文件级永久操作：SessionStore 校验 ID、等待该 Session 的串行写入队列完成后删除 JSONL，不写入删除事件或回收站。当前活动 Session 被删除后由 TUI 清理内存状态并解除会话；未选中的 Session 与当前聊天不受影响。
 - 每个 session 使用一个版本化 JSONL 文件，存放于平台应用状态目录；API Key 仍只进入系统 keyring。
 - 可见 timeline 与 Responses API context 分开记录，保证恢复界面完整，同时不把直接 `!` 命令错误加入模型上下文。
 - 写入按 session 串行追加；不完整末行可忽略，其他损坏只隔离对应文件。

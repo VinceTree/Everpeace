@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.2.6) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.7) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -132,7 +132,7 @@ TUI 命令：
 - `/history`：浏览或明确确认后清空全局输入历史，不删除 Session。
 - `/terminal-setup`：预览并可选配置稳定版 Windows Terminal 的 Shift+Enter；确认后先备份设置，再新增全局按键绑定。
 - `/new`：立即创建并进入一个新的本地 session。
-- `/resume`：查看并恢复本机 JSONL session。
+- `/resume`：查看、恢复或批量永久删除本机 JSONL session。
 - `/resume` 后上下键浏览该会话保存的用户提问及带来源记录的直接命令，向下越过最新一条回到空输入。召回的斜杠命令在编辑前不打开候选菜单；`/history` 仍显示全局输入历史。
 - `/logout`：多选删除模型与对应系统凭据。
 - `/clear`：结束当前对话并清屏；下一次提问创建新 session，同时保留当前模型。

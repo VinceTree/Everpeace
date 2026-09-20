@@ -1220,6 +1220,34 @@ export function EverpeaceApp({
     });
   }, [activeModel, clearQueuedGuidance, onReplayOutput]);
 
+  const deleteSessions = useCallback((sessionIds: string[]) => {
+    if (abortController.current || directController.current) {
+      openInfo("/resume · Cannot delete", "A model turn or direct command is active. Wait for it to finish before deleting sessions.", "error");
+      return;
+    }
+    const operation = startCommandLoad("/resume · Delete sessions", "Deleting sessions", false, false);
+    void dependencies.sessionStore.deleteMany(sessionIds)
+      .then(async () => {
+        if (!isCurrentCommandOperation(operation)) return;
+        if (activeSessionId.current && sessionIds.includes(activeSessionId.current)) {
+          clearConversation();
+          returnToChat();
+          return;
+        }
+        const result = await dependencies.sessionStore.list();
+        if (!isCurrentCommandOperation(operation)) return;
+        if (result.sessions.length === 0) {
+          replaceCommandView(infoView("/resume · Sessions", "No sessions are available to resume."));
+          return;
+        }
+        replaceCommandView({ kind: "session-picker", sessions: result.sessions, ...(result.skipped > 0 ? { notice: `Skipped ${result.skipped} damaged session${result.skipped === 1 ? "" : "s"}.` } : {}) });
+      })
+      .catch((error: unknown) => {
+        if (!isCurrentCommandOperation(operation)) return;
+        replaceCommandView(infoView("/resume · Delete failed", error instanceof Error ? error.message : String(error), "error"));
+      });
+  }, [clearConversation, dependencies.sessionStore, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad]);
+
   const runtimeForGoal = useCallback((sessionId: string) => new GoalRuntime({
     getGoal: async () => (await dependencies.sessionStore.load(sessionId)).goal,
     setGoal: async (goal) => {
@@ -1855,6 +1883,7 @@ export function EverpeaceApp({
             sessions={view.sessions}
             {...(view.notice === undefined ? {} : { notice: view.notice })}
             onSelect={(session) => void chooseSession(session)}
+            onDelete={deleteSessions}
             onCancel={returnToChat}
           />
         ) : view.kind === "logout" ? (

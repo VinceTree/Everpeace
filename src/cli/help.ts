@@ -19,7 +19,7 @@ Commands inside the agent:
   /goal                     Create, inspect, pause, or resume a session goal
   /compact                  Compact the model context
   /new                      Create and enter a new session
-  /resume                   List and resume local sessions
+  /resume                   List, resume, or permanently batch-delete local sessions
   /logout                   Remove models and credentials
   /clear                    Start a fresh session on the next prompt
   /help                     Show this help

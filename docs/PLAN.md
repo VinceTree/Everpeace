@@ -2,6 +2,10 @@
 
 ## Plan 与 Goal
 
+## Session deletion
+
+`/resume` 的 Session 列表支持进入删除模式，用 `MultiSelect` 勾选多个本地 Session，二次确认后永久删除对应 JSONL；删除当前 Session 会解除当前会话并回到聊天界面，删除其他 Session 只刷新列表。
+
 ## Context compaction
 
 已加入 Codex 风格的 `/compact`：手动命令调用供应商原生 Responses `/responses/compact`，将其返回的完整 context window 原样作为后续模型输入；可见 transcript 与旧 JSONL timeline 不删除。压缩事件持久化为 `context_compacted`，并按普通模型请求累计 input/output/total token usage。

@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.2.6) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.7) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -132,7 +132,7 @@ TUI commands:
 - `/history`: Browse or explicitly clear global input history (not sessions).
 - `/terminal-setup`: Preview and optionally configure Shift+Enter in stable Windows Terminal; confirmation creates a settings backup before applying a global key binding.
 - `/new`: Immediately create and enter a new local session.
-- `/resume`: List and resume local JSONL sessions.
+- `/resume`: List, resume, or permanently batch-delete local JSONL sessions.
 - After `/resume`, Up/Down browse that session's saved user prompts and direct commands with source metadata; Down past the newest entry returns to an empty draft. Recalled slash commands do not open the command menu until edited. `/history` still shows global input history.
 - `/logout`: Select and remove models with their operating system credentials.
 - `/clear`: End the current conversation and start a fresh session on the next prompt while retaining the active model.
