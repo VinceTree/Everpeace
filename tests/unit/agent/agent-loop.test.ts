@@ -110,3 +110,20 @@ test("steering checkpoints skip unstarted tools and preserve every function outp
   );
   assert.match(String(f.records.find((item) => item.type === "function_call_output" && item.call_id === "b")?.output), /steered/);
 });
+
+test("a tool can end the current loop after its durable output is recorded", async () => {
+  let samples = 0;
+  const f = fixture({
+    async sample() {
+      samples += 1;
+      return { output: [call("a"), call("b")], output_text: "" };
+    },
+    async dispatch(item) {
+      return item.call_id === "a" ? { output: "approved", stop: true } : "unexpected";
+    },
+  });
+  await runAgentLoop(f.options);
+  assert.equal(samples, 1);
+  assert.match(String(f.records.find((item) => item.call_id === "a" && item.type === "function_call_output")?.output), /approved/);
+  assert.match(String(f.records.find((item) => item.call_id === "b" && item.type === "function_call_output")?.output), /skipped/);
+});

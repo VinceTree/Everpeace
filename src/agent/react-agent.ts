@@ -33,6 +33,9 @@ import {
   type WebToolExecutor,
 } from "../tools/web.js";
 import type { LearnedMemoryRuntimeLike, LearnedTurn } from "../memory/learned-memory.js";
+import { GOAL_TOOL_DEFINITIONS, type GoalRuntime } from "../goal/runtime.js";
+import { PLAN_INSTRUCTIONS, PLAN_TOOL_DEFINITIONS, parsePlanRequest, parseSubmittedPlan, type AgentMode, type PlanInteraction, type PlanReviewDecision } from "../plan/runtime.js";
+import type { SessionGoal } from "../storage/session-store.js";
 
 interface ResponseOutputItem extends Record<string, unknown> {
   type: string;
@@ -71,6 +74,11 @@ export interface AgentIO {
   confirmBash(command: string): Promise<boolean>;
   confirmWeb?(request: string): Promise<boolean>;
   confirmMcp?(request: string): Promise<boolean>;
+  confirmGoal?(request: string): Promise<boolean>;
+  requestPlanInput?(request: Parameters<PlanInteraction["requestInput"]>[0], signal?: AbortSignal): Promise<Record<string, string>>;
+  reviewPlan?(plan: Parameters<PlanInteraction["reviewPlan"]>[0], signal?: AbortSignal): Promise<PlanReviewDecision>;
+  getGoal?(): Promise<SessionGoal | undefined>;
+  setGoal?(goal: SessionGoal): Promise<void>;
   runBash(command: string, signal?: AbortSignal): Promise<BashResult>;
   writeAssistant(text: string): void;
   writeAssistantDelta?(text: string): void;
@@ -93,9 +101,20 @@ export interface ReactAgentOptions {
   mcp?: McpRuntimeLike;
   skills?: SkillCatalogLike;
   learnedMemory?: LearnedMemoryRuntimeLike;
+  planInteraction?: PlanInteraction;
+  goalRuntime?: GoalRuntime;
   initialHistory?: readonly Record<string, unknown>[];
   onHistoryAppend?(items: readonly Record<string, unknown>[]): Promise<void>;
   onUsage?(usage: TokenUsageSample | null): Promise<void>;
+}
+
+export interface AgentTurnOptions {
+  mode?: AgentMode;
+}
+
+export interface AgentTurnResult {
+  planDecision?: PlanReviewDecision;
+  approvedPlan?: string;
 }
 
 const INSTRUCTIONS = `You are Everpeace, a concise, helpful general-purpose agent with strong coding abilities.
@@ -120,6 +139,8 @@ export class ReactAgent {
   readonly #mcp: McpRuntimeLike | undefined;
   readonly #skills: SkillCatalogLike | undefined;
   readonly #learnedMemory: LearnedMemoryRuntimeLike | undefined;
+  readonly #planInteraction: PlanInteraction | undefined;
+  readonly #goalRuntime: GoalRuntime | undefined;
   readonly #onHistoryAppend:
     | ((items: readonly Record<string, unknown>[]) => Promise<void>)
     | undefined;
@@ -134,6 +155,9 @@ export class ReactAgent {
   #learnedPrompt = "";
   #learnedPromptLoaded = false;
   #turnItems: Array<Record<string, unknown>> | undefined;
+  #turnMode: AgentMode = "default";
+  #turnResult: AgentTurnResult = {};
+  #goalPrompt = "";
 
   constructor(options: ReactAgentOptions) {
     this.#onPhase = options.onPhase;
@@ -146,22 +170,28 @@ export class ReactAgent {
     this.#mcp = options.mcp;
     this.#skills = options.skills;
     this.#learnedMemory = options.learnedMemory;
+    this.#planInteraction = options.planInteraction;
+    this.#goalRuntime = options.goalRuntime;
     this.#history = repairToolContext(options.initialHistory ?? []);
     this.#onHistoryAppend = options.onHistoryAppend;
     this.#onUsage = options.onUsage;
   }
 
-  async runTurn(userInput: string, signal?: AbortSignal): Promise<void> {
+  async runTurn(userInput: string, signal?: AbortSignal, options: AgentTurnOptions = {}): Promise<AgentTurnResult> {
     if (this.#running) throw new Error("An agent turn is already running");
     signal?.throwIfAborted();
     this.#running = true;
     const turnItems: Array<Record<string, unknown>> = [];
     this.#turnItems = turnItems;
+    this.#turnMode = options.mode ?? "default";
+    this.#turnResult = {};
     const assistantTexts: string[] = [];
     try {
       await this.#ensureLearnedPrompt();
-      if (this.#mcp) this.#mcpSnapshot = await this.#mcp.ensureReady(signal);
+      if (this.#mcp && this.#turnMode === "default") this.#mcpSnapshot = await this.#mcp.ensureReady(signal);
       if (this.#skills) this.#skillTurn = await this.#skills.prepareTurn(userInput);
+      const goal = await this.#goalRuntime?.get();
+      this.#goalPrompt = goal?.status === "active" ? `Active session goal: ${goal.objective}\nContinue until verified complete. Before completion, audit the objective and call update_goal with complete. Mark blocked only after the same blocker recurs for three consecutive goal turns.` : "";
       this.#history = repairToolContext(this.#history);
       await this.#record([{ role: "user", content: userInput }]);
       await runAgentLoop({
@@ -187,6 +217,7 @@ export class ReactAgent {
         };
         this.#learnedMemory.scheduleCapture(learnedTurn);
       }
+      return { ...this.#turnResult };
     } finally {
       try {
         if (signal?.aborted) await this.#applyPendingSteering();
@@ -214,10 +245,37 @@ export class ReactAgent {
     this.#turnItems?.push(...copies);
   }
 
-  async #dispatchTool(call: ToolCall, signal?: AbortSignal): Promise<string> {
+  async #dispatchTool(call: ToolCall, signal?: AbortSignal): Promise<string | { output: string; stop?: boolean }> {
     const policy = this.#io.getPermissions?.() ?? defaultPermissions();
     let output: string;
-    if (call.name === BASH_TOOL_DEFINITION.name) {
+    if (call.name === "request_user_input" && this.#turnMode === "plan" && this.#planInteraction) {
+      const answers = await this.#planInteraction.requestInput(parsePlanRequest(call.arguments), signal);
+      if (answers.__cancelled === "true") {
+        this.#turnResult = { planDecision: "cancel" };
+        return { output: JSON.stringify({ status: "cancelled" }), stop: true };
+      }
+      return JSON.stringify({ answers });
+    } else if (call.name === "submit_plan" && this.#turnMode === "plan" && this.#planInteraction) {
+      const submitted = parseSubmittedPlan(call.arguments);
+      const decision = await this.#planInteraction.reviewPlan(submitted, signal);
+      this.#turnResult = { planDecision: decision, ...(decision === "approve" ? { approvedPlan: submitted.plan } : {}) };
+      return { output: JSON.stringify({ decision }), stop: decision !== "continue" };
+    } else if (call.name === "get_goal" && this.#goalRuntime) {
+      return JSON.stringify({ goal: await this.#goalRuntime.get() ?? null });
+    } else if (call.name === "create_goal" && this.#goalRuntime) {
+      const args = JSON.parse(call.arguments) as { objective?: unknown; token_budget?: unknown };
+      if (typeof args.objective !== "string") return JSON.stringify({ error: "Goal objective is required" });
+      if (!(await this.#io.confirmGoal?.(`Create goal: ${args.objective}`))) return JSON.stringify({ status: "rejected" });
+      const goal = await this.#goalRuntime.create({ objective: args.objective, ...(typeof args.token_budget === "number" ? { tokenBudget: args.token_budget } : {}) });
+      return JSON.stringify({ goal });
+    } else if (call.name === "update_goal" && this.#goalRuntime) {
+      const args = JSON.parse(call.arguments) as { status?: unknown };
+      if (args.status !== "complete" && args.status !== "blocked" && args.status !== "paused") return JSON.stringify({ error: "Invalid goal status" });
+      if (args.status === "paused" && !(await this.#io.confirmGoal?.("Pause the active goal"))) return JSON.stringify({ status: "rejected" });
+      return JSON.stringify({ goal: await this.#goalRuntime.update(args.status) });
+    } else if (call.name === BASH_TOOL_DEFINITION.name && this.#turnMode === "plan") {
+      output = JSON.stringify({ status: "denied", error: "Bash is unavailable in Plan mode" });
+    } else if (call.name === BASH_TOOL_DEFINITION.name) {
       const command = parseBashCommand(call.arguments);
       if (command === undefined) {
         output = JSON.stringify({ error: "Invalid bash arguments" });
@@ -241,7 +299,7 @@ export class ReactAgent {
       this.#io.writeTool?.("Reading skill instructions");
       output = await this.#skills.read(call.arguments);
       this.#io.onToolProgress?.({ phase: "finished", name: call.name });
-    } else if (this.#mcp?.toolInfo(call.name)) {
+    } else if (this.#turnMode !== "plan" && this.#mcp?.toolInfo(call.name)) {
       const tool = this.#mcp.toolInfo(call.name)!;
       const detail = `${tool.serverName}/${tool.toolName} ${call.arguments}`;
       if (mcpPermission(policy) === "ask" && !(await this.#confirmTool(call.name, detail, () => this.#confirmMcp(detail)))) {
@@ -265,7 +323,7 @@ export class ReactAgent {
         output = JSON.stringify({ error: "Invalid web_search arguments" });
       } else if (webPermission(policy) === "deny") {
         output = JSON.stringify({ status: "denied", error: "Web tools are disabled by the current permission policy." });
-      } else if (webPermission(policy) === "ask" && !(await this.#confirmTool("web_search", query, () => this.#confirmWeb(`Search the web for: ${query}`)))) {
+      } else if (this.#turnMode !== "plan" && webPermission(policy) === "ask" && !(await this.#confirmTool("web_search", query, () => this.#confirmWeb(`Search the web for: ${query}`)))) {
         signal?.throwIfAborted();
         output = JSON.stringify({
           status: "rejected",
@@ -286,7 +344,7 @@ export class ReactAgent {
         output = JSON.stringify({ error: "Invalid web_fetch arguments" });
       } else if (webPermission(policy) === "deny") {
         output = JSON.stringify({ status: "denied", error: "Web tools are disabled by the current permission policy." });
-      } else if (webPermission(policy) === "ask" && !(await this.#confirmTool("web_fetch", url, () => this.#confirmWeb(`Read public web page: ${url}`)))) {
+      } else if (this.#turnMode !== "plan" && webPermission(policy) === "ask" && !(await this.#confirmTool("web_fetch", url, () => this.#confirmWeb(`Read public web page: ${url}`)))) {
         signal?.throwIfAborted();
         output = JSON.stringify({
           status: "rejected",
@@ -377,6 +435,13 @@ export class ReactAgent {
         isTokenUsageSample(response.usage) ? response.usage : null,
       );
     }
+    if (this.#goalRuntime) {
+      const current = await this.#goalRuntime.get();
+      if (current?.status === "active") {
+        const usage = isTokenUsageSample(response.usage) ? response.usage : null;
+        await this.#goalRuntime.recordUsage({ tokensUsed: current.tokens_used + (usage ? usage.input_tokens + usage.output_tokens : 0), usageComplete: current.usage_complete && usage !== null, timeUsedSeconds: current.time_used_seconds });
+      }
+    }
     return response;
   }
 
@@ -387,20 +452,25 @@ export class ReactAgent {
     const skillInstructions = this.#skillTurn
       ? [this.#skillTurn.instructions, this.#skillTurn.explicitInstructions].filter(Boolean).join("\n\n")
       : "";
-    const extensionInstructions = [skillInstructions, this.#mcpSnapshot.instructions, this.#learnedPrompt]
+    const extensionInstructions = [this.#turnMode === "plan" ? PLAN_INSTRUCTIONS : "", skillInstructions, this.#turnMode === "default" ? this.#mcpSnapshot.instructions : "", this.#learnedPrompt, this.#goalPrompt]
       .filter(Boolean)
       .join("\n\n");
     const params = {
         model: this.#model,
-        instructions: `${INSTRUCTIONS}\nCurrent permissions: ${JSON.stringify(this.#io.getPermissions?.() ?? defaultPermissions())}. Permission profiles: read-only requires approval for model shell, web, and MCP calls and enforces the Codex :read-only sandbox; ask requires approval for those calls and then enforces the Codex :workspace sandbox for shell; workspace-write runs model shell inside the Codex :workspace sandbox while web and MCP still require approval; full-access uses :danger-full-access after explicit user confirmation. Built-in web access retains its independent enable/disable switch. File tools are always workspace-scoped. The OS sandbox applies to model shell, not direct user ! commands.${extensionInstructions ? `\n\n${extensionInstructions}` : ""}`,
+        instructions: `${INSTRUCTIONS}\nCurrent permissions: ${JSON.stringify(this.#io.getPermissions?.() ?? defaultPermissions())}. Permission profiles: read-only requires approval for model shell, web, and MCP calls and enforces the Codex :read-only sandbox; ask requires approval for those calls and then enforces the Codex :workspace sandbox for shell; workspace-write runs model shell inside the Codex :workspace sandbox while web and MCP require approval outside Plan mode; full-access uses :danger-full-access after explicit user confirmation. In Plan mode, enabled public web access is read-only research and does not require per-request web approval; the web toggle still applies. File tools are always workspace-scoped. The OS sandbox applies to model shell, not direct user ! commands.${extensionInstructions ? `\n\n${extensionInstructions}` : ""}`,
         input,
-        tools: [
+        tools: this.#turnMode === "plan" ? [
+          WEB_SEARCH_TOOL_DEFINITION, WEB_FETCH_TOOL_DEFINITION, ...FILE_TOOL_DEFINITIONS,
+          ...(this.#skillTurn && this.#skillTurn.skills.length > 0 ? [READ_SKILL_TOOL_DEFINITION] : []),
+          ...PLAN_TOOL_DEFINITIONS,
+        ] : [
           BASH_TOOL_DEFINITION,
           WEB_SEARCH_TOOL_DEFINITION,
           WEB_FETCH_TOOL_DEFINITION,
           ...FILE_TOOL_DEFINITIONS,
           ...(this.#skillTurn && this.#skillTurn.skills.length > 0 ? [READ_SKILL_TOOL_DEFINITION] : []),
           ...this.#mcpSnapshot.tools,
+          ...(this.#goalRuntime ? GOAL_TOOL_DEFINITIONS : []),
         ],
         tool_choice: "auto",
         parallel_tool_calls: false,

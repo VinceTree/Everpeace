@@ -20,9 +20,10 @@ import type {
   StatusSnapshot,
   TokenUsageSample,
 } from "../../status/model-status.js";
+import type { AgentTurnOptions, AgentTurnResult } from "../../agent/react-agent.js";
 
 export interface AgentSession {
-  runTurn(userInput: string, signal?: AbortSignal): Promise<void>;
+  runTurn(userInput: string, signal?: AbortSignal, options?: AgentTurnOptions): Promise<AgentTurnResult>;
   requestSteering?(text: string): boolean;
 }
 

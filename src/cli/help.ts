@@ -15,6 +15,8 @@ Commands inside the agent:
   /permissions              Select read-only, ask, workspace-write, or full-access tools
   /mcp                      Refresh and inspect Codex MCP servers and tools
   /skills                   Create, install, inspect, and use local skills
+  /plan                     Enter strict planning mode or plan a request
+  /goal                     Create, inspect, pause, or resume a session goal
   /new                      Create and enter a new session
   /resume                   List and resume local sessions
   /logout                   Remove models and credentials

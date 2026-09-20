@@ -151,6 +151,51 @@ test("agent returns a final answer without running Bash", async () => {
   assert.deepEqual(requests[0]?.include, ["reasoning.encrypted_content"]);
 });
 
+test("plan mode exposes only read-only and planning tools", async () => {
+  let request: Record<string, unknown> | undefined;
+  const agent = new ReactAgent({
+    client: { responses: { async create(params) { request = params; return { id: "plan", output_text: "planned", output: [] }; } } },
+    model: "test",
+    io: { async confirmBash() { throw new Error("not allowed"); }, async runBash() { throw new Error("not allowed"); }, writeAssistant() {} },
+  });
+  await agent.runTurn("make a plan", undefined, { mode: "plan" });
+  const names = (request?.tools as Array<{ name: string }>).map((tool) => tool.name);
+  assert.ok(names.includes("read_file"));
+  assert.ok(names.includes("request_user_input"));
+  assert.ok(names.includes("submit_plan"));
+  assert.ok(!names.includes("bash"));
+  assert.ok(!names.includes("get_goal"));
+});
+
+test("plan mode can use enabled web tools without approval", async () => {
+  let requests = 0;
+  let webApprovals = 0;
+  const agent = new ReactAgent({
+    client: { responses: { async create() {
+      requests += 1;
+      return requests === 1
+        ? { id: "search", output_text: "", output: [{ type: "function_call", name: "web_search", arguments: '{"query":"TypeScript"}', call_id: "search-1" }] }
+        : { id: "done", output_text: "Plan researched.", output: [] };
+    } } },
+    model: "test",
+    io: {
+      getPermissions: () => ({ mode: "workspace-write", web: true }),
+      async confirmBash() { throw new Error("Bash should not be requested in Plan mode"); },
+      async confirmWeb() { webApprovals += 1; return true; },
+      async runBash() { throw new Error("Bash should not run in Plan mode"); },
+      writeAssistant() {},
+    },
+    web: {
+      async search(query) { return { query, results: [] }; },
+      async fetch() { throw new Error("web_fetch should not run"); },
+    },
+  });
+
+  await agent.runTurn("research the current TypeScript details", undefined, { mode: "plan" });
+  assert.equal(webApprovals, 0);
+  assert.equal(requests, 2);
+});
+
 test("agent loads learned memory once and captures a completed substantive turn", async () => {
   const instructions: string[] = [];
   const prompts: string[] = [];

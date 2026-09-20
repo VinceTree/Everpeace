@@ -25,6 +25,8 @@ Codex uses platform-native enforcement: Seatbelt on macOS, bubblewrap/seccomp wi
 | Direct `!` | Explicit user PTY command, unchanged, outside model sandbox and model context |
 | Lifetime | Process-local; retained across new/clear/resume, reset on restart |
 
+Plan mode is a read-only planning exception: when web tools remain enabled, `web_search` and `web_fetch` can run without a per-request approval prompt so the agent can research the plan. Disabling web still denies those calls, and normal chat keeps the profile's ordinary web approval behavior.
+
 Permission changes do not rebuild the agent or lose context. Every tool call checks current policy; each model request includes it. Permissions are not restored from project files, model output, or JSONL, so resuming cannot silently restore elevated authority. No JSONL schema change.
 
 Model shell execution calls the pinned `@openai/codex@0.155.1` CLI instead of reimplementing OS policy. A missing CLI/platform binary, unsupported OS, or sandbox setup failure is returned as a failed tool result; Everpeace never retries the command directly on the host. Windows model commands use PowerShell because Git Bash/MSYS cannot initialize its service inside the Codex restricted token. macOS/Linux model commands use Bash.

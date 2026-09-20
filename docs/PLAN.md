@@ -1,5 +1,9 @@
 # Everpeace Current Plan
 
+## Plan 与 Goal
+
+已加入 Codex 风格的严格 `/plan` 和持久化 `/goal`：Plan 模式只开放工作区读取、网页、Skill 读取及结构化问题/计划审批工具，禁止 Bash/MCP 等副作用；网页开关开启时，Plan 的公共 web 请求不要求逐次确认，关闭网页工具仍拒绝访问。`/plan` 可持续进入规划模式，`/plan <需求>` 直接开始，批准后回到 Default 并在同一 Session 执行。Goal 绑定创建它的 Session，使用 `get_goal`、`create_goal`、`update_goal` 工具及 JSONL goal 事件保存状态；`/goal <目标> [--tokens N]` 确认后立即运行，active goal 每轮自动续跑，恢复原 Session 后继续，支持 complete/blocked/paused/budget_limited/usage_limited 状态。
+
 
 ## 历史显示上限
 

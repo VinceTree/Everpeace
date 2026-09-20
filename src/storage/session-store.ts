@@ -30,6 +30,22 @@ export interface SessionModelRef {
   base_url: string;
 }
 
+export type GoalStatus = "active" | "paused" | "blocked" | "complete" | "budget_limited" | "usage_limited";
+
+export interface SessionGoal {
+  goal_id: string;
+  objective: string;
+  status: GoalStatus;
+  token_budget: number | null;
+  tokens_used: number;
+  usage_complete: boolean;
+  time_used_seconds: number;
+  /** Consecutive goal turns that reported the same blocker. */
+  blocked_streak?: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface StoredTextTimelineEntry {
   command?: CommandRecord;
   kind: SessionTimelineKind;
@@ -53,6 +69,7 @@ export interface SessionSummary {
   updated_at: string;
   workspace_path: string;
   model: SessionModelRef;
+  goal?: SessionGoal;
 }
 
 export interface LoadedSession {
@@ -60,6 +77,7 @@ export interface LoadedSession {
   timeline: StoredTimelineEntry[];
   context: Array<Record<string, unknown>>;
   usage: SessionUsage;
+  goal?: SessionGoal;
 }
 
 export interface SessionListResult {
@@ -93,6 +111,8 @@ export interface SessionStoreLike {
   ): Promise<void>;
   list(): Promise<SessionListResult>;
   load(sessionId: string): Promise<LoadedSession>;
+  setGoal(sessionId: string, goal: SessionGoal): Promise<void>;
+  updateGoal(sessionId: string, patch: Partial<Pick<SessionGoal, "status" | "tokens_used" | "usage_complete" | "time_used_seconds" | "blocked_streak" | "updated_at">>): Promise<void>;
 }
 
 interface EventBase {
@@ -136,13 +156,19 @@ interface UsageRecordedEvent extends EventBase {
   usage: TokenUsageSample | null;
 }
 
+interface GoalUpdatedEvent extends EventBase {
+  type: "goal_updated";
+  goal: SessionGoal;
+}
+
 type SessionEvent =
   | SessionCreatedEvent
   | TitleUpdatedEvent
   | TimelineEntryEvent
   | ContextAppendEvent
   | ModelSelectedEvent
-  | UsageRecordedEvent;
+  | UsageRecordedEvent
+  | GoalUpdatedEvent;
 
 export interface SessionStoreOptions {
   directory?: string;
@@ -279,7 +305,26 @@ function parseEvent(value: unknown): SessionEvent {
     return { ...base, type: "usage_recorded", usage: value.usage };
   }
 
+  if (value.type === "goal_updated") {
+    if (!isGoal(value.goal)) throw new Error("Session goal is invalid");
+    return { ...base, type: "goal_updated", goal: value.goal };
+  }
+
   throw new Error(`Unsupported session event type: ${value.type}`);
+}
+
+function isGoalStatus(value: unknown): value is GoalStatus {
+  return value === "active" || value === "paused" || value === "blocked" || value === "complete" || value === "budget_limited" || value === "usage_limited";
+}
+
+function isGoal(value: unknown): value is SessionGoal {
+  if (!isRecord(value)) return false;
+  return isNonEmptyString(value.goal_id) && isNonEmptyString(value.objective) && isGoalStatus(value.status) &&
+    (value.token_budget === null || (typeof value.token_budget === "number" && Number.isSafeInteger(value.token_budget) && value.token_budget > 0)) &&
+    typeof value.tokens_used === "number" && Number.isSafeInteger(value.tokens_used) && value.tokens_used >= 0 &&
+    typeof value.usage_complete === "boolean" && typeof value.time_used_seconds === "number" && value.time_used_seconds >= 0 &&
+    (value.blocked_streak === undefined || (typeof value.blocked_streak === "number" && Number.isSafeInteger(value.blocked_streak) && value.blocked_streak >= 0)) &&
+    isNonEmptyString(value.created_at) && isNonEmptyString(value.updated_at);
 }
 
 function parseSession(contents: string, filePath: string): LoadedSession {
@@ -313,6 +358,7 @@ function parseSession(contents: string, filePath: string): LoadedSession {
   let context: Array<Record<string, unknown>> = [];
   let usage = createEmptySessionUsage(header.usage_tracking);
 
+  let goal: SessionGoal | undefined;
   for (const event of events.slice(1)) {
     updatedAt = event.at;
     if (event.type === "title_updated") {
@@ -329,6 +375,7 @@ function parseSession(contents: string, filePath: string): LoadedSession {
     if (event.type === "usage_recorded") {
       usage = applyUsageSample(usage, event.usage);
     }
+    if (event.type === "goal_updated") goal = { ...event.goal };
   }
 
   return {
@@ -340,10 +387,12 @@ function parseSession(contents: string, filePath: string): LoadedSession {
       updated_at: updatedAt,
       workspace_path: header.workspace_path,
       model,
+      ...(goal ? { goal } : {}),
     },
     timeline,
     context,
     usage,
+    ...(goal ? { goal } : {}),
   };
 }
 
@@ -464,6 +513,16 @@ export class SessionStore implements SessionStoreLike {
       model: modelRef(model),
       preserve_context: preserveContext,
     });
+  }
+
+  setGoal(sessionId: string, goal: SessionGoal): Promise<void> {
+    return this.#append(sessionId, { version: SESSION_FORMAT_VERSION, type: "goal_updated", at: this.#now().toISOString(), goal: { ...goal } });
+  }
+
+  async updateGoal(sessionId: string, patch: Partial<Pick<SessionGoal, "status" | "tokens_used" | "usage_complete" | "time_used_seconds" | "blocked_streak" | "updated_at">>): Promise<void> {
+    const current = (await this.load(sessionId)).goal;
+    if (!current) throw new Error("No goal exists for this session");
+    await this.setGoal(sessionId, { ...current, ...patch, updated_at: patch.updated_at ?? this.#now().toISOString() });
   }
 
   async list(): Promise<SessionListResult> {

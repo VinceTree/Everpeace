@@ -49,6 +49,8 @@ import { SessionPicker } from "../components/navigation/session-picker.js";
 import { StatusBar } from "../components/conversation/status-bar.js";
 import { SkillWizard } from "../components/wizards/skill-wizard.js";
 import { MemorySurface } from "../components/screens/memory-surface.js";
+import { PlanQuestionsSurface, PlanReviewSurface } from "../components/screens/plan-surface.js";
+import { GoalConfirmationSurface, GoalStatusSurface } from "../components/screens/goal-surface.js";
 import { HighlightedCommand, RichOutput } from "../rendering/rich-text.js";
 import { TUI_COLORS } from "../rendering/palette.js";
 import { truncateEnd } from "../rendering/text-width.js";
@@ -58,6 +60,9 @@ import type {
   TuiDependencies,
 } from "./types.js";
 import type { LearnedMemoryStatus, LearnedScope } from "../../memory/learned-memory.js";
+import type { AgentMode, PlanRequest, PlanReviewDecision, SubmittedPlan } from "../../plan/runtime.js";
+import { GoalRuntime, parseGoalCommand } from "../../goal/runtime.js";
+import type { SessionGoal } from "../../storage/session-store.js";
 
 type View =
   | { kind: "outputs" }
@@ -66,6 +71,10 @@ type View =
   | { kind: "permissions" }
   | { kind: "skills" }
   | { kind: "memory"; status: LearnedMemoryStatus }
+  | { kind: "plan-questions"; request: PlanRequest; complete(answers: Record<string, string>): void; cancel(): void }
+  | { kind: "plan-review"; submitted: SubmittedPlan; decide(decision: PlanReviewDecision): void }
+  | { kind: "goal-confirm"; objective: string; tokenBudget?: number; confirm(): void; cancel(): void }
+  | { kind: "goal-status"; goal?: SessionGoal }
   | { kind: "chat" }
   | { kind: "login" }
   | {
@@ -93,7 +102,7 @@ type View =
 type CommandView = Exclude<View, { kind: "chat" }>;
 
 interface PendingConfirmation {
-  kind: "bash" | "web" | "mcp";
+  kind: "bash" | "web" | "mcp" | "goal";
   request: string;
   resolve(accepted: boolean): void;
 }
@@ -288,6 +297,8 @@ export function EverpeaceApp({
     createEmptySessionUsage(),
   );
   const [activeModel, setActiveModel] = useState(firstActiveModel);
+  const [agentMode, setAgentMode] = useState<AgentMode>("default");
+  const [activeGoal, setActiveGoal] = useState<SessionGoal>();
   const [workspacePath, setWorkspacePath] = useState(dependencies.workspacePath);
   const [view, setView] = useState<View>(() => initialView(initialModels.available));
   const [busyLabel, setBusyLabel] = useState<string>();
@@ -308,7 +319,8 @@ export function EverpeaceApp({
   const directController = useRef<AbortController | undefined>(undefined);
   const commandInput = useRef<((input: string) => void) | undefined>(undefined);
   const queuedGuidance = useRef<QueuedGuidance[]>([]);
-  const runChatRef = useRef<((text: string, timelineRecorded?: boolean) => Promise<void>) | undefined>(undefined);
+  const resumeGoalPending = useRef(false);
+  const runChatRef = useRef<((text: string, timelineRecorded?: boolean, mode?: AgentMode) => Promise<void>) | undefined>(undefined);
   useEffect(() => {
     let active = true;
     void dependencies.inputHistory?.load().then((entries) => { if (active) setInputHistory((current) => [...entries, ...current].slice(-1000)); }).catch(() => undefined);
@@ -452,6 +464,8 @@ export function EverpeaceApp({
           ? "Web request rejected"
           : pending?.kind === "mcp"
             ? "MCP tool call rejected"
+            : pending?.kind === "goal"
+              ? "Goal change rejected"
             : "Shell command rejected";
         append("system", pending?.kind === "mcp" ? label : `${label}: ${pending?.request ?? "unknown request"}`);
       }
@@ -492,6 +506,47 @@ export function EverpeaceApp({
     },
     [],
   );
+
+  const requestGoalConfirmation = useCallback(
+    (request: string): Promise<boolean> => new Promise((resolve) => {
+      const pending = { kind: "goal" as const, request, resolve };
+      confirmationRef.current = pending;
+      setConfirmation(pending);
+    }),
+    [],
+  );
+
+  const requestPlanInput = useCallback((request: PlanRequest, signal?: AbortSignal): Promise<Record<string, string>> => (
+    new Promise((resolve) => {
+      let finished = false;
+      const finish = (answers: Record<string, string>) => {
+        if (finished) return;
+        finished = true;
+        signal?.removeEventListener("abort", cancel);
+        returnToChat();
+        resolve(answers);
+      };
+      const cancel = () => finish({ __cancelled: "true" });
+      signal?.addEventListener("abort", cancel, { once: true });
+      enterCommandView({ kind: "plan-questions", request, complete: finish, cancel });
+    })
+  ), [enterCommandView, returnToChat]);
+
+  const reviewPlan = useCallback((submitted: SubmittedPlan, signal?: AbortSignal): Promise<PlanReviewDecision> => (
+    new Promise((resolve) => {
+      let finished = false;
+      const decide = (decision: PlanReviewDecision) => {
+        if (finished) return;
+        finished = true;
+        signal?.removeEventListener("abort", cancel);
+        returnToChat();
+        resolve(decision);
+      };
+      const cancel = () => decide("cancel");
+      signal?.addEventListener("abort", cancel, { once: true });
+      enterCommandView({ kind: "plan-review", submitted, decide });
+    })
+  ), [enterCommandView, returnToChat]);
 
   const executeBash = useCallback(
     async (command: string, signal?: AbortSignal): Promise<BashResult> => {
@@ -552,6 +607,19 @@ export function EverpeaceApp({
       confirmBash: requestBashConfirmation,
       confirmWeb: requestWebConfirmation,
       confirmMcp: requestMcpConfirmation,
+      confirmGoal: requestGoalConfirmation,
+      requestPlanInput,
+      reviewPlan,
+      async getGoal() {
+        const sessionId = activeSessionId.current;
+        return sessionId ? (await dependencies.sessionStore.load(sessionId)).goal : undefined;
+      },
+      async setGoal(goal) {
+        const sessionId = activeSessionId.current;
+        if (!sessionId) throw new Error("Goals require an active session");
+        await dependencies.sessionStore.setGoal(sessionId, goal);
+        setActiveGoal(goal);
+      },
       runBash: executeBash,
       writeAssistant(text) {
         setLiveAssistant("");
@@ -578,7 +646,7 @@ export function EverpeaceApp({
         }
       },
     }),
-    [append, executeBash, requestBashConfirmation, requestMcpConfirmation, requestWebConfirmation],
+    [append, dependencies.sessionStore, executeBash, requestBashConfirmation, requestGoalConfirmation, requestMcpConfirmation, requestPlanInput, requestWebConfirmation, reviewPlan],
   );
 
   const agent = useMemo(
@@ -905,6 +973,7 @@ export function EverpeaceApp({
         activeSessionId.current = loaded.summary.id;
         sessionTitlePending.current = loaded.summary.title_pending;
         nextId.current = restoredTimeline.length;
+        resumeGoalPending.current = loaded.goal?.status === "active";
         onReplayOutput(() => {
           setTimeline(restoredTimeline);
           setResumedInputHistory(loaded.timeline.flatMap((entry) => {
@@ -922,6 +991,8 @@ export function EverpeaceApp({
               : { ...loaded.usage },
           );
           setActiveModel(model);
+          setAgentMode("default");
+          setActiveGoal(loaded.goal);
           setWorkspacePath(restoredWorkspace);
           setSessionEpoch((current) => current + 1);
           setInputKey((current) => current + 1);
@@ -1074,6 +1145,7 @@ export function EverpeaceApp({
       abortController.current?.abort();
       activeSessionId.current = session.id;
       sessionTitlePending.current = true;
+      resumeGoalPending.current = false;
       nextId.current = 2;
       onReplayOutput(() => {
         setTimeline([
@@ -1083,6 +1155,8 @@ export function EverpeaceApp({
         setTimelineEpoch((current) => current + 1);
         setSessionContext([]);
         setSessionUsage(createEmptySessionUsage());
+        setAgentMode("default");
+        setActiveGoal(undefined);
         setResumedInputHistory(undefined);
         historyNavigationRef.current = { index: undefined, draft: "" };
         setSessionEpoch((current) => current + 1);
@@ -1110,6 +1184,9 @@ export function EverpeaceApp({
     sessionTitlePending.current = false;
     setSessionContext([]);
     setSessionUsage(createEmptySessionUsage());
+    resumeGoalPending.current = false;
+    setAgentMode("default");
+    setActiveGoal(undefined);
     const banner: TimelineEntry = {
       id: nextId.current++,
       kind: "banner",
@@ -1124,6 +1201,78 @@ export function EverpeaceApp({
       setSessionEpoch((current) => current + 1);
     });
   }, [activeModel, clearQueuedGuidance, onReplayOutput]);
+
+  const runtimeForGoal = useCallback((sessionId: string) => new GoalRuntime({
+    getGoal: async () => (await dependencies.sessionStore.load(sessionId)).goal,
+    setGoal: async (goal) => {
+      await dependencies.sessionStore.setGoal(sessionId, goal);
+      setActiveGoal(goal);
+    },
+  }), [dependencies.sessionStore]);
+
+  const showGoalStatus = useCallback(async () => {
+    const sessionId = activeSessionId.current;
+    const goal = sessionId ? (await dependencies.sessionStore.load(sessionId)).goal : undefined;
+    setActiveGoal(goal);
+    enterCommandView({ kind: "goal-status", ...(goal ? { goal } : {}) });
+  }, [dependencies.sessionStore, enterCommandView]);
+
+  const pauseGoal = useCallback(() => {
+    const sessionId = activeSessionId.current;
+    if (!sessionId) { void showGoalStatus(); return; }
+    void runtimeForGoal(sessionId).update("paused").then((goal) => {
+      setActiveGoal(goal);
+      returnToChat(() => appendTransient("system", "Goal paused."));
+    }).catch((error: unknown) => openInfo("/goal · Could not pause", error instanceof Error ? error.message : String(error), "error"));
+  }, [appendTransient, openInfo, returnToChat, runtimeForGoal, showGoalStatus]);
+
+  const resumeGoal = useCallback(() => {
+    const sessionId = activeSessionId.current;
+    if (!sessionId) { void showGoalStatus(); return; }
+    void runtimeForGoal(sessionId).resume().then((goal) => {
+      setActiveGoal(goal);
+      returnToChat(() => appendTransient("system", "Goal resumed."));
+      setTimeout(() => void runChatRef.current?.("Continue working toward the active session goal. Call get_goal first, then proceed until the objective is verified complete.", true, "default"), 0);
+    }).catch((error: unknown) => openInfo("/goal · Could not resume", error instanceof Error ? error.message : String(error), "error"));
+  }, [appendTransient, openInfo, returnToChat, runtimeForGoal, showGoalStatus]);
+
+  const createGoal = useCallback(async (objective: string, tokenBudget?: number) => {
+    if (!activeModel) {
+      openInfo("/goal · Cannot create", "No model is active. Use /login or /model first.", "error");
+      return;
+    }
+    let sessionId = activeSessionId.current;
+    if (!sessionId) {
+      const session = await dependencies.sessionStore.create({ title: fallbackSessionTitle(objective), titlePending: false, workspacePath, model: toSessionModel(activeModel) });
+      sessionId = session.id;
+      activeSessionId.current = sessionId;
+      sessionTitlePending.current = false;
+      startTitleGeneration(sessionId, activeModel, objective);
+    }
+    const goal = await runtimeForGoal(sessionId).create({ objective, ...(tokenBudget === undefined ? {} : { tokenBudget }) });
+    setAgentMode("default");
+    returnToChat(() => appendTransient("system", "Goal created; continuing until it is complete, paused, blocked, or limited."));
+    setTimeout(() => void runChatRef.current?.(objective, false, "default"), 0);
+    setActiveGoal(goal);
+  }, [activeModel, appendTransient, dependencies.sessionStore, openInfo, returnToChat, runtimeForGoal, startTitleGeneration, workspacePath]);
+
+  const handleGoal = useCallback((args: string) => {
+    try {
+      const command = parseGoalCommand(args);
+      if (command.action === "status") { void showGoalStatus(); return; }
+      if (command.action === "pause") { pauseGoal(); return; }
+      if (command.action === "resume") { resumeGoal(); return; }
+      if (command.action !== "create") return;
+      enterCommandView({
+        kind: "goal-confirm", objective: command.objective,
+        ...(command.tokenBudget === undefined ? {} : { tokenBudget: command.tokenBudget }),
+        confirm: () => void createGoal(command.objective, command.tokenBudget).catch((error: unknown) => openInfo("/goal · Could not create", error instanceof Error ? error.message : String(error), "error")),
+        cancel: returnToChat,
+      });
+    } catch (error) {
+      openInfo("/goal · Invalid command", error instanceof Error ? error.message : String(error), "error");
+    }
+  }, [createGoal, enterCommandView, openInfo, pauseGoal, resumeGoal, returnToChat, showGoalStatus]);
 
   const showStatus = useCallback(() => {
     const metadata = activeModel
@@ -1154,7 +1303,7 @@ export function EverpeaceApp({
   ]);
 
   const runChat = useCallback(
-    async (text: string, timelineRecorded = false) => {
+    async (text: string, timelineRecorded = false, mode: AgentMode = agentMode) => {
       if (abortController.current || directController.current) return;
       if (!agent || !activeModel) {
         append("error", "No model is active. Use /login or /model first.");
@@ -1211,10 +1360,49 @@ export function EverpeaceApp({
       setBusyLabel(`Waiting for ${waitingTarget}`);
       setLiveAssistant("");
       setLiveToolStatus(undefined);
+      let approvedPlan = false;
       try {
-        await agent.runTurn(text, controller.signal);
+        let nextText = text;
+        let nextMode = mode;
+        while (true) {
+          const started = Date.now();
+          const result = await agent.runTurn(nextText, controller.signal, { mode: nextMode }) ?? {};
+          if (result.planDecision === "approve") {
+            approvedPlan = true;
+            setAgentMode("default");
+            break;
+          }
+          if (result.planDecision === "cancel") {
+            setAgentMode("default");
+            appendTransient("system", "Plan mode cancelled.");
+            break;
+          }
+          if (nextMode === "plan") break;
+          const sessionId = activeSessionId.current;
+          if (!sessionId) break;
+          let goal = (await dependencies.sessionStore.load(sessionId)).goal;
+          if (goal) {
+            await dependencies.sessionStore.updateGoal(sessionId, { time_used_seconds: goal.time_used_seconds + (Date.now() - started) / 1000 });
+            goal = (await dependencies.sessionStore.load(sessionId)).goal;
+            setActiveGoal(goal);
+          }
+          if (goal?.status !== "active") break;
+          nextText = "Continue working toward the active session goal. Call get_goal, make concrete progress, verify the result, and update the goal when complete or genuinely blocked.";
+          nextMode = "default";
+          setLiveAssistant("");
+          setLiveToolStatus("Continuing active goal");
+        }
       } catch (error) {
         if (controller.signal.aborted) {
+          const sessionId = activeSessionId.current;
+          if (mode === "default" && sessionId) {
+            const goal = (await dependencies.sessionStore.load(sessionId).catch(() => undefined))?.goal;
+            if (goal?.status === "active") {
+              const paused = { ...goal, status: "paused" as const, updated_at: new Date().toISOString() };
+              await dependencies.sessionStore.setGoal(sessionId, paused).catch(() => undefined);
+              setActiveGoal(paused);
+            }
+          }
           append("system", "Model request cancelled.");
         } else {
           append("error", `Model request failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -1231,6 +1419,10 @@ export function EverpeaceApp({
           setQueuedGuidanceCount(0);
         }
         if (ownsController) {
+          if (approvedPlan) {
+            queueMicrotask(() => void runChatRef.current?.("The user approved the immediately preceding plan. Implement it now and verify the result.", true, "default"));
+            return;
+          }
           const next = queuedGuidance.current.shift();
           setQueuedGuidanceCount(queuedGuidance.current.length);
           if (next) {
@@ -1241,7 +1433,7 @@ export function EverpeaceApp({
         }
       }
     },
-    [activeModel, agent, append, clearQueuedGuidance, dependencies.sessionStore, startTitleGeneration, workspacePath],
+    [activeModel, agent, agentMode, append, appendTransient, clearQueuedGuidance, dependencies.sessionStore, startTitleGeneration, workspacePath],
   );
 
   useEffect(() => {
@@ -1250,6 +1442,12 @@ export function EverpeaceApp({
       if (runChatRef.current === runChat) runChatRef.current = undefined;
     };
   }, [runChat]);
+
+  useEffect(() => {
+    if (!resumeGoalPending.current || activeGoal?.status !== "active" || !agent) return;
+    resumeGoalPending.current = false;
+    queueMicrotask(() => void runChatRef.current?.("Continue working toward the restored active session goal. Call get_goal first and proceed until the objective is verified complete.", true, "default"));
+  }, [activeGoal, agent, sessionEpoch]);
 
   const runDirectBash = useCallback(
     async (command: string) => {
@@ -1298,7 +1496,7 @@ export function EverpeaceApp({
 
       if (parsed.kind === "chat") {
         if (abortController.current) queueGuidance(parsed.text);
-        else void runChat(parsed.text);
+        else void runChat(parsed.text, false, agentMode);
         return;
       }
       if (parsed.kind === "bash") {
@@ -1333,6 +1531,20 @@ export function EverpeaceApp({
         else if (args.toLowerCase() === "view") void showMemoryPrompt();
         else void showMemory();
       }
+      if (parsed.command === "/plan") {
+        const args = parsed.args?.trim() ?? "";
+        if (args.toLowerCase() === "exit") {
+          setAgentMode("default");
+          appendTransient("system", "Plan mode disabled.");
+        } else if (!args) {
+          setAgentMode("plan");
+          appendTransient("system", "Plan mode enabled. The agent can inspect and plan, but cannot use mutating tools.");
+        } else {
+          setAgentMode("plan");
+          void runChat(args, false, "plan");
+        }
+      }
+      if (parsed.command === "/goal") handleGoal(parsed.args?.trim() ?? "");
       if (parsed.command === "/outputs") enterCommandView({ kind: "outputs" });
       if (parsed.command === "/history") enterCommandView({ kind: "input-history" });
       if (parsed.command === "/terminal-setup") enterCommandView({ kind: "terminal-setup" });
@@ -1349,10 +1561,12 @@ export function EverpeaceApp({
       enterCommandView,
       exit,
       appendTransient,
+      agentMode,
       openLogout,
       openModelPicker,
       openResume,
       openInfo,
+      handleGoal,
       rememberMemory,
       showMemory,
       showMemoryPrompt,
@@ -1522,6 +1736,19 @@ export function EverpeaceApp({
             onToggle={toggleMemory}
             onClear={clearMemory}
           />
+        ) : view.kind === "plan-questions" ? (
+          <PlanQuestionsSurface request={view.request} onComplete={view.complete} onCancel={view.cancel} />
+        ) : view.kind === "plan-review" ? (
+          <PlanReviewSurface submitted={view.submitted} onDecision={view.decide} />
+        ) : view.kind === "goal-confirm" ? (
+          <GoalConfirmationSurface
+            objective={view.objective}
+            {...(view.tokenBudget === undefined ? {} : { tokenBudget: view.tokenBudget })}
+            onConfirm={view.confirm}
+            onCancel={view.cancel}
+          />
+        ) : view.kind === "goal-status" ? (
+          <GoalStatusSurface {...(view.goal ? { goal: view.goal } : {})} onPause={pauseGoal} onResume={resumeGoal} onBack={returnToChat} />
         ) : view.kind === "login" ? (
           <LoginWizard
             dependencies={dependencies}
@@ -1684,6 +1911,8 @@ export function EverpeaceApp({
       <StatusBar
         modelName={activeModel?.model_name}
         workspacePath={workspacePath}
+        mode={agentMode}
+        {...(activeGoal ? { goalStatus: activeGoal.status } : {})}
       />
     </Box>
   );

@@ -35,6 +35,12 @@ Git Skill 来源采用 shallow、no-checkout 克隆：先读取有界 Git tree �
 - 新 Agent 实例只在第一次模型请求前读取一次 learned 快照；刚写入的经验不反灌当前 prompt。注入内容被包裹为不可信背景，当前用户指令、工具结果和仓库状态优先。
 - Markdown 条目包含 Lesson 和 Apply when，写入/读取两侧均做秘密脱敏、提示标签中和、去重及 100 条上限。`/memory` 的 UI 操作是 transient，不进入 timeline、Session JSONL 或模型 context。
 
+## Plan 与 Goal
+
+- `/plan` 是进程内严格规划模式，不写计划文件；只暴露 read/list、web、Skill read、`request_user_input` 和 `submit_plan`，从工具列表层面阻止 Bash/MCP。启用网页工具时，Plan 的公共 web 请求按只读联网能力免逐次确认；关闭网页工具仍然拒绝请求，普通聊天继续遵循当前权限档位。结构化问题和最终计划均经 transient picker/review，用户批准后在同一 Session 切回 Default 执行。
+- `/goal` 绑定原 Session，以 `goal_updated` JSONL 事件保存最新快照，旧 Session 文件缺少该事件时按无目标兼容读取。目标恢复只发生在用户 `/resume` 原 Session 后，不扫描其他 Session 自动运行；`/new` 和 `/clear` 不继承目标。
+- Goal 工具按 Codex 语义提供 `get_goal`、`create_goal`、`update_goal`；只有显式目标创建、用户确认的暂停/恢复，以及真实完成或连续三轮同一阻塞才改变状态。连续阻塞计数写入 goal 快照，跨 Agent 重建和 Session 恢复不丢失。token budget 只在用户显式指定时启用，缺失 usage 不伪造 token。
+
 ## Status 与 usage
 
 - `/status` 生成结构化独立命令窗口；窗口与聊天根视图互斥，隐藏 `History`、Prompt 和全局状态栏。Esc 同步清屏并从内存重放原 Session，窗口不进入 `Static` timeline、session JSONL 或 Responses context。

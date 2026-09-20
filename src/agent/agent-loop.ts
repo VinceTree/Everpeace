@@ -36,7 +36,7 @@ export class LoopSteeredError extends Error {
 export interface AgentLoopOptions {
   sample(): Promise<LoopResponse>;
   record(items: readonly Record<string, unknown>[]): Promise<void>;
-  dispatch(call: ToolCall): Promise<string>;
+  dispatch(call: ToolCall): Promise<string | { output: string; stop?: boolean }>;
   assistant(text: string): void;
   signal?: AbortSignal;
   onPhase?(phase: LoopPhase): void;
@@ -116,15 +116,18 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
       }
       if (response.output_text.trim()) options.assistant(response.output_text.trim());
       if (calls.length) options.onPhase?.("tools");
+      let stopAfterTools = false;
       for (let callIndex = 0; callIndex < calls.length; callIndex++) {
         const call = calls[callIndex]!;
         options.onEvent?.({ type: "tool_started", call: call as ToolCall });
         let output: string;
         try {
           signal?.throwIfAborted();
-          output = typeof call.name === "string" && typeof call.arguments === "string"
+          const result = typeof call.name === "string" && typeof call.arguments === "string"
             ? await options.dispatch(call as ToolCall)
             : JSON.stringify({ status: "error", error: "Invalid tool call fields" });
+          output = typeof result === "string" ? result : result.output;
+          stopAfterTools = typeof result === "object" && result.stop === true;
         } catch (error) {
           output = JSON.stringify(signal?.aborted
             ? { status: "cancelled" }
@@ -133,6 +136,12 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
         // Checkpoint each result; a later interrupted tool cannot erase it.
         await options.record([{ type: "function_call_output", call_id: call.call_id, output }]);
         options.onEvent?.({ type: "tool_finished", call: call as ToolCall, output });
+        if (stopAfterTools) {
+          for (const skipped of calls.slice(callIndex + 1)) {
+            await options.record([{ type: "function_call_output", call_id: skipped.call_id, output: JSON.stringify({ status: "skipped" }) }]);
+          }
+          break;
+        }
         const steeringCount = await options.applySteering?.() ?? 0;
         if (steeringCount > 0) {
           for (const skipped of calls.slice(callIndex + 1)) {
@@ -143,6 +152,10 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
         }
       }
       signal?.throwIfAborted();
+      if (stopAfterTools) {
+        options.onPhase?.("completed");
+        return;
+      }
       const needsFollowUp = calls.length > 0 || response.end_turn === false;
       if (!needsFollowUp) {
         options.onPhase?.("completed");

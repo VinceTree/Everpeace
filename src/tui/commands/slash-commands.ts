@@ -8,6 +8,8 @@ export const SLASH_COMMANDS = [
   "/mcp",
   "/skills",
   "/memory",
+  "/plan",
+  "/goal",
   "/new",
   "/resume",
   "/logout",
@@ -69,6 +71,8 @@ export const TUI_HELP = `Slash commands
   /mcp     Refresh and inspect Codex MCP servers and tools
   /skills  Create, install, inspect, and use local skills
   /memory  View and manage learned experience
+  /plan    Enter strict planning mode or plan a request
+  /goal    Create, inspect, pause, or resume a session goal
   /new     Create and enter a new session
   /resume  Find and resume a local session
   /logout  Remove models and system credentials

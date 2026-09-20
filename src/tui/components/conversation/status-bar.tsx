@@ -5,9 +5,12 @@ import React from "react";
 export interface StatusBarProps {
   modelName: string | undefined;
   workspacePath: string;
+  mode?: "default" | "plan";
+  goalStatus?: string;
 }
 
-export function StatusBar({ modelName, workspacePath }: StatusBarProps) {
+export function StatusBar({ modelName, workspacePath, mode = "default", goalStatus }: StatusBarProps) {
+  const prefix = [mode === "plan" ? "Plan" : undefined, goalStatus ? `Goal: ${goalStatus}` : undefined].filter(Boolean).join(" · ");
   return (
     <Box
       width="100%"
@@ -16,7 +19,7 @@ export function StatusBar({ modelName, workspacePath }: StatusBarProps) {
       justifyContent="space-between"
     >
       <Text color={modelName ? "green" : "yellow"} wrap="truncate-end">
-        {modelName ?? "No model selected"}
+        {[prefix, modelName ?? "No model selected"].filter(Boolean).join(" · ")}
       </Text>
       <Text dimColor wrap="truncate-middle">
         {workspacePath}

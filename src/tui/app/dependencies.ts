@@ -29,6 +29,7 @@ import {
   LearnedMemoryRuntime,
   LearnedMemoryStore,
 } from "../../memory/learned-memory.js";
+import { GoalRuntime } from "../../goal/runtime.js";
 
 const require = createRequire(import.meta.url);
 const packageJson = require("../../../package.json") as { version?: unknown };
@@ -119,6 +120,12 @@ export function createDefaultTuiDependencies(
         client,
         model: model.model_name,
       });
+      const goalRuntime = io.getGoal && io.setGoal
+        ? new GoalRuntime({ getGoal: io.getGoal, setGoal: io.setGoal })
+        : undefined;
+      const planInteraction = io.requestPlanInput && io.reviewPlan
+        ? { requestInput: io.requestPlanInput, reviewPlan: io.reviewPlan }
+        : undefined;
       return new ReactAgent({
         workspacePath: process.cwd(),
         client,
@@ -127,6 +134,8 @@ export function createDefaultTuiDependencies(
         mcp,
         skills,
         learnedMemory,
+        ...(goalRuntime ? { goalRuntime } : {}),
+        ...(planInteraction ? { planInteraction } : {}),
         ...(restore?.initialContext === undefined
           ? {}
           : { initialHistory: restore.initialContext }),

@@ -7,6 +7,7 @@ import {
   defaultSessionDirectory,
   SessionStore,
   type SessionModelRef,
+  type SessionGoal,
 } from "../../../src/storage/session-store.js";
 
 const model: SessionModelRef = {
@@ -81,6 +82,26 @@ test("session store round-trips timeline, context, title, and model changes", as
 
     await fixture.store.selectModel(created.id, model, false);
     assert.deepEqual((await fixture.store.load(created.id)).context, []);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("session store round-trips a goal and preserves it in the session summary", async () => {
+  const fixture = await createFixture();
+  try {
+    const created = await fixture.store.create({ title: "goal", titlePending: false, workspacePath: "C:\\repo", model });
+    const goal: SessionGoal = {
+      goal_id: "goal-1", objective: "Ship it", status: "active", token_budget: 100,
+      tokens_used: 20, usage_complete: true, time_used_seconds: 3,
+      created_at: "2026-09-16T00:00:00.000Z", updated_at: "2026-09-16T00:00:00.000Z",
+    };
+    await fixture.store.setGoal(created.id, goal);
+    await fixture.store.updateGoal(created.id, { status: "complete", tokens_used: 40 });
+    const loaded = await fixture.store.load(created.id);
+    assert.equal(loaded.goal?.status, "complete");
+    assert.equal(loaded.goal?.tokens_used, 40);
+    assert.equal((await fixture.store.list()).sessions[0]?.goal?.goal_id, "goal-1");
   } finally {
     await fixture.cleanup();
   }
