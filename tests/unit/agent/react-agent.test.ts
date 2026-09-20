@@ -30,6 +30,124 @@ test("agent rejects overlapping turns and releases the guard after cancellation"
   await agent.runTurn("next");
 });
 
+test("agent uses the native compaction output as the next context window", async () => {
+  const createInputs: Array<Array<Record<string, unknown>>> = [];
+  let compactInput: Array<Record<string, unknown>> | undefined;
+  let saved: Array<Record<string, unknown>> = [];
+  const compacted = [
+    { type: "message", role: "user", content: "retained" },
+    { type: "compaction", encrypted_content: "opaque" },
+  ];
+  const agent = new ReactAgent({
+    model: "test",
+    initialHistory: [{ role: "user", content: "old context" }],
+    client: {
+      responses: {
+        async compact(params) {
+          compactInput = params.input as Array<Record<string, unknown>>;
+          return {
+            output: compacted,
+            usage: { input_tokens: 90, output_tokens: 10, total_tokens: 100 },
+          };
+        },
+        async create(params) {
+          createInputs.push(params.input as Array<Record<string, unknown>>);
+          return { id: "done", output_text: "finished", output: [] };
+        },
+      },
+    },
+    io: { async confirmBash() { return true; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+    async onContextCompacted(items, automatic, usage) {
+      assert.equal(automatic, false);
+      assert.deepEqual(items, compacted);
+      assert.deepEqual(usage, { input_tokens: 90, output_tokens: 10, total_tokens: 100 });
+      saved = items.map((item) => ({ ...item }));
+    },
+  });
+
+  const result = await agent.compact();
+  assert.deepEqual(result.items, compacted);
+  assert.deepEqual(compactInput, [{ role: "user", content: "old context" }]);
+  await agent.runTurn("next question");
+  assert.deepEqual(saved, compacted);
+  assert.ok(createInputs[0]?.some((item) => item.type === "compaction"));
+  assert.ok(createInputs[0]?.some((item) => item.role === "user" && item.content === "next question"));
+  assert.ok(!createInputs[0]?.some((item) => item.content === "old context"));
+});
+
+test("automatic compaction runs at the known context threshold before sampling", async () => {
+  const calls: string[] = [];
+  const inputs: Array<Array<Record<string, unknown>>> = [];
+  const agent = new ReactAgent({
+    model: "test",
+    contextWindow: 100,
+    client: {
+      responses: {
+        async compact(params) {
+          calls.push("compact");
+          assert.ok((params.input as Array<Record<string, unknown>>).some((item) => item.content === "second"));
+          return {
+            output: [{ type: "compaction", encrypted_content: "opaque" }],
+            usage: { input_tokens: 70, output_tokens: 5, total_tokens: 75 },
+          };
+        },
+        async create(params) {
+          calls.push("create");
+          inputs.push(params.input as Array<Record<string, unknown>>);
+          if (calls.filter((call) => call === "create").length === 1) {
+            return {
+              id: "first",
+              output_text: "first answer",
+              output: [],
+              usage: { input_tokens: 80, output_tokens: 10, total_tokens: 90 },
+            };
+          }
+          return { id: "second", output_text: "second answer", output: [] };
+        },
+      },
+    },
+    io: { async confirmBash() { return true; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+
+  await agent.runTurn("first");
+  await agent.runTurn("second");
+  assert.deepEqual(calls, ["create", "compact", "create"]);
+  assert.equal(inputs[1]?.[0]?.type, "compaction");
+});
+
+test("compaction failures do not enter the ordinary sampling retry loop", async () => {
+  let compactCalls = 0;
+  let createCalls = 0;
+  const agent = new ReactAgent({
+    model: "test",
+    contextWindow: 100,
+    client: {
+      responses: {
+        async compact() {
+          compactCalls += 1;
+          const error = new Error("compact unavailable") as Error & { status?: number };
+          error.status = 500;
+          throw error;
+        },
+        async create() {
+          createCalls += 1;
+          return {
+            id: `response-${createCalls}`,
+            output_text: "done",
+            output: [],
+            usage: { input_tokens: 80, output_tokens: 10, total_tokens: 90 },
+          };
+        },
+      },
+    },
+    io: { async confirmBash() { return true; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+  await agent.runTurn("first");
+  await assert.rejects(agent.runTurn("second"), /compact unavailable/);
+  assert.equal(compactCalls, 1);
+  assert.equal(createCalls, 1);
+});
+
 test("resumed missing outputs and thrown tool executors cannot poison subsequent requests", async () => {
   let requests = 0;
   const persisted: Record<string, unknown>[] = [];

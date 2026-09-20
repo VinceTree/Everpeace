@@ -113,6 +113,12 @@ export function createDefaultTuiDependencies(
               options as never,
             ) as unknown as ResponseStreamLike;
           },
+          compact(params, options) {
+            return providerClient.responses.compact(
+              params as never,
+              options as never,
+            ) as never;
+          },
         },
       };
       const learnedMemory = new LearnedMemoryRuntime({
@@ -142,6 +148,15 @@ export function createDefaultTuiDependencies(
         ...(restore?.onContextAppend === undefined
           ? {}
           : { onHistoryAppend: restore.onContextAppend }),
+        ...(restore?.onContextCompacted === undefined
+          ? {}
+          : { onContextCompacted: restore.onContextCompacted }),
+        ...(restore?.contextWindow === undefined
+          ? {}
+          : { contextWindow: restore.contextWindow }),
+        ...(restore?.initialContextTokens === undefined
+          ? {}
+          : { initialContextTokens: restore.initialContextTokens }),
         ...(restore?.onUsage === undefined
           ? {}
           : { onUsage: restore.onUsage }),

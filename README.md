@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.2.5) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.6) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -127,6 +127,7 @@ TUI commands:
 - `/memory`: View learned experience, pause/resume automatic capture, inspect the injected snapshot with `/memory view`, clear project or user entries, or run `/memory remember <preference>` to save a lasting user preference.
 - `/plan`: Enter strict read-only planning mode, answer structured strategy questions, and approve a plan before execution.
 - `/goal <objective> [--tokens N]`: Create, inspect, pause, resume, and automatically continue a persistent session goal.
+- `/compact`: Replace the model context with the provider's native compacted context while keeping the full visible transcript and session history. It rejects while a model turn or direct command is active; known context windows also compact automatically at 80% usage before the next model request.
 - `/outputs`: Browse retained command output with paged details, highlighted commands, and unified-diff rendering.
 - `/history`: Browse or explicitly clear global input history (not sessions).
 - `/terminal-setup`: Preview and optionally configure Shift+Enter in stable Windows Terminal; confirmation creates a settings backup before applying a global key binding.

@@ -1,5 +1,9 @@
 # Architecture Decisions
 
+## Context compaction
+
+`/compact` 和自动压缩都调用供应商原生 Responses `/responses/compact`，不生成本地摘要。原始输出必须原样保留为新的模型 context，包括供应商的 retained items 与 opaque compaction item；可见 transcript 和既有 JSONL timeline 不裁剪。压缩成功后以 `context_compacted` 事件原子替换 context，并把压缩 usage 累计进 session token 统计；手动命令在模型轮次或直接命令运行时拒绝，已知 context window 达到 80% 时在下一次采样前自动触发，未知 window 不自动触发。
+
 
 ## 有界历史显示
 

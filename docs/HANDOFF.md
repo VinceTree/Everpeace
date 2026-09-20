@@ -2,7 +2,14 @@
 
 ## 最新修复：Banner 長安司矩对齐
 
-状态快照：2026-09-20。参考 `question/image.png` 保留金色双线框与“長安 · 司矩”样式，并改用终端单元格宽度计算左右留白；中文双宽字符现在在框内视觉居中。新增 Banner 回归，确认左右留白只差一个单元格。展示号同步升至 `0.2.5`；本次提交使用 `[skip ci]`，不创建 tag 或 GitHub Release。
+状态快照：2026-09-20。参考 `question/image.png` 保留金色双线框与“長安 · 司矩”样式，并改用终端单元格宽度计算左右留白；中文双宽字符现在在框内视觉居中。新增 Banner 回归，确认左右留白只差一个单元格。展示号同步升至 `0.2.6`；本批次随 `main` 推送触发自动发布流程。
+
+## 最新功能：Context compaction
+
+状态快照：2026-09-20。已加入 `/compact` 和自动 context 压缩：两者调用供应商原生 Responses `/responses/compact`，不做本地摘要回退；压缩返回的完整 context window 原样进入后续模型请求，完整可见 transcript 和旧 JSONL timeline 保持不变。压缩事件以 `context_compacted` 持久化，并计入 session 累计 token usage。
+
+- 已知模型 context window 达到 80% 时，在下一次采样前自动压缩；未知 window 不自动触发。手动 `/compact` 只接受无参数命令，模型轮次或直接 `!` 命令运行时明确拒绝，Esc 可取消正在进行的压缩。
+- 新增 Agent compaction lifecycle、上下文替换回调、TUI transient loading/info、原生 provider client 映射、SessionStore schema 兼容解析及 Agent/Session/TUI/slash command 回归；当前完整 `pnpm test` 为 203/203，`pnpm typecheck`、`pnpm build` 和 `git diff --check` 通过。
 
 ## 最新功能：Plan 与 Goal
 

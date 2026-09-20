@@ -2,6 +2,12 @@
 
 ## Plan 与 Goal
 
+## Context compaction
+
+已加入 Codex 风格的 `/compact`：手动命令调用供应商原生 Responses `/responses/compact`，将其返回的完整 context window 原样作为后续模型输入；可见 transcript 与旧 JSONL timeline 不删除。压缩事件持久化为 `context_compacted`，并按普通模型请求累计 input/output/total token usage。
+
+已知模型 context window 达到 80% 时，Agent 会在所有工具结果持久化后的下一次采样前自动压缩；未知 window 不自动触发。模型轮次或直接命令运行期间拒绝手动压缩，Esc/取消会中止请求。供应商不支持原生压缩时明确报错，不执行本地摘要回退。
+
 已加入 Codex 风格的严格 `/plan` 和持久化 `/goal`：Plan 模式只开放工作区读取、网页、Skill 读取及结构化问题/计划审批工具，禁止 Bash/MCP 等副作用；网页开关开启时，Plan 的公共 web 请求不要求逐次确认，关闭网页工具仍拒绝访问。`/plan` 可持续进入规划模式，`/plan <需求>` 直接开始，批准后回到 Default 并在同一 Session 执行。Goal 绑定创建它的 Session，使用 `get_goal`、`create_goal`、`update_goal` 工具及 JSONL goal 事件保存状态；`/goal <目标> [--tokens N]` 确认后立即运行，active goal 每轮自动续跑，恢复原 Session 后继续，支持 complete/blocked/paused/budget_limited/usage_limited 状态。
 
 

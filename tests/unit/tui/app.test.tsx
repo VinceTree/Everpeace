@@ -144,6 +144,12 @@ function createMemorySessionStore(): MemorySessionStore {
       session.context.push(...items.map((item) => ({ ...item })));
       session.summary.updated_at = timestamp();
     },
+    async compactContext(sessionId, items, _automatic, usage) {
+      const session = requireSession(sessionId);
+      session.context = items.map((item) => ({ ...item }));
+      session.usage = applyUsageSample(session.usage, usage);
+      session.summary.updated_at = timestamp();
+    },
     async appendUsage(sessionId, usage: TokenUsageSample | null) {
       const session = requireSession(sessionId);
       session.usage = applyUsageSample(session.usage, usage);
@@ -337,6 +343,53 @@ test("TUI accepts chat and renders the assistant response", async () => {
   const topBorders = frameLines.filter((line) => line.startsWith("╭"));
   assert.deepEqual(topBorders.map((line) => line.length), [60]);
   view.unmount();
+});
+
+test("/compact replaces persisted model context without removing the visible transcript", async () => {
+  const model: RegisteredModel = {
+    id: "compact-model",
+    model_name: "test-model",
+    base_url: "https://example.com/v1",
+    api_key: "secret",
+  };
+  const fixture = createFixture({
+    initial: [model],
+    createAgent: (_model, io, restore) => ({
+      async runTurn(input) {
+        await restore?.onContextAppend?.([{ role: "user", content: input }]);
+        io.writeAssistant("visible answer");
+      },
+      async compact() {
+        const items = [{ type: "compaction", encrypted_content: "opaque" }];
+        await restore?.onContextCompacted?.(items, false, { input_tokens: 20, output_tokens: 2, total_tokens: 22 });
+        return { items, usage: { input_tokens: 20, output_tokens: 2, total_tokens: 22 } };
+      },
+    }),
+  });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+  try {
+    await tick();
+    view.stdin.write("keep this transcript");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("visible answer"));
+    view.stdin.write("/compact");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("full transcript remains available"));
+    const session = [...fixture.sessionStore.sessions.values()][0];
+    assert.ok(session);
+    assert.deepEqual(session.context, [{ type: "compaction", encrypted_content: "opaque" }]);
+    assert.match(view.lastFrame() ?? "", /keep this transcript/u);
+  } finally {
+    view.unmount();
+  }
 });
 
 test("history below the Codex row cap stays visible and remains persisted", async () => {

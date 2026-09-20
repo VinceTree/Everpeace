@@ -90,6 +90,7 @@ type View =
       title: string;
       label: string;
       cancellable: boolean;
+      onCancel?: () => void;
     }
   | {
       kind: "info";
@@ -415,6 +416,7 @@ export function EverpeaceApp({
     label: string,
     enterFromChat = true,
     cancellable = true,
+    onCancel?: () => void,
   ): number => {
     const operation = ++commandOperation.current;
     const nextView: CommandView = {
@@ -422,6 +424,7 @@ export function EverpeaceApp({
       title,
       label,
       cancellable,
+      ...(onCancel ? { onCancel } : {}),
     };
     if (enterFromChat) {
       onReplayOutput(() => setView(nextView));
@@ -649,17 +652,28 @@ export function EverpeaceApp({
     [append, dependencies.sessionStore, executeBash, requestBashConfirmation, requestGoalConfirmation, requestMcpConfirmation, requestPlanInput, requestWebConfirmation, reviewPlan],
   );
 
+  const contextWindow = activeModel
+    ? resolveModelStatusMetadata(activeModel.base_url, activeModel.model_name).context_window
+    : null;
   const agent = useMemo(
     () =>
       activeModel === undefined
         ? undefined
         : dependencies.createAgent(activeModel, agentIo, {
             initialContext: sessionContext,
+            contextWindow,
+            initialContextTokens: sessionUsage.context_tokens,
             async onContextAppend(items) {
               const sessionId = activeSessionId.current;
               if (sessionId !== undefined) {
                 await dependencies.sessionStore.appendContext(sessionId, items);
               }
+            },
+            async onContextCompacted(items, automatic, usage) {
+              const sessionId = activeSessionId.current;
+              if (sessionId === undefined) throw new Error("Context compaction requires an active session");
+              await dependencies.sessionStore.compactContext(sessionId, items, automatic, usage);
+              setSessionUsage((current) => applyUsageSample(current, usage));
             },
             async onUsage(usage) {
               setSessionUsage((current) => applyUsageSample(current, usage));
@@ -686,10 +700,14 @@ export function EverpeaceApp({
                 setLiveToolStatus(`Preparing ${event.call.name}`);
               } else if (event.type === "tool_finished") {
                 setLiveToolStatus(`${event.call.name} finished`);
+              } else if (event.type === "compaction_started") {
+                setLiveToolStatus(event.automatic ? "Compacting context automatically" : "Compacting context");
+              } else if (event.type === "compaction_completed") {
+                setLiveToolStatus("Context compacted");
               }
             },
           }),
-    [activeModel, agentIo, dependencies, sessionContext, sessionEpoch],
+    [activeModel, agentIo, contextWindow, dependencies, sessionContext, sessionEpoch],
   );
 
   const activateModel = useCallback(
@@ -1302,6 +1320,53 @@ export function EverpeaceApp({
     workspacePath,
   ]);
 
+  const runCompact = useCallback((args: string) => {
+    if (args.trim()) {
+      openInfo("/compact · Invalid command", "Use /compact without arguments.", "error");
+      return;
+    }
+    if (abortController.current || directController.current) {
+      openInfo("/compact · Busy", "A model turn or direct command is active. Wait for it to finish before compacting context.", "error");
+      return;
+    }
+    if (!activeModel) {
+      openInfo("/compact · Cannot compact", "No model is active. Use /login or /model first.", "error");
+      return;
+    }
+    if (!activeSessionId.current) {
+      openInfo("/compact · Nothing to compact", "There is no active session context to compact.", "error");
+      return;
+    }
+    if (!agent?.compact) {
+      openInfo("/compact · Unsupported", "The active provider does not support Responses context compaction.", "error");
+      return;
+    }
+    const controller = new AbortController();
+    const operation = startCommandLoad(
+      "/compact · Compacting context",
+      "Compacting context",
+      true,
+      true,
+      () => {
+        controller.abort();
+        returnToChat();
+      },
+    );
+    void agent.compact(controller.signal)
+      .then(() => {
+        if (!isCurrentCommandOperation(operation)) return;
+        returnToChat(() => appendTransient("system", "Context compacted; the full transcript remains available."));
+      })
+      .catch((error: unknown) => {
+        if (!isCurrentCommandOperation(operation) || controller.signal.aborted) return;
+        replaceCommandView(infoView(
+          "/compact · Could not compact",
+          error instanceof Error ? error.message : String(error),
+          "error",
+        ));
+      });
+  }, [activeModel, agent, appendTransient, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad]);
+
   const runChat = useCallback(
     async (text: string, timelineRecorded = false, mode: AgentMode = agentMode) => {
       if (abortController.current || directController.current) return;
@@ -1520,6 +1585,7 @@ export function EverpeaceApp({
       if (parsed.command === "/model") void openModelPicker();
       if (parsed.command === "/models") void showModels();
       if (parsed.command === "/status") showStatus();
+      if (parsed.command === "/compact") runCompact(parsed.args ?? "");
       if (parsed.command === "/permissions") enterCommandView({ kind: "permissions" });
       if (parsed.command === "/mcp") void showMcp();
       if (parsed.command === "/skills") enterCommandView({ kind: "skills" });
@@ -1577,6 +1643,7 @@ export function EverpeaceApp({
       showModels,
       showMcp,
       showStatus,
+      runCompact,
     ],
   );
 
@@ -1801,7 +1868,7 @@ export function EverpeaceApp({
           <CommandLoadingSurface
             title={view.title}
             label={view.label}
-            {...(view.cancellable ? { onBack: returnToChat } : {})}
+            {...(view.cancellable ? { onBack: view.onCancel ?? returnToChat } : {})}
           />
         ) : view.kind === "info" ? (
           <CommandInfoSurface

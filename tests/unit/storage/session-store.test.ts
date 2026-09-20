@@ -87,6 +87,31 @@ test("session store round-trips timeline, context, title, and model changes", as
   }
 });
 
+test("session store replaces model context on compaction and counts its usage", async () => {
+  const fixture = await createFixture();
+  try {
+    const created = await fixture.store.create({ title: "compact", titlePending: false, workspacePath: "C:\\repo", model });
+    await fixture.store.appendContext(created.id, [{ role: "user", content: "old" }]);
+    await fixture.store.appendUsage(created.id, { input_tokens: 10, output_tokens: 2, total_tokens: 12 });
+    await fixture.store.compactContext(
+      created.id,
+      [{ type: "compaction", encrypted_content: "opaque" }],
+      true,
+      { input_tokens: 80, output_tokens: 8, total_tokens: 88 },
+    );
+    const loaded = await fixture.store.load(created.id);
+    assert.deepEqual(loaded.context, [{ type: "compaction", encrypted_content: "opaque" }]);
+    assert.deepEqual(loaded.usage, {
+      input_tokens: 90,
+      output_tokens: 10,
+      context_tokens: 88,
+      complete: true,
+    });
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("session store round-trips a goal and preserves it in the session summary", async () => {
   const fixture = await createFixture();
   try {

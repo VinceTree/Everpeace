@@ -100,6 +100,12 @@ export interface SessionStoreLike {
     sessionId: string,
     items: readonly Record<string, unknown>[],
   ): Promise<void>;
+  compactContext(
+    sessionId: string,
+    items: readonly Record<string, unknown>[],
+    automatic: boolean,
+    usage: TokenUsageSample | null,
+  ): Promise<void>;
   appendUsage(
     sessionId: string,
     usage: TokenUsageSample | null,
@@ -145,6 +151,13 @@ interface ContextAppendEvent extends EventBase {
   items: Array<Record<string, unknown>>;
 }
 
+interface ContextCompactedEvent extends EventBase {
+  type: "context_compacted";
+  items: Array<Record<string, unknown>>;
+  automatic: boolean;
+  usage: TokenUsageSample | null;
+}
+
 interface ModelSelectedEvent extends EventBase {
   type: "model_selected";
   model: SessionModelRef;
@@ -166,6 +179,7 @@ type SessionEvent =
   | TitleUpdatedEvent
   | TimelineEntryEvent
   | ContextAppendEvent
+  | ContextCompactedEvent
   | ModelSelectedEvent
   | UsageRecordedEvent
   | GoalUpdatedEvent;
@@ -285,6 +299,24 @@ function parseEvent(value: unknown): SessionEvent {
     return { ...base, type: "context_append", items: value.items };
   }
 
+  if (value.type === "context_compacted") {
+    if (
+      !Array.isArray(value.items) ||
+      !value.items.every(isRecord) ||
+      typeof value.automatic !== "boolean" ||
+      (value.usage !== null && !isTokenUsageSample(value.usage))
+    ) {
+      throw new Error("Session compaction event is invalid");
+    }
+    return {
+      ...base,
+      type: "context_compacted",
+      items: value.items,
+      automatic: value.automatic,
+      usage: value.usage,
+    };
+  }
+
   if (value.type === "model_selected") {
     if (!isModelRef(value.model) || typeof value.preserve_context !== "boolean") {
       throw new Error("Session model event is invalid");
@@ -367,6 +399,10 @@ function parseSession(contents: string, filePath: string): LoadedSession {
     }
     if (event.type === "timeline_entry") timeline.push(event.entry);
     if (event.type === "context_append") context.push(...event.items);
+    if (event.type === "context_compacted") {
+      context = event.items.map((item) => ({ ...item }));
+      usage = applyUsageSample(usage, event.usage);
+    }
     if (event.type === "model_selected") {
       model = event.model;
       if (!event.preserve_context) context = [];
@@ -486,6 +522,22 @@ export class SessionStore implements SessionStoreLike {
       type: "context_append",
       at: this.#now().toISOString(),
       items: items.map((item) => ({ ...item })),
+    });
+  }
+
+  compactContext(
+    sessionId: string,
+    items: readonly Record<string, unknown>[],
+    automatic: boolean,
+    usage: TokenUsageSample | null,
+  ): Promise<void> {
+    return this.#append(sessionId, {
+      version: SESSION_FORMAT_VERSION,
+      type: "context_compacted",
+      at: this.#now().toISOString(),
+      items: items.map((item) => ({ ...item })),
+      automatic,
+      usage: usage === null ? null : { ...usage },
     });
   }
 

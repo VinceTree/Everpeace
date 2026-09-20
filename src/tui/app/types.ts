@@ -24,12 +24,16 @@ import type { AgentTurnOptions, AgentTurnResult } from "../../agent/react-agent.
 
 export interface AgentSession {
   runTurn(userInput: string, signal?: AbortSignal, options?: AgentTurnOptions): Promise<AgentTurnResult>;
+  compact?(signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>>; usage: TokenUsageSample | null }>;
   requestSteering?(text: string): boolean;
 }
 
 export interface AgentRestoreOptions {
   initialContext?: readonly Record<string, unknown>[];
   onContextAppend?(items: readonly Record<string, unknown>[]): Promise<void>;
+  onContextCompacted?(items: readonly Record<string, unknown>[], automatic: boolean, usage: TokenUsageSample | null): Promise<void>;
+  contextWindow?: number | null;
+  initialContextTokens?: number | null;
   onUsage?(usage: TokenUsageSample | null): Promise<void>;
   onPhase?(phase: LoopPhase): void;
   onEvent?(event: LoopEvent): void;

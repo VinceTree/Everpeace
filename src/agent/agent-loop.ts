@@ -2,6 +2,7 @@
 // Upstream revision and differences: docs/architecture/AGENT_LOOP.md.
 // Copyright 2025 OpenAI. Licensed under Apache-2.0; see third_party/codex/LICENSE.
 import { setTimeout as delay } from "node:timers/promises";
+import type { TokenUsageSample } from "../status/model-status.js";
 export interface LoopResponse {
   output: Array<Record<string, unknown>>;
   output_text: string;
@@ -24,7 +25,9 @@ export type LoopEvent =
   | { type: "tool_started"; call: ToolCall }
   | { type: "tool_finished"; call: ToolCall; output: string }
   | { type: "steering_applied"; count: number }
-  | { type: "retrying"; attempt: number; delayMs: number };
+  | { type: "retrying"; attempt: number; delayMs: number }
+  | { type: "compaction_started"; automatic: boolean }
+  | { type: "compaction_completed"; automatic: boolean; usage: TokenUsageSample | null };
 
 export class LoopSteeredError extends Error {
   constructor() {
@@ -49,6 +52,7 @@ export interface AgentLoopOptions {
 function retryable(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const { status, name } = error as { status?: unknown; name?: unknown };
+  if (name === "ContextCompactionError") return false;
   return status === 408 || status === 409 || status === 429 ||
     (typeof status === "number" && status >= 500 && status <= 599) ||
     name === "APIConnectionError" || name === "APIConnectionTimeoutError";

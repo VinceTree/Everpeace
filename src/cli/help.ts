@@ -17,6 +17,7 @@ Commands inside the agent:
   /skills                   Create, install, inspect, and use local skills
   /plan                     Enter strict planning mode or plan a request
   /goal                     Create, inspect, pause, or resume a session goal
+  /compact                  Compact the model context
   /new                      Create and enter a new session
   /resume                   List and resume local sessions
   /logout                   Remove models and credentials

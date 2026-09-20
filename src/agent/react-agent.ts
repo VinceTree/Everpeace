@@ -61,7 +61,14 @@ export interface ResponsesClientLike {
     create(
       params: Record<string, unknown>,
       options?: { signal?: AbortSignal; maxRetries?: number },
-      ): Promise<AgentResponse>;
+    ): Promise<AgentResponse>;
+    compact?(
+      params: Record<string, unknown>,
+      options?: { signal?: AbortSignal; maxRetries?: number },
+    ): Promise<{
+      output: Array<Record<string, unknown>>;
+      usage?: TokenUsageSample | null;
+    }>;
     stream?(
       params: Record<string, unknown>,
       options?: { signal?: AbortSignal; maxRetries?: number },
@@ -104,7 +111,14 @@ export interface ReactAgentOptions {
   planInteraction?: PlanInteraction;
   goalRuntime?: GoalRuntime;
   initialHistory?: readonly Record<string, unknown>[];
+  contextWindow?: number | null;
+  initialContextTokens?: number | null;
   onHistoryAppend?(items: readonly Record<string, unknown>[]): Promise<void>;
+  onContextCompacted?(
+    items: readonly Record<string, unknown>[],
+    automatic: boolean,
+    usage: TokenUsageSample | null,
+  ): Promise<void>;
   onUsage?(usage: TokenUsageSample | null): Promise<void>;
 }
 
@@ -115,6 +129,18 @@ export interface AgentTurnOptions {
 export interface AgentTurnResult {
   planDecision?: PlanReviewDecision;
   approvedPlan?: string;
+}
+
+export interface ContextCompactionResult {
+  items: Array<Record<string, unknown>>;
+  usage: TokenUsageSample | null;
+}
+
+class ContextCompactionError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "ContextCompactionError";
+  }
 }
 
 const INSTRUCTIONS = `You are Everpeace, a concise, helpful general-purpose agent with strong coding abilities.
@@ -144,6 +170,9 @@ export class ReactAgent {
   readonly #onHistoryAppend:
     | ((items: readonly Record<string, unknown>[]) => Promise<void>)
     | undefined;
+  readonly #onContextCompacted:
+    | ((items: readonly Record<string, unknown>[], automatic: boolean, usage: TokenUsageSample | null) => Promise<void>)
+    | undefined;
   readonly #onUsage:
     | ((usage: TokenUsageSample | null) => Promise<void>)
     | undefined;
@@ -158,6 +187,9 @@ export class ReactAgent {
   #turnMode: AgentMode = "default";
   #turnResult: AgentTurnResult = {};
   #goalPrompt = "";
+  #contextWindow: number | null;
+  #contextTokens: number | null;
+  #compacting = false;
 
   constructor(options: ReactAgentOptions) {
     this.#onPhase = options.onPhase;
@@ -174,7 +206,15 @@ export class ReactAgent {
     this.#goalRuntime = options.goalRuntime;
     this.#history = repairToolContext(options.initialHistory ?? []);
     this.#onHistoryAppend = options.onHistoryAppend;
+    this.#onContextCompacted = options.onContextCompacted;
     this.#onUsage = options.onUsage;
+    this.#contextWindow = options.contextWindow ?? null;
+    this.#contextTokens = options.initialContextTokens ?? null;
+  }
+
+  async compact(signal?: AbortSignal): Promise<ContextCompactionResult> {
+    if (this.#running) throw new Error("Cannot compact while an agent turn is running");
+    return this.#compactContext(false, signal);
   }
 
   async runTurn(userInput: string, signal?: AbortSignal, options: AgentTurnOptions = {}): Promise<AgentTurnResult> {
@@ -195,7 +235,10 @@ export class ReactAgent {
       this.#history = repairToolContext(this.#history);
       await this.#record([{ role: "user", content: userInput }]);
       await runAgentLoop({
-        sample: () => this.#requestResponse([...this.#history], signal),
+        sample: async () => {
+          await this.#maybeAutoCompact(signal);
+          return this.#requestResponse([...this.#history], signal);
+        },
         record: (items) => this.#record(items),
         dispatch: (call) => this.#dispatchTool(call, signal),
         assistant: (text) => {
@@ -430,10 +473,10 @@ export class ReactAgent {
       if (this.#sampleController === controller) this.#sampleController = undefined;
     }
     signal?.throwIfAborted();
+    const usage = isTokenUsageSample(response.usage) ? response.usage : null;
+    this.#contextTokens = usage?.total_tokens ?? null;
     if (this.#onUsage) {
-      await this.#onUsage(
-        isTokenUsageSample(response.usage) ? response.usage : null,
-      );
+      await this.#onUsage(usage);
     }
     if (this.#goalRuntime) {
       const current = await this.#goalRuntime.get();
@@ -443,6 +486,54 @@ export class ReactAgent {
       }
     }
     return response;
+  }
+
+  async #maybeAutoCompact(signal?: AbortSignal): Promise<void> {
+    if (
+      this.#compacting ||
+      this.#contextWindow === null ||
+      this.#contextTokens === null ||
+      this.#contextTokens < Math.floor(this.#contextWindow * 0.8)
+    ) return;
+    await this.#compactContext(true, signal);
+  }
+
+  async #compactContext(
+    automatic: boolean,
+    signal?: AbortSignal,
+  ): Promise<ContextCompactionResult> {
+    if (this.#compacting) throw new Error("Context compaction is already running");
+    if (this.#history.length === 0) throw new Error("There is no conversation context to compact");
+    const compact = this.#client.responses.compact;
+    if (!compact) throw new Error("This provider does not support Responses context compaction");
+    this.#compacting = true;
+    this.#onEvent?.({ type: "compaction_started", automatic });
+    try {
+      const response = await compact(
+        { model: this.#model, input: repairToolContext(this.#history) },
+        { maxRetries: 0, ...(signal ? { signal } : {}) },
+      );
+      if (!Array.isArray(response.output) || !response.output.every((item) => item && typeof item === "object" && !Array.isArray(item))) {
+        throw new Error("The compaction response returned an invalid context window");
+      }
+      const items = response.output.map((item) => ({ ...item }));
+      const usage = isTokenUsageSample(response.usage) ? response.usage : null;
+      await this.#onContextCompacted?.(items, automatic, usage);
+      this.#history = items;
+      this.#contextTokens = usage?.total_tokens ?? null;
+      const result = { items, usage };
+      this.#onEvent?.({ type: "compaction_completed", automatic, usage });
+      return result;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      if (error instanceof ContextCompactionError) throw error;
+      throw new ContextCompactionError(
+        error instanceof Error ? error.message : String(error),
+        { cause: error },
+      );
+    } finally {
+      this.#compacting = false;
+    }
   }
 
   async #createResponse(

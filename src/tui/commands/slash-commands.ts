@@ -10,6 +10,7 @@ export const SLASH_COMMANDS = [
   "/memory",
   "/plan",
   "/goal",
+  "/compact",
   "/new",
   "/resume",
   "/logout",
@@ -73,6 +74,7 @@ export const TUI_HELP = `Slash commands
   /memory  View and manage learned experience
   /plan    Enter strict planning mode or plan a request
   /goal    Create, inspect, pause, or resume a session goal
+  /compact Compact the model context
   /new     Create and enter a new session
   /resume  Find and resume a local session
   /logout  Remove models and system credentials
