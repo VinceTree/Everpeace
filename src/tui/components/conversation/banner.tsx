@@ -2,6 +2,7 @@ import { Box, Text, useWindowSize } from "ink";
 import React from "react";
 import {
   padEndToWidth,
+  textWidth,
   truncateEnd,
   truncateMiddle,
 } from "../../rendering/text-width.js";
@@ -10,6 +11,8 @@ const CYAN = "#4EC9B0";
 const GOLD = "#D4AF37";
 const JADE = "#2AA198";
 const SESSION_CARD_MAX_INNER_WIDTH = 56;
+const BRAND_CARD_INNER_WIDTH = 18;
+const BRAND_TITLE = "長安 · 司矩";
 
 interface SessionCard {
   top: string;
@@ -17,6 +20,19 @@ interface SessionCard {
   directory: string;
   bottom: string;
   width: number;
+}
+
+export function createBrandCard(): [string, string, string] {
+  const remainingWidth = BRAND_CARD_INNER_WIDTH - textWidth(BRAND_TITLE);
+  const leftPadding = Math.floor(remainingWidth / 2);
+  const rightPadding = remainingWidth - leftPadding;
+  const horizontal = "═".repeat(BRAND_CARD_INNER_WIDTH);
+
+  return [
+    `╔${horizontal}╗`,
+    `║${" ".repeat(leftPadding)}${BRAND_TITLE}${" ".repeat(rightPadding)}║`,
+    `╚${horizontal}╝`,
+  ];
 }
 
 export function createSessionCard(
@@ -67,6 +83,7 @@ export function Banner({ version, modelName, workspacePath }: BannerProps) {
   const { columns } = useWindowSize();
   const wide = columns >= 88;
   const sessionCard = createSessionCard(columns, modelName, workspacePath);
+  const brandCard = createBrandCard();
 
   return (
     <Box width="100%" flexDirection="column" marginBottom={1}>
@@ -75,13 +92,11 @@ export function Banner({ version, modelName, workspacePath }: BannerProps) {
           <Text color={CYAN}>{`░█▀▀░█░█░█▀▀░█▀▄░█▀█░█▀▀░█▀█░█▀▀░█▀▀
 ░█▀▀░▀▄▀░█▀▀░█▀▄░█▀▀░█▀▀░█▀█░█░░░█▀▀
 ░▀▀▀░░▀░░▀▀▀░▀░▀░▀░░░▀▀▀░▀░▀░▀▀▀░▀▀▀`}</Text>
-          <Text color={GOLD}>{`╔══════════════════╗
-║ 长安 · 司矩      ║
-╚══════════════════╝`}</Text>
+          <Text color={GOLD}>{brandCard.join("\n")}</Text>
         </Box>
       ) : (
         <Text bold color={CYAN}>
-          EVERPEACE <Text color={GOLD}>· 长安 · 司矩</Text>
+          EVERPEACE <Text color={GOLD}>· 長安 · 司矩</Text>
         </Text>
       )}
 

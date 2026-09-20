@@ -1,12 +1,16 @@
 # Session Handoff
 
+## 最新修复：Banner 長安司矩对齐
+
+状态快照：2026-09-20。参考 `question/image.png` 保留金色双线框与“長安 · 司矩”样式，并改用终端单元格宽度计算左右留白；中文双宽字符现在在框内视觉居中。新增 Banner 回归，确认左右留白只差一个单元格。展示号同步升至 `0.2.5`；本次提交使用 `[skip ci]`，不创建 tag 或 GitHub Release。
+
 ## 最新功能：Plan 与 Goal
 
 状态快照：2026-09-20。已加入严格只读 `/plan` 和绑定 Session 的持久化 `/goal`。`/plan` 支持持续模式、`/plan <需求>`、结构化策略问题、Other 自定义答案、计划 review 和批准后同一 Session 执行；Plan 工具列表不包含 Bash/MCP，启用 web 时公共联网请求不逐次确认。`/goal <目标> [--tokens N]` 确认后立即运行，目标通过 `goal_updated` JSONL 事件持久化，恢复原 Session 后 active goal 自动继续，支持 pause/resume/complete/blocked/budget_limited/usage_limited。
 
 - 新增 `src/plan/runtime.ts`、`src/goal/runtime.ts` 和 Plan/Goal transient surfaces；Agent loop 支持工具结果持久化后安全结束当前轮。
 - 新增 Goal session schema、lifecycle、跨 Agent 重建仍有效的 blocker streak、Plan 参数边界、Plan mode tool allowlist 回归；现有 TUI/Agent/Session 行为保持兼容。
-- 当前验证：完整 `pnpm test` 198/198、`pnpm typecheck`、`pnpm build` 和 `git diff --check` 通过；测试仍会出现既有的 Ink resize listener `MaxListenersExceededWarning`，不影响结果。
+- 当前验证：完整 `pnpm test` 199/199、`pnpm typecheck`、`pnpm build` 和 `git diff --check` 通过；测试仍会出现既有的 Ink resize listener `MaxListenersExceededWarning`，不影响结果。
 
 ## 最新修复：workspace-write 联网审批
 
