@@ -17,7 +17,7 @@ Codex uses platform-native enforcement: Seatbelt on macOS, bubblewrap/seccomp wi
 | `/permissions` | Shared centered inline command window; Esc returns to the same conversation |
 | `read-only` | Workspace file reads are allowed; model shell asks, then runs under Codex `:read-only`; built-in web and MCP ask separately |
 | `ask` | Every model shell, built-in web, and MCP call asks; approved shell uses Codex `:workspace` |
-| `workspace-write`, default | Model shell runs under Codex `:workspace` without per-command approval; web and MCP still ask |
+| `workspace-write`, default | Model shell runs under Codex `:workspace` without per-command approval; enabled public web tools run without per-request approval; MCP still asks |
 | `full-access` | Second explicit confirmation selects `:danger-full-access` and skips tool approvals |
 | Files | `read_file` and `list_directory`, workspace-only in every mode |
 | Web | Independent enable/disable setting for built-in web tools; public-address checks retained |
@@ -25,7 +25,7 @@ Codex uses platform-native enforcement: Seatbelt on macOS, bubblewrap/seccomp wi
 | Direct `!` | Explicit user PTY command, unchanged, outside model sandbox and model context |
 | Lifetime | Process-local; retained across new/clear/resume, reset on restart |
 
-Plan mode is a read-only planning exception: when web tools remain enabled, `web_search` and `web_fetch` can run without a per-request approval prompt so the agent can research the plan. Disabling web still denies those calls, and normal chat keeps the profile's ordinary web approval behavior.
+Plan mode is a read-only planning exception: when web tools remain enabled, `web_search` and `web_fetch` can run without a per-request approval prompt so the agent can research the plan. This matches the normal `workspace-write` web behavior; `read-only` and `ask` still require approval outside Plan mode. Disabling web still denies those calls.
 
 Permission changes do not rebuild the agent or lose context. Every tool call checks current policy; each model request includes it. Permissions are not restored from project files, model output, or JSONL, so resuming cannot silently restore elevated authority. No JSONL schema change.
 

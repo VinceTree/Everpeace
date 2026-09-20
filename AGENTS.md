@@ -15,7 +15,7 @@
 - Everpeace 是 Node.js 22+、TypeScript、ESM 项目，使用 `pnpm@10.22.0`。
 - CLI/TUI 入口位于 `src/cli/`；界面使用 React + Ink，并保持 inline terminal 模式。
 - Agent 是 Responses API 驱动的 ReAct 循环，支持按权限 profile 审批模型 shell、网页搜索、公共网页读取和 MCP tools，并按需加载 Codex 主机 Skills。
-- `/permissions` 管理进程内审批策略：`read-only` 允许工作区读取但对模型 shell/web/MCP 逐条审批，`ask` 对三者逐条审批，默认 `workspace-write` 免逐条 shell 审批但普通聊天的 web/MCP 仍需审批，`full-access` 经二次确认后免工具审批；Plan 模式把已开启的公共 web 请求视为只读调研并免逐次 web 确认，关闭网页工具仍拒绝请求。网页工具可独立禁用。模型 shell 分别进入固定 `@openai/codex` CLI 的 `:read-only`、`:workspace` 或 `:danger-full-access` profile，失败时不得回退宿主直跑；直接 `!` 不进 sandbox。仍不得声称等同于 Codex Auto 或完整 Codex runtime。
+- `/permissions` 管理进程内审批策略：`read-only` 允许工作区读取但对模型 shell/web/MCP 逐条审批，`ask` 对三者逐条审批，默认 `workspace-write` 免逐条 shell 和已开启公共 web 审批但 MCP 仍需审批，`full-access` 经二次确认后免工具审批；Plan 模式把已开启的公共 web 请求视为只读调研并免逐次 web 确认，关闭网页工具仍拒绝请求。网页工具可独立禁用。模型 shell 分别进入固定 `@openai/codex` CLI 的 `:read-only`、`:workspace` 或 `:danger-full-access` profile，失败时不得回退宿主直跑；直接 `!` 不进 sandbox。仍不得声称等同于 Codex Auto 或完整 Codex runtime。
 - MCP 从 `codex mcp` 配置加载 stdio/Streamable HTTP tools；`/mcp` 刷新状态。Skills 扫描项目/用户/admin/system 根，显式 `$name` 只作用当前轮，隐式匹配通过 `read_skill` 渐进读取；同名冲突不得进入 catalog 或按名称读取。`/skills` 提供 AI 创建单文件 Skill、手动编辑、公开 HTTPS URL 暂存/预览/确认安装、已安装内容查看及 `$name` 回填；Git 来源先 no-checkout clone 并检查有界 tree，同名镜像清单优先保留规范 `skills/<name>` 目录，100 个候选限制在名称去重后执行，只 sparse checkout 已校验的候选目录。项目目标为仓库根 `.agents/skills`，用户目标为 `$CODEX_HOME/skills`，不得覆盖既有名称。完整支持范围和限制见 `docs/architecture/CODEX_CAPABILITIES.md`。
 - `read_file`、`list_directory` 始终限定当前工作目录。权限不从 JSONL 恢复，切换权限不得重建 Agent 或丢失 context；直接 `!` 仍由用户主动执行。对标与安全限制见 `docs/architecture/PERMISSIONS.md`。
 - 支持官方供应商和兼容端点；模型名称必须保留供应商返回的官方 model ID。

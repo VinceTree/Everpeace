@@ -6,7 +6,14 @@
 
 - 新增 `src/plan/runtime.ts`、`src/goal/runtime.ts` 和 Plan/Goal transient surfaces；Agent loop 支持工具结果持久化后安全结束当前轮。
 - 新增 Goal session schema、lifecycle、跨 Agent 重建仍有效的 blocker streak、Plan 参数边界、Plan mode tool allowlist 回归；现有 TUI/Agent/Session 行为保持兼容。
-- 当前验证：完整 `pnpm test` 197/197、`pnpm typecheck`、`pnpm build` 和 `git diff --check` 通过；测试仍会出现既有的 Ink resize listener `MaxListenersExceededWarning`，不影响结果。
+- 当前验证：完整 `pnpm test` 198/198、`pnpm typecheck`、`pnpm build` 和 `git diff --check` 通过；测试仍会出现既有的 Ink resize listener `MaxListenersExceededWarning`，不影响结果。
+
+## 最新修复：workspace-write 联网审批
+
+状态快照：2026-09-20。修复权限策略错误：默认 `workspace-write` 开启网页工具时，`web_search` 和 `web_fetch` 现在直接执行，不再逐次弹出网页确认；`read-only`、`ask` 仍逐次审批，`full-access` 保持免审批，关闭网页工具仍拒绝联网请求。MCP 不受影响，继续使用独立审批。
+
+- `webPermission()` 将 `workspace-write` 映射为 `allow`，并更新权限选择器、Agent 动态权限说明和中英文用户文档。
+- 新增权限策略与普通 Agent 回归，确认 workspace-write 搜索网页不会调用 `confirmWeb`。
 
 ## 最新功能：Learned 经验记忆
 

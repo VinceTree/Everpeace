@@ -453,7 +453,7 @@ test("agent progressively loads matching skills and injects explicit skill instr
   assert.match(JSON.stringify(requests[1]?.input), /skill body/u);
 });
 
-test("agent searches the web without requesting Bash confirmation", async () => {
+test("workspace-write searches the web without per-request confirmation", async () => {
   const requests: Array<Record<string, unknown>> = [];
   const toolActivity: string[] = [];
   const webApprovals: string[] = [];
@@ -523,7 +523,7 @@ test("agent searches the web without requesting Bash confirmation", async () => 
   await agent.runTurn("What is the latest TypeScript release?");
 
   assert.deepEqual(toolActivity, ["Searching the web: latest TypeScript release"]);
-  assert.deepEqual(webApprovals, ["search"]);
+  assert.deepEqual(webApprovals, []);
   const tools = requests[0]?.tools as Array<Record<string, unknown>>;
   assert.deepEqual(tools.map((tool) => tool.name), [
     "bash",

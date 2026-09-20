@@ -56,7 +56,7 @@ Codex sandbox、MCP 与 Skills 接入：模型 shell 通过固定版本 Codex CL
 - [ ] 真实 Windows Terminal 手动验收键位、复制、缩放、resize 和带凭据模型的完整流程。
 
 - [x] 应用层 ask/read-only/full-access 模式，完全访问二次确认，网页工具独立开关。
-- [x] Codex 风格 workspace-write 默认档位；read-only/ask 对模型 shell 和网页请求逐项审批，MCP 使用独立审批面。
+- [x] Codex 风格 workspace-write 默认档位；read-only/ask 对模型 shell 和网页请求逐项审批，workspace-write 的已开启公共网页工具免逐次确认，MCP 使用独立审批面。
 - [x] `read_file` / `list_directory` 路径校验、内容上限、结构化失败返回。
 - [x] 权限独立窗口；切换不清空 context、不向 JSONL 写入授权。
 - [x] 模型 shell 映射 Codex `:read-only`、`:workspace`、`:danger-full-access`，sandbox 不可用时失败关闭；直接 `!` 保持原生 PTY。

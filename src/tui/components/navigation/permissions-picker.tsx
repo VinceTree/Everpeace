@@ -25,7 +25,7 @@ export function PermissionsPicker({ policy, workspace, onChange, onBack }: {
         options={[
           { label: "Read only: sandboxed reads; approve Bash, web, MCP", value: "read-only" },
           { label: "Ask for approval: review every Bash, web, MCP call", value: "ask" },
-          { label: "Workspace write: sandboxed edits; web/MCP ask (Plan web auto)", value: "workspace-write" },
+          { label: "Workspace write: sandboxed edits; web allowed; MCP asks", value: "workspace-write" },
           { label: "Full access: no tool approvals", value: "full-access" },
           { label: policy.web ? "Disable web tools" : "Enable web tools", value: "web" },
         ]}

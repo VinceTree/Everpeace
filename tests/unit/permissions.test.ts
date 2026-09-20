@@ -12,7 +12,7 @@ test("workspace-write is the friction-free current-workspace default", () => {
   const policy = defaultPermissions();
   assert.deepEqual(policy, { mode: "workspace-write", web: true });
   assert.equal(bashPermission(policy), "allow");
-  assert.equal(webPermission(policy), "ask");
+  assert.equal(webPermission(policy), "allow");
   assert.equal(mcpPermission(policy), "ask");
   assert.equal(codexSandboxProfile(policy), ":workspace");
 });
@@ -30,6 +30,10 @@ test("read-only and ask profiles gate Bash and web requests", () => {
     assert.equal(bashPermission(policy), "ask");
     assert.equal(webPermission(policy), "ask");
   }
+});
+
+test("workspace-write allows enabled public web tools without per-request approval", () => {
+  assert.equal(webPermission({ mode: "workspace-write", web: true }), "allow");
 });
 
 test("disabling web always wins over the selected profile", () => {

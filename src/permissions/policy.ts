@@ -22,7 +22,7 @@ export function bashPermission(policy: PermissionPolicy): "deny" | "ask" | "allo
 
 export function webPermission(policy: PermissionPolicy): "deny" | "ask" | "allow" {
   if (!policy.web) return "deny";
-  return policy.mode === "full-access" ? "allow" : "ask";
+  return policy.mode === "workspace-write" || policy.mode === "full-access" ? "allow" : "ask";
 }
 
 export function mcpPermission(policy: PermissionPolicy): "ask" | "allow" {

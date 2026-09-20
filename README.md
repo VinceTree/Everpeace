@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.2.3) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.4) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -154,11 +154,11 @@ Behavior notes:
 
 - The core turn loop adapts Codex's sampling/tool/follow-up flow in TypeScript, with per-tool result persistence, cancellable request retries, and overlapping-turn protection. It is not the complete Codex runtime; see [source mapping and scope](docs/architecture/AGENT_LOOP.md).
 
-- Permission profiles keep sandbox scope separate from approvals: `read-only` asks before model shell, web, and MCP calls and uses Codex `:read-only`; `ask` asks before each call and uses `:workspace` after shell approval; `workspace-write` runs model shell in `:workspace` without per-command prompts while web and MCP ask outside Plan mode; `full-access` selects `:danger-full-access` after a second explicit confirmation.
+- Permission profiles keep sandbox scope separate from approvals: `read-only` asks before model shell, web, and MCP calls and uses Codex `:read-only`; `ask` asks before each call and uses `:workspace` after shell approval; `workspace-write` runs model shell in `:workspace` without per-command prompts, allows enabled public web tools without per-request prompts, and keeps MCP approval separate; `full-access` selects `:danger-full-access` after a second explicit confirmation.
 - `read_file` reads workspace UTF-8 files up to 128 KiB; `list_directory` lists up to 500 entries. Outside paths and resolved symlink escapes are rejected. File contents enter model context and persisted session data; avoid reading secrets.
 - Permissions last for this process across `/new`, `/clear`, and `/resume`; restarting resets to `workspace-write` with web tools enabled. Changing permissions preserves context; JSONL never restores full access.
 - Model shell commands are launched through the pinned `@openai/codex@0.155.1` native OS sandbox and fail closed if that runtime cannot start. Windows model commands use PowerShell because Git Bash/MSYS cannot initialize inside the restricted token; macOS/Linux use Bash. Direct `!` commands remain outside the model sandbox. See [design and limits](docs/architecture/PERMISSIONS.md).
-- `read-only`, `ask`, and `workspace-write` require approval before each web request during normal chat; `full-access` skips that prompt. Plan mode treats enabled public web access as read-only research and skips the per-request prompt, while disabling web still denies it. Search queries are sent to Bing, with DuckDuckGo as a fallback; opening a result sends a request to that site.
+- `read-only` and `ask` require approval before each web request during normal chat; `workspace-write` and `full-access` skip that prompt. Plan mode also treats enabled public web access as read-only research and skips the per-request prompt, while disabling web still denies it. Search queries are sent to Bing, with DuckDuckGo as a fallback; opening a result sends a request to that site.
 - Web page reads allow only public HTTP/HTTPS targets, validate redirects, block local/private network addresses, apply time and response-size limits, and treat returned content as untrusted data.
 - Search availability and result quality depend on the external search services and the current network connection. A failed web request is returned to the model so it can explain the limitation or try another source.
 - A direct `!<command>` is user-authored, requires no second confirmation, and is not added to model context.
