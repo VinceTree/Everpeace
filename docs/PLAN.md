@@ -8,6 +8,10 @@
 
 状态快照：2026-09-19。
 
+## Learned 经验记忆
+
+已接入独立的 learned memory：实质且正常完成的回合由当前模型后台提炼项目经验；显式长期偏好进入用户级文档。经验存放在平台应用状态目录，不进入 Session JSONL 或仓库；新 Agent 实例首轮读取一次，并以不可信背景注入。`/memory` 提供状态、暂停/恢复、分别清理和显式记忆入口。首版使用 Markdown、原子写入、脱敏、去重和 100 条上限，不引入远程后端或向量检索。
+
 ## 实时 Agent 进度与运行中纠正
 
 已完成 Responses SSE 优先、buffered fallback、实时 assistant delta/工具状态、运行中 safe-checkpoint steering 及分段耗时显示。流式增量和阶段状态只存在当前 TUI，不写入 Session JSONL；采样中的 guidance 会中止当前采样，工具执行中的 guidance 在结果落盘后生效，未执行的调用补齐 `steered` output。Ctrl+C 时已提交的待处理 guidance 会持久化到模型 context。

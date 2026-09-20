@@ -32,6 +32,7 @@ import {
   WEB_SEARCH_TOOL_DEFINITION,
   type WebToolExecutor,
 } from "../tools/web.js";
+import type { LearnedMemoryRuntimeLike, LearnedTurn } from "../memory/learned-memory.js";
 
 interface ResponseOutputItem extends Record<string, unknown> {
   type: string;
@@ -91,6 +92,7 @@ export interface ReactAgentOptions {
   web?: WebToolExecutor;
   mcp?: McpRuntimeLike;
   skills?: SkillCatalogLike;
+  learnedMemory?: LearnedMemoryRuntimeLike;
   initialHistory?: readonly Record<string, unknown>[];
   onHistoryAppend?(items: readonly Record<string, unknown>[]): Promise<void>;
   onUsage?(usage: TokenUsageSample | null): Promise<void>;
@@ -117,6 +119,7 @@ export class ReactAgent {
   readonly #web: WebToolExecutor;
   readonly #mcp: McpRuntimeLike | undefined;
   readonly #skills: SkillCatalogLike | undefined;
+  readonly #learnedMemory: LearnedMemoryRuntimeLike | undefined;
   readonly #onHistoryAppend:
     | ((items: readonly Record<string, unknown>[]) => Promise<void>)
     | undefined;
@@ -128,6 +131,9 @@ export class ReactAgent {
   #sampleController: AbortController | undefined;
   #mcpSnapshot: McpSnapshot = { tools: [], instructions: "", servers: [] };
   #skillTurn: SkillTurnContext | undefined;
+  #learnedPrompt = "";
+  #learnedPromptLoaded = false;
+  #turnItems: Array<Record<string, unknown>> | undefined;
 
   constructor(options: ReactAgentOptions) {
     this.#onPhase = options.onPhase;
@@ -139,6 +145,7 @@ export class ReactAgent {
     this.#web = options.web ?? createWebToolExecutor();
     this.#mcp = options.mcp;
     this.#skills = options.skills;
+    this.#learnedMemory = options.learnedMemory;
     this.#history = repairToolContext(options.initialHistory ?? []);
     this.#onHistoryAppend = options.onHistoryAppend;
     this.#onUsage = options.onUsage;
@@ -148,7 +155,11 @@ export class ReactAgent {
     if (this.#running) throw new Error("An agent turn is already running");
     signal?.throwIfAborted();
     this.#running = true;
+    const turnItems: Array<Record<string, unknown>> = [];
+    this.#turnItems = turnItems;
+    const assistantTexts: string[] = [];
     try {
+      await this.#ensureLearnedPrompt();
       if (this.#mcp) this.#mcpSnapshot = await this.#mcp.ensureReady(signal);
       if (this.#skills) this.#skillTurn = await this.#skills.prepareTurn(userInput);
       this.#history = repairToolContext(this.#history);
@@ -157,12 +168,25 @@ export class ReactAgent {
         sample: () => this.#requestResponse([...this.#history], signal),
         record: (items) => this.#record(items),
         dispatch: (call) => this.#dispatchTool(call, signal),
-        assistant: (text) => this.#io.writeAssistant(text),
+        assistant: (text) => {
+          assistantTexts.push(text);
+          this.#io.writeAssistant(text);
+        },
         applySteering: () => this.#applyPendingSteering(),
         ...(signal ? { signal } : {}),
         ...(this.#onPhase ? { onPhase: this.#onPhase } : {}),
         ...(this.#onEvent ? { onEvent: this.#onEvent } : {}),
       });
+      if (this.#learnedMemory) {
+        const learnedTurn: LearnedTurn = {
+          workspacePath: this.#workspacePath,
+          userInput,
+          transcript: JSON.stringify(turnItems),
+          assistantText: assistantTexts.join("\n\n"),
+          toolCallCount: turnItems.filter((item) => item.type === "function_call").length,
+        };
+        this.#learnedMemory.scheduleCapture(learnedTurn);
+      }
     } finally {
       try {
         if (signal?.aborted) await this.#applyPendingSteering();
@@ -170,6 +194,7 @@ export class ReactAgent {
         this.#sampleController = undefined;
         this.#skillTurn = undefined;
         this.#running = false;
+        this.#turnItems = undefined;
       }
     }
   }
@@ -184,7 +209,9 @@ export class ReactAgent {
 
   async #record(items: readonly Record<string, unknown>[]): Promise<void> {
     await this.#persist(items);
-    this.#history.push(...items.map((item) => ({ ...item })));
+    const copies = items.map((item) => ({ ...item }));
+    this.#history.push(...copies);
+    this.#turnItems?.push(...copies);
   }
 
   async #dispatchTool(call: ToolCall, signal?: AbortSignal): Promise<string> {
@@ -360,7 +387,7 @@ export class ReactAgent {
     const skillInstructions = this.#skillTurn
       ? [this.#skillTurn.instructions, this.#skillTurn.explicitInstructions].filter(Boolean).join("\n\n")
       : "";
-    const extensionInstructions = [skillInstructions, this.#mcpSnapshot.instructions]
+    const extensionInstructions = [skillInstructions, this.#mcpSnapshot.instructions, this.#learnedPrompt]
       .filter(Boolean)
       .join("\n\n");
     const params = {
@@ -460,6 +487,17 @@ export class ReactAgent {
     if (result.output.length === 0 && items.size > 0) result.output = [...items.values()];
     if (!result.output_text) result.output_text = outputText;
     return result;
+  }
+
+  async #ensureLearnedPrompt(): Promise<void> {
+    if (this.#learnedPromptLoaded) return;
+    this.#learnedPromptLoaded = true;
+    if (!this.#learnedMemory) return;
+    try {
+      this.#learnedPrompt = await this.#learnedMemory.loadPrompt(this.#workspacePath);
+    } catch {
+      this.#learnedPrompt = "";
+    }
   }
 
   async #applyPendingSteering(): Promise<number> {

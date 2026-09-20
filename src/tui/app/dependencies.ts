@@ -25,6 +25,10 @@ import {
   normalizeGeneratedSkillMarkdown,
   validateManagedSkillMarkdown,
 } from "../../skills/manager.js";
+import {
+  LearnedMemoryRuntime,
+  LearnedMemoryStore,
+} from "../../memory/learned-memory.js";
 
 const require = createRequire(import.meta.url);
 const packageJson = require("../../../package.json") as { version?: unknown };
@@ -78,6 +82,7 @@ export function createDefaultTuiDependencies(
   const skills = new SkillCatalog(process.cwd());
   const skillManager = new SkillManager({ workspacePath: process.cwd(), catalog: skills });
   const mcp = new McpRuntime({ workspacePath: process.cwd(), version });
+  const learnedMemoryStore = new LearnedMemoryStore();
   return {
     registry,
     version,
@@ -109,6 +114,11 @@ export function createDefaultTuiDependencies(
           },
         },
       };
+      const learnedMemory = new LearnedMemoryRuntime({
+        store: learnedMemoryStore,
+        client,
+        model: model.model_name,
+      });
       return new ReactAgent({
         workspacePath: process.cwd(),
         client,
@@ -116,6 +126,7 @@ export function createDefaultTuiDependencies(
         io,
         mcp,
         skills,
+        learnedMemory,
         ...(restore?.initialContext === undefined
           ? {}
           : { initialHistory: restore.initialContext }),
@@ -132,6 +143,33 @@ export function createDefaultTuiDependencies(
           ? {}
           : { onEvent: restore.onEvent }),
       });
+    },
+    async getMemoryStatus(workspacePath) {
+      return learnedMemoryStore.status(workspacePath);
+    },
+    async getMemoryPrompt(workspacePath) {
+      return learnedMemoryStore.prompt(workspacePath);
+    },
+    async setMemoryEnabled(enabled) {
+      await learnedMemoryStore.setEnabled(enabled);
+    },
+    async clearMemory(scope, workspacePath) {
+      await learnedMemoryStore.clear(scope, workspacePath);
+    },
+    async rememberMemory(model, workspacePath, text, signal) {
+      const client = createProviderClient(model.base_url, model.api_key);
+      const runtime = new LearnedMemoryRuntime({
+        store: learnedMemoryStore,
+        client: {
+          responses: {
+            create(params, options) {
+              return client.responses.create(params as never, options as never) as never;
+            },
+          },
+        },
+        model: model.model_name,
+      });
+      await runtime.remember(workspacePath, text, signal);
     },
     async generateSessionTitle(model, firstQuestion, signal) {
       const client = createProviderClient(model.base_url, model.api_key);

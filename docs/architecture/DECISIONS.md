@@ -23,11 +23,17 @@
 Git Skill 来源采用 shallow、no-checkout 克隆：先读取有界 Git tree 和候选 `SKILL.md` metadata，同名打包副本按规范 `skills/<name>` 路径优先去重，预检候选文件类型、数量和字节数后才 sparse checkout。原始 `SKILL.md` 清单数与去重后的不同 Skill 候选数使用独立上限，100 个候选限制只对去重结果生效，避免同一仓库中的 Codex/评审镜像副本在实际候选未超限时被提前拒绝。该顺序避免 Windows 在无关深层路径上提前失败，也防止为了一个 Skill 展开整个仓库工作树；它不改变公开 HTTPS、无认证、超时、无覆盖和显式确认边界。
 
 ## Session 持久化
-
 - 每个 session 使用一个版本化 JSONL 文件，存放于平台应用状态目录；API Key 仍只进入系统 keyring。
 - 可见 timeline 与 Responses API context 分开记录，保证恢复界面完整，同时不把直接 `!` 命令错误加入模型上下文。
 - 写入按 session 串行追加；不完整末行可忽略，其他损坏只隔离对应文件。
 - `session_created` 保存模型引用、工作目录及 usage tracking 能力；`model_selected` 表达模型变化及是否重置 context；`usage_recorded` 保存每次主 Agent 响应的 token 增量。
+
+## Learned 经验记忆
+
+- Learned 经验与 Session JSONL 分离，写入平台应用状态目录：项目条目按规范化工作区路径哈希隔离，用户条目单独保存；不会自动修改仓库文件。
+- 正常完成且有实质内容的轮次才进入后台提炼。取消、失败和 trivial turn 不写入；显式 `/memory remember` 可直接写入用户偏好。
+- 新 Agent 实例只在第一次模型请求前读取一次 learned 快照；刚写入的经验不反灌当前 prompt。注入内容被包裹为不可信背景，当前用户指令、工具结果和仓库状态优先。
+- Markdown 条目包含 Lesson 和 Apply when，写入/读取两侧均做秘密脱敏、提示标签中和、去重及 100 条上限。`/memory` 的 UI 操作是 transient，不进入 timeline、Session JSONL 或模型 context。
 
 ## Status 与 usage
 

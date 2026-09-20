@@ -13,6 +13,10 @@ import type { BashOutputPreview, BashResult } from "../../tools/bash.js";
 import type { PermissionPolicy } from "../../permissions/policy.js";
 import type { SkillManagerLike } from "../../skills/manager.js";
 import type {
+  LearnedMemoryStatus,
+  LearnedScope,
+} from "../../memory/learned-memory.js";
+import type {
   StatusSnapshot,
   TokenUsageSample,
 } from "../../status/model-status.js";
@@ -53,6 +57,16 @@ export interface TuiDependencies {
     io: AgentIO,
     restore?: AgentRestoreOptions,
   ): AgentSession;
+  getMemoryStatus?(workspacePath: string): Promise<LearnedMemoryStatus>;
+  getMemoryPrompt?(workspacePath: string): Promise<string>;
+  setMemoryEnabled?(enabled: boolean): Promise<void>;
+  clearMemory?(scope: LearnedScope, workspacePath: string): Promise<void>;
+  rememberMemory?(
+    model: RegisteredModel,
+    workspacePath: string,
+    text: string,
+    signal?: AbortSignal,
+  ): Promise<void>;
   generateSessionTitle(
     model: RegisteredModel,
     firstQuestion: string,

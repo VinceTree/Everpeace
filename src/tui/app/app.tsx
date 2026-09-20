@@ -48,6 +48,7 @@ import { Prompt } from "../composer/prompt.js";
 import { SessionPicker } from "../components/navigation/session-picker.js";
 import { StatusBar } from "../components/conversation/status-bar.js";
 import { SkillWizard } from "../components/wizards/skill-wizard.js";
+import { MemorySurface } from "../components/screens/memory-surface.js";
 import { HighlightedCommand, RichOutput } from "../rendering/rich-text.js";
 import { TUI_COLORS } from "../rendering/palette.js";
 import { truncateEnd } from "../rendering/text-width.js";
@@ -56,6 +57,7 @@ import type {
   TimelineEntry,
   TuiDependencies,
 } from "./types.js";
+import type { LearnedMemoryStatus, LearnedScope } from "../../memory/learned-memory.js";
 
 type View =
   | { kind: "outputs" }
@@ -63,6 +65,7 @@ type View =
   | { kind: "terminal-setup" }
   | { kind: "permissions" }
   | { kind: "skills" }
+  | { kind: "memory"; status: LearnedMemoryStatus }
   | { kind: "chat" }
   | { kind: "login" }
   | {
@@ -698,6 +701,100 @@ export function EverpeaceApp({
     }
   }, [dependencies, isCurrentCommandOperation, replaceCommandView, startCommandLoad]);
 
+  const showMemory = useCallback(async (enterFromChat = true) => {
+    const operation = startCommandLoad(
+      "/memory · Learned experience",
+      "Reading learned experience",
+      enterFromChat,
+    );
+    try {
+      const status = dependencies.getMemoryStatus
+        ? await dependencies.getMemoryStatus(workspacePath)
+        : { enabled: false, projectEntries: 0, userEntries: 0, recent: [] };
+      if (!isCurrentCommandOperation(operation)) return;
+      replaceCommandView({ kind: "memory", status });
+    } catch (error) {
+      if (!isCurrentCommandOperation(operation)) return;
+      replaceCommandView(infoView(
+        "/memory · Could not load",
+        error instanceof Error ? error.message : String(error),
+        "error",
+      ));
+    }
+  }, [dependencies, isCurrentCommandOperation, replaceCommandView, startCommandLoad, workspacePath]);
+
+  const showMemoryPrompt = useCallback(async () => {
+    const operation = startCommandLoad(
+      "/memory view · Injected experience",
+      "Reading memory snapshot",
+    );
+    try {
+      const text = dependencies.getMemoryPrompt
+        ? await dependencies.getMemoryPrompt(workspacePath)
+        : "Memory is unavailable in this integration.";
+      if (!isCurrentCommandOperation(operation)) return;
+      replaceCommandView(infoView(
+        "/memory view · Injected experience",
+        text || "No learned experience is currently injected.",
+      ));
+    } catch (error) {
+      if (!isCurrentCommandOperation(operation)) return;
+      replaceCommandView(infoView(
+        "/memory view · Could not load",
+        error instanceof Error ? error.message : String(error),
+        "error",
+      ));
+    }
+  }, [dependencies, isCurrentCommandOperation, replaceCommandView, startCommandLoad, workspacePath]);
+
+  const toggleMemory = useCallback((enabled: boolean) => {
+    void (async () => {
+      try {
+        await dependencies.setMemoryEnabled?.(enabled);
+        await showMemory(false);
+      } catch (error) {
+        replaceCommandView(infoView(
+          "/memory · Could not update",
+          error instanceof Error ? error.message : String(error),
+          "error",
+        ));
+      }
+    })();
+  }, [dependencies, replaceCommandView, showMemory]);
+
+  const clearMemory = useCallback((scope: LearnedScope) => {
+    void (async () => {
+      try {
+        await dependencies.clearMemory?.(scope, workspacePath);
+        await showMemory(false);
+      } catch (error) {
+        replaceCommandView(infoView(
+          "/memory · Could not clear",
+          error instanceof Error ? error.message : String(error),
+          "error",
+        ));
+      }
+    })();
+  }, [dependencies, replaceCommandView, showMemory, workspacePath]);
+
+  const rememberMemory = useCallback((text: string) => {
+    if (!activeModel || !dependencies.rememberMemory) {
+      openInfo("/memory · Cannot remember", "No active model is available for memory extraction.", "error");
+      return;
+    }
+    const operation = startCommandLoad("/memory · Remember preference", "Extracting user preference");
+    void dependencies.rememberMemory(activeModel, workspacePath, text)
+      .then(() => showMemory(false))
+      .catch((error: unknown) => {
+        if (!isCurrentCommandOperation(operation)) return;
+        replaceCommandView(infoView(
+          "/memory · Could not remember",
+          error instanceof Error ? error.message : String(error),
+          "error",
+        ));
+      });
+  }, [activeModel, dependencies, isCurrentCommandOperation, openInfo, replaceCommandView, showMemory, startCommandLoad, workspacePath]);
+
   const openModelPicker = useCallback(async () => {
     const operation = startCommandLoad(
       "/model · Switch model",
@@ -1228,6 +1325,14 @@ export function EverpeaceApp({
       if (parsed.command === "/permissions") enterCommandView({ kind: "permissions" });
       if (parsed.command === "/mcp") void showMcp();
       if (parsed.command === "/skills") enterCommandView({ kind: "skills" });
+      if (parsed.command === "/memory") {
+        const args = parsed.args?.trim() ?? "";
+        if (args.toLowerCase().startsWith("remember ")) rememberMemory(args.slice("remember ".length).trim());
+        else if (args.toLowerCase() === "pause") toggleMemory(false);
+        else if (args.toLowerCase() === "resume") toggleMemory(true);
+        else if (args.toLowerCase() === "view") void showMemoryPrompt();
+        else void showMemory();
+      }
       if (parsed.command === "/outputs") enterCommandView({ kind: "outputs" });
       if (parsed.command === "/history") enterCommandView({ kind: "input-history" });
       if (parsed.command === "/terminal-setup") enterCommandView({ kind: "terminal-setup" });
@@ -1248,6 +1353,10 @@ export function EverpeaceApp({
       openModelPicker,
       openResume,
       openInfo,
+      rememberMemory,
+      showMemory,
+      showMemoryPrompt,
+      toggleMemory,
       runChat,
       runDirectBash,
       queueGuidance,
@@ -1405,6 +1514,13 @@ export function EverpeaceApp({
               historyNavigationRef.current = { index: undefined, draft: "" };
             })}
             onBack={returnToChat}
+          />
+        ) : view.kind === "memory" ? (
+          <MemorySurface
+            status={view.status}
+            onBack={returnToChat}
+            onToggle={toggleMemory}
+            onClear={clearMemory}
           />
         ) : view.kind === "login" ? (
           <LoginWizard

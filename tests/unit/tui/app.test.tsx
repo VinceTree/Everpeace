@@ -782,6 +782,28 @@ test("/mcp refreshes status and /skills opens the transient Skill manager", asyn
   view.unmount();
 });
 
+test("/memory opens a transient learned experience surface and supports pause", async () => {
+  const model: RegisteredModel = { id: "memory-model", model_name: "test", base_url: "https://example.com/v1", api_key: "secret" };
+  const fixture = createFixture({ initial: [model] });
+  fixture.dependencies.getMemoryStatus = async () => ({
+    enabled: true,
+    projectEntries: 2,
+    userEntries: 1,
+    recent: [{ scope: "project", lesson: "Validate inputs first", applyWhen: "When adding commands", createdAt: "2026-09-20T00:00:00.000Z" }],
+  });
+  let enabled: boolean | undefined;
+  fixture.dependencies.setMemoryEnabled = async (value) => { enabled = value; };
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+  await tick();
+  view.stdin.write("/memory");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Learned experience"));
+  assert.match(view.lastFrame() ?? "", /Validate inputs first/u);
+  assert.equal(enabled, undefined);
+  view.unmount();
+});
+
 test("Esc cancels an in-flight slash command load without reopening its window", async () => {
   const model: RegisteredModel = {
     id: "model-1",

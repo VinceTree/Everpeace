@@ -7,6 +7,7 @@ export const SLASH_COMMANDS = [
   "/permissions",
   "/mcp",
   "/skills",
+  "/memory",
   "/new",
   "/resume",
   "/logout",
@@ -34,7 +35,7 @@ export type ParsedTuiInput =
   | { kind: "empty" }
   | { kind: "chat"; text: string }
   | { kind: "bash"; command: string }
-  | { kind: "slash"; command: SlashCommand }
+  | { kind: "slash"; command: SlashCommand; args?: string }
   | { kind: "unknown"; command: string };
 
 function isSlashCommand(value: string): value is SlashCommand {
@@ -50,7 +51,10 @@ export function parseTuiInput(input: string): ParsedTuiInput {
   if (trimmed.startsWith("/")) {
     const command = trimmed.split(/\s+/, 1)[0]!.toLowerCase();
     return isSlashCommand(command)
-      ? { kind: "slash", command }
+      ? (() => {
+          const args = trimmed.slice(command.length).trim();
+          return args ? { kind: "slash", command, args } : { kind: "slash", command };
+        })()
       : { kind: "unknown", command };
   }
   return { kind: "chat", text: trimmed };
@@ -64,6 +68,7 @@ export const TUI_HELP = `Slash commands
   /permissions  Select read-only, ask, workspace-write, or full-access tools
   /mcp     Refresh and inspect Codex MCP servers and tools
   /skills  Create, install, inspect, and use local skills
+  /memory  View and manage learned experience
   /new     Create and enter a new session
   /resume  Find and resume a local session
   /logout  Remove models and system credentials

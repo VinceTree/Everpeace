@@ -151,6 +151,49 @@ test("agent returns a final answer without running Bash", async () => {
   assert.deepEqual(requests[0]?.include, ["reasoning.encrypted_content"]);
 });
 
+test("agent loads learned memory once and captures a completed substantive turn", async () => {
+  const instructions: string[] = [];
+  const prompts: string[] = [];
+  const captures: unknown[] = [];
+  let loadCount = 0;
+  const learnedMemory = {
+    async loadPrompt() {
+      loadCount += 1;
+      return "<learned_memory>Prefer the existing test style.</learned_memory>";
+    },
+    scheduleCapture(turn: unknown) {
+      captures.push(turn);
+    },
+    async remember() {},
+    async status() { return { enabled: true, projectEntries: 0, userEntries: 0, recent: [] }; },
+    async setEnabled() {},
+    async clear() {},
+  };
+  const responses = [
+    { id: "tool", output_text: "", output: [{ type: "function_call", name: "read_file", call_id: "call-1", arguments: '{"path":"README.md"}' }] },
+    { id: "done", output_text: "Completed", output: [] },
+    { id: "done-2", output_text: "Completed again", output: [] },
+  ];
+  const agent = new ReactAgent({
+    model: "test",
+    workspacePath: "C:\\repo",
+    learnedMemory,
+    client: { responses: { async create(params) {
+      instructions.push(String(params.instructions));
+      prompts.push(JSON.stringify(params.input));
+      return responses.shift()!;
+    } } },
+    io: { async confirmBash() { return false; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+  await agent.runTurn("inspect the repository");
+  await agent.runTurn("continue");
+  assert.equal(loadCount, 1);
+  assert.equal(captures.length, 2);
+  assert.match(instructions[0]!, /Prefer the existing test style/u);
+  assert.match(prompts[1]!, /README\.md/u);
+  assert.equal((captures[0] as { toolCallCount: number }).toolCallCount, 1);
+});
+
 test("agent confirms, runs Bash, and returns its output to the model", async () => {
   const requests: Array<Record<string, unknown>> = [];
   const commands: string[] = [];

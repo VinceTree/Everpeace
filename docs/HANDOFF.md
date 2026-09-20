@@ -1,5 +1,15 @@
 # Session Handoff
 
+## 最新功能：Learned 经验记忆
+
+状态快照：2026-09-20。已加入独立的 learned memory：实质且正常完成的回合由当前模型在后台提炼可复用项目经验；用户明确表达长期偏好或执行 `/memory remember <text>` 时写入用户级经验。项目/用户条目均保存为应用状态目录下的 Markdown，不进入仓库或 Session JSONL；新 Agent 实例只在首个模型请求前读取一次，并以不可信背景块注入。
+
+- 新增 `src/memory/learned-memory.ts`：项目路径哈希隔离、原子写入、串行追加、100 条上限、去重、secret/prompt-tag 脱敏、状态统计和结构化提炼调用。
+- `ReactAgent` 正常完成后异步排队提炼；取消、失败和 trivial turn 不写入，提炼失败不影响主对话。当前模型用于提炼，调用使用 `store: false`。
+- 新增 `/memory` transient 命令窗口：查看状态与最近条目、用 `/memory view` 查看实际注入快照、暂停/恢复自动积累、分别清理项目/用户经验；`/memory remember <preference>` 保存长期用户偏好。
+- 新增 memory store、Agent 首轮注入、TUI surface 和 `/memory` 回归测试；完整 `pnpm test` 为 187/187，`pnpm typecheck`、`pnpm build` 和 `git diff --check` 已通过。测试仍会出现既有的 Ink resize listener `MaxListenersExceededWarning`，不影响结果。
+- 工作区展示号已提升至 `0.2.2`；本次只提交并推送代码，不创建 tag 或 GitHub Release。
+
 ## 最新优化：已安装 Skill 查看界面
 
 状态快照：2026-09-20。`/skills` 的 View installed Skills 流程已从单行 `Select` 改为可扫描的四行目录：名称与作用域、最多两行描述、ready/conflict/unavailable 状态；列表和详情不再显示路径，把终端空间留给辨识信息。顶部显示总数和当前位置，支持上下翻页、Home/End、Enter 进入详情。详情页先展示 Skill 名称、描述、作用域和状态，再分页阅读完整 `SKILL.md`，原有 `$name` 回填、Esc 返回和冲突保护保持不变。
