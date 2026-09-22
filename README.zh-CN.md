@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.2.7) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.8) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -105,7 +105,7 @@ TUI 使用原生 inline 模式，普通滚轮可以浏览已完成的 Everpeace 
 
 第一次普通提问会创建本地 JSONL session。Everpeace 会保存对话记录和继续聊天所需的模型上下文，同时在后台单独调用当前模型，根据第一次提问生成简短名称。带信息或选择界面的 slash command 会打开独立临时窗口，隐藏 banner、历史、输入框和全局状态栏。命令窗口水平、垂直居中，最大宽度 80 列，并在窄终端自动缩小、保留安全边距。按 `Esc` 后原子重放并返回同一个 session，窗口内容不会加入历史。直接 `!` 命令的输出仍属于可恢复记录。`/new` 会立即创建并进入一个空 session，第一次提问后再替换临时名称。`/resume` 会按名称和最后活动时间列出本机全部 session，恢复原模型、原工作目录及上下文，并继续追加到同一个文件。Windows 下 session 默认保存在 `%APPDATA%\Everpeace\sessions`。
 
-Everpeace 还会维护独立的 learned 经验记忆。每次有实质内容且正常完成的对话后，当前模型会在后台提炼可复用的项目经验；只有用户明确表达长期偏好时才写入用户级记忆。记忆位于平台应用状态目录（Windows 为 `%APPDATA%\Everpeace\memory`），不会写入仓库，只在新 Agent 实例的第一次请求中作为不可信背景注入。写入前后都会脱敏，条目会去重并限制数量；当前用户指令和实际仓库证据始终优先。
+Everpeace 还会维护独立的 learned 经验记忆。每次有实质内容且正常完成的对话在短暂 idle grace period 后，当前模型会在后台提炼可复用的项目经验；只有用户明确表达长期偏好时才写入用户级记忆。记忆位于平台应用状态目录（Windows 为 `%APPDATA%\Everpeace\memory`），不会写入仓库，只在新 Agent 实例的第一次请求中按当前问题召回相关条目，并作为不可信背景注入。条目会脱敏、去重、记录来源和状态，并受召回预算限制；当前用户指令和实际仓库证据始终优先。
 
 `/status` 会打开居中的独立 Codex 风格命令窗口，只显示状态详情和 `Esc` 返回提示。它显示当前模型、根据 `base_url` 识别的供应商、接口地址、工作目录、Session ID、当前 context 占用，以及主 Responses API 循环累计的输入/输出 token。Usage 总量会随 session 持久化并由 `/resume` 恢复，但状态窗口本身不会加入 transcript；恢复后再次执行 `/status` 即可查看累计值。后台标题请求不计入统计。已知官方 model ID 使用文档公布的 context 上限，未知型号和自定义兼容端点显示 `N/A`，不会猜测。
 
@@ -124,7 +124,7 @@ TUI 命令：
 - `/permissions`：选择只读、逐条审批、工作区写入或完全访问模式，并开关网页工具。
 - `/mcp`：重新加载 Codex MCP 配置、连接已启用服务器并查看 tool 状态。
 - `/skills`：创建、安装、查看并显式调用本地 Skills。
-- `/memory`：查看 learned 经验、暂停/恢复自动积累、使用 `/memory view` 查看实际注入快照、分别清理项目或用户条目，或使用 `/memory remember <偏好>` 保存长期用户偏好。
+- `/memory`：查看 learned 经验、暂停/恢复自动积累、切换当前聊天是否读取或记录 memory、归档或清理条目、使用 `/memory view` 查看实际注入快照，或使用 `/memory remember <偏好>` 保存长期用户偏好。
 - `/plan`：进入严格只读规划模式，回答结构化策略问题，并在批准计划后执行。
 - `/goal <目标> [--tokens N]`：创建、查看、暂停、恢复并自动持续执行当前 Session 目标。
 - `/compact`：使用供应商原生的 Responses 压缩接口替换模型 context，同时保留完整可见 transcript 和 Session 历史。模型轮次或直接命令运行时会拒绝执行；已知 context window 达到 80% 后，会在下一次模型请求前自动压缩。

@@ -125,6 +125,8 @@ export function createDefaultTuiDependencies(
         store: learnedMemoryStore,
         client,
         model: model.model_name,
+        idleDelayMs: 5 * 60 * 1000,
+        minTranscriptChars: 200,
       });
       const goalRuntime = io.getGoal && io.setGoal
         ? new GoalRuntime({ getGoal: io.getGoal, setGoal: io.setGoal })
@@ -179,6 +181,12 @@ export function createDefaultTuiDependencies(
     },
     async clearMemory(scope, workspacePath) {
       await learnedMemoryStore.clear(scope, workspacePath);
+    },
+    async archiveMemory(scope, workspacePath, id) {
+      await learnedMemoryStore.updateEntry(scope, workspacePath, id, { status: "archived" });
+    },
+    async deleteMemoryEntry(scope, workspacePath, id) {
+      await learnedMemoryStore.deleteEntry(scope, workspacePath, id);
     },
     async rememberMemory(model, workspacePath, text, signal) {
       const client = createProviderClient(model.base_url, model.api_key);

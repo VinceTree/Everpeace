@@ -13,6 +13,7 @@ import type { BashOutputPreview, BashResult } from "../../tools/bash.js";
 import type { PermissionPolicy } from "../../permissions/policy.js";
 import type { SkillManagerLike } from "../../skills/manager.js";
 import type {
+  LearnedMemoryPolicy,
   LearnedMemoryStatus,
   LearnedScope,
 } from "../../memory/learned-memory.js";
@@ -26,6 +27,8 @@ export interface AgentSession {
   runTurn(userInput: string, signal?: AbortSignal, options?: AgentTurnOptions): Promise<AgentTurnResult>;
   compact?(signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>>; usage: TokenUsageSample | null }>;
   requestSteering?(text: string): boolean;
+  setMemoryPolicy?(policy: Partial<LearnedMemoryPolicy>): void;
+  getMemoryPolicy?(): LearnedMemoryPolicy | undefined;
 }
 
 export interface AgentRestoreOptions {
@@ -66,6 +69,8 @@ export interface TuiDependencies {
   getMemoryPrompt?(workspacePath: string): Promise<string>;
   setMemoryEnabled?(enabled: boolean): Promise<void>;
   clearMemory?(scope: LearnedScope, workspacePath: string): Promise<void>;
+  archiveMemory?(scope: LearnedScope, workspacePath: string, id: string): Promise<void>;
+  deleteMemoryEntry?(scope: LearnedScope, workspacePath: string, id: string): Promise<void>;
   rememberMemory?(
     model: RegisteredModel,
     workspacePath: string,

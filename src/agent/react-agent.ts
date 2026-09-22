@@ -32,7 +32,7 @@ import {
   WEB_SEARCH_TOOL_DEFINITION,
   type WebToolExecutor,
 } from "../tools/web.js";
-import type { LearnedMemoryRuntimeLike, LearnedTurn } from "../memory/learned-memory.js";
+import type { LearnedMemoryPolicy, LearnedMemoryRuntimeLike, LearnedTurn } from "../memory/learned-memory.js";
 import { GOAL_TOOL_DEFINITIONS, type GoalRuntime } from "../goal/runtime.js";
 import { PLAN_INSTRUCTIONS, PLAN_TOOL_DEFINITIONS, parsePlanRequest, parseSubmittedPlan, type AgentMode, type PlanInteraction, type PlanReviewDecision } from "../plan/runtime.js";
 import type { SessionGoal } from "../storage/session-store.js";
@@ -77,6 +77,7 @@ export interface ResponsesClientLike {
 }
 
 export interface AgentIO {
+  getSessionId?(): string | undefined;
   getPermissions?(): PermissionPolicy;
   confirmBash(command: string): Promise<boolean>;
   confirmWeb?(request: string): Promise<boolean>;
@@ -108,6 +109,7 @@ export interface ReactAgentOptions {
   mcp?: McpRuntimeLike;
   skills?: SkillCatalogLike;
   learnedMemory?: LearnedMemoryRuntimeLike;
+  learnedMemoryPolicy?: Partial<LearnedMemoryPolicy>;
   planInteraction?: PlanInteraction;
   goalRuntime?: GoalRuntime;
   initialHistory?: readonly Record<string, unknown>[];
@@ -202,6 +204,7 @@ export class ReactAgent {
     this.#mcp = options.mcp;
     this.#skills = options.skills;
     this.#learnedMemory = options.learnedMemory;
+    this.#learnedMemory?.setPolicy?.(options.learnedMemoryPolicy ?? {});
     this.#planInteraction = options.planInteraction;
     this.#goalRuntime = options.goalRuntime;
     this.#history = repairToolContext(options.initialHistory ?? []);
@@ -227,7 +230,7 @@ export class ReactAgent {
     this.#turnResult = {};
     const assistantTexts: string[] = [];
     try {
-      await this.#ensureLearnedPrompt();
+      await this.#ensureLearnedPrompt(userInput);
       if (this.#mcp && this.#turnMode === "default") this.#mcpSnapshot = await this.#mcp.ensureReady(signal);
       if (this.#skills) this.#skillTurn = await this.#skills.prepareTurn(userInput);
       const goal = await this.#goalRuntime?.get();
@@ -251,12 +254,14 @@ export class ReactAgent {
         ...(this.#onEvent ? { onEvent: this.#onEvent } : {}),
       });
       if (this.#learnedMemory) {
+        const sessionId = this.#io.getSessionId?.();
         const learnedTurn: LearnedTurn = {
           workspacePath: this.#workspacePath,
           userInput,
           transcript: JSON.stringify(turnItems),
           assistantText: assistantTexts.join("\n\n"),
           toolCallCount: turnItems.filter((item) => item.type === "function_call").length,
+          ...(sessionId ? { sessionId } : {}),
         };
         this.#learnedMemory.scheduleCapture(learnedTurn);
       }
@@ -279,6 +284,14 @@ export class ReactAgent {
     this.#pendingSteering.push(value);
     this.#sampleController?.abort(new LoopSteeredError());
     return true;
+  }
+
+  setMemoryPolicy(policy: Partial<LearnedMemoryPolicy>): void {
+    this.#learnedMemory?.setPolicy?.(policy);
+  }
+
+  getMemoryPolicy(): LearnedMemoryPolicy | undefined {
+    return this.#learnedMemory?.getPolicy?.();
   }
 
   async #record(items: readonly Record<string, unknown>[]): Promise<void> {
@@ -650,12 +663,12 @@ export class ReactAgent {
     return result;
   }
 
-  async #ensureLearnedPrompt(): Promise<void> {
+  async #ensureLearnedPrompt(userInput: string): Promise<void> {
     if (this.#learnedPromptLoaded) return;
     this.#learnedPromptLoaded = true;
     if (!this.#learnedMemory) return;
     try {
-      this.#learnedPrompt = await this.#learnedMemory.loadPrompt(this.#workspacePath);
+      this.#learnedPrompt = await this.#learnedMemory.loadPrompt(this.#workspacePath, userInput);
     } catch {
       this.#learnedPrompt = "";
     }

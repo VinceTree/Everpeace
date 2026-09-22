@@ -59,7 +59,7 @@ import type {
   TimelineEntry,
   TuiDependencies,
 } from "./types.js";
-import type { LearnedMemoryStatus, LearnedScope } from "../../memory/learned-memory.js";
+import type { LearnedMemoryPolicy, LearnedMemoryStatus, LearnedScope } from "../../memory/learned-memory.js";
 import type { AgentMode, PlanRequest, PlanReviewDecision, SubmittedPlan } from "../../plan/runtime.js";
 import { GoalRuntime, parseGoalCommand } from "../../goal/runtime.js";
 import type { SessionGoal } from "../../storage/session-store.js";
@@ -70,7 +70,7 @@ type View =
   | { kind: "terminal-setup" }
   | { kind: "permissions" }
   | { kind: "skills" }
-  | { kind: "memory"; status: LearnedMemoryStatus }
+  | { kind: "memory"; status: LearnedMemoryStatus; policy: LearnedMemoryPolicy }
   | { kind: "plan-questions"; request: PlanRequest; complete(answers: Record<string, string>): void; cancel(): void }
   | { kind: "plan-review"; submitted: SubmittedPlan; decide(decision: PlanReviewDecision): void }
   | { kind: "goal-confirm"; objective: string; tokenBudget?: number; confirm(): void; cancel(): void }
@@ -300,6 +300,7 @@ export function EverpeaceApp({
   const [activeModel, setActiveModel] = useState(firstActiveModel);
   const [agentMode, setAgentMode] = useState<AgentMode>("default");
   const [activeGoal, setActiveGoal] = useState<SessionGoal>();
+  const [memoryPolicy, setMemoryPolicy] = useState<LearnedMemoryPolicy>({ readExisting: true, captureFuture: true });
   const [workspacePath, setWorkspacePath] = useState(dependencies.workspacePath);
   const [view, setView] = useState<View>(() => initialView(initialModels.available));
   const [busyLabel, setBusyLabel] = useState<string>();
@@ -606,6 +607,7 @@ export function EverpeaceApp({
 
   const agentIo = useMemo<AgentIO>(
     () => ({
+      getSessionId: () => activeSessionId.current,
       getPermissions: () => ({ ...permissions.current }),
       confirmBash: requestBashConfirmation,
       confirmWeb: requestWebConfirmation,
@@ -710,6 +712,10 @@ export function EverpeaceApp({
     [activeModel, agentIo, contextWindow, dependencies, sessionContext, sessionEpoch],
   );
 
+  useEffect(() => {
+    agent?.setMemoryPolicy?.(memoryPolicy);
+  }, [agent, memoryPolicy]);
+
   const activateModel = useCallback(
     (model: RegisteredModel, message = `Enabled model ${model.model_name}`) => {
       clearQueuedGuidance();
@@ -798,7 +804,7 @@ export function EverpeaceApp({
         ? await dependencies.getMemoryStatus(workspacePath)
         : { enabled: false, projectEntries: 0, userEntries: 0, recent: [] };
       if (!isCurrentCommandOperation(operation)) return;
-      replaceCommandView({ kind: "memory", status });
+      replaceCommandView({ kind: "memory", status, policy: agent?.getMemoryPolicy?.() ?? memoryPolicy });
     } catch (error) {
       if (!isCurrentCommandOperation(operation)) return;
       replaceCommandView(infoView(
@@ -807,7 +813,7 @@ export function EverpeaceApp({
         "error",
       ));
     }
-  }, [dependencies, isCurrentCommandOperation, replaceCommandView, startCommandLoad, workspacePath]);
+  }, [agent, dependencies, isCurrentCommandOperation, memoryPolicy, replaceCommandView, startCommandLoad, workspacePath]);
 
   const showMemoryPrompt = useCallback(async () => {
     const operation = startCommandLoad(
@@ -848,6 +854,12 @@ export function EverpeaceApp({
     })();
   }, [dependencies, replaceCommandView, showMemory]);
 
+  const updateMemoryPolicy = useCallback((patch: Partial<LearnedMemoryPolicy>) => {
+    setMemoryPolicy((current) => ({ ...current, ...patch }));
+    agent?.setMemoryPolicy?.(patch);
+    void showMemory(false);
+  }, [agent, showMemory]);
+
   const clearMemory = useCallback((scope: LearnedScope) => {
     void (async () => {
       try {
@@ -856,6 +868,21 @@ export function EverpeaceApp({
       } catch (error) {
         replaceCommandView(infoView(
           "/memory · Could not clear",
+          error instanceof Error ? error.message : String(error),
+          "error",
+        ));
+      }
+    })();
+  }, [dependencies, replaceCommandView, showMemory, workspacePath]);
+
+  const archiveMemory = useCallback((entry: LearnedMemoryStatus["recent"][number]) => {
+    void (async () => {
+      try {
+        await dependencies.archiveMemory?.(entry.scope, workspacePath, entry.id);
+        await showMemory(false);
+      } catch (error) {
+        replaceCommandView(infoView(
+          "/memory · Could not archive",
           error instanceof Error ? error.message : String(error),
           "error",
         ));
@@ -1827,8 +1854,11 @@ export function EverpeaceApp({
         ) : view.kind === "memory" ? (
           <MemorySurface
             status={view.status}
+            policy={view.policy}
             onBack={returnToChat}
             onToggle={toggleMemory}
+            onPolicyChange={updateMemoryPolicy}
+            onArchive={archiveMemory}
             onClear={clearMemory}
           />
         ) : view.kind === "plan-questions" ? (

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -106,6 +106,97 @@ test("explicit remember writes a user preference and can be disabled", async () 
     assert.equal((await runtime.status("C:\\repo")).enabled, false);
     await runtime.clear("user", "C:\\repo");
     assert.equal((await store.read("user", "C:\\repo")).length, 0);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("memory metadata remains compatible with legacy markdown and supports archive/delete", async () => {
+  const directory = await temporaryDirectory();
+  try {
+    const store = new LearnedMemoryStore({ directory, now: () => new Date("2026-09-20T12:00:00.000Z") });
+    await mkdir(path.dirname(store.filePath("project", "C:\\repo")), { recursive: true });
+    await writeFile(store.filePath("project", "C:\\repo"), [
+      "# Learned Experience",
+      "",
+      "### 2026-09-19 · Project",
+      "- Lesson: Keep changes focused",
+      "- Apply when: Editing this repository",
+      "",
+    ].join("\n"), "utf8");
+    const legacy = (await store.read("project", "C:\\repo"))[0]!;
+    assert.equal(legacy.kind, "convention");
+    assert.equal(legacy.status, "active");
+    await store.append("project", "C:\\repo", [{
+      lesson: "Prefer the existing test style",
+      applyWhen: "When adding tests",
+      kind: "procedure",
+      confidence: "high",
+      sourceSessionId: "session-1",
+      evidence: [{ sessionId: "session-1", createdAt: "2026-09-20T12:00:00.000Z", excerpt: "A short supporting excerpt" }],
+    }]);
+    const entries = await store.read("project", "C:\\repo");
+    const added = entries.find((entry) => entry.lesson.includes("existing test"))!;
+    assert.equal(added.kind, "procedure");
+    assert.equal(added.confidence, "high");
+    assert.equal(added.sourceSessionId, "session-1");
+    assert.equal(added.evidence?.[0]?.excerpt, "A short supporting excerpt");
+    await store.updateEntry("project", "C:\\repo", added.id, { status: "archived" });
+    assert.equal((await store.read("project", "C:\\repo")).find((entry) => entry.id === added.id)!.status, "archived");
+    await store.deleteEntry("project", "C:\\repo", added.id);
+    assert.equal((await store.read("project", "C:\\repo")).some((entry) => entry.id === added.id), false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("memory retrieval prefers relevant active entries and respects chat policy", async () => {
+  const directory = await temporaryDirectory();
+  try {
+    const store = new LearnedMemoryStore({ directory, now: () => new Date("2026-09-20T12:00:00.000Z") });
+    await store.append("project", "C:\\repo", [
+      { lesson: "Use the existing test style", applyWhen: "When adding tests" },
+      { lesson: "Use the release checklist", applyWhen: "When preparing a release" },
+    ]);
+    const entries = await store.read("project", "C:\\repo");
+    await store.updateEntry("project", "C:\\repo", entries[1]!.id, { status: "archived" });
+    const prompt = await store.prompt("C:\\repo", "add a unit test", [], 2_000);
+    assert.match(prompt, /existing test style/u);
+    assert.doesNotMatch(prompt, /release checklist/u);
+
+    const runtime = new LearnedMemoryRuntime({
+      store,
+      model: "test-model",
+      policy: { readExisting: false, captureFuture: false },
+      client: { responses: { async create() { throw new Error("capture should be disabled"); } } },
+    });
+    assert.equal(await runtime.loadPrompt("C:\\repo", "add a unit test"), "");
+    runtime.scheduleCapture({ workspacePath: "C:\\repo", userInput: "fix tests", transcript: "", assistantText: "done", toolCallCount: 1 });
+    assert.equal((await runtime.status("C:\\repo")).capture?.state, "skipped");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("memory capture can wait for idle time before extracting", async () => {
+  const directory = await temporaryDirectory();
+  let requests = 0;
+  try {
+    const store = new LearnedMemoryStore({ directory });
+    const runtime = new LearnedMemoryRuntime({
+      store,
+      model: "test-model",
+      idleDelayMs: 25,
+      client: { responses: { async create() {
+        requests += 1;
+        return { id: "capture", output_text: JSON.stringify({ entries: [{ lesson: "Use bounded output", applyWhen: "When rendering command output" }] }), output: [] };
+      } } },
+    });
+    runtime.scheduleCapture({ workspacePath: "C:\\repo", userInput: "fix command output", transcript: "tool", assistantText: "done", toolCallCount: 1 });
+    assert.equal(requests, 0);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(requests, 1);
+    assert.equal((await store.read("project", "C:\\repo")).length, 1);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

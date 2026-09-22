@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.2.7) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.8) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -105,7 +105,7 @@ The TUI runs inline, so the normal scroll wheel can browse the completed Everpea
 
 The first normal prompt creates a local JSONL session. Everpeace saves the conversation transcript and the model context needed to continue it, while a separate background model request generates a short title from that first prompt. Slash commands with informational or selection interfaces open an isolated temporary screen that hides the banner, transcript, composer, and global status bar. Command windows are centered horizontally and vertically, capped at 80 columns, and shrink with safe margins on narrow terminals. Press `Esc` to replay and return to the same session; command-screen contents are not added to session history. Direct `!` command output remains part of the recoverable transcript. `/new` immediately creates and enters an empty session; its temporary title is replaced after the first prompt. `/resume` lists every local session by title and last activity time, restores its original model and working directory, and continues appending to the same file. Session files live under the platform application-state directory (`%APPDATA%\Everpeace\sessions` on Windows).
 
-Everpeace also keeps a separate learned-experience memory. After a substantive, successfully completed turn, the current model may extract reusable project lessons in the background. Explicit long-term preferences are stored separately at user scope. Memory is stored under the platform application-state directory (`%APPDATA%\Everpeace\memory` on Windows), is not written into the repository, and is injected only into the first request of a new Agent instance as untrusted background context. Secrets are redacted, entries are deduplicated and capped, and current user instructions and repository evidence always take precedence.
+Everpeace also keeps a separate learned-experience memory. After a substantive, successfully completed turn has been idle for a short grace period, the current model may extract reusable project lessons in the background. Explicit long-term preferences are stored separately at user scope. Memory is stored under the platform application-state directory (`%APPDATA%\Everpeace\memory` on Windows), is not written into the repository, and relevant entries are injected only into the first request of a new Agent instance as untrusted background context. Secrets are redacted, entries carry auditable metadata, can be archived, and are bounded by a retrieval budget; current user instructions and repository evidence always take precedence.
 
 `/status` opens a centered, isolated Codex-style command screen showing only status details and `Esc` return guidance. It shows the active model, provider inferred from `base_url`, endpoint, workspace, session ID, current context occupancy, and cumulative input/output tokens reported by the main Responses API loop. Usage totals are persisted with the session and restored by `/resume`, but the status screen itself is never added to the transcript; run `/status` again after restoring to see the recovered totals. Internal title-generation requests are excluded. Known official model IDs use documented context limits, while unknown or custom compatible models show `N/A` instead of a guessed limit.
 
@@ -124,7 +124,7 @@ TUI commands:
 - `/permissions`: Select read-only, ask-for-approval, workspace-write, or full-access mode and toggle web tools.
 - `/mcp`: Reload Codex MCP configuration, connect enabled servers, and inspect server/tool status.
 - `/skills`: Create, install, inspect, and explicitly invoke local Skills.
-- `/memory`: View learned experience, pause/resume automatic capture, inspect the injected snapshot with `/memory view`, clear project or user entries, or run `/memory remember <preference>` to save a lasting user preference.
+- `/memory`: View learned experience, pause/resume automatic capture, enable or disable memory reading/capture for the current chat, inspect the injected snapshot with `/memory view`, archive or clear entries, or run `/memory remember <preference>` to save a lasting user preference.
 - `/plan`: Enter strict read-only planning mode, answer structured strategy questions, and approve a plan before execution.
 - `/goal <objective> [--tokens N]`: Create, inspect, pause, resume, and automatically continue a persistent session goal.
 - `/compact`: Replace the model context with the provider's native compacted context while keeping the full visible transcript and session history. It rejects while a model turn or direct command is active; known context windows also compact automatically at 80% usage before the next model request.

@@ -1,5 +1,12 @@
 # Session Handoff
 
+## 最新优化：memory 分层、召回与聊天级策略
+
+状态快照：2026-09-23。learned memory 现在支持兼容旧 Markdown 的 `id/kind/confidence/status/evidence/source session` metadata；项目条目按当前问题和工作区关键词进行可解释召回，过滤 archived/superseded 条目并使用独立字符预算。生产 Agent capture 使用 5 分钟 idle grace period，capture 状态会记录 queued/running/succeeded/skipped/failed；当前聊天可分别关闭已有 memory 读取或未来 capture，且 `/memory` 可以归档最新条目。旧 Session JSONL schema、Session context 和 Responses compaction 语义保持不变。工作区展示号同步升至 `0.2.8`；本次提交使用 `[skip ci]`，不更新远程 Release。
+
+- 新增 memory store/runtime archive/delete、policy 和 idle capture 回归；旧 Markdown 会按兼容默认值读取。
+- 更新 `DECISIONS.md`、`PLAN.md`、中英文 README，明确 learned memory 只是不可信 recall，不替代 `AGENTS.md`、当前指令、工具结果或 compaction。
+
 ## 最新功能：`/resume` 批量删除 Session
 
 状态快照：2026-09-20。`/resume` 的 Session 列表现在支持 `MultiSelect` 批量勾选并永久删除本地 JSONL 记录，删除前显示二次确认；删除当前活动 Session 会清理内存状态并返回聊天界面，其他 Session 只刷新列表。新增 SessionStore 和 TUI 回归；完整 `pnpm test` 206/206、`pnpm typecheck`、`pnpm build` 和 `git diff --check` 均通过。展示号同步升至 `0.2.7`；本次提交使用 `[skip ci]`，不更新远程 Release。

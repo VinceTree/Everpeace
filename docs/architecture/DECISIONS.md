@@ -37,9 +37,11 @@ Git Skill 来源采用 shallow、no-checkout 克隆：先读取有界 Git tree �
 ## Learned 经验记忆
 
 - Learned 经验与 Session JSONL 分离，写入平台应用状态目录：项目条目按规范化工作区路径哈希隔离，用户条目单独保存；不会自动修改仓库文件。
-- 正常完成且有实质内容的轮次才进入后台提炼。取消、失败和 trivial turn 不写入；显式 `/memory remember` 可直接写入用户偏好。
+- 正常完成且有实质内容的轮次才进入后台提炼。生产运行时 capture 等待 session idle grace period，取消、失败、trivial turn 和关闭当前聊天 capture 的轮次不写入；显式 `/memory remember` 可直接写入用户偏好。
 - 新 Agent 实例只在第一次模型请求前读取一次 learned 快照；刚写入的经验不反灌当前 prompt。注入内容被包裹为不可信背景，当前用户指令、工具结果和仓库状态优先。
-- Markdown 条目包含 Lesson 和 Apply when，写入/读取两侧均做秘密脱敏、提示标签中和、去重及 100 条上限。`/memory` 的 UI 操作是 transient，不进入 timeline、Session JSONL 或模型 context。
+- Markdown 条目包含兼容旧文件的 id、kind、confidence、status、evidence 和来源 session metadata；写入/读取两侧均做秘密脱敏、提示标签中和、去重及 100 条上限。召回按当前问题、项目范围、状态、置信度和新鲜度评分，并受独立字符预算限制，不再无条件注入全部条目。
+- 全局 automatic learning 开关与当前聊天的 `readExisting` / `captureFuture` 策略分离；当前聊天策略只影响当前 Agent，不写入 Session JSONL。`/memory` 支持查看/切换两项策略、归档最新条目和清理范围。所有 UI 操作仍是 transient，不进入 timeline、Session JSONL 或模型 context。
+- Learned memory 只提供不可信 recall，不替代 `AGENTS.md`、项目文档、当前用户指令、权限策略、Session context 或 Responses compaction。
 
 ## Plan 与 Goal
 
