@@ -1,6 +1,12 @@
 import { LoopSteeredError, runAgentLoop, type LoopEvent, type LoopPhase, type ToolCall } from "./agent-loop.js";
 import { repairToolContext } from "./repair-context.js";
 import {
+  isContextLimitError,
+  isStreamUnsupportedError,
+  ModelResponseError,
+  ResponseStreamIncompleteError,
+} from "./response-errors.js";
+import {
   BASH_TOOL_DEFINITION,
   parseBashCommand,
   serializeBashResult,
@@ -52,6 +58,8 @@ interface AgentResponse {
   output_text: string;
   output: ResponseOutputItem[];
   usage?: TokenUsageSample | null;
+  error?: unknown;
+  incomplete_details?: unknown;
 }
 
 export type ResponseStreamLike = AsyncIterable<Record<string, unknown>>;
@@ -192,6 +200,7 @@ export class ReactAgent {
   #contextWindow: number | null;
   #contextTokens: number | null;
   #compacting = false;
+  #responseTransport: "stream" | "buffered";
 
   constructor(options: ReactAgentOptions) {
     this.#onPhase = options.onPhase;
@@ -213,6 +222,7 @@ export class ReactAgent {
     this.#onUsage = options.onUsage;
     this.#contextWindow = options.contextWindow ?? null;
     this.#contextTokens = options.initialContextTokens ?? null;
+    this.#responseTransport = options.client.responses.stream ? "stream" : "buffered";
   }
 
   async compact(signal?: AbortSignal): Promise<ContextCompactionResult> {
@@ -229,6 +239,7 @@ export class ReactAgent {
     this.#turnMode = options.mode ?? "default";
     this.#turnResult = {};
     const assistantTexts: string[] = [];
+    let contextRecoveryUsed = false;
     try {
       await this.#ensureLearnedPrompt(userInput);
       if (this.#mcp && this.#turnMode === "default") this.#mcpSnapshot = await this.#mcp.ensureReady(signal);
@@ -240,7 +251,21 @@ export class ReactAgent {
       await runAgentLoop({
         sample: async () => {
           await this.#maybeAutoCompact(signal);
-          return this.#requestResponse([...this.#history], signal);
+          try {
+            return await this.#requestResponse([...this.#history], signal);
+          } catch (error) {
+            signal?.throwIfAborted();
+            if (
+              !contextRecoveryUsed &&
+              this.#client.responses.compact !== undefined &&
+              isContextLimitError(error)
+            ) {
+              contextRecoveryUsed = true;
+              await this.#compactContext(true, signal);
+              return this.#requestResponse([...this.#history], signal);
+            }
+            throw error;
+          }
         },
         record: (items) => this.#record(items),
         dispatch: (call) => this.#dispatchTool(call, signal),
@@ -498,6 +523,9 @@ export class ReactAgent {
         await this.#goalRuntime.recordUsage({ tokensUsed: current.tokens_used + (usage ? usage.input_tokens + usage.output_tokens : 0), usageComplete: current.usage_complete && usage !== null, timeUsedSeconds: current.time_used_seconds });
       }
     }
+    if (response.status && response.status !== "completed") {
+      throw new ModelResponseError(response);
+    }
     return response;
   }
 
@@ -582,82 +610,96 @@ export class ReactAgent {
         include: ["reasoning.encrypted_content"],
       };
     const options = { maxRetries: 0, ...(signal ? { signal } : {}) };
-    if (this.#client.responses.stream) {
+    if (this.#responseTransport === "stream" && this.#client.responses.stream) {
+      let eventsSeen = 0;
       try {
         return await this.#consumeResponseStream(
           await this.#client.responses.stream(params, options),
+          () => { eventsSeen += 1; },
         );
       } catch (error) {
-        // Some compatible endpoints advertise Responses but reject stream=true.
-        // Keep those endpoints usable unless the caller explicitly cancelled.
         if (signal?.aborted) throw error;
-        return this.#client.responses.create(params, options);
+        if (eventsSeen === 0 && isStreamUnsupportedError(error)) {
+          this.#responseTransport = "buffered";
+          return this.#client.responses.create(params, options);
+        }
+        throw error;
       }
     }
     return this.#client.responses.create(params, options);
   }
 
-  async #consumeResponseStream(stream: ResponseStreamLike): Promise<AgentResponse> {
+  async #consumeResponseStream(
+    stream: ResponseStreamLike,
+    onEvent: () => void,
+  ): Promise<AgentResponse> {
     let response: AgentResponse | undefined;
     let outputText = "";
     const items = new Map<string, ResponseOutputItem>();
-    for await (const event of stream) {
-      const type = event.type;
-      if (type === "response.output_text.delta" && typeof event.delta === "string") {
-        outputText += event.delta;
-        this.#io.writeAssistantDelta?.(event.delta);
-      } else if (type === "response.output_item.added" && event.item && typeof event.item === "object") {
-        const item = event.item as ResponseOutputItem;
-        const key = typeof event.output_index === "number"
-          ? String(event.output_index)
-          : item.id ?? item.call_id ?? `${items.size}`;
-        items.set(key, { ...item });
-        if (item.type === "function_call") {
-          this.#io.onToolProgress?.({
-            phase: "streaming",
-            name: typeof item.name === "string" ? item.name : "tool",
-            ...(typeof item.arguments === "string" ? { detail: item.arguments } : {}),
-          });
-        }
-      } else if (type === "response.function_call_arguments.delta" && typeof event.delta === "string") {
-        const key = typeof event.output_index === "number"
-          ? String(event.output_index)
-          : typeof event.item_id === "string" ? event.item_id : "";
-        const item = items.get(key);
-        if (item) {
-          item.arguments = `${item.arguments ?? ""}${event.delta}`;
-          this.#io.onToolProgress?.({
-            phase: "streaming",
-            name: typeof item.name === "string" ? item.name : "tool",
-            detail: item.arguments,
-          });
-        }
-      } else if (type === "response.output_item.done" && event.item && typeof event.item === "object") {
-        const item = event.item as ResponseOutputItem;
-        const key = typeof event.output_index === "number"
-          ? String(event.output_index)
-          : item.id ?? item.call_id ?? `${items.size}`;
-        items.set(key, { ...item });
+    try {
+      for await (const event of stream) {
+        onEvent();
+        const type = event.type;
+        if (type === "response.output_text.delta" && typeof event.delta === "string") {
+          outputText += event.delta;
+          this.#io.writeAssistantDelta?.(event.delta);
+        } else if (type === "response.output_item.added" && event.item && typeof event.item === "object") {
+          const item = event.item as ResponseOutputItem;
+          const key = typeof event.output_index === "number"
+            ? String(event.output_index)
+            : item.id ?? item.call_id ?? `${items.size}`;
+          items.set(key, { ...item });
+          if (item.type === "function_call") {
+            this.#io.onToolProgress?.({
+              phase: "streaming",
+              name: typeof item.name === "string" ? item.name : "tool",
+              ...(typeof item.arguments === "string" ? { detail: item.arguments } : {}),
+            });
+          }
+        } else if (type === "response.function_call_arguments.delta" && typeof event.delta === "string") {
+          const key = typeof event.output_index === "number"
+            ? String(event.output_index)
+            : typeof event.item_id === "string" ? event.item_id : "";
+          const item = items.get(key);
+          if (item) {
+            item.arguments = `${item.arguments ?? ""}${event.delta}`;
+            this.#io.onToolProgress?.({
+              phase: "streaming",
+              name: typeof item.name === "string" ? item.name : "tool",
+              detail: item.arguments,
+            });
+          }
+        } else if (type === "response.output_item.done" && event.item && typeof event.item === "object") {
+          const item = event.item as ResponseOutputItem;
+          const key = typeof event.output_index === "number"
+            ? String(event.output_index)
+            : item.id ?? item.call_id ?? `${items.size}`;
+          items.set(key, { ...item });
       } else if (type === "response.completed" && event.response && typeof event.response === "object") {
         response = event.response as AgentResponse;
+        break;
       } else if (type === "response.failed" || type === "response.incomplete") {
         const failedResponse = event.response && typeof event.response === "object"
           ? event.response as Record<string, unknown>
-          : undefined;
-        response = {
-          id: typeof failedResponse?.id === "string" ? failedResponse.id : "stream",
-          output: [],
-          output_text: outputText,
-          status: type === "response.incomplete" ? "incomplete" : "failed",
+            : undefined;
+          response = {
+            id: typeof failedResponse?.id === "string" ? failedResponse.id : "stream",
+            output: [],
+            output_text: outputText,
+            status: type === "response.incomplete" ? "incomplete" : "failed",
+          ...(failedResponse?.usage === undefined ? {} : { usage: failedResponse.usage as TokenUsageSample | null }),
+          ...(failedResponse?.error === undefined ? {} : { error: failedResponse.error }),
+          ...(failedResponse?.incomplete_details === undefined ? {} : { incomplete_details: failedResponse.incomplete_details }),
         };
+        break;
       }
+      }
+    } catch (error) {
+      if (error instanceof ModelResponseError || error instanceof ResponseStreamIncompleteError) throw error;
+      throw error;
     }
-    const result = response ?? {
-      id: "stream",
-      output: [...items.values()],
-      output_text: outputText,
-      status: "completed",
-    };
+    if (!response) throw new ResponseStreamIncompleteError();
+    const result = response;
     if (result.output.length === 0 && items.size > 0) result.output = [...items.values()];
     if (!result.output_text) result.output_text = outputText;
     return result;

@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.2.8) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.9) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -95,7 +95,7 @@ Run this command? y
 
 For questions that depend on current or niche information, the model can call `web_search` and then use `web_fetch` to read promising sources. Search and page reads do not require Bash confirmation. Their function calls and results remain in the recoverable model context, while concise tool activity is shown in the TUI transcript. The model is instructed to cite the source URLs it used.
 
-The TUI's own interface is English throughout. While a turn is active, a provider-aware status such as `Waiting for DeepSeek (3s • ctrl+c to interrupt)` changes to `Working` during tool dispatch. Responses-capable providers stream assistant text and tool progress live; compatible buffered endpoints still show phase, approval, and command previews. Assistant replies render GitHub-flavored Markdown, including headings, lists, emphasis, links, tables, inline code, and fenced code. Fenced code and Bash/PowerShell commands use language-aware terminal highlighting with bounded-size safety fallbacks.
+The TUI's own interface is English throughout. While a turn is active, a provider-aware status such as `Waiting for DeepSeek (3s • ctrl+c to interrupt)` changes to `Working` during tool dispatch. Responses-capable providers stream assistant text and tool progress live; an endpoint is switched to buffered mode only after it explicitly rejects streaming before emitting any event. Interrupted or incomplete streams are retried from the last durable context and never execute half-received tools. Compatible buffered endpoints still show phase, approval, and command previews. Assistant replies render GitHub-flavored Markdown, including headings, lists, emphasis, links, tables, inline code, and fenced code. Fenced code and Bash/PowerShell commands use language-aware terminal highlighting with bounded-size safety fallbacks.
 
 Commands are visually separate from conversation text: active commands show `Running`, completed model commands show `Ran`, and direct commands show `You ran`, with status color, shell, duration, and retained output underneath. Standard unified diffs in assistant `diff` fences or command output include old/new line gutters, cyan headers, green additions, and red deletions. True-color terminals receive light/dark-aware backgrounds; lower-color and `NO_COLOR` environments retain structural markers without requiring color. Restored legacy UI messages are translated for display without modifying session JSONL or translating user/assistant content.
 
@@ -127,7 +127,7 @@ TUI commands:
 - `/memory`: View learned experience, pause/resume automatic capture, enable or disable memory reading/capture for the current chat, inspect the injected snapshot with `/memory view`, archive or clear entries, or run `/memory remember <preference>` to save a lasting user preference.
 - `/plan`: Enter strict read-only planning mode, answer structured strategy questions, and approve a plan before execution.
 - `/goal <objective> [--tokens N]`: Create, inspect, pause, resume, and automatically continue a persistent session goal.
-- `/compact`: Replace the model context with the provider's native compacted context while keeping the full visible transcript and session history. It rejects while a model turn or direct command is active; known context windows also compact automatically at 80% usage before the next model request.
+- `/compact`: Replace the model context with the provider's native compacted context while keeping the full visible transcript and session history. It rejects while a model turn or direct command is active; known context windows compact automatically at 80% usage, and an explicit context-limit response can trigger one additional automatic recovery compaction.
 - `/outputs`: Browse retained command output with paged details, highlighted commands, and unified-diff rendering.
 - `/history`: Browse or explicitly clear global input history (not sessions).
 - `/terminal-setup`: Preview and optionally configure Shift+Enter in stable Windows Terminal; confirmation creates a settings backup before applying a global key binding.
@@ -153,7 +153,7 @@ Project installs go to the repository root's `.agents/skills`; user installs go 
 
 Behavior notes:
 
-- The core turn loop adapts Codex's sampling/tool/follow-up flow in TypeScript, with per-tool result persistence, cancellable request retries, and overlapping-turn protection. It is not the complete Codex runtime; see [source mapping and scope](docs/architecture/AGENT_LOOP.md).
+- The core turn loop adapts Codex's sampling/tool/follow-up flow in TypeScript, with per-tool result persistence, cancellable request retries, strict stream completion, and one-shot context-limit recovery. It is not the complete Codex runtime; see [source mapping and scope](docs/architecture/AGENT_LOOP.md).
 
 - Permission profiles keep sandbox scope separate from approvals: `read-only` asks before model shell, web, and MCP calls and uses Codex `:read-only`; `ask` asks before each call and uses `:workspace` after shell approval; `workspace-write` runs model shell in `:workspace` without per-command prompts, allows enabled public web tools without per-request prompts, and keeps MCP approval separate; `full-access` selects `:danger-full-access` after a second explicit confirmation.
 - `read_file` reads workspace UTF-8 files up to 128 KiB; `list_directory` lists up to 500 entries. Outside paths and resolved symlink escapes are rejected. File contents enter model context and persisted session data; avoid reading secrets.

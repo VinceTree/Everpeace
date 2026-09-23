@@ -12,6 +12,8 @@
 
 已知模型 context window 达到 80% 时，Agent 会在所有工具结果持久化后的下一次采样前自动压缩；未知 window 不自动触发。模型轮次或直接命令运行期间拒绝手动压缩，Esc/取消会中止请求。供应商不支持原生压缩时明确报错，不执行本地摘要回退。
 
+模型明确返回 context-limit 错误时，当前 turn 最多额外调用一次原生 compaction 并恢复采样；普通 400 不触发压缩，压缩失败不重试。SSE 必须收到 `response.completed`，能力拒绝只在首个事件前回退 buffered；网络中断、异常 EOF 和半截响应不执行工具，按现有两次采样重试边界处理。
+
 已加入 Codex 风格的严格 `/plan` 和持久化 `/goal`：Plan 模式只开放工作区读取、网页、Skill 读取及结构化问题/计划审批工具，禁止 Bash/MCP 等副作用；网页开关开启时，Plan 的公共 web 请求不要求逐次确认，关闭网页工具仍拒绝访问。`/plan` 可持续进入规划模式，`/plan <需求>` 直接开始，批准后回到 Default 并在同一 Session 执行。Goal 绑定创建它的 Session，使用 `get_goal`、`create_goal`、`update_goal` 工具及 JSONL goal 事件保存状态；`/goal <目标> [--tokens N]` 确认后立即运行，active goal 每轮自动续跑，恢复原 Session 后继续，支持 complete/blocked/paused/budget_limited/usage_limited 状态。
 
 
@@ -28,7 +30,7 @@
 
 ## 实时 Agent 进度与运行中纠正
 
-已完成 Responses SSE 优先、buffered fallback、实时 assistant delta/工具状态、运行中 safe-checkpoint steering 及分段耗时显示。流式增量和阶段状态只存在当前 TUI，不写入 Session JSONL；采样中的 guidance 会中止当前采样，工具执行中的 guidance 在结果落盘后生效，未执行的调用补齐 `steered` output。Ctrl+C 时已提交的待处理 guidance 会持久化到模型 context。
+已完成 Responses SSE 优先、严格 completed 边界、能力拒绝的 sticky buffered fallback、半截流有界重试、实时 assistant delta/工具状态、运行中 safe-checkpoint steering 及分段耗时显示。流式增量和阶段状态只存在当前 TUI，不写入 Session JSONL；采样中的 guidance 会中止当前采样，工具执行中的 guidance 在结果落盘后生效，未执行的调用补齐 `steered` output。Ctrl+C 时已提交的待处理 guidance 会持久化到模型 context。
 
 ## 当前目标
 

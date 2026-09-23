@@ -51,9 +51,13 @@ export interface AgentLoopOptions {
 
 function retryable(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
-  const { status, name } = error as { status?: unknown; name?: unknown };
+  const { status, name, retryable: explicitlyRetryable } = error as {
+    status?: unknown;
+    name?: unknown;
+    retryable?: unknown;
+  };
   if (name === "ContextCompactionError") return false;
-  return status === 408 || status === 409 || status === 429 ||
+  return explicitlyRetryable === true || status === 408 || status === 409 || status === 429 ||
     (typeof status === "number" && status >= 500 && status <= 599) ||
     name === "APIConnectionError" || name === "APIConnectionTimeoutError";
 }

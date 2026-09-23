@@ -1,5 +1,15 @@
 # Session Handoff
 
+## 最新优化：Agent Loop 可靠性恢复边界
+
+状态快照：2026-09-23。Agent Loop 现在只把带 `response.completed` 的 SSE 响应视为成功；stream 在首个事件前明确拒绝时才切换到 buffered，并在当前 Agent 生命周期内记住该能力结果。连接中断、异常 EOF 和半截响应从最后一个已持久化 context 有界重试，不启动半截工具。明确的 context-limit 错误每个 turn 最多触发一次原生 Responses compaction 和恢复采样，普通 400、压缩失败和第二次超限不会进入该恢复路径。
+
+- 新增响应错误分类、stream transport 状态和模型失败详情；Session JSONL schema、工具串行语义、审批和现有 `LoopEvent` 保持兼容。
+- 新增响应恢复与边界回归；Agent 定向测试当前为 38/38，通过 typecheck、build 和 `git diff --check`。
+- 全量 `pnpm test` 为 217 项通过、1 项取消、无失败；唯一取消项是既有 Windows Bash abort 用例在 15 秒超时，单独复跑仍可复现，与本轮 Agent Loop 改动无关。
+- 真实流式/兼容端点 Windows Terminal 冒烟仍待完成；本轮未改变 Session JSONL schema、工具串行语义或公开命令。
+- 工作区展示号同步升至 `0.2.9`；本次仅推送代码，不创建 tag 或远程 Release。
+
 ## 最新优化：memory 分层、召回与聊天级策略
 
 状态快照：2026-09-23。learned memory 现在支持兼容旧 Markdown 的 `id/kind/confidence/status/evidence/source session` metadata；项目条目按当前问题和工作区关键词进行可解释召回，过滤 archived/superseded 条目并使用独立字符预算。生产 Agent capture 使用 5 分钟 idle grace period，capture 状态会记录 queued/running/succeeded/skipped/failed；当前聊天可分别关闭已有 memory 读取或未来 capture，且 `/memory` 可以归档最新条目。旧 Session JSONL schema、Session context 和 Responses compaction 语义保持不变。工作区展示号同步升至 `0.2.8`；本次提交使用 `[skip ci]`，不更新远程 Release。

@@ -975,6 +975,172 @@ test("agent consumes Responses stream deltas and reconstructs tool calls", async
   assert.ok(toolProgress.some((event) => event.includes('streaming:bash:{"command":"pwd"}')));
 });
 
+test("agent falls back to buffered responses only for an explicit stream capability rejection", async () => {
+  let streamCalls = 0;
+  let createCalls = 0;
+  const agent = new ReactAgent({
+    model: "stream-fallback-test",
+    client: {
+      responses: {
+        async stream() {
+          streamCalls += 1;
+          throw Object.assign(new Error("stream is not supported"), {
+            status: 400,
+            code: "unsupported_parameter",
+            param: "stream",
+          });
+        },
+        async create() {
+          createCalls += 1;
+          return { id: `buffered-${createCalls}`, output_text: "done", output: [] };
+        },
+      },
+    },
+    io: { async confirmBash() { return true; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+
+  await agent.runTurn("first");
+  await agent.runTurn("second");
+  assert.equal(streamCalls, 1);
+  assert.equal(createCalls, 2);
+});
+
+test("agent retries a stream interruption without buffered fallback or duplicate tools", async () => {
+  let streamCalls = 0;
+  const deltas: string[] = [];
+  const retries: number[] = [];
+  let toolCalls = 0;
+  const agent = new ReactAgent({
+    model: "stream-retry-test",
+    client: {
+      responses: {
+        async create() { throw new Error("buffered fallback is not allowed"); },
+        async *stream() {
+          streamCalls += 1;
+          yield { type: "response.output_text.delta", delta: "partial" };
+          if (streamCalls === 1) {
+            throw Object.assign(new Error("connection dropped"), { name: "APIConnectionError" });
+          }
+          yield { type: "response.completed", response: { id: "complete", output: [], output_text: "complete" } };
+        },
+      },
+    },
+    onEvent(event) {
+      if (event.type === "retrying") retries.push(event.attempt);
+    },
+    io: {
+      async confirmBash() { return true; },
+      async runBash() { toolCalls += 1; return bashResult("unexpected"); },
+      writeAssistantDelta(text) { deltas.push(text); },
+      writeAssistant() {},
+    },
+  });
+
+  await agent.runTurn("retry");
+  assert.equal(streamCalls, 2);
+  assert.deepEqual(retries, [1]);
+  assert.deepEqual(deltas, ["partial", "partial"]);
+  assert.equal(toolCalls, 0);
+});
+
+test("agent rejects a clean stream EOF without response.completed", async () => {
+  let streamCalls = 0;
+  const retries: number[] = [];
+  const agent = new ReactAgent({
+    model: "stream-eof-test",
+    client: {
+      responses: {
+        async create() { throw new Error("buffered fallback is not allowed"); },
+        async *stream() {
+          streamCalls += 1;
+          yield { type: "response.output_text.delta", delta: "partial" };
+        },
+      },
+    },
+    onEvent(event) {
+      if (event.type === "retrying") retries.push(event.attempt);
+    },
+    io: { async confirmBash() { return true; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+
+  await assert.rejects(agent.runTurn("eof"), /response\.completed/);
+  assert.equal(streamCalls, 3);
+  assert.deepEqual(retries, [1, 2]);
+});
+
+test("agent compacts once and retries after a context-limit response error", async () => {
+  let createCalls = 0;
+  let compactCalls = 0;
+  const compactEvents: string[] = [];
+  const inputs: Array<Array<Record<string, unknown>>> = [];
+  const compacted = [{ type: "compaction", encrypted_content: "opaque" }];
+  const agent = new ReactAgent({
+    model: "context-recovery-test",
+    client: {
+      responses: {
+        async create(params) {
+          createCalls += 1;
+          inputs.push(params.input as Array<Record<string, unknown>>);
+          if (createCalls === 1) {
+            throw Object.assign(new Error("maximum context length is 100"), {
+              status: 400,
+              code: "context_length_exceeded",
+            });
+          }
+          return { id: "recovered", output_text: "recovered", output: [] };
+        },
+        async compact() {
+          compactCalls += 1;
+          return { output: compacted, usage: { input_tokens: 20, output_tokens: 2, total_tokens: 22 } };
+        },
+      },
+    },
+    onEvent(event) {
+      if (event.type === "compaction_started") compactEvents.push("started");
+      if (event.type === "compaction_completed") compactEvents.push("completed");
+    },
+    io: { async confirmBash() { return true; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+
+  await agent.runTurn("recover");
+  assert.equal(createCalls, 2);
+  assert.equal(compactCalls, 1);
+  assert.deepEqual(compactEvents, ["started", "completed"]);
+  assert.equal(inputs[1]?.[0]?.type, "compaction");
+});
+
+test("agent does not compact ordinary bad requests or retry a second context failure", async () => {
+  let createCalls = 0;
+  let compactCalls = 0;
+  const ordinary = new ReactAgent({
+    model: "ordinary-error-test",
+    client: { responses: {
+      async create() {
+        throw Object.assign(new Error("invalid request"), { status: 400, code: "invalid_request" });
+      },
+      async compact() { compactCalls += 1; return { output: [] }; },
+    } },
+    io: { async confirmBash() { return true; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+  await assert.rejects(ordinary.runTurn("bad"), /invalid request/);
+  assert.equal(compactCalls, 0);
+
+  const repeated = new ReactAgent({
+    model: "repeated-context-test",
+    client: { responses: {
+      async create() {
+        createCalls += 1;
+        throw Object.assign(new Error("maximum context length"), { status: 400, code: "context_length_exceeded" });
+      },
+      async compact() { compactCalls += 1; return { output: [{ type: "compaction" }] }; },
+    } },
+    io: { async confirmBash() { return true; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+  await assert.rejects(repeated.runTurn("again"), /maximum context length/);
+  assert.equal(createCalls, 2);
+  assert.equal(compactCalls, 1);
+});
+
 test("agent applies guidance by stopping sampling and continuing with durable context", async () => {
   let request = 0;
   let started!: () => void;

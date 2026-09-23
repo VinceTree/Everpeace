@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.2.8) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.9) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -95,7 +95,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 
 对于依赖当前信息或冷门资料的问题，模型可以先调用 `web_search`，再使用 `web_fetch` 读取有价值的来源。搜索和网页读取不需要 Bash 确认；function call 及结果会保留在可恢复的模型上下文中，TUI transcript 则显示简短的工具动作。模型会被要求在最终回答中列出实际采用的来源 URL。
 
-TUI 自身界面现统一使用英文。任务运行时会显示按供应商识别的状态，例如 `Waiting for DeepSeek (3s • ctrl+c to interrupt)`，进入工具调度阶段后切换为 `Working`。支持 Responses 流式端点时，模型文字和工具进度会即时显示；兼容的 buffered 端点仍显示阶段、审批和命令预览。模型回复支持 GitHub Flavored Markdown，包括标题、列表、强调、链接、表格、行内代码和 fenced code；代码块及 Bash/PowerShell 命令使用语言感知的终端高亮，超大内容会安全退回纯文本。
+TUI 自身界面现统一使用英文。任务运行时会显示按供应商识别的状态，例如 `Waiting for DeepSeek (3s • ctrl+c to interrupt)`，进入工具调度阶段后切换为 `Working`。支持 Responses 流式端点时，模型文字和工具进度会即时显示；只有端点在发出任何事件前明确拒绝 streaming 时才切换到 buffered，流式中断或不完整响应会从最后一个已持久化上下文有界重试，不会执行半截工具调用。兼容的 buffered 端点仍显示阶段、审批和命令预览。模型回复支持 GitHub Flavored Markdown，包括标题、列表、强调、链接、表格、行内代码和 fenced code；代码块及 Bash/PowerShell 命令使用语言感知的终端高亮，超大内容会安全退回纯文本。
 
 命令与对话正文使用不同层级展示：运行中显示 `Running`，完成的模型命令显示 `Ran`，用户直接命令显示 `You ran`，并附带状态色、shell、耗时和保留输出。模型 `diff` 代码块及命令输出中的标准 unified diff 会显示新旧行号、青色文件/hunk 标题、绿色新增和红色删除；真彩终端使用随明暗背景调整的底色，低色彩及 `NO_COLOR` 环境仍保留结构标记。恢复旧 Session 时，已知旧中文系统/工具提示只在显示层翻译，不改写 JSONL，也不翻译用户或模型正文。
 
@@ -127,7 +127,7 @@ TUI 命令：
 - `/memory`：查看 learned 经验、暂停/恢复自动积累、切换当前聊天是否读取或记录 memory、归档或清理条目、使用 `/memory view` 查看实际注入快照，或使用 `/memory remember <偏好>` 保存长期用户偏好。
 - `/plan`：进入严格只读规划模式，回答结构化策略问题，并在批准计划后执行。
 - `/goal <目标> [--tokens N]`：创建、查看、暂停、恢复并自动持续执行当前 Session 目标。
-- `/compact`：使用供应商原生的 Responses 压缩接口替换模型 context，同时保留完整可见 transcript 和 Session 历史。模型轮次或直接命令运行时会拒绝执行；已知 context window 达到 80% 后，会在下一次模型请求前自动压缩。
+- `/compact`：使用供应商原生的 Responses 压缩接口替换模型 context，同时保留完整可见 transcript 和 Session 历史。模型轮次或直接命令运行时会拒绝执行；已知 context window 达到 80% 后，会在下一次模型请求前自动压缩，明确的 context-limit 响应每轮最多额外触发一次自动恢复压缩。
 - `/outputs`：分页浏览保留输出、已高亮的命令及 unified diff。
 - `/history`：浏览或明确确认后清空全局输入历史，不删除 Session。
 - `/terminal-setup`：预览并可选配置稳定版 Windows Terminal 的 Shift+Enter；确认后先备份设置，再新增全局按键绑定。
@@ -153,7 +153,7 @@ Skills 从工作区到仓库根的 `.agents/skills`、项目 `.codex/skills`、`
 
 行为说明：
 
-- 核心循环已适配 Codex 的采样、工具执行、后续采样流程，提供逐工具结果保存、可取消的请求重试和并发轮次防护。这不是完整 Codex runtime，详见 [源码对应与移植范围](docs/architecture/AGENT_LOOP.md)。
+- 核心循环已适配 Codex 的采样、工具执行、后续采样流程，提供逐工具结果保存、可取消的请求重试、严格的流完成判断和单次 context-limit 恢复。这不是完整 Codex runtime，详见 [源码对应与移植范围](docs/architecture/AGENT_LOOP.md)。
 
 - 权限档位把 sandbox 范围与审批分开：`read-only` 对模型 shell、网页和 MCP 逐项审批，并使用 Codex `:read-only`；`ask` 逐项审批，shell 获批后使用 `:workspace`；`workspace-write` 在 `:workspace` 内免逐条 shell 审批，已开启的公共网页工具也免逐次确认，MCP 仍单独审批；`full-access` 二次明确确认后选择 `:danger-full-access` 并跳过工具审批。
 - 模型可以用 `read_file` 查看工作目录内不超过 128 KiB 的 UTF-8 文件，用 `list_directory` 列出最多 500 个目录项。拒绝目录外路径和符号链接越界。文件正文会进入模型 context 和 Session 文件，请避免读取机密。
