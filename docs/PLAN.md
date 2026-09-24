@@ -14,6 +14,8 @@
 
 模型明确返回 context-limit 错误时，当前 turn 最多额外调用一次原生 compaction 并恢复采样；普通 400 不触发压缩，压缩失败不重试。SSE 必须收到 `response.completed`，能力拒绝只在首个事件前回退 buffered；网络中断、异常 EOF 和半截响应不执行工具，按现有两次采样重试边界处理。
 
+Agent Loop 平衡优化：采样错误现在按连接、超时、限流、服务端、半截流、上下文超限和永久错误分类，采样、stream recovery、context compaction 预算彼此隔离。Responses client 可显式提供 event-cursor recovery adapter；成功续接只返回一个完整响应，失败回到有界整轮重试。`parallelToolCalls` 默认关闭，只有显式开启时才发送 `parallel_tool_calls: true`，并只允许 `read_file`、`list_directory`、`read_skill` 进入按原始调用顺序落盘的并行批次；Bash、MCP、网页、审批和 Goal/Plan 写操作保持串行。
+
 ## Prompt cache
 
 主 Agent 使用 Responses API 服务端 prompt caching：官方 OpenAI endpoint 的主采样和原生 compaction 请求使用按 Session ID 延迟解析的 `everpeace:v2:session:<id>` key，并同步发送 `session-id` 会话亲和性 header；不缓存完整响应，不改变工具循环或 Session context。GPT-5.6 及以后型号额外发送隐式缓存模式和 `30m` TTL，旧模型只使用基础 key。高级字段被兼容端点拒绝时，当前 Agent 只降级重试一次。

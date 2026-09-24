@@ -1364,3 +1364,87 @@ test("guidance submitted before Ctrl+C is checkpointed for the next turn", async
   await agent.runTurn("continue");
   assert.ok(nextInput.some((item) => item.role === "user" && item.content === "keep the correction"));
 });
+
+test("provider stream recovery resumes only after an interrupted response", async () => {
+  let streamCalls = 0;
+  let recoveryCalls = 0;
+  const events: string[] = [];
+  const agent = new ReactAgent({
+    model: "recovery-test",
+    client: {
+      responses: {
+        async create() { throw new Error("buffered path should not be used"); },
+        async *stream() {
+          streamCalls += 1;
+          yield { id: "event-1", type: "response.output_text.delta", delta: "partial" };
+          throw new Error("connection dropped");
+        },
+        recovery: {
+          async resume(_params, state) {
+            recoveryCalls += 1;
+            assert.equal(state.lastEventId, "event-1");
+            return { id: "recovered", output_text: "complete", output: [], status: "completed" };
+          },
+        },
+      },
+    },
+    streamRecoveryBudget: 1,
+    onEvent(event) {
+      if (event.type === "stream_recovery_started") events.push("started");
+      if (event.type === "stream_recovery_finished") events.push(event.success === false ? "failed" : "finished");
+    },
+    io: { async confirmBash() { return false; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+  await agent.runTurn("resume");
+  assert.equal(streamCalls, 1);
+  assert.equal(recoveryCalls, 1);
+  assert.deepEqual(events, ["started", "finished"]);
+});
+
+test("recovery failure consumes its budget and falls back to bounded sampling retry", async () => {
+  let streamCalls = 0;
+  let recoveryCalls = 0;
+  const agent = new ReactAgent({
+    model: "recovery-failure-test",
+    client: {
+      responses: {
+        async create() { throw new Error("buffered path should not be used"); },
+        async *stream() {
+          streamCalls += 1;
+          yield { id: `event-${streamCalls}`, type: "response.output_text.delta", delta: "partial" };
+          throw new Error("connection dropped");
+        },
+        recovery: {
+          async resume() {
+            recoveryCalls += 1;
+            throw new Error("resume unavailable");
+          },
+        },
+      },
+    },
+    streamRecoveryBudget: 1,
+    samplingRetryBudget: 1,
+    io: { async confirmBash() { return false; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+  await assert.rejects(agent.runTurn("resume"), /resume unavailable|response\.completed/);
+  assert.equal(recoveryCalls, 1);
+  assert.equal(streamCalls, 2);
+});
+
+test("parallel tool calls are opt-in and only change the request flag when enabled", async () => {
+  const seen: boolean[] = [];
+  const makeAgent = (parallelToolCalls?: boolean) => new ReactAgent({
+    model: "parallel-flag-test",
+    ...(parallelToolCalls === undefined ? {} : { parallelToolCalls }),
+    client: { responses: {
+      async create(params) {
+        seen.push(params.parallel_tool_calls as boolean);
+        return { id: "done", output_text: "done", output: [] };
+      },
+    } },
+    io: { async confirmBash() { return false; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+  await makeAgent().runTurn("serial");
+  await makeAgent(true).runTurn("parallel");
+  assert.deepEqual(seen, [false, true]);
+});

@@ -19,13 +19,26 @@ export interface ToolCall extends Record<string, unknown> {
 
 export type LoopPhase = "sampling" | "tools" | "completed" | "cancelled" | "failed";
 
+export type SamplingErrorCategory =
+  | "connection"
+  | "timeout"
+  | "rate_limit"
+  | "server"
+  | "stream_incomplete"
+  | "context_limit"
+  | "permanent";
+
 export type LoopEvent =
   | { type: "sampling_started" }
   | { type: "response_received"; response: LoopResponse }
   | { type: "tool_started"; call: ToolCall }
   | { type: "tool_finished"; call: ToolCall; output: string }
   | { type: "steering_applied"; count: number }
-  | { type: "retrying"; attempt: number; delayMs: number }
+  | { type: "retrying"; attempt: number; delayMs: number; category?: SamplingErrorCategory }
+  | { type: "tool_batch_started"; calls: ToolCall[] }
+  | { type: "tool_batch_finished"; calls: ToolCall[]; outputs: string[] }
+  | { type: "stream_recovery_started" }
+  | { type: "stream_recovery_finished"; success?: boolean }
   | { type: "compaction_started"; automatic: boolean }
   | { type: "compaction_completed"; automatic: boolean; usage: TokenUsageSample | null };
 
@@ -47,32 +60,53 @@ export interface AgentLoopOptions {
   applySteering?(): Promise<number>;
   maxRetries?: number;
   retryDelayMs?: number;
+  retryBudgets?: {
+    sampling?: number;
+    streamRecovery?: number;
+    compaction?: number;
+  };
+  canRunInParallel?(call: ToolCall): boolean;
 }
 
-function retryable(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
+export function classifySamplingError(error: unknown): SamplingErrorCategory {
+  if (!error || typeof error !== "object") return "permanent";
   const { status, name, retryable: explicitlyRetryable } = error as {
     status?: unknown;
     name?: unknown;
     retryable?: unknown;
   };
-  if (name === "ContextCompactionError") return false;
-  return explicitlyRetryable === true || status === 408 || status === 409 || status === 429 ||
-    (typeof status === "number" && status >= 500 && status <= 599) ||
-    name === "APIConnectionError" || name === "APIConnectionTimeoutError";
+  const record = error as Record<string, unknown>;
+  const code = typeof record.code === "string" ? record.code.toLowerCase() : "";
+  const text = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  if (name === "ContextCompactionError" || code.includes("context") || /context.{0,20}(?:length|window)|too many input tokens/.test(text)) return "context_limit";
+  if (name === "ResponseStreamIncompleteError" || code.includes("stream") && /incomplete|eof|ended|closed/.test(text)) return "stream_incomplete";
+  if (name === "APIConnectionTimeoutError" || name === "TimeoutError" || status === 408 || /timed? ?out|timeout/.test(text)) return "timeout";
+  if (status === 429 || code.includes("rate_limit") || /rate limit|too many requests/.test(text)) return "rate_limit";
+  if (name === "APIConnectionError" || /connection|socket|econn|network|fetch failed/.test(text)) return "connection";
+  if (status === 409 || (typeof status === "number" && status >= 500 && status <= 599) || code.includes("server_error")) return "server";
+  if (explicitlyRetryable === true) return "connection";
+  return "permanent";
 }
 
-async function sample(options: AgentLoopOptions): Promise<LoopResponse> {
-  const maxRetries = options.maxRetries ?? 2;
+function retryable(category: SamplingErrorCategory): boolean {
+  return category !== "permanent" && category !== "context_limit";
+}
+
+async function sample(
+  options: AgentLoopOptions,
+  budget: { remaining: number; total: number },
+): Promise<LoopResponse> {
   for (let attempt = 0; ; attempt++) {
     options.signal?.throwIfAborted();
     try {
       return await options.sample();
     } catch (error) {
       options.signal?.throwIfAborted();
-      if (attempt >= maxRetries || !retryable(error)) throw error;
+      const category = classifySamplingError(error);
+      if (budget.remaining <= 0 || !retryable(category)) throw error;
+      budget.remaining -= 1;
       const delayMs = Math.min(10_000, (options.retryDelayMs ?? 250) * 2 ** attempt);
-      options.onEvent?.({ type: "retrying", attempt: attempt + 1, delayMs });
+      options.onEvent?.({ type: "retrying", attempt: budget.total - budget.remaining, delayMs, category });
       await delay(delayMs, undefined,
         options.signal ? { signal: options.signal } : {});
     }
@@ -82,6 +116,10 @@ async function sample(options: AgentLoopOptions): Promise<LoopResponse> {
 /** Keep transport, tool permissions, and durable history outside turn control. */
 export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
   const { signal } = options;
+  const samplingBudget = {
+    remaining: Math.max(0, options.retryBudgets?.sampling ?? options.maxRetries ?? 2),
+    total: Math.max(0, options.retryBudgets?.sampling ?? options.maxRetries ?? 2),
+  };
   try {
     while (true) {
       signal?.throwIfAborted();
@@ -89,7 +127,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
       options.onEvent?.({ type: "sampling_started" });
       let response: LoopResponse;
       try {
-        response = await sample(options);
+        response = await sample(options, samplingBudget);
       } catch (error) {
         if (error instanceof LoopSteeredError) {
           const count = await options.applySteering?.() ?? 0;
@@ -105,7 +143,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
       const calls = response.output.filter((item) => item.type === "function_call");
       const ids = new Set<string>();
       for (let callIndex = 0; callIndex < calls.length; callIndex++) {
-        const call = calls[callIndex]!;
+        const call = calls[callIndex]! as ToolCall;
         if (typeof call.call_id !== "string" || !call.call_id || ids.has(call.call_id)) {
           throw new Error("Tool call has a missing or duplicate call_id");
         }
@@ -126,7 +164,57 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
       if (calls.length) options.onPhase?.("tools");
       let stopAfterTools = false;
       for (let callIndex = 0; callIndex < calls.length; callIndex++) {
-        const call = calls[callIndex]!;
+        const call = calls[callIndex]! as ToolCall;
+        const parallel = options.canRunInParallel?.(call) === true;
+        if (parallel) {
+          const batch: ToolCall[] = [];
+          for (let index = callIndex; index < calls.length; index++) {
+            const candidate = calls[index] as ToolCall;
+            if (options.canRunInParallel?.(candidate) !== true) break;
+            batch.push(candidate);
+          }
+          options.onEvent?.({ type: "tool_batch_started", calls: batch });
+          const results = await Promise.all(batch.map(async (batchCall) => {
+            options.onEvent?.({ type: "tool_started", call: batchCall });
+            let output: string;
+            let stop = false;
+            try {
+              signal?.throwIfAborted();
+              const result = typeof batchCall.name === "string" && typeof batchCall.arguments === "string"
+                ? await options.dispatch(batchCall)
+                : JSON.stringify({ status: "error", error: "Invalid tool call fields" });
+              output = typeof result === "string" ? result : result.output;
+              stop = typeof result === "object" && result.stop === true;
+            } catch (error) {
+              output = JSON.stringify(signal?.aborted
+                ? { status: "cancelled" }
+                : { status: "error", error: error instanceof Error ? error.message : String(error) });
+            }
+            return { call: batchCall, output, stop };
+          }));
+          for (const result of results) {
+            await options.record([{ type: "function_call_output", call_id: result.call.call_id, output: result.output }]);
+            options.onEvent?.({ type: "tool_finished", call: result.call, output: result.output });
+            stopAfterTools ||= result.stop;
+          }
+          options.onEvent?.({ type: "tool_batch_finished", calls: batch, outputs: results.map((result) => result.output) });
+          callIndex += batch.length - 1;
+          if (stopAfterTools) {
+            for (const skipped of calls.slice(callIndex + 1)) {
+              await options.record([{ type: "function_call_output", call_id: skipped.call_id, output: JSON.stringify({ status: "skipped" }) }]);
+            }
+            break;
+          }
+          const batchSteeringCount = await options.applySteering?.() ?? 0;
+          if (batchSteeringCount > 0) {
+            for (const skipped of calls.slice(callIndex + 1)) {
+              await options.record([{ type: "function_call_output", call_id: skipped.call_id, output: JSON.stringify({ status: "steered" }) }]);
+            }
+            options.onEvent?.({ type: "steering_applied", count: batchSteeringCount });
+            break;
+          }
+          continue;
+        }
         options.onEvent?.({ type: "tool_started", call: call as ToolCall });
         let output: string;
         try {

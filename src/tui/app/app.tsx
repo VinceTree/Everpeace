@@ -693,7 +693,11 @@ export function EverpeaceApp({
                 setLiveToolStatus(undefined);
               } else if (event.type === "retrying") {
                 setLiveAssistant("");
-                setLiveToolStatus(`Retrying model request (attempt ${event.attempt})`);
+                setLiveToolStatus(`Retrying model request (attempt ${event.attempt}${event.category ? ` · ${event.category.replace(/_/g, " ")}` : ""})`);
+              } else if (event.type === "stream_recovery_started") {
+                setLiveToolStatus("Resuming interrupted model stream");
+              } else if (event.type === "stream_recovery_finished") {
+                setLiveToolStatus(event.success === false ? "Stream resume failed; retrying request" : "Model stream resumed");
               } else if (event.type === "steering_applied") {
                 setQueuedGuidanceCount((current) => Math.max(0, current - event.count));
                 setLiveAssistant("");
@@ -702,6 +706,10 @@ export function EverpeaceApp({
                 setLiveToolStatus(`Preparing ${event.call.name}`);
               } else if (event.type === "tool_finished") {
                 setLiveToolStatus(`${event.call.name} finished`);
+              } else if (event.type === "tool_batch_started") {
+                setLiveToolStatus(`Running ${event.calls.length} read-only tools in parallel`);
+              } else if (event.type === "tool_batch_finished") {
+                setLiveToolStatus(`Finished ${event.calls.length} parallel tools`);
               } else if (event.type === "compaction_started") {
                 setLiveToolStatus(event.automatic ? "Compacting context automatically" : "Compacting context");
               } else if (event.type === "compaction_completed") {

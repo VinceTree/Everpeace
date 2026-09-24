@@ -6,6 +6,8 @@
 
 响应式恢复继续复用同一原生 compaction 接口：只有明确的 context-limit 错误才触发，每个 `runTurn` 最多一次；压缩成功后才用替换后的 context 重试采样，压缩失败不进入普通采样重试，也不做本地摘要回退。SSE 只有收到 `response.completed` 才算成功；能力拒绝必须发生在首个事件之前才允许切到 buffered 请求，连接中断、异常 EOF 或半截输出只从未持久化的历史有界重试。
 
+Agent Loop 可靠性预算彼此隔离：普通采样重试默认最多两次，provider event-cursor 续接和 context compaction 各使用独立的一次性预算；半截 SSE 永不写入 context 或执行工具，续接失败回退到有界整轮重试。并行工具采用能力标记而非工具名泛化，默认 `parallelToolCalls=false`，显式开启后仅 `read_file`、`list_directory`、`read_skill` 可组成连续批次。批次同时执行但按模型调用顺序持久化，guidance/stop 等待整批结果落盘，副作用工具和审批永不自动并行。批次、续接和 retry 分类事件只供当前 UI/诊断使用，不扩展 Session JSONL schema。
+
 
 ## 有界历史显示
 

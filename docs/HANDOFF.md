@@ -9,6 +9,14 @@
 
 # Session Handoff
 
+## 最新优化：Agent Loop 平衡恢复与能力标记并行
+
+状态快照：2026-09-24。Agent Loop 新增采样错误分类及独立预算：普通采样默认最多两次重试，provider 明确提供 event-cursor recovery 时当前 turn 最多续接一次，context-limit 仍最多触发一次原生 compaction；半截响应在 `response.completed` 前不会进入模型 context 或执行工具，续接失败回退到有界整轮重试。`retrying` 事件增加可选分类字段，并新增仅供当前 TUI/诊断的 `tool_batch_*`、`stream_recovery_*` 事件。
+
+`ReactAgentOptions.parallelToolCalls` 默认关闭；显式开启时 Responses 请求才发送 `parallel_tool_calls: true`，且 loop 只为 `read_file`、`list_directory`、`read_skill` 启用并行批次。批次内部并发执行，结果按模型原始顺序持久化，guidance/stop/取消在整批落盘后统一处理；Bash、MCP、网页、审批和 Goal/Plan 写操作保持串行。Session JSONL、工具结果格式、默认串行 provider 请求形状和公开命令均未改变。
+
+工作区展示号提升至 `0.2.11`。新增 Agent Loop/ReactAgent 回归覆盖并行顺序、混合边界、stream recovery 成功与预算耗尽回退，以及默认/显式 `parallel_tool_calls` 请求标记。验证结果：`pnpm test` 为 231 项通过、1 项取消（既有 Windows Bash abort 15 秒超时）；`pnpm typecheck`、`pnpm build` 和 `git diff --check` 通过。已完成隔离本地 SSE 端到端冒烟：半截流重试、两个只读工具并行且按原序落盘、工具 follow-up、Ctrl+C 取消均通过。真实 `deepseek-flash` Windows Terminal 冒烟暂未执行，因为当前系统凭据存储将已注册模型标记为 missing；TUI 已验证能正确提示并退出。本次只提交并推送代码，不创建 tag 或远程 Release。
+
 ## Prompt cache 基础能力
 
 Responses usage 中的 `cached_tokens` / `cache_write_tokens` 继续通过现有 usage 事件累计并在 `/status` 显示读取量、写入量和命中率。不缓存完整模型回答；旧 Session、DeepSeek、未知兼容端点及缺少缓存详情的 provider 保持兼容并显示 `N/A`。Session JSONL 事件类型保持不变。

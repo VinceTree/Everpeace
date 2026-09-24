@@ -51,7 +51,7 @@ interface ResponseOutputItem extends Record<string, unknown> {
   call_id?: string;
 }
 
-interface AgentResponse {
+export interface AgentResponse {
   end_turn?: boolean;
   status?: string;
   id: string;
@@ -63,6 +63,24 @@ interface AgentResponse {
 }
 
 export type ResponseStreamLike = AsyncIterable<Record<string, unknown>>;
+
+function isResponseStream(value: AgentResponse | ResponseStreamLike): value is ResponseStreamLike {
+  return typeof value === "object" && value !== null && Symbol.asyncIterator in value;
+}
+
+export interface ResponseRecoveryState {
+  events: readonly Record<string, unknown>[];
+  lastEventId?: string;
+  responseId?: string;
+}
+
+export interface ResponseRecoveryAdapter {
+  resume(
+    params: Record<string, unknown>,
+    state: ResponseRecoveryState,
+    options?: ResponsesRequestOptions,
+  ): Promise<AgentResponse | ResponseStreamLike>;
+}
 
 export interface ResponsesRequestOptions {
   signal?: AbortSignal;
@@ -92,6 +110,20 @@ export interface ResponsesClientLike {
       params: Record<string, unknown>,
       options?: ResponsesRequestOptions,
     ): Promise<ResponseStreamLike> | ResponseStreamLike;
+    /** Optional provider-owned event cursor recovery. */
+    recovery?: ResponseRecoveryAdapter;
+    /** Alias accepted for lightweight compatible clients. */
+    recover?(
+      params: Record<string, unknown>,
+      state: ResponseRecoveryState,
+      options?: ResponsesRequestOptions,
+    ): Promise<AgentResponse | ResponseStreamLike>;
+    /** Alias accepted for clients that expose the adapter as resume(). */
+    resume?(
+      params: Record<string, unknown>,
+      state: ResponseRecoveryState,
+      options?: ResponsesRequestOptions,
+    ): Promise<AgentResponse | ResponseStreamLike>;
   };
 }
 
@@ -126,6 +158,10 @@ export interface ReactAgentOptions {
   io: AgentIO;
   promptCacheKey?: string | (() => string | undefined);
   promptCacheOptions?: PromptCacheOptions;
+  parallelToolCalls?: boolean;
+  samplingRetryBudget?: number;
+  streamRecoveryBudget?: number;
+  contextRecoveryBudget?: number;
   web?: WebToolExecutor;
   mcp?: McpRuntimeLike;
   skills?: SkillCatalogLike;
@@ -237,6 +273,11 @@ export class ReactAgent {
   #compacting = false;
   #responseTransport: "stream" | "buffered";
   #advancedPromptCacheEnabled: boolean;
+  #streamRecoveryRemaining = 0;
+  readonly #parallelToolCalls: boolean;
+  readonly #samplingRetryBudget: number;
+  readonly #streamRecoveryBudget: number;
+  readonly #contextRecoveryBudget: number;
 
   constructor(options: ReactAgentOptions) {
     this.#onPhase = options.onPhase;
@@ -248,6 +289,10 @@ export class ReactAgent {
     this.#promptCacheKey = options.promptCacheKey;
     this.#promptCacheOptions = options.promptCacheOptions;
     this.#advancedPromptCacheEnabled = options.promptCacheOptions !== undefined;
+    this.#parallelToolCalls = options.parallelToolCalls === true;
+    this.#samplingRetryBudget = Math.max(0, options.samplingRetryBudget ?? 2);
+    this.#streamRecoveryBudget = Math.max(0, options.streamRecoveryBudget ?? 1);
+    this.#contextRecoveryBudget = Math.max(0, options.contextRecoveryBudget ?? 1);
     this.#web = options.web ?? createWebToolExecutor();
     this.#mcp = options.mcp;
     this.#skills = options.skills;
@@ -277,8 +322,9 @@ export class ReactAgent {
     this.#turnItems = turnItems;
     this.#turnMode = options.mode ?? "default";
     this.#turnResult = {};
+    this.#streamRecoveryRemaining = this.#streamRecoveryBudget;
     const assistantTexts: string[] = [];
-    let contextRecoveryUsed = false;
+    let contextRecoveryRemaining = this.#contextRecoveryBudget;
     try {
       await this.#ensureLearnedPrompt(userInput);
       if (this.#mcp && this.#turnMode === "default") this.#mcpSnapshot = await this.#mcp.ensureReady(signal);
@@ -295,11 +341,11 @@ export class ReactAgent {
           } catch (error) {
             signal?.throwIfAborted();
             if (
-              !contextRecoveryUsed &&
+              contextRecoveryRemaining > 0 &&
               this.#client.responses.compact !== undefined &&
               isContextLimitError(error)
             ) {
-              contextRecoveryUsed = true;
+              contextRecoveryRemaining -= 1;
               await this.#compactContext(true, signal);
               return this.#requestResponse([...this.#history], signal);
             }
@@ -316,6 +362,10 @@ export class ReactAgent {
         ...(signal ? { signal } : {}),
         ...(this.#onPhase ? { onPhase: this.#onPhase } : {}),
         ...(this.#onEvent ? { onEvent: this.#onEvent } : {}),
+        retryBudgets: { sampling: this.#samplingRetryBudget },
+        ...(this.#parallelToolCalls
+          ? { canRunInParallel: (call: ToolCall) => call.name === "read_file" || call.name === "list_directory" || call.name === READ_SKILL_TOOL_DEFINITION.name }
+          : {}),
       });
       if (this.#learnedMemory) {
         const sessionId = this.#io.getSessionId?.();
@@ -337,6 +387,7 @@ export class ReactAgent {
         this.#sampleController = undefined;
         this.#skillTurn = undefined;
         this.#running = false;
+        this.#streamRecoveryRemaining = 0;
         this.#turnItems = undefined;
       }
     }
@@ -539,14 +590,16 @@ export class ReactAgent {
         ? controller.signal
         : AbortSignal.any([signal, controller.signal]);
     let response: AgentResponse;
+    const recoveryBudget = { remaining: this.#streamRecoveryRemaining };
     try {
-      response = await this.#createResponse(input, requestSignal);
+      response = await this.#createResponse(input, requestSignal, recoveryBudget);
     } catch (error) {
       if (!signal?.aborted && controller.signal.aborted && this.#pendingSteering.length > 0) {
         throw new LoopSteeredError();
       }
       throw error;
     } finally {
+      this.#streamRecoveryRemaining = recoveryBudget.remaining;
       if (this.#sampleController === controller) this.#sampleController = undefined;
     }
     signal?.throwIfAborted();
@@ -631,13 +684,14 @@ export class ReactAgent {
   async #createResponse(
     input: Array<Record<string, unknown>>,
     signal?: AbortSignal,
+    recoveryBudget: { remaining: number } = { remaining: this.#streamRecoveryBudget },
   ): Promise<AgentResponse> {
     try {
-      return await this.#createResponseAttempt(input, signal, this.#advancedPromptCacheEnabled);
+      return await this.#createResponseAttempt(input, signal, this.#advancedPromptCacheEnabled, recoveryBudget);
     } catch (error) {
       if (signal?.aborted || !this.#advancedPromptCacheEnabled || !isUnsupportedPromptCacheOptionsError(error)) throw error;
       this.#advancedPromptCacheEnabled = false;
-      return this.#createResponseAttempt(input, signal, false);
+      return this.#createResponseAttempt(input, signal, false, recoveryBudget);
     }
   }
 
@@ -645,6 +699,7 @@ export class ReactAgent {
     input: Array<Record<string, unknown>>,
     signal: AbortSignal | undefined,
     advancedPromptCache: boolean,
+    recoveryBudget: { remaining: number },
   ): Promise<AgentResponse> {
     const skillInstructions = this.#skillTurn
       ? [this.#skillTurn.instructions, this.#skillTurn.explicitInstructions].filter(Boolean).join("\n\n")
@@ -696,7 +751,7 @@ export class ReactAgent {
         input: requestInput,
         tools,
         tool_choice: "auto",
-        parallel_tool_calls: false,
+        parallel_tool_calls: this.#parallelToolCalls,
         store: false,
         include: ["reasoning.encrypted_content"],
         ...cache.params,
@@ -705,10 +760,39 @@ export class ReactAgent {
     if (this.#responseTransport === "stream" && this.#client.responses.stream) {
       let eventsSeen = 0;
       try {
-        return await this.#consumeResponseStream(
-          await this.#client.responses.stream(params, options),
-          () => { eventsSeen += 1; },
-        );
+        try {
+          return await this.#consumeResponseStream(
+            await this.#client.responses.stream(params, options),
+            () => { eventsSeen += 1; },
+          );
+        } catch (error) {
+          const adapter = this.#client.responses.recovery
+            ?? (this.#client.responses.recover === undefined ? undefined : { resume: this.#client.responses.recover.bind(this.#client.responses) })
+            ?? (this.#client.responses.resume === undefined ? undefined : { resume: this.#client.responses.resume.bind(this.#client.responses) });
+          const state = error instanceof ResponseStreamIncompleteError
+            ? (error as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState }).recoveryState
+            : undefined;
+          if (!signal?.aborted && adapter && state && recoveryBudget.remaining > 0) {
+            recoveryBudget.remaining -= 1;
+            this.#onEvent?.({ type: "stream_recovery_started" });
+            try {
+              const recovered = await adapter.resume(params, state, options);
+              const result = isResponseStream(recovered)
+                ? await this.#consumeResponseStream(recovered, () => { eventsSeen += 1; })
+                : recovered;
+              if (result.status && result.status !== "completed") throw new ModelResponseError(result);
+              this.#onEvent?.({ type: "stream_recovery_finished" });
+              return result;
+            } catch (recoveryError) {
+              this.#onEvent?.({ type: "stream_recovery_finished", success: false });
+              // The adapter owns cursor recovery. If it cannot rebuild a
+              // complete response, let the loop's bounded whole-request retry
+              // handle the original interrupted stream.
+              throw error;
+            }
+          }
+          throw error;
+        }
       } catch (error) {
         if (signal?.aborted) throw error;
         if (eventsSeen === 0 && isStreamUnsupportedError(error)) {
@@ -728,9 +812,17 @@ export class ReactAgent {
     let response: AgentResponse | undefined;
     let outputText = "";
     const items = new Map<string, ResponseOutputItem>();
+    const events: Array<Record<string, unknown>> = [];
+    let lastEventId: string | undefined;
+    let responseId: string | undefined;
     try {
       for await (const event of stream) {
         onEvent();
+        events.push(event);
+        if (typeof event.id === "string") lastEventId = event.id;
+        if (event.response && typeof event.response === "object" && typeof (event.response as Record<string, unknown>).id === "string") {
+          responseId = (event.response as Record<string, unknown>).id as string;
+        }
         const type = event.type;
         if (type === "response.output_text.delta" && typeof event.delta === "string") {
           outputText += event.delta;
@@ -787,10 +879,38 @@ export class ReactAgent {
       }
       }
     } catch (error) {
-      if (error instanceof ModelResponseError || error instanceof ResponseStreamIncompleteError) throw error;
+      if (error instanceof ModelResponseError) throw error;
+      if (error instanceof ResponseStreamIncompleteError) {
+        const incomplete = error as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState };
+        if (incomplete.recoveryState === undefined) {
+          incomplete.recoveryState = {
+            events,
+            ...(lastEventId === undefined ? {} : { lastEventId }),
+            ...(responseId === undefined ? {} : { responseId }),
+          };
+        }
+        throw incomplete;
+      }
+      if (events.length > 0) {
+        const incomplete = new ResponseStreamIncompleteError({ cause: error });
+        (incomplete as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState }).recoveryState = {
+          events,
+          ...(lastEventId === undefined ? {} : { lastEventId }),
+          ...(responseId === undefined ? {} : { responseId }),
+        };
+        throw incomplete;
+      }
       throw error;
     }
-    if (!response) throw new ResponseStreamIncompleteError();
+    if (!response) {
+      const incomplete = new ResponseStreamIncompleteError();
+      (incomplete as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState }).recoveryState = {
+        events,
+        ...(lastEventId === undefined ? {} : { lastEventId }),
+        ...(responseId === undefined ? {} : { responseId }),
+      };
+      throw incomplete;
+    }
     const result = response;
     if (result.output.length === 0 && items.size > 0) result.output = [...items.values()];
     if (!result.output_text) result.output_text = outputText;

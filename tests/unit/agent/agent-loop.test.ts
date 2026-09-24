@@ -1,8 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runAgentLoop, type AgentLoopOptions, type LoopPhase } from "../../../src/agent/agent-loop.js";
+import { classifySamplingError, runAgentLoop, type AgentLoopOptions, type LoopPhase } from "../../../src/agent/agent-loop.js";
 
 const call = (id: string) => ({ type: "function_call", call_id: id, name: "test", arguments: "{}" });
+
+test("sampling errors expose stable recovery categories", () => {
+  assert.equal(classifySamplingError(Object.assign(new Error("socket closed"), { name: "APIConnectionError" })), "connection");
+  assert.equal(classifySamplingError(Object.assign(new Error("request timeout"), { status: 408 })), "timeout");
+  assert.equal(classifySamplingError(Object.assign(new Error("rate limited"), { status: 429 })), "rate_limit");
+  assert.equal(classifySamplingError(Object.assign(new Error("upstream"), { status: 503 })), "server");
+  assert.equal(classifySamplingError(Object.assign(new Error("Responses stream ended before response.completed"), { name: "ResponseStreamIncompleteError" })), "stream_incomplete");
+  assert.equal(classifySamplingError(Object.assign(new Error("maximum context length exceeded"), { status: 400 })), "context_limit");
+  assert.equal(classifySamplingError(Object.assign(new Error("bad request"), { status: 400 })), "permanent");
+});
 function fixture(overrides: Partial<AgentLoopOptions> = {}) {
   const records: Record<string, unknown>[] = [];
   const phases: LoopPhase[] = [];
@@ -47,6 +57,21 @@ test("sampling retry never repeats already executed tools", async () => {
   await runAgentLoop(f.options);
   assert.equal(samples, 3);
   assert.equal(executions, 1);
+});
+
+test("sampling retry budget is shared across follow-up requests in one turn", async () => {
+  let samples = 0;
+  const f = fixture({
+    async sample() {
+      samples += 1;
+      if (samples === 1) return { output: [call("a")], output_text: "" };
+      throw Object.assign(new Error("temporary"), { status: 503 });
+    },
+    maxRetries: 2,
+    async dispatch() { return "ok"; },
+  });
+  await assert.rejects(runAgentLoop(f.options), /temporary/);
+  assert.equal(samples, 4);
 });
 
 test("nonretryable errors and exhausted retries fail instead of spinning", async () => {
@@ -126,4 +151,56 @@ test("a tool can end the current loop after its durable output is recorded", asy
   assert.equal(samples, 1);
   assert.match(String(f.records.find((item) => item.call_id === "a" && item.type === "function_call_output")?.output), /approved/);
   assert.match(String(f.records.find((item) => item.call_id === "b" && item.type === "function_call_output")?.output), /skipped/);
+});
+
+test("explicitly marked read-only tools run concurrently but persist outputs in model order", async () => {
+  let sample = 0;
+  const f = fixture({
+    async sample() {
+      sample += 1;
+      return sample === 1
+        ? { output: [
+            { ...call("a"), name: "read_file" },
+            { ...call("b"), name: "list_directory" },
+          ], output_text: "" }
+        : { output: [], output_text: "done" };
+    },
+    canRunInParallel: (tool) => tool.name === "read_file" || tool.name === "list_directory",
+  });
+  let active = 0;
+  let peak = 0;
+  f.options.dispatch = async (tool) => {
+    active += 1;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, tool.call_id === "a" ? 20 : 1));
+    active -= 1;
+    return tool.call_id;
+  };
+  await runAgentLoop(f.options);
+  assert.equal(peak, 2);
+  assert.deepEqual(
+    f.records.filter((item) => item.type === "function_call_output").map((item) => [item.call_id, item.output]),
+    [["a", "a"], ["b", "b"]],
+  );
+});
+
+test("parallel batches stop at unsafe calls and preserve later serial work", async () => {
+  const order: string[] = [];
+  let sample = 0;
+  const f = fixture({
+    async sample() {
+      sample += 1;
+      return sample === 1
+        ? { output: [
+            { ...call("a"), name: "read_file" },
+            { ...call("b"), name: "bash" },
+            { ...call("c"), name: "list_directory" },
+          ], output_text: "" }
+        : { output: [], output_text: "done" };
+    },
+    canRunInParallel: (tool) => tool.name === "read_file" || tool.name === "list_directory",
+    async dispatch(tool) { order.push(tool.call_id); return tool.call_id; },
+  });
+  await runAgentLoop(f.options);
+  assert.deepEqual(order, ["a", "b", "c"]);
 });
