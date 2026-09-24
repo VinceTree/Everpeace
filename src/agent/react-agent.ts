@@ -27,7 +27,7 @@ import {
 } from "../skills/catalog.js";
 import { FILE_TOOL_DEFINITIONS, runFileTool } from "../tools/files.js";
 import {
-  isTokenUsageSample,
+  normalizeTokenUsageSample,
   type TokenUsageSample,
 } from "../status/model-status.js";
 import {
@@ -57,29 +57,40 @@ interface AgentResponse {
   id: string;
   output_text: string;
   output: ResponseOutputItem[];
-  usage?: TokenUsageSample | null;
+  usage?: unknown;
   error?: unknown;
   incomplete_details?: unknown;
 }
 
 export type ResponseStreamLike = AsyncIterable<Record<string, unknown>>;
 
+export interface ResponsesRequestOptions {
+  signal?: AbortSignal;
+  maxRetries?: number;
+  headers?: Record<string, string>;
+}
+
+export interface PromptCacheOptions {
+  mode: "implicit";
+  ttl: "30m";
+}
+
 export interface ResponsesClientLike {
   responses: {
     create(
       params: Record<string, unknown>,
-      options?: { signal?: AbortSignal; maxRetries?: number },
+      options?: ResponsesRequestOptions,
     ): Promise<AgentResponse>;
     compact?(
       params: Record<string, unknown>,
-      options?: { signal?: AbortSignal; maxRetries?: number },
+      options?: ResponsesRequestOptions,
     ): Promise<{
       output: Array<Record<string, unknown>>;
-      usage?: TokenUsageSample | null;
+      usage?: unknown;
     }>;
     stream?(
       params: Record<string, unknown>,
-      options?: { signal?: AbortSignal; maxRetries?: number },
+      options?: ResponsesRequestOptions,
     ): Promise<ResponseStreamLike> | ResponseStreamLike;
   };
 }
@@ -113,6 +124,8 @@ export interface ReactAgentOptions {
   client: ResponsesClientLike;
   model: string;
   io: AgentIO;
+  promptCacheKey?: string | (() => string | undefined);
+  promptCacheOptions?: PromptCacheOptions;
   web?: WebToolExecutor;
   mcp?: McpRuntimeLike;
   skills?: SkillCatalogLike;
@@ -163,6 +176,26 @@ Before calling the bash tool, briefly tell the user what you are about to do.
 Base your answer on actual tool results and never claim a command succeeded when it did not.
 Respect the current permission policy. A denied operation must not be retried through a different tool to bypass the policy.`;
 
+const PERMISSION_INSTRUCTIONS = `Permission profiles: read-only requires approval for model shell, web, and MCP calls and enforces the Codex :read-only sandbox; ask requires approval for those calls and then enforces the Codex :workspace sandbox for shell; workspace-write runs model shell inside the Codex :workspace sandbox, allows enabled public web tools without per-request approval, and keeps MCP approval separate; full-access uses :danger-full-access after explicit user confirmation. In Plan mode, enabled public web access is read-only research and does not require per-request web approval; the web toggle still applies. File tools are always workspace-scoped. The OS sandbox applies to model shell, not direct user ! commands.`;
+
+function isUnsupportedPromptCacheOptionsError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const record = error as Record<string, unknown>;
+  const status = record.status ?? record.statusCode ?? (record.response as Record<string, unknown> | undefined)?.status;
+  if (status !== 400 && status !== 422) return false;
+  const serialized = [
+    error instanceof Error ? error.message : "",
+    record.message,
+    record.code,
+    record.error,
+    record.response,
+  ].map((value) => {
+    if (typeof value === "string") return value;
+    try { return JSON.stringify(value); } catch { return String(value); }
+  }).join("\n");
+  return /prompt[ _-]?cache|cache[ _-]?breakpoint/iu.test(serialized);
+}
+
 export class ReactAgent {
   #running = false;
   readonly #onPhase: ((phase: LoopPhase) => void) | undefined;
@@ -171,6 +204,8 @@ export class ReactAgent {
   readonly #client: ResponsesClientLike;
   readonly #model: string;
   readonly #io: AgentIO;
+  readonly #promptCacheKey: string | (() => string | undefined) | undefined;
+  readonly #promptCacheOptions: PromptCacheOptions | undefined;
   readonly #web: WebToolExecutor;
   readonly #mcp: McpRuntimeLike | undefined;
   readonly #skills: SkillCatalogLike | undefined;
@@ -201,6 +236,7 @@ export class ReactAgent {
   #contextTokens: number | null;
   #compacting = false;
   #responseTransport: "stream" | "buffered";
+  #advancedPromptCacheEnabled: boolean;
 
   constructor(options: ReactAgentOptions) {
     this.#onPhase = options.onPhase;
@@ -209,6 +245,9 @@ export class ReactAgent {
     this.#client = options.client;
     this.#model = options.model;
     this.#io = options.io;
+    this.#promptCacheKey = options.promptCacheKey;
+    this.#promptCacheOptions = options.promptCacheOptions;
+    this.#advancedPromptCacheEnabled = options.promptCacheOptions !== undefined;
     this.#web = options.web ?? createWebToolExecutor();
     this.#mcp = options.mcp;
     this.#skills = options.skills;
@@ -511,7 +550,7 @@ export class ReactAgent {
       if (this.#sampleController === controller) this.#sampleController = undefined;
     }
     signal?.throwIfAborted();
-    const usage = isTokenUsageSample(response.usage) ? response.usage : null;
+    const usage = normalizeTokenUsageSample(response.usage);
     this.#contextTokens = usage?.total_tokens ?? null;
     if (this.#onUsage) {
       await this.#onUsage(usage);
@@ -519,7 +558,6 @@ export class ReactAgent {
     if (this.#goalRuntime) {
       const current = await this.#goalRuntime.get();
       if (current?.status === "active") {
-        const usage = isTokenUsageSample(response.usage) ? response.usage : null;
         await this.#goalRuntime.recordUsage({ tokensUsed: current.tokens_used + (usage ? usage.input_tokens + usage.output_tokens : 0), usageComplete: current.usage_complete && usage !== null, timeUsedSeconds: current.time_used_seconds });
       }
     }
@@ -550,15 +588,28 @@ export class ReactAgent {
     this.#compacting = true;
     this.#onEvent?.({ type: "compaction_started", automatic });
     try {
-      const response = await compact(
-        { model: this.#model, input: repairToolContext(this.#history) },
-        { maxRetries: 0, ...(signal ? { signal } : {}) },
-      );
+      const input = repairToolContext(this.#history);
+      let response;
+      try {
+        const cache = this.#promptCacheRequest(this.#advancedPromptCacheEnabled);
+        response = await compact(
+          { model: this.#model, input, ...cache.params },
+          { maxRetries: 0, ...(signal ? { signal } : {}), ...cache.options },
+        );
+      } catch (error) {
+        if (signal?.aborted || !this.#advancedPromptCacheEnabled || !isUnsupportedPromptCacheOptionsError(error)) throw error;
+        this.#advancedPromptCacheEnabled = false;
+        const cache = this.#promptCacheRequest(false);
+        response = await compact(
+          { model: this.#model, input, ...cache.params },
+          { maxRetries: 0, ...(signal ? { signal } : {}), ...cache.options },
+        );
+      }
       if (!Array.isArray(response.output) || !response.output.every((item) => item && typeof item === "object" && !Array.isArray(item))) {
         throw new Error("The compaction response returned an invalid context window");
       }
       const items = response.output.map((item) => ({ ...item }));
-      const usage = isTokenUsageSample(response.usage) ? response.usage : null;
+      const usage = normalizeTokenUsageSample(response.usage);
       await this.#onContextCompacted?.(items, automatic, usage);
       this.#history = items;
       this.#contextTokens = usage?.total_tokens ?? null;
@@ -581,35 +632,76 @@ export class ReactAgent {
     input: Array<Record<string, unknown>>,
     signal?: AbortSignal,
   ): Promise<AgentResponse> {
+    try {
+      return await this.#createResponseAttempt(input, signal, this.#advancedPromptCacheEnabled);
+    } catch (error) {
+      if (signal?.aborted || !this.#advancedPromptCacheEnabled || !isUnsupportedPromptCacheOptionsError(error)) throw error;
+      this.#advancedPromptCacheEnabled = false;
+      return this.#createResponseAttempt(input, signal, false);
+    }
+  }
+
+  async #createResponseAttempt(
+    input: Array<Record<string, unknown>>,
+    signal: AbortSignal | undefined,
+    advancedPromptCache: boolean,
+  ): Promise<AgentResponse> {
     const skillInstructions = this.#skillTurn
       ? [this.#skillTurn.instructions, this.#skillTurn.explicitInstructions].filter(Boolean).join("\n\n")
       : "";
     const extensionInstructions = [this.#turnMode === "plan" ? PLAN_INSTRUCTIONS : "", skillInstructions, this.#turnMode === "default" ? this.#mcpSnapshot.instructions : "", this.#learnedPrompt, this.#goalPrompt]
       .filter(Boolean)
       .join("\n\n");
-    const params = {
-        model: this.#model,
-        instructions: `${INSTRUCTIONS}\nCurrent permissions: ${JSON.stringify(this.#io.getPermissions?.() ?? defaultPermissions())}. Permission profiles: read-only requires approval for model shell, web, and MCP calls and enforces the Codex :read-only sandbox; ask requires approval for those calls and then enforces the Codex :workspace sandbox for shell; workspace-write runs model shell inside the Codex :workspace sandbox, allows enabled public web tools without per-request approval, and keeps MCP approval separate; full-access uses :danger-full-access after explicit user confirmation. In Plan mode, enabled public web access is read-only research and does not require per-request web approval; the web toggle still applies. File tools are always workspace-scoped. The OS sandbox applies to model shell, not direct user ! commands.${extensionInstructions ? `\n\n${extensionInstructions}` : ""}`,
-        input,
-        tools: this.#turnMode === "plan" ? [
-          WEB_SEARCH_TOOL_DEFINITION, WEB_FETCH_TOOL_DEFINITION, ...FILE_TOOL_DEFINITIONS,
-          ...(this.#skillTurn && this.#skillTurn.skills.length > 0 ? [READ_SKILL_TOOL_DEFINITION] : []),
+    const stableInstructions = `${INSTRUCTIONS}\n${PERMISSION_INSTRUCTIONS}`;
+    const dynamicInstructions = [`Current permissions: ${JSON.stringify(this.#io.getPermissions?.() ?? defaultPermissions())}.`, extensionInstructions]
+      .filter(Boolean)
+      .join("\n\n");
+    const cache = this.#promptCacheRequest(advancedPromptCache);
+    const useAdvancedLayout = cache.key !== undefined && advancedPromptCache;
+    const requestInput = useAdvancedLayout
+      ? [
+          {
+            type: "message",
+            role: "developer",
+            content: [{
+              type: "input_text",
+              text: stableInstructions,
+              prompt_cache_breakpoint: { mode: "explicit" },
+            }],
+          },
+          { type: "message", role: "developer", content: dynamicInstructions },
+          ...input,
+        ]
+      : input;
+    const tools = this.#turnMode === "plan"
+      ? [
+          WEB_SEARCH_TOOL_DEFINITION,
+          WEB_FETCH_TOOL_DEFINITION,
+          ...FILE_TOOL_DEFINITIONS,
           ...PLAN_TOOL_DEFINITIONS,
-        ] : [
+          ...(this.#skillTurn && this.#skillTurn.skills.length > 0 ? [READ_SKILL_TOOL_DEFINITION] : []),
+        ]
+      : [
           BASH_TOOL_DEFINITION,
           WEB_SEARCH_TOOL_DEFINITION,
           WEB_FETCH_TOOL_DEFINITION,
           ...FILE_TOOL_DEFINITIONS,
-          ...(this.#skillTurn && this.#skillTurn.skills.length > 0 ? [READ_SKILL_TOOL_DEFINITION] : []),
           ...this.#mcpSnapshot.tools,
           ...(this.#goalRuntime ? GOAL_TOOL_DEFINITIONS : []),
-        ],
+          ...(this.#skillTurn && this.#skillTurn.skills.length > 0 ? [READ_SKILL_TOOL_DEFINITION] : []),
+        ];
+    const params = {
+        model: this.#model,
+        ...(useAdvancedLayout ? {} : { instructions: `${stableInstructions}\n${dynamicInstructions}` }),
+        input: requestInput,
+        tools,
         tool_choice: "auto",
         parallel_tool_calls: false,
         store: false,
         include: ["reasoning.encrypted_content"],
+        ...cache.params,
       };
-    const options = { maxRetries: 0, ...(signal ? { signal } : {}) };
+    const options = { maxRetries: 0, ...(signal ? { signal } : {}), ...cache.options };
     if (this.#responseTransport === "stream" && this.#client.responses.stream) {
       let eventsSeen = 0;
       try {
@@ -687,7 +779,7 @@ export class ReactAgent {
             output: [],
             output_text: outputText,
             status: type === "response.incomplete" ? "incomplete" : "failed",
-          ...(failedResponse?.usage === undefined ? {} : { usage: failedResponse.usage as TokenUsageSample | null }),
+          ...(failedResponse?.usage === undefined ? {} : { usage: failedResponse.usage }),
           ...(failedResponse?.error === undefined ? {} : { error: failedResponse.error }),
           ...(failedResponse?.incomplete_details === undefined ? {} : { incomplete_details: failedResponse.incomplete_details }),
         };
@@ -703,6 +795,27 @@ export class ReactAgent {
     if (result.output.length === 0 && items.size > 0) result.output = [...items.values()];
     if (!result.output_text) result.output_text = outputText;
     return result;
+  }
+
+  #promptCacheRequest(advancedPromptCache: boolean): {
+    key: string | undefined;
+    params: Record<string, unknown>;
+    options: ResponsesRequestOptions;
+  } {
+    const key = typeof this.#promptCacheKey === "function"
+      ? this.#promptCacheKey()
+      : this.#promptCacheKey;
+    if (!key) return { key: undefined, params: {}, options: {} };
+    return {
+      key,
+      params: {
+        prompt_cache_key: key,
+        ...(advancedPromptCache && this.#promptCacheOptions !== undefined
+          ? { prompt_cache_options: this.#promptCacheOptions }
+          : {}),
+      },
+      options: { headers: { "session-id": key } },
+    };
   }
 
   async #ensureLearnedPrompt(userInput: string): Promise<void> {

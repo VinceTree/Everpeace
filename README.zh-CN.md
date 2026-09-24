@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.2.9) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.10) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -107,7 +107,7 @@ TUI 使用原生 inline 模式，普通滚轮可以浏览已完成的 Everpeace 
 
 Everpeace 还会维护独立的 learned 经验记忆。每次有实质内容且正常完成的对话在短暂 idle grace period 后，当前模型会在后台提炼可复用的项目经验；只有用户明确表达长期偏好时才写入用户级记忆。记忆位于平台应用状态目录（Windows 为 `%APPDATA%\Everpeace\memory`），不会写入仓库，只在新 Agent 实例的第一次请求中按当前问题召回相关条目，并作为不可信背景注入。条目会脱敏、去重、记录来源和状态，并受召回预算限制；当前用户指令和实际仓库证据始终优先。
 
-`/status` 会打开居中的独立 Codex 风格命令窗口，只显示状态详情和 `Esc` 返回提示。它显示当前模型、根据 `base_url` 识别的供应商、接口地址、工作目录、Session ID、当前 context 占用，以及主 Responses API 循环累计的输入/输出 token。Usage 总量会随 session 持久化并由 `/resume` 恢复，但状态窗口本身不会加入 transcript；恢复后再次执行 `/status` 即可查看累计值。后台标题请求不计入统计。已知官方 model ID 使用文档公布的 context 上限，未知型号和自定义兼容端点显示 `N/A`，不会猜测。
+`/status` 会打开居中的独立 Codex 风格命令窗口，只显示状态详情和 `Esc` 返回提示。它显示当前模型、根据 `base_url` 识别的供应商、接口地址、工作目录、Session ID、当前 context 占用，以及主 Responses API 循环累计的输入/输出 token、prompt cache 读取量、写入量和命中率。Usage 总量会随 session 持久化并由 `/resume` 恢复，但状态窗口本身不会加入 transcript；恢复后再次执行 `/status` 即可查看累计值。后台标题请求不计入统计。prompt cache 只对官方 OpenAI endpoint 使用按 Session ID 生成的 key；GPT-5.6 及以后型号额外使用隐式缓存与 `30m` TTL，并发送会话亲和性 header。其他兼容端点不会额外发送缓存参数；provider 没有返回缓存详情时显示 `N/A`。已知官方 model ID 使用文档公布的 context 上限，未知型号和自定义兼容端点显示 `N/A`，不会猜测。
 
 输入快捷键与 Codex composer 保持一致：`Enter` 提交，`Shift+Enter`、`Alt+Enter` 或 `Ctrl+J` 换行，`Home`/`End` 与 `Ctrl+A`/`Ctrl+E` 移动到当前行首/行尾，`Ctrl+U`/`Ctrl+K` 删除到当前行首/行尾，`Ctrl+W` 删除前一个词，`Ctrl+Y` 恢复最近删除的内容。方向键、`Ctrl+B/F/P/N` 和 `Alt+B/F` 也可移动光标。
 
@@ -120,7 +120,7 @@ TUI 命令：
 - `/login`：登录并立即启用一个模型。
 - `/model`：切换已注册模型，切换后重置对话上下文。
 - `/models`：查看所有模型和凭据状态。
-- `/status`：查看当前模型、供应商、context window 和 session token 使用量。
+- `/status`：查看当前模型、供应商、context window、session token 使用量和 prompt cache 统计。
 - `/permissions`：选择只读、逐条审批、工作区写入或完全访问模式，并开关网页工具。
 - `/mcp`：重新加载 Codex MCP 配置、连接已启用服务器并查看 tool 状态。
 - `/skills`：创建、安装、查看并显式调用本地 Skills。

@@ -33,6 +33,21 @@ function totalTokens(value: number, complete: boolean): string {
   return `${value.toLocaleString("en-US")}${complete ? "" : "+ (partial)"}`;
 }
 
+function cacheTokens(value: number | undefined, complete: boolean | undefined): string {
+  if (complete !== true || value === undefined) return "N/A";
+  return value.toLocaleString("en-US");
+}
+
+function cacheHitRate(snapshot: StatusSnapshot): string {
+  if (
+    snapshot.cache_usage_complete !== true ||
+    snapshot.cached_input_tokens === undefined ||
+    snapshot.input_tokens === 0
+  ) return "N/A";
+  const rate = Math.round((snapshot.cached_input_tokens / snapshot.input_tokens) * 100);
+  return `${Math.max(0, Math.min(100, rate))}%`;
+}
+
 function contextStatus(snapshot: StatusSnapshot): string {
   if (snapshot.context_tokens === null) return "N/A";
   if (snapshot.context_window === null) {
@@ -88,6 +103,15 @@ function statusFields(snapshot: StatusSnapshot): StatusField[] {
       label: "Output tokens",
       value: totalTokens(snapshot.output_tokens, snapshot.usage_complete),
     },
+    {
+      label: "Cached input",
+      value: cacheTokens(snapshot.cached_input_tokens, snapshot.cache_usage_complete),
+    },
+    {
+      label: "Cache writes",
+      value: cacheTokens(snapshot.cache_write_input_tokens, snapshot.cache_usage_complete),
+    },
+    { label: "Cache hit rate", value: cacheHitRate(snapshot) },
   ];
 }
 

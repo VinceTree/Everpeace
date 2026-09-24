@@ -112,6 +112,32 @@ test("session store replaces model context on compaction and counts its usage", 
   }
 });
 
+test("session store persists prompt cache usage details with legacy compatibility", async () => {
+  const fixture = await createFixture();
+  try {
+    const created = await fixture.store.create({ title: "cache", titlePending: false, workspacePath: "C:\\repo", model });
+    await fixture.store.appendUsage(created.id, {
+      input_tokens: 100,
+      output_tokens: 10,
+      total_tokens: 110,
+      cached_input_tokens: 80,
+      cache_write_input_tokens: 20,
+    });
+    const loaded = await fixture.store.load(created.id);
+    assert.deepEqual(loaded.usage, {
+      input_tokens: 100,
+      output_tokens: 10,
+      context_tokens: 110,
+      cached_input_tokens: 80,
+      cache_write_input_tokens: 20,
+      cache_usage_complete: true,
+      complete: true,
+    });
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("session store round-trips a goal and preserves it in the session summary", async () => {
   const fixture = await createFixture();
   try {

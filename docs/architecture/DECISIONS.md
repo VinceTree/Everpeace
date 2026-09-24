@@ -63,6 +63,14 @@ Git Skill 来源采用 shallow、no-checkout 克隆：先读取有界 Git tree �
 - 旧 session 缺少 usage tracking 时继续兼容读取，历史总量标记为不完整，不反推或伪造 token。
 - 旧 session 已包含的结构化 status timeline entry 继续解析和显示，不迁移或改写已有 JSONL。
 
+## Prompt cache
+
+主 Agent 使用 Responses API 的服务端 prompt caching，不缓存或复用完整模型回答。官方 OpenAI endpoint 的主采样与原生 compaction 请求携带按 Session ID 生成的 `everpeace:v2:session:<id>` `prompt_cache_key`，并在请求 options 中携带同值 `session-id` header；key 由 Agent 在请求时延迟解析，以覆盖 Session 创建晚于 Agent 创建的生命周期。DeepSeek 和未知 OpenAI-compatible endpoint 不主动发送缓存参数或 header，避免兼容端点因未知字段失败。缓存 key 不包含原始路径、API key 或用户输入。
+
+GPT-5.6 及以后官方型号额外使用 `{ mode: "implicit", ttl: "30m" }`，并把固定系统指令放入 request-local developer 前缀，在其最后一个输入文本块设置显式 breakpoint；动态权限、Plan/Skill/MCP、memory 和 goal 内容不进入固定前缀。旧型号只使用基础 key/header。若官方端点返回明确的 prompt-cache 参数不支持错误，当前 Agent 生命周期内关闭高级字段并对原请求降级重试一次。
+
+Responses usage 中的 `input_tokens_details.cached_tokens` 与 `cache_write_tokens` 会归一化为 Session usage 的可选缓存统计，并通过既有 `usage_recorded` / `context_compacted` 事件兼容持久化。旧 JSONL、没有缓存详情的 provider 和缺失 usage 不伪造缓存命中，`/status` 对不可用统计显示 `N/A`；可用时显示缓存读取量、写入量和累计命中率。
+
 ## Session 生命周期
 
 - 默认采用延迟创建：没有活动 session 时，第一次普通提问先建档再请求模型。

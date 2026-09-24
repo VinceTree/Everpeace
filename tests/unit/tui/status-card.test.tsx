@@ -17,6 +17,9 @@ const snapshot = {
   context_tokens: 18_400,
   input_tokens: 12_345,
   output_tokens: 2_345,
+  cached_input_tokens: 10_000,
+  cache_write_input_tokens: 2_345,
+  cache_usage_complete: true,
   usage_complete: true,
 };
 
@@ -30,6 +33,9 @@ test("status card renders the selected Codex-style fields", () => {
   assert.match(output, /Context window:\s+98% left \(18\.4K used \/ 1M\)/);
   assert.match(output, /Input tokens:\s+12,345/);
   assert.match(output, /Output tokens:\s+2,345/);
+  assert.match(output, /Cached input:\s+10,000/);
+  assert.match(output, /Cache writes:\s+2,345/);
+  assert.match(output, /Cache hit rate:\s+81%/);
 });
 
 test("status card never reaches the terminal auto-wrap cell", () => {

@@ -1,11 +1,29 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  createSessionPromptCacheKey,
   getProviderDefinition,
+  isOfficialOpenAiBaseUrl,
   listOfficialModelIds,
   normalizeBaseUrl,
   parseProvider,
+  supportsPromptCacheOptions,
 } from "../../../src/providers/openai-compatible.js";
+
+test("prompt cache keys are stable and endpoint-gated", () => {
+  assert.equal(isOfficialOpenAiBaseUrl("https://api.openai.com/v1/"), true);
+  assert.equal(isOfficialOpenAiBaseUrl("https://api.openai.com/v1?proxy=true"), false);
+  assert.equal(isOfficialOpenAiBaseUrl("https://models.example.com/v1"), false);
+  const first = createSessionPromptCacheKey("session-123");
+  const second = createSessionPromptCacheKey("session-123");
+  assert.equal(first, second);
+  assert.equal(first, "everpeace:v2:session:session-123");
+  assert.throws(() => createSessionPromptCacheKey("  "), /cannot be empty/);
+  assert.equal(supportsPromptCacheOptions("gpt-5.6"), true);
+  assert.equal(supportsPromptCacheOptions("gpt-5.6-codex"), true);
+  assert.equal(supportsPromptCacheOptions("gpt-5.5"), false);
+  assert.equal(supportsPromptCacheOptions("custom-model"), false);
+});
 
 test("official providers use their documented API base URLs", () => {
   assert.equal(

@@ -1,4 +1,17 @@
+# 最新优化：Codex 对齐型 prompt cache
+
+状态快照：2026-09-24。Prompt cache 已从工作区级 key 优化为按 Session ID 延迟解析的 `everpeace:v2:session:<id>` key。官方 OpenAI 主采样和原生 compaction 请求同时携带 `prompt_cache_key` 与 `session-id` header；GPT-5.6 及以后型号使用隐式缓存、`30m` TTL 和 request-local developer 前缀 breakpoint。旧模型继续使用基础 key，DeepSeek、未知兼容端点不发送新增缓存参数。
+
+- 固定系统指令和静态 tool definitions 保持稳定顺序，动态权限、Plan/Skill/MCP、memory 和 goal 内容放在动态尾部。
+- 高级 prompt-cache 字段被官方端点明确拒绝时，当前 Agent 生命周期内只降级重试一次；Session JSONL schema、context、工具循环和 `/status` 统计兼容保持不变。
+- 新增 session key、模型能力判断、请求 header、动态 key 生命周期、compaction 共享 key 和高级字段降级回归；定向 Agent/provider 测试 41/41 通过，`pnpm typecheck`、`pnpm build` 和 `git diff --check` 通过。
+- 本轮 `pnpm test` 为 224 项通过、1 项取消、无失败；取消项仍是 Windows Bash abort 用例在 15 秒超时，单独复跑仍可复现，与本轮 prompt-cache 改动无关。
+
 # Session Handoff
+
+## Prompt cache 基础能力
+
+Responses usage 中的 `cached_tokens` / `cache_write_tokens` 继续通过现有 usage 事件累计并在 `/status` 显示读取量、写入量和命中率。不缓存完整模型回答；旧 Session、DeepSeek、未知兼容端点及缺少缓存详情的 provider 保持兼容并显示 `N/A`。Session JSONL 事件类型保持不变。
 
 ## 最新优化：Agent Loop 可靠性恢复边界
 
@@ -8,7 +21,7 @@
 - 新增响应恢复与边界回归；Agent 定向测试当前为 38/38，通过 typecheck、build 和 `git diff --check`。
 - 全量 `pnpm test` 为 217 项通过、1 项取消、无失败；唯一取消项是既有 Windows Bash abort 用例在 15 秒超时，单独复跑仍可复现，与本轮 Agent Loop 改动无关。
 - 真实流式/兼容端点 Windows Terminal 冒烟仍待完成；本轮未改变 Session JSONL schema、工具串行语义或公开命令。
-- 工作区展示号同步升至 `0.2.9`；本次仅推送代码，不创建 tag 或远程 Release。
+- 工作区展示号同步升至 `0.2.10`；本次使用 `[skip ci]` 推送代码，不创建 tag 或远程 Release。
 
 ## 最新优化：memory 分层、召回与聊天级策略
 

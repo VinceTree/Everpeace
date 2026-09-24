@@ -904,6 +904,155 @@ test("agent reports usage for every response in a tool loop", async () => {
   ]);
 });
 
+test("agent sends a stable prompt cache key and reports cached usage details", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const requestOptions: Array<Record<string, unknown> | undefined> = [];
+  const usage: Array<unknown> = [];
+  const agent = new ReactAgent({
+    model: "gpt-5.6",
+    promptCacheKey: "everpeace:v2:session:test-key",
+    promptCacheOptions: { mode: "implicit", ttl: "30m" },
+    client: {
+      responses: {
+        async create(params, options) {
+          requests.push(params);
+          requestOptions.push(options as Record<string, unknown> | undefined);
+          return {
+            id: "response-cache",
+            output_text: "done",
+            output: [],
+            usage: {
+              input_tokens: 100,
+              output_tokens: 10,
+              total_tokens: 110,
+              input_tokens_details: { cached_tokens: 80, cache_write_tokens: 20 },
+            },
+          };
+        },
+      },
+    },
+    io: {
+      async confirmBash() { return false; },
+      async runBash() { return bashResult(""); },
+      writeAssistant() {},
+    },
+    async onUsage(sample) { usage.push(sample); },
+  });
+
+  await agent.runTurn("hello");
+  assert.equal(requests[0]?.prompt_cache_key, "everpeace:v2:session:test-key");
+  assert.deepEqual(requests[0]?.prompt_cache_options, { mode: "implicit", ttl: "30m" });
+  assert.equal(requests[0]?.instructions, undefined);
+  const requestInput = requests[0]?.input as Array<Record<string, unknown>>;
+  assert.equal(requestInput[0]?.role, "developer");
+  assert.deepEqual((requestInput[0]?.content as Array<Record<string, unknown>>)[0]?.prompt_cache_breakpoint, { mode: "explicit" });
+  assert.deepEqual(requestOptions[0]?.headers, { "session-id": "everpeace:v2:session:test-key" });
+  assert.deepEqual(usage, [{
+    input_tokens: 100,
+    output_tokens: 10,
+    total_tokens: 110,
+    cached_input_tokens: 80,
+    cache_write_input_tokens: 20,
+  }]);
+});
+
+test("agent resolves the session cache key at request time and reuses it for compaction", async () => {
+  let sessionId: string | undefined;
+  const calls: Array<{ kind: string; params: Record<string, unknown>; options: Record<string, unknown> | undefined }> = [];
+  const agent = new ReactAgent({
+    model: "gpt-5.5",
+    promptCacheKey: () => sessionId === undefined ? undefined : `everpeace:v2:session:${sessionId}`,
+    client: {
+      responses: {
+        async create(params, options) {
+          calls.push({ kind: "create", params, options: options as Record<string, unknown> | undefined });
+          return { id: "response-1", output_text: "done", output: [] };
+        },
+        async compact(params, options) {
+          calls.push({ kind: "compact", params, options: options as Record<string, unknown> | undefined });
+          return { output: [{ role: "user", content: "retained" }] };
+        },
+      },
+    },
+    io: {
+      async confirmBash() { return false; },
+      async runBash() { return bashResult(""); },
+      writeAssistant() {},
+    },
+  });
+
+  sessionId = "created-after-agent";
+  await agent.runTurn("hello");
+  await agent.compact();
+
+  assert.equal(calls[0]?.params.prompt_cache_key, "everpeace:v2:session:created-after-agent");
+  assert.deepEqual(calls[0]?.options?.headers, { "session-id": "everpeace:v2:session:created-after-agent" });
+  assert.equal(calls[1]?.kind, "compact");
+  assert.equal(calls[1]?.params.prompt_cache_key, "everpeace:v2:session:created-after-agent");
+  assert.deepEqual(calls[1]?.options?.headers, { "session-id": "everpeace:v2:session:created-after-agent" });
+});
+
+test("stream requests use the same session cache affinity header", async () => {
+  let seenOptions: Record<string, unknown> | undefined;
+  const agent = new ReactAgent({
+    model: "gpt-5.5",
+    promptCacheKey: "everpeace:v2:session:stream",
+    client: {
+      responses: {
+        async create() {
+          throw new Error("buffered path should not be used");
+        },
+        async *stream(_params, options) {
+          seenOptions = options as Record<string, unknown> | undefined;
+          yield { type: "response.completed", response: { id: "stream-response", output: [], output_text: "done" } };
+        },
+      },
+    },
+    io: {
+      async confirmBash() { return false; },
+      async runBash() { return bashResult(""); },
+      writeAssistant() {},
+    },
+  });
+
+  await agent.runTurn("hello");
+
+  assert.deepEqual(seenOptions?.headers, { "session-id": "everpeace:v2:session:stream" });
+});
+
+test("agent falls back once when advanced prompt cache fields are rejected", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const agent = new ReactAgent({
+    model: "gpt-5.6",
+    promptCacheKey: "everpeace:v2:session:fallback",
+    promptCacheOptions: { mode: "implicit", ttl: "30m" },
+    client: {
+      responses: {
+        async create(params) {
+          requests.push(params);
+          if (params.prompt_cache_options !== undefined) {
+            throw { status: 400, message: "Unknown parameter: prompt_cache_options" };
+          }
+          return { id: "response-1", output_text: "done", output: [] };
+        },
+      },
+    },
+    io: {
+      async confirmBash() { return false; },
+      async runBash() { return bashResult(""); },
+      writeAssistant() {},
+    },
+  });
+
+  await agent.runTurn("hello");
+
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[0]?.prompt_cache_options, { mode: "implicit", ttl: "30m" });
+  assert.equal(requests[1]?.prompt_cache_options, undefined);
+  assert.equal(typeof requests[1]?.instructions, "string");
+  assert.equal(requests[1]?.prompt_cache_key, "everpeace:v2:session:fallback");
+});
+
 test("agent reports unavailable usage without failing compatible endpoints", async () => {
   const usage: Array<unknown> = [];
   const agent = new ReactAgent({

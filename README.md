@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.2.9) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.10) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -107,7 +107,7 @@ The first normal prompt creates a local JSONL session. Everpeace saves the conve
 
 Everpeace also keeps a separate learned-experience memory. After a substantive, successfully completed turn has been idle for a short grace period, the current model may extract reusable project lessons in the background. Explicit long-term preferences are stored separately at user scope. Memory is stored under the platform application-state directory (`%APPDATA%\Everpeace\memory` on Windows), is not written into the repository, and relevant entries are injected only into the first request of a new Agent instance as untrusted background context. Secrets are redacted, entries carry auditable metadata, can be archived, and are bounded by a retrieval budget; current user instructions and repository evidence always take precedence.
 
-`/status` opens a centered, isolated Codex-style command screen showing only status details and `Esc` return guidance. It shows the active model, provider inferred from `base_url`, endpoint, workspace, session ID, current context occupancy, and cumulative input/output tokens reported by the main Responses API loop. Usage totals are persisted with the session and restored by `/resume`, but the status screen itself is never added to the transcript; run `/status` again after restoring to see the recovered totals. Internal title-generation requests are excluded. Known official model IDs use documented context limits, while unknown or custom compatible models show `N/A` instead of a guessed limit.
+`/status` opens a centered, isolated Codex-style command screen showing only status details and `Esc` return guidance. It shows the active model, provider inferred from `base_url`, endpoint, workspace, session ID, current context occupancy, cumulative input/output tokens, and prompt-cache reads, writes, and hit rate reported by the main Responses API loop. Usage totals are persisted with the session and restored by `/resume`, but the status screen itself is never added to the transcript; run `/status` again after restoring to see the recovered totals. Internal title-generation requests are excluded. Prompt caching uses a Session-scoped key only for the official OpenAI endpoint; GPT-5.6 and later models additionally use implicit caching with a `30m` TTL and session-affinity header. Other compatible providers continue without extra cache parameters. When a provider does not return cache details, the cache fields show `N/A`. Known official model IDs use documented context limits, while unknown or custom compatible models show `N/A` instead of a guessed limit.
 
 Composer shortcuts follow Codex conventions: `Enter` submits; `Shift+Enter`, `Alt+Enter`, or `Ctrl+J` inserts a newline; `Home`/`End` and `Ctrl+A`/`Ctrl+E` move to the current line's start/end; `Ctrl+U`/`Ctrl+K` delete to the current line's start/end; `Ctrl+W` deletes the previous word; and `Ctrl+Y` restores the most recently killed text. Arrow keys, `Ctrl+B/F/P/N`, and `Alt+B/F` also move the cursor.
 
@@ -120,7 +120,7 @@ TUI commands:
 - `/login`: Sign in and activate a model immediately.
 - `/model`: Switch to a registered model and reset the conversation context.
 - `/models`: List all registered models and credential states.
-- `/status`: Show the current model, provider, context window, and session token usage.
+- `/status`: Show the current model, provider, context window, session token usage, and prompt-cache statistics.
 - `/permissions`: Select read-only, ask-for-approval, workspace-write, or full-access mode and toggle web tools.
 - `/mcp`: Reload Codex MCP configuration, connect enabled servers, and inspect server/tool status.
 - `/skills`: Create, install, inspect, and explicitly invoke local Skills.

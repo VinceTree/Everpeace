@@ -48,6 +48,31 @@ export function createProviderClient(
   return new OpenAI({ apiKey, baseURL });
 }
 
+export function isOfficialOpenAiBaseUrl(value: string): boolean {
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" &&
+      url.hostname.toLowerCase() === "api.openai.com" &&
+      url.pathname.replace(/\/+$/u, "") === "/v1" &&
+      !url.username && !url.password && !url.search && !url.hash;
+  } catch {
+    return false;
+  }
+}
+
+export function createSessionPromptCacheKey(sessionId: string): string {
+  const normalized = sessionId.trim();
+  if (!normalized) throw new Error("Prompt cache session ID cannot be empty");
+  return `everpeace:v2:session:${normalized}`;
+}
+
+export function supportsPromptCacheOptions(model: string): boolean {
+  const normalized = model.trim().toLowerCase();
+  if (/^gpt-6(?:[.-]|$)/u.test(normalized)) return true;
+  const match = normalized.match(/^gpt-5\.(\d+)(?:[.-]|$)/u);
+  return match !== null && Number(match[1]) >= 6;
+}
+
 export async function listOfficialModelIds(
   client: ModelListClient,
   signal?: AbortSignal,

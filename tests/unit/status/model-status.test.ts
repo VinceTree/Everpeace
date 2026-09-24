@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   applyUsageSample,
   createEmptySessionUsage,
+  normalizeTokenUsageSample,
   resetContextUsage,
   resolveModelStatusMetadata,
 } from "../../../src/status/model-status.js";
@@ -69,5 +70,30 @@ test("missing provider usage marks totals partial and context unknown", () => {
     output_tokens: 0,
     context_tokens: null,
     complete: false,
+  });
+});
+
+test("prompt cache usage is normalized and accumulated separately", () => {
+  const sample = normalizeTokenUsageSample({
+    input_tokens: 100,
+    output_tokens: 20,
+    total_tokens: 120,
+    input_tokens_details: { cached_tokens: 64, cache_write_tokens: 36 },
+  });
+  assert.deepEqual(sample, {
+    input_tokens: 100,
+    output_tokens: 20,
+    total_tokens: 120,
+    cached_input_tokens: 64,
+    cache_write_input_tokens: 36,
+  });
+  assert.deepEqual(applyUsageSample(createEmptySessionUsage(), sample), {
+    input_tokens: 100,
+    output_tokens: 20,
+    context_tokens: 120,
+    cached_input_tokens: 64,
+    cache_write_input_tokens: 36,
+    cache_usage_complete: true,
+    complete: true,
   });
 });

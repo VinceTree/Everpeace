@@ -1364,6 +1364,9 @@ export function EverpeaceApp({
         context_tokens: activeModel ? sessionUsage.context_tokens : null,
         input_tokens: sessionUsage.input_tokens,
         output_tokens: sessionUsage.output_tokens,
+        ...(sessionUsage.cached_input_tokens === undefined ? {} : { cached_input_tokens: sessionUsage.cached_input_tokens }),
+        ...(sessionUsage.cache_write_input_tokens === undefined ? {} : { cache_write_input_tokens: sessionUsage.cache_write_input_tokens }),
+        ...(sessionUsage.cache_usage_complete === undefined ? {} : { cache_usage_complete: sessionUsage.cache_usage_complete }),
         usage_complete: sessionUsage.complete,
       },
     });

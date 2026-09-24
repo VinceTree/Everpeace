@@ -14,6 +14,12 @@
 
 模型明确返回 context-limit 错误时，当前 turn 最多额外调用一次原生 compaction 并恢复采样；普通 400 不触发压缩，压缩失败不重试。SSE 必须收到 `response.completed`，能力拒绝只在首个事件前回退 buffered；网络中断、异常 EOF 和半截响应不执行工具，按现有两次采样重试边界处理。
 
+## Prompt cache
+
+主 Agent 使用 Responses API 服务端 prompt caching：官方 OpenAI endpoint 的主采样和原生 compaction 请求使用按 Session ID 延迟解析的 `everpeace:v2:session:<id>` key，并同步发送 `session-id` 会话亲和性 header；不缓存完整响应，不改变工具循环或 Session context。GPT-5.6 及以后型号额外发送隐式缓存模式和 `30m` TTL，旧模型只使用基础 key。高级字段被兼容端点拒绝时，当前 Agent 只降级重试一次。
+
+固定系统指令和工具定义保持稳定顺序，动态权限、Plan/Skill/MCP、memory 和 goal 内容位于动态尾部；GPT-5.6+ 请求使用 request-local developer 前缀和显式 breakpoint，且不把缓存标记写入 Session。缓存 usage 详情会累计到 Session，并在 `/status` 显示 cached input、cache writes 和 cache hit rate；旧 Session、兼容端点或 provider 未返回详情时保持兼容并显示 `N/A`。
+
 已加入 Codex 风格的严格 `/plan` 和持久化 `/goal`：Plan 模式只开放工作区读取、网页、Skill 读取及结构化问题/计划审批工具，禁止 Bash/MCP 等副作用；网页开关开启时，Plan 的公共 web 请求不要求逐次确认，关闭网页工具仍拒绝访问。`/plan` 可持续进入规划模式，`/plan <需求>` 直接开始，批准后回到 Default 并在同一 Session 执行。Goal 绑定创建它的 Session，使用 `get_goal`、`create_goal`、`update_goal` 工具及 JSONL goal 事件保存状态；`/goal <目标> [--tokens N]` 确认后立即运行，active goal 每轮自动续跑，恢复原 Session 后继续，支持 complete/blocked/paused/budget_limited/usage_limited 状态。
 
 

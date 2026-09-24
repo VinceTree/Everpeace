@@ -8,7 +8,10 @@ import {
 } from "../../agent/react-agent.js";
 import {
   createProviderClient,
+  createSessionPromptCacheKey,
+  isOfficialOpenAiBaseUrl,
   listOfficialModelIds,
+  supportsPromptCacheOptions,
 } from "../../providers/openai-compatible.js";
 import type { RegisteredModel } from "../../storage/model-registry.js";
 import { SessionStore } from "../../storage/session-store.js";
@@ -139,6 +142,17 @@ export function createDefaultTuiDependencies(
         client,
         model: model.model_name,
         io,
+        ...(isOfficialOpenAiBaseUrl(model.base_url)
+          ? {
+              promptCacheKey: () => {
+                const sessionId = io.getSessionId?.();
+                return sessionId === undefined ? undefined : createSessionPromptCacheKey(sessionId);
+              },
+              ...(supportsPromptCacheOptions(model.model_name)
+                ? { promptCacheOptions: { mode: "implicit" as const, ttl: "30m" as const } }
+                : {}),
+            }
+          : {}),
         mcp,
         skills,
         learnedMemory,
