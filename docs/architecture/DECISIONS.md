@@ -1,5 +1,11 @@
 # Architecture Decisions
 
+## Coding task benchmark isolation
+
+benchmark runner 是 Agent/TUI 之外的独立评测边界。任务通过 adapter 提供 prompt、工作区和可选验证命令；runner 只负责有界超时、验证执行、结果聚合和既有 `LoopEvent`/phase 指标采集，不负责 reset、checkout、删除工作区或改变权限策略。验证命令的 stdout/stderr 各保留最多 1 MiB 尾部。
+
+benchmark 结果不是 Session 事件，不写入 JSONL，也不进入模型 context。adapter 必须把取消信号传递给底层 harness；runner 在任务超时后立即结束记录并将结果标记为 `timed_out`，底层 adapter 仍需自行终止其子进程或网络请求。unsafe action 会使运行失败，即使验证命令通过。
+
 ## Context compaction
 
 `/compact` 和自动压缩都调用供应商原生 Responses `/responses/compact`，不生成本地摘要。原始输出必须原样保留为新的模型 context，包括供应商的 retained items 与 opaque compaction item；可见 transcript 和既有 JSONL timeline 不裁剪。压缩成功后以 `context_compacted` 事件原子替换 context，并把压缩 usage 累计进 session token 统计；手动命令在模型轮次或直接命令运行时拒绝，已知 context window 达到 80% 时在下一次采样前自动触发，未知 window 不自动触发。

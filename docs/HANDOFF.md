@@ -1,3 +1,13 @@
+# 最新功能：Coding task benchmark 基础层
+
+状态快照：2026-09-25。新增 `src/benchmark` 独立评测接口：`BenchmarkTask` 描述 prompt、隔离工作区、标签、超时和验证命令；`BenchmarkHarnessAdapter` 接入 Everpeace 或外部 harness；runner 提供任务超时、验证命令、有界 stdout/stderr、suite 聚合和 `passed/failed/timed_out/error` 结果。指标采集器复用现有 LoopEvent/phase，统计响应、工具调用与失败、重试、stream recovery、compaction、steering 和取消，不改 Session JSONL、TUI 或 Agent loop。
+
+- 新增 `docs/BENCHMARKING.md`，说明任务格式、adapter 接入和结果语义。
+- 新增 benchmark 指标、验证失败、任务超时、unsafe action 和 suite 聚合回归。
+- `pnpm typecheck` 通过；最终全量 `pnpm test` 为 238 项通过、1 项取消：取消是既有 Windows Bash abort 15 秒超时，与本轮 benchmark 改动无关。
+- 工作区展示号同步升至 `0.2.12`；本次只提交并推送代码，不创建 tag 或远程 Release。
+- 下一步：在真实项目中固定 15-20 个任务和验证命令，先生成 Everpeace baseline，再用独立 adapter 对照外部 harness；不直接 fork 外部项目。
+
 # 最新优化：Codex 对齐型 prompt cache
 
 状态快照：2026-09-24。Prompt cache 已从工作区级 key 优化为按 Session ID 延迟解析的 `everpeace:v2:session:<id>` key。官方 OpenAI 主采样和原生 compaction 请求同时携带 `prompt_cache_key` 与 `session-id` header；GPT-5.6 及以后型号使用隐式缓存、`30m` TTL 和 request-local developer 前缀 breakpoint。旧模型继续使用基础 key，DeepSeek、未知兼容端点不发送新增缓存参数。
