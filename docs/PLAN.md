@@ -1,5 +1,9 @@
 # Everpeace Current Plan
 
+## Model shell reliability
+
+模型 Bash 不是无限等待的后台任务。生产 Agent 通过 `DEFAULT_MODEL_BASH_TIMEOUT_MS` 使用 120 秒有界执行时间；超时会终止子进程树，并向模型返回 `timed_out: true` 与结构化错误。用户直接 `!` 命令继续保持无默认超时，由用户负责取消。该边界不改变权限 profile、sandbox 映射或 Session JSONL schema。
+
 ## Coding task benchmark foundation
 
 已加入独立 `src/benchmark` 评测层：任务定义包含 prompt、隔离工作区、标签、超时、验证命令和有界修复次数；harness 通过 adapter 接入，运行期间转发既有 `LoopEvent`/phase 并收集响应、工具失败、重试、stream recovery、compaction、steering 和取消指标。验证失败会进入 `diagnose` adapter 调用并重新验证，runner 记录每次尝试、workspace 前后 Git 快照和可选脱敏 artifact。Provider capability profile 只记录事实，不自动路由模型。

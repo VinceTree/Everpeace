@@ -9,9 +9,13 @@ import { codexCliLaunch } from "../codex/cli.js";
 
 export type { BashOutputPreview } from "./bash-output-preview.js";
 
+/** Model shell commands must not wait forever when a child ignores guidance. */
+export const DEFAULT_MODEL_BASH_TIMEOUT_MS = 120_000;
+
 export interface BashResult {
   truncated?: boolean;
   cancelled?: boolean;
+  timedOut?: boolean;
   stdout: string;
   stderr: string;
   exitCode: number | null;
@@ -21,6 +25,8 @@ export interface BashResult {
 
 export interface BashOptions {
   signal?: AbortSignal;
+  /** Stop the child after this many milliseconds. Omit for no timeout. */
+  timeoutMs?: number;
   onOutput?(output: BashOutputPreview): void;
   bashPath?: string;
   cwd?: string;
@@ -88,6 +94,7 @@ export function serializeBashResult(result: BashResult): string {
     exit_code: result.exitCode,
     signal: result.signal,
     ...(result.truncated ? { truncated: true } : {}),
+    ...(result.timedOut ? { timed_out: true } : {}),
     ...(result.error === undefined ? {} : { error: result.error }),
   });
 }
@@ -102,7 +109,16 @@ export function resolveBashLaunch(
 ): { command: string; args: string[] } {
   const env = options.env ?? process.env;
   const bashPath = options.bashPath ?? resolveBashPath(env);
-  if (!options.sandbox) return { command: bashPath, args: ["-c", command] };
+  if (!options.sandbox) {
+    const configuredBashPath = options.bashPath ?? env.EVERPEACE_BASH_PATH?.trim();
+    if (process.platform === "win32" && !configuredBashPath) {
+      return {
+        command: "powershell.exe",
+        args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+      };
+    }
+    return { command: bashPath, args: ["-c", command] };
+  }
   const cwd = options.cwd ?? process.cwd();
   const sandboxCommand = process.platform === "win32"
     ? { command: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command] }
@@ -136,7 +152,11 @@ export function runBash(
     let stderr = "";
     let settled = false;
     let truncated = false;
+    let timedOut = false;
     let previewTimer: ReturnType<typeof setTimeout> | undefined;
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+    let cancelTimer: ReturnType<typeof setTimeout> | undefined;
+    let effectiveTimeoutMs: number | undefined;
     const previewOutput = options.onOutput
       ? new BashOutputPreviewBuffer()
       : undefined;
@@ -152,6 +172,8 @@ export function runBash(
       if (settled) return;
       settled = true;
       if (previewTimer) clearTimeout(previewTimer);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (cancelTimer) clearTimeout(cancelTimer);
       resolve(result);
     };
 
@@ -173,9 +195,34 @@ export function runBash(
       return;
     }
 
-    const cancel = () => { if (child.pid) stopProcessTree(child.pid); };
+    const cancel = () => {
+      if (child.pid) stopProcessTree(child.pid);
+      if (cancelTimer) return;
+      cancelTimer = setTimeout(() => {
+        if (settled) return;
+        try { child.kill(); } catch { /* the process may already be gone */ }
+        options.signal?.removeEventListener("abort", cancel);
+        finish({
+          stdout: retainOutput(stdout).text,
+          stderr: retainOutput(stderr).text,
+          exitCode: null,
+          signal: null,
+          cancelled: options.signal?.aborted ?? false,
+          ...(timedOut ? { timedOut: true, error: `Bash command timed out after ${effectiveTimeoutMs ?? 0} ms` } : {}),
+        });
+      }, 500);
+    };
     options.signal?.addEventListener("abort", cancel, { once: true });
     if (options.signal?.aborted) cancel();
+
+    const timeoutMs = options.timeoutMs;
+    if (typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+      effectiveTimeoutMs = Math.max(1, Math.min(Math.floor(timeoutMs), 2_147_483_647));
+      timeoutTimer = setTimeout(() => {
+        timedOut = true;
+        cancel();
+      }, effectiveTimeoutMs);
+    }
 
     if (child.stdout) {
       child.stdout.setEncoding("utf8");
@@ -214,7 +261,15 @@ export function runBash(
       options.signal?.removeEventListener("abort", cancel);
       const out = retainOutput(stdout);
       const err = retainOutput(stderr);
-      finish({ stdout: out.text, stderr: err.text, exitCode, signal, truncated: truncated || out.truncated || err.truncated, cancelled: options.signal?.aborted ?? false });
+      finish({
+        stdout: out.text,
+        stderr: err.text,
+        exitCode,
+        signal,
+        truncated: truncated || out.truncated || err.truncated,
+        cancelled: options.signal?.aborted ?? false,
+        ...(timedOut ? { timedOut: true, error: `Bash command timed out after ${effectiveTimeoutMs ?? 0} ms` } : {}),
+      });
     });
   });
 }

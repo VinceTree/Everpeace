@@ -1,5 +1,9 @@
 # Architecture Decisions
 
+## Model shell timeout boundary
+
+模型 Bash 调用必须有界：TUI 依赖层为模型命令设置 120 秒默认超时，`runBash` 在超时后终止完整子进程树，并保留已捕获输出。返回结果使用 `timedOut` 字段，序列化给模型时使用 `timed_out: true` 和明确错误文本；超时不是用户 Ctrl+C，因此 `cancelled` 保持 false。用户直接 `!` 走原生终端路径，不继承该默认超时。超时只限制执行时长，不绕过或改变 Codex sandbox 和审批策略。
+
 ## Coding task benchmark isolation
 
 benchmark runner 是 Agent/TUI 之外的独立评测边界。任务通过 adapter 提供 prompt、工作区和可选验证命令；runner 只负责有界超时、验证执行、结果聚合和既有 `LoopEvent`/phase 指标采集，不负责 reset、checkout、删除工作区或改变权限策略。验证命令的 stdout/stderr 各保留最多 1 MiB 尾部。

@@ -16,7 +16,7 @@ import {
 import type { RegisteredModel } from "../../storage/model-registry.js";
 import { SessionStore } from "../../storage/session-store.js";
 import { InputHistory } from "../../storage/input-history.js";
-import { runBash } from "../../tools/bash.js";
+import { DEFAULT_MODEL_BASH_TIMEOUT_MS, runBash } from "../../tools/bash.js";
 import { runTerminalCommand } from "../../tools/terminal.js";
 import type { TuiDependencies, TuiModelRegistry } from "./types.js";
 import { truncateEnd } from "../rendering/text-width.js";
@@ -247,6 +247,7 @@ export function createDefaultTuiDependencies(
     runBash(command, policy: PermissionPolicy, signal, onOutput) {
       return runBash(command, {
         streamOutput: false,
+        timeoutMs: DEFAULT_MODEL_BASH_TIMEOUT_MS,
         sandbox: {
           permissionProfile: codexSandboxProfile(policy),
           readableRoots: skills.readableRoots(),
