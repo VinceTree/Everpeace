@@ -1,12 +1,12 @@
 # 最新功能：Coding task benchmark 基础层
 
-状态快照：2026-09-25。新增 `src/benchmark` 独立评测接口：`BenchmarkTask` 描述 prompt、隔离工作区、标签、超时和验证命令；`BenchmarkHarnessAdapter` 接入 Everpeace 或外部 harness；runner 提供任务超时、验证命令、有界 stdout/stderr、suite 聚合和 `passed/failed/timed_out/error` 结果。指标采集器复用现有 LoopEvent/phase，统计响应、工具调用与失败、重试、stream recovery、compaction、steering 和取消，不改 Session JSONL、TUI 或 Agent loop。
+状态快照：2026-09-26。benchmark 层新增有界 `implement -> diagnose -> verify` 修复闭环：验证失败后默认最多 3 次 adapter 尝试，context 会收到 attempt、phase 和 previousVerification。runner 记录每次验证、前后 workspace Git 快照、尝试/修复次数，并支持独立脱敏 artifact sink；新增 provider capability profile，只记录事实，不自动路由模型。仍不改 Session JSONL、TUI 或 Agent loop。
 
 - 新增 `docs/BENCHMARKING.md`，说明任务格式、adapter 接入和结果语义。
-- 新增 benchmark 指标、验证失败、任务超时、unsafe action 和 suite 聚合回归。
-- `pnpm typecheck` 通过；最终全量 `pnpm test` 为 238 项通过、1 项取消：取消是既有 Windows Bash abort 15 秒超时，与本轮 benchmark 改动无关。
-- 工作区展示号同步升至 `0.2.12`；本次只提交并推送代码，不创建 tag 或远程 Release。
-- 下一步：在真实项目中固定 15-20 个任务和验证命令，先生成 Everpeace baseline，再用独立 adapter 对照外部 harness；不直接 fork 外部项目。
+- 新增只解析不执行命令的公开 issue catalog manifest、benchmark 指标、验证失败、任务超时、unsafe action、修复循环、workspace snapshot、artifact 脱敏和 capability profile 回归；benchmark 定向测试 14/14 通过。
+- `pnpm typecheck` 和 `pnpm build` 通过；本轮全量 `pnpm test` 为 240 项通过、5 项失败：1 项既有 memory idle timing，4 项既有 Windows sandbox/Bash 环境用例（`tests/unit/tools/bash.test.ts`）；benchmark 定向 14/14 通过。
+- 工作区展示号同步升至 `0.2.13`；本次只提交并推送代码，不创建 tag 或远程 Release。
+- 下一步：固定 15-20 个公开 issue 任务的 commit、准备脚本和审核后的验证命令，使用临时 worktree 生成多模型 baseline；日常目录继续使用显式检查点，不自动回滚。
 
 # 最新优化：Codex 对齐型 prompt cache
 

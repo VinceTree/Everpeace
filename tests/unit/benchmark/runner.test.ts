@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import { createFileBenchmarkArtifactSink } from "../../../src/benchmark/artifacts.js";
 import { runBenchmarkSuite, runBenchmarkTask } from "../../../src/benchmark/runner.js";
 import type { BenchmarkHarnessAdapter, BenchmarkTask } from "../../../src/benchmark/types.js";
 
@@ -107,4 +111,56 @@ test("unsafe actions fail the run and suite aggregates reliability metrics", asy
   assert.equal(summary.totalRetries, 2);
   assert.equal(summary.totalManualInterventions, 4);
   assert.equal(summary.unsafeActions, 2);
+});
+
+test("verification failures enter a bounded diagnose loop with prior output", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "everpeace-benchmark-"));
+  const verificationScript = join(workspacePath, "verify.mjs");
+  await writeFile(verificationScript, "import { existsSync } from 'node:fs'; process.exit(existsSync('passed') ? 0 : 1);\n");
+  const phases: string[] = [];
+  const taskPhases: string[] = [];
+  let attempts = 0;
+  const adapter: BenchmarkHarnessAdapter = {
+    name: "repair-harness",
+    async run(_task, context) {
+      attempts += 1;
+      phases.push(`${context.phase}:${context.attempt}`);
+      if (context.previousVerification !== undefined) {
+        assert.equal(context.previousVerification.passed, false);
+      }
+      if (context.attempt === 2) await writeFile(join(workspacePath, "passed"), "ok");
+    },
+  };
+  const result = await runBenchmarkTask(task({
+    workspacePath,
+    maxRepairAttempts: 1,
+    verification: {
+      command: process.execPath,
+      args: [verificationScript],
+    },
+  }), adapter, { onTaskPhase: (phase, attempt) => taskPhases.push(`${phase}:${attempt}`) });
+
+  assert.equal(result.status, "passed");
+  assert.equal(result.attempts, 2);
+  assert.equal(attempts, 2);
+  assert.deepEqual(phases, ["implement:1", "diagnose:2"]);
+  assert.deepEqual(taskPhases, ["implement:1", "verify:1", "diagnose:2", "verify:2", "summarize:2"]);
+  assert.equal(result.verificationAttempts?.length, 2);
+  assert.equal(result.workspaceBefore?.workspacePath, workspacePath);
+});
+
+test("benchmark artifacts are bounded to safe names and redact common credentials", async () => {
+  const artifactDirectory = await mkdtemp(join(tmpdir(), "everpeace-artifacts-"));
+  const sink = createFileBenchmarkArtifactSink(artifactDirectory);
+  const result = await runBenchmarkTask(task({ maxRepairAttempts: 0 }), {
+    name: "artifact-harness",
+    async run(_task, context) {
+      await context.writeArtifact?.("diagnostic.txt", "api_key=secret-value");
+    },
+  }, { artifactSink: sink });
+
+  assert.equal(result.status, "passed");
+  assert.ok(result.artifacts?.some((path) => path.endsWith("diagnostic.txt")));
+  assert.match(await readFile(join(artifactDirectory, "diagnostic.txt"), "utf8"), /\[REDACTED\]/u);
+  assert.ok(await readFile(join(artifactDirectory, "result.json"), "utf8"));
 });

@@ -1,15 +1,20 @@
 import { spawn } from "node:child_process";
 import type {
+  BenchmarkArtifactSink,
   BenchmarkHarnessAdapter,
+  BenchmarkHarnessResult,
+  BenchmarkProviderCapabilities,
   BenchmarkRunResult,
   BenchmarkSuiteSummary,
   BenchmarkTask,
+  BenchmarkTaskPhase,
   BenchmarkVerification,
   BenchmarkVerificationResult,
 } from "./types.js";
 import { createBenchmarkMetricsCollector } from "./metrics.js";
 import { retainOutput } from "../tools/command-record.js";
 import { stopProcessTree } from "../tools/process-cancel.js";
+import { captureWorkspaceSnapshot } from "./workspace.js";
 
 const DEFAULT_TASK_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_VERIFICATION_TIMEOUT_MS = 2 * 60 * 1000;
@@ -88,6 +93,38 @@ function runVerification(spec: BenchmarkVerification, workspacePath: string, sig
 export interface BenchmarkRunOptions {
   signal?: AbortSignal;
   now?: () => number;
+  artifactSink?: BenchmarkArtifactSink;
+  capabilities?: BenchmarkProviderCapabilities;
+  onTaskPhase?(phase: BenchmarkTaskPhase, attempt: number): void;
+}
+
+async function runAdapterAttempt(
+  adapter: BenchmarkHarnessAdapter,
+  task: BenchmarkTask,
+  context: Parameters<BenchmarkHarnessAdapter["run"]>[1],
+  signal: AbortSignal,
+): Promise<BenchmarkHarnessResult | void> {
+  if (signal.aborted) throw signal.reason ?? new Error("Benchmark task was cancelled");
+  const runPromise = adapter.run(task, context);
+  return await new Promise<BenchmarkHarnessResult | void>((resolve, reject) => {
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", rejectOnAbort);
+      callback();
+    };
+    const rejectOnAbort = () => finish(() => reject(signal.reason ?? new Error("Benchmark task was cancelled")));
+    signal.addEventListener("abort", rejectOnAbort, { once: true });
+    if (signal.aborted) {
+      rejectOnAbort();
+      return;
+    }
+    runPromise.then(
+      (result) => finish(() => resolve(result)),
+      (error: unknown) => finish(() => reject(error)),
+    );
+  });
 }
 
 export async function runBenchmarkTask(
@@ -115,41 +152,78 @@ export async function runBenchmarkTask(
   let unsafeActions = 0;
   let notes: string | undefined;
   let verification: BenchmarkVerificationResult | undefined;
+  const verificationAttempts: BenchmarkVerificationResult[] = [];
+  const artifactPaths: string[] = [];
+  const workspaceBefore = await captureWorkspaceSnapshot(task.workspacePath, { now, signal: controller.signal });
+  let workspaceAfter = workspaceBefore;
+  let capabilities = options.capabilities;
+  let attempts = 0;
   let status: BenchmarkRunResult["status"] = "passed";
   let failure: string | undefined;
 
+  const writeArtifact = options.artifactSink === undefined
+    ? undefined
+    : async (name: string, content: string): Promise<string | undefined> => {
+      try {
+        const path = await options.artifactSink!.write(name, content);
+        if (path !== undefined) artifactPaths.push(path);
+        return path;
+      } catch (error) {
+        notes = [notes, `Could not write artifact ${name}: ${errorMessage(error)}`].filter(Boolean).join("\n");
+        return undefined;
+      }
+    };
+
   try {
-    const runPromise = adapter.run(task, {
-      task,
-      signal: controller.signal,
-      onPhase: metrics.onPhase,
-      onEvent: metrics.onEvent,
-    });
-    const abortPromise = new Promise<never>((_, reject) => {
-      const rejectOnAbort = () => reject(controller.signal.reason ?? new Error("Benchmark task was cancelled"));
-      controller.signal.addEventListener("abort", rejectOnAbort, { once: true });
-      if (controller.signal.aborted) rejectOnAbort();
-    });
-    const result = await Promise.race([runPromise, abortPromise]);
-    manualInterventions = result?.manualInterventions ?? 0;
-    unsafeActions = result?.unsafeActions ?? 0;
-    notes = result?.notes;
-    if (controller.signal.aborted) {
-      status = timedOut ? "timed_out" : "error";
-      failure = timedOut ? `Benchmark task exceeded ${task.timeoutMs ?? DEFAULT_TASK_TIMEOUT_MS}ms` : "Benchmark task was cancelled";
-    } else if (task.verification) {
+    const maxRepairAttempts = Math.min(10, Math.max(0, task.maxRepairAttempts ?? 3));
+    while (true) {
+      attempts += 1;
+      const phase = attempts === 1 ? "implement" as const : "diagnose" as const;
+      options.onTaskPhase?.(phase, attempts);
+      const result = await runAdapterAttempt(adapter, task, {
+        task,
+        signal: controller.signal,
+        attempt: attempts,
+        phase,
+        ...(verification === undefined ? {} : { previousVerification: verification }),
+        workspaceBefore,
+        onPhase: metrics.onPhase,
+        onEvent: metrics.onEvent,
+        ...(writeArtifact === undefined ? {} : { writeArtifact }),
+      }, controller.signal);
+      manualInterventions += result?.manualInterventions ?? 0;
+      unsafeActions += result?.unsafeActions ?? 0;
+      if (result?.notes !== undefined) notes = [notes, result.notes].filter(Boolean).join("\n");
+      if (result?.capabilities !== undefined) capabilities = result.capabilities;
+
+      if (controller.signal.aborted) {
+        status = timedOut ? "timed_out" : "error";
+        failure = timedOut ? `Benchmark task exceeded ${task.timeoutMs ?? DEFAULT_TASK_TIMEOUT_MS}ms` : "Benchmark task was cancelled";
+        break;
+      }
+      if (unsafeActions > 0) {
+        status = "failed";
+        failure = `${unsafeActions} unsafe action(s) were reported by the harness`;
+        break;
+      }
+      if (task.verification === undefined) break;
+
+      options.onTaskPhase?.("verify", attempts);
       verification = await runVerification(task.verification, task.workspacePath, controller.signal);
+      verificationAttempts.push(verification);
       if (verification.timedOut) {
         status = "timed_out";
         failure = verification.error ?? "Verification timed out";
-      } else if (!verification.passed) {
-        status = "failed";
-        failure = verification.error ?? `Verification exited with code ${verification.exitCode ?? "unknown"}`;
+        break;
       }
-    }
-    if (unsafeActions > 0) {
+      if (verification.passed) {
+        status = "passed";
+        failure = undefined;
+        break;
+      }
       status = "failed";
-      failure = failure ?? `${unsafeActions} unsafe action(s) were reported by the harness`;
+      failure = verification.error ?? `Verification exited with code ${verification.exitCode ?? "unknown"}`;
+      if (attempts > maxRepairAttempts) break;
     }
   } catch (error) {
     status = timedOut ? "timed_out" : "error";
@@ -158,22 +232,44 @@ export async function runBenchmarkTask(
     if (timeout) clearTimeout(timeout);
     options.signal?.removeEventListener("abort", abortFromParent);
     controller.abort();
+    options.onTaskPhase?.("summarize", attempts);
+    workspaceAfter = timedOut || options.signal?.aborted
+      ? workspaceBefore
+      : await captureWorkspaceSnapshot(task.workspacePath, { now });
+  }
+
+  if (writeArtifact !== undefined) {
+    await writeArtifact("workspace-before.json", JSON.stringify(workspaceBefore, null, 2));
+    await writeArtifact("workspace-after.json", JSON.stringify(workspaceAfter, null, 2));
+    for (const [index, item] of verificationAttempts.entries()) {
+      await writeArtifact(`verification-${index + 1}.json`, JSON.stringify(item, null, 2));
+    }
   }
 
   const durationMs = Math.max(0, now() - startedAtMs);
-  return {
+  const runResult: BenchmarkRunResult = {
     taskId: task.id,
     adapter: adapter.name,
     status,
     startedAt,
     durationMs,
+    attempts,
     metrics: metrics.snapshot(now()),
     manualInterventions,
     unsafeActions,
     ...(verification === undefined ? {} : { verification }),
+    ...(verificationAttempts.length === 0 ? {} : { verificationAttempts }),
+    workspaceBefore,
+    workspaceAfter,
+    ...(artifactPaths.length === 0 ? {} : { artifacts: artifactPaths }),
+    ...(capabilities === undefined ? {} : { capabilities }),
     ...(failure === undefined ? {} : { error: failure }),
     ...(notes === undefined ? {} : { notes }),
   };
+  if (writeArtifact !== undefined) {
+    await writeArtifact("result.json", JSON.stringify(runResult, null, 2));
+  }
+  return runResult;
 }
 
 export async function runBenchmarkSuite(
@@ -203,6 +299,8 @@ export async function runBenchmarkSuite(
     completionRate: results.length === 0 ? 0 : passed / results.length,
     verificationPassRate: verified === 0 ? null : verificationPassed / verified,
     totalDurationMs: results.reduce((total, result) => total + result.durationMs, 0),
+    totalAttempts: results.reduce((total, result) => total + result.attempts, 0),
+    totalRepairAttempts: results.reduce((total, result) => total + Math.max(0, result.attempts - 1), 0),
     totalToolCalls: results.reduce((total, result) => total + result.metrics.toolCalls, 0),
     totalRetries: results.reduce((total, result) => total + result.metrics.retries, 0),
     totalManualInterventions: results.reduce((total, result) => total + result.manualInterventions, 0),

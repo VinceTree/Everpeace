@@ -2,9 +2,9 @@
 
 ## Coding task benchmark foundation
 
-已加入独立 `src/benchmark` 评测层：任务定义包含 prompt、隔离工作区、标签、超时和验证命令；harness 通过 adapter 接入，运行期间转发既有 `LoopEvent`/phase 并收集响应、工具失败、重试、stream recovery、compaction、steering 和取消指标。验证命令使用有界输出和独立超时，suite 按任务顺序运行并汇总完成率、验证通过率、工具调用、重试、人工介入和 unsafe action。
+已加入独立 `src/benchmark` 评测层：任务定义包含 prompt、隔离工作区、标签、超时、验证命令和有界修复次数；harness 通过 adapter 接入，运行期间转发既有 `LoopEvent`/phase 并收集响应、工具失败、重试、stream recovery、compaction、steering 和取消指标。验证失败会进入 `diagnose` adapter 调用并重新验证，runner 记录每次尝试、workspace 前后 Git 快照和可选脱敏 artifact。Provider capability profile 只记录事实，不自动路由模型。
 
-该层不进入 Session JSONL、不改变 TUI 或 Agent loop 语义，也不自动 reset/checkout/delete 工作区。第一阶段目标是用 15-20 个真实 coding task 建立 Everpeace baseline，再以独立 adapter 比较其他 harness；多 Agent、云端、多用户和 IDE 集成不属于本阶段。
+该层不进入 Session JSONL、不改变 TUI 或 Agent loop 语义，也不自动 reset/checkout/delete 工作区。公开 issue benchmark 必须固定 commit 和人工审核的验证命令，并使用临时 clone/worktree；日常 coding task 保持当前目录加显式检查点。第一阶段目标是用 15-20 个公开 issue 建立多模型 baseline，再以独立 adapter 比较其他 harness；自动路由、多 Agent、云端、多用户和 IDE 集成不属于本阶段。
 
 ## Plan 与 Goal
 

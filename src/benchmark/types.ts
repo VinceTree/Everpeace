@@ -2,6 +2,8 @@ import type { LoopEvent, LoopPhase } from "../agent/agent-loop.js";
 
 export type BenchmarkRunStatus = "passed" | "failed" | "timed_out" | "error";
 
+export type BenchmarkTaskPhase = "inspect" | "plan" | "implement" | "test" | "diagnose" | "verify" | "summarize";
+
 export interface BenchmarkVerification {
   command: string;
   args?: readonly string[];
@@ -17,7 +19,45 @@ export interface BenchmarkTask {
   workspacePath: string;
   tags?: readonly string[];
   timeoutMs?: number;
+  maxRepairAttempts?: number;
   verification?: BenchmarkVerification;
+  source?: BenchmarkTaskSource;
+}
+
+export interface BenchmarkTaskSource {
+  repositoryUrl: string;
+  commit: string;
+  issue: string;
+  license?: string;
+}
+
+export interface BenchmarkWorkspaceGitSnapshot {
+  root: string;
+  head: string | null;
+  branch: string | null;
+  status: string;
+  diffHash: string | null;
+  diff?: string;
+  diffTruncated?: boolean;
+}
+
+export interface BenchmarkWorkspaceSnapshot {
+  capturedAt: string;
+  workspacePath: string;
+  git?: BenchmarkWorkspaceGitSnapshot;
+  error?: string;
+}
+
+export interface BenchmarkProviderCapabilities {
+  provider: string;
+  baseUrl: string;
+  model: string;
+  streaming: boolean;
+  streamRecovery: boolean;
+  nativeCompaction: boolean;
+  promptCache: boolean;
+  parallelToolCalls: boolean;
+  contextWindow: number | null;
 }
 
 export interface BenchmarkMetricsSnapshot {
@@ -38,13 +78,23 @@ export interface BenchmarkHarnessResult {
   manualInterventions?: number;
   unsafeActions?: number;
   notes?: string;
+  capabilities?: BenchmarkProviderCapabilities;
+}
+
+export interface BenchmarkArtifactSink {
+  write(name: string, content: string): Promise<string | undefined>;
 }
 
 export interface BenchmarkHarnessContext {
   readonly task: BenchmarkTask;
   readonly signal: AbortSignal;
+  readonly attempt: number;
+  readonly phase: BenchmarkTaskPhase;
+  readonly previousVerification?: BenchmarkVerificationResult;
+  readonly workspaceBefore?: BenchmarkWorkspaceSnapshot;
   readonly onPhase: (phase: LoopPhase) => void;
   readonly onEvent: (event: LoopEvent) => void;
+  readonly writeArtifact?: (name: string, content: string) => Promise<string | undefined>;
 }
 
 export interface BenchmarkHarnessAdapter {
@@ -69,10 +119,16 @@ export interface BenchmarkRunResult {
   status: BenchmarkRunStatus;
   startedAt: string;
   durationMs: number;
+  attempts: number;
   metrics: BenchmarkMetricsSnapshot;
   manualInterventions: number;
   unsafeActions: number;
   verification?: BenchmarkVerificationResult;
+  verificationAttempts?: readonly BenchmarkVerificationResult[];
+  workspaceBefore?: BenchmarkWorkspaceSnapshot;
+  workspaceAfter?: BenchmarkWorkspaceSnapshot;
+  artifacts?: readonly string[];
+  capabilities?: BenchmarkProviderCapabilities;
   error?: string;
   notes?: string;
 }
@@ -89,6 +145,8 @@ export interface BenchmarkSuiteSummary {
   completionRate: number;
   verificationPassRate: number | null;
   totalDurationMs: number;
+  totalAttempts: number;
+  totalRepairAttempts: number;
   totalToolCalls: number;
   totalRetries: number;
   totalManualInterventions: number;
