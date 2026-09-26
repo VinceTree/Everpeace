@@ -58,7 +58,7 @@ export class CodingWorkflowRuntime {
   async afterPatch(
     operations: readonly ApplyPatchOperation[],
     result: ApplyPatchResult,
-    run: (command: string, signal?: AbortSignal) => Promise<import("../tools/bash.js").BashResult>,
+    run: (command: string, signal?: AbortSignal, timeoutMs?: number) => Promise<import("../tools/bash.js").BashResult>,
     signal?: AbortSignal,
   ): Promise<WorkflowPatchFollowup> {
     if (result.status !== "applied") {
@@ -88,7 +88,7 @@ export class CodingWorkflowRuntime {
   }
 
   async finishTurn(
-    run: (command: string, signal?: AbortSignal) => Promise<import("../tools/bash.js").BashResult>,
+    run: (command: string, signal?: AbortSignal, timeoutMs?: number) => Promise<import("../tools/bash.js").BashResult>,
     signal?: AbortSignal,
   ): Promise<WorkflowRunResult> {
     if (!this.#changed || this.#state.phase === "blocked") {

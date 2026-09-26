@@ -15,4 +15,17 @@ server.registerTool(
   async () => ({ content: [{ type: "text", text: "pong" }] }),
 );
 
+server.registerResource(
+  "notes",
+  "test://notes",
+  { description: "A deterministic test resource.", mimeType: "text/plain" },
+  async (uri) => ({ contents: [{ uri: uri.href, text: "resource-value", mimeType: "text/plain" }] }),
+);
+
+server.registerPrompt(
+  "greeting",
+  { description: "Build a deterministic greeting prompt." },
+  async () => ({ messages: [{ role: "user", content: { type: "text", text: "prompt-value" } }] }),
+);
+
 await server.connect(new StdioServerTransport());

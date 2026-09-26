@@ -1,3 +1,13 @@
+## 最新优化：持久化权限策略与 MCP resources/prompts
+
+状态快照：2026-09-26。本轮在现有单 Agent 核心上继续补齐 Codex 对齐缺口：`/permissions` 的用户策略现在按平台写入版本化配置文件，项目可选 `.everpeace/permissions.json` 以 fail-closed 方式合并；项目策略只能收紧 mode、关闭 web 或追加 deny/ask command rule，不能通过仓库内容提升权限。新增 MCP resources/prompts 的分页 function-call 映射（`list_resources`、`read_resource`、`list_prompts`、`get_prompt`），沿用 MCP 审批、超时、取消、有界结果和 context 持久化边界。工作流验证命令现在正确传递命令级 timeout。
+
+- 新增权限路径、版本化原子写入、项目策略降权合并及不写入凭据的回归测试；用户策略从平台配置目录恢复，项目策略不会覆盖用户拒绝。
+- stdio MCP fixture 和 runtime 回归覆盖资源读取、prompt 获取及 `enabled_tools` 过滤；OAuth、elicitation、sampling、tasks 和 list-changed 仍未接入。
+- 工作区展示号同步升至 `0.2.17`；本次只提交并推送代码，不创建 tag 或更新远程 Release。
+- 当前验证：`pnpm test` 为 272 项，271 通过、0 失败、1 项按平台跳过；`pnpm typecheck` 与 `pnpm build` 已通过，`git diff --check` 仅有 Windows 换行提示。仍需补真实 Windows Terminal / live provider smoke。
+- 后续优先补 MCP OAuth/elicitation/tasks 与 managed policy 边界，再评估 hooks/plugins 和多 Agent；不重构为外部 app-server，也不把当前实现描述为完整 Codex runtime。
+
 # 最新优化：单 Agent coding workflow 闭环
 
 状态快照：2026-09-26。本轮在现有 Agent 下加入 Codex 风格的单 Agent coding workflow：普通 coding turn 维护 understand/implement/verify/diagnose/review/done 状态；`apply_patch` 成功后先执行自动发现的快速检查，回合结束执行完整检查，失败输出会反馈给模型，最多三次修复尝试后进入 blocked。新增只读 `workspace_status`、`workspace_diff` 工具，以及 `/diff`、`/verify`、`/undo` 命令。

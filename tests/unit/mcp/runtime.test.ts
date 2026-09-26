@@ -34,9 +34,15 @@ test("MCP runtime discovers namespaced stdio tools, instructions, and calls", as
   t.after(() => runtime.close());
 
   const snapshot = await runtime.refresh();
-  assert.deepEqual(snapshot.tools.map((tool) => tool.name), ["mcp__test_server__ping"]);
+  assert.deepEqual(snapshot.tools.map((tool) => tool.name), [
+    "mcp__test_server__ping",
+    "mcp__test_server__list_resources",
+    "mcp__test_server__read_resource",
+    "mcp__test_server__list_prompts",
+    "mcp__test_server__get_prompt",
+  ]);
   assert.match(snapshot.instructions, /Use ping/u);
-  assert.match(formatMcpStatus(snapshot), /test_server · stdio · ready · 1 tool/u);
+  assert.match(formatMcpStatus(snapshot), /test_server · stdio · ready · 5 tools/u);
   assert.deepEqual(runtime.toolInfo("mcp__test_server__ping")?.annotations, {
     readOnlyHint: true,
     destructiveHint: false,
@@ -46,6 +52,10 @@ test("MCP runtime discovers namespaced stdio tools, instructions, and calls", as
     content: Array<{ type: string; text: string }>;
   };
   assert.equal(output.content[0]?.text, "pong");
+  const resource = JSON.parse(await runtime.call("mcp__test_server__read_resource", JSON.stringify({ uri: "test://notes" }))) as { contents: Array<{ text?: string }> };
+  assert.equal(resource.contents[0]?.text, "resource-value");
+  const prompt = JSON.parse(await runtime.call("mcp__test_server__get_prompt", JSON.stringify({ name: "greeting" }))) as { messages: Array<{ content?: { text?: string } }> };
+  assert.equal(prompt.messages[0]?.content?.text, "prompt-value");
 });
 
 test("MCP runtime respects Codex enabled tools and isolates server failures", async (t) => {

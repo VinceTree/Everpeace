@@ -4,10 +4,11 @@ import React, { useState } from "react";
 import type { CommandRuleAction, PermissionPolicy } from "../../../permissions/policy.js";
 import { CommandSurface } from "../screens/command-surface.js";
 
-export function PermissionsPicker({ policy, workspace, onChange, onBack }: {
+export function PermissionsPicker({ policy, workspace, onChange, onSaveProject, onBack }: {
   policy: PermissionPolicy;
   workspace: string;
   onChange(policy: PermissionPolicy): void;
+  onSaveProject?(policy: PermissionPolicy): void;
   onBack(): void;
 }) {
   const [confirmFull, setConfirmFull] = useState(false);
@@ -17,7 +18,7 @@ export function PermissionsPicker({ policy, workspace, onChange, onBack }: {
   if (addingRule) {
     return (
       <CommandSurface title="/permissions · Add command rule" onBack={() => setAddingRule(false)}>
-        <Text>Rules are process-local and apply only to model Bash.</Text>
+        <Text>User policy is persisted; project policy can only restrict model Bash.</Text>
         <Text>Action: {ruleAction}</Text>
         <Select
           options={[{ label: "Ask", value: "ask" }, { label: "Allow", value: "allow" }, { label: "Deny", value: "deny" }]}
@@ -51,12 +52,14 @@ export function PermissionsPicker({ policy, workspace, onChange, onBack }: {
           { label: "Full access: no tool approvals", value: "full-access" },
           { label: policy.web ? "Disable web tools" : "Enable web tools", value: "web" },
           { label: "Add command prefix rule", value: "add-rule" },
+          { label: "Save current policy for this project", value: "save-project" },
           ...(rules.length > 0 ? [{ label: "Clear command prefix rules", value: "clear-rules" }] : []),
         ]}
         onChange={(value) => {
           if (value === "full-access") setConfirmFull(true);
           else if (value === "web") onChange({ ...policy, web: !policy.web });
           else if (value === "add-rule") setAddingRule(true);
+          else if (value === "save-project") onSaveProject?.(policy);
           else if (value === "clear-rules") onChange({ ...policy, commandRules: [] });
           else if (value === "ask" || value === "read-only" || value === "workspace-write") onChange({ ...policy, mode: value });
         }}

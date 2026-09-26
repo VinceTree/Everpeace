@@ -10,7 +10,7 @@
 
 模型 Bash 与 Codex CLI JSON 请求必须共享同一条 bounded process executor，避免只在 `runCodexCli` 测试路径覆盖 Windows sandbox helper retry，而真实 Bash 仍绕过它。Windows sandbox helper setup/refresh/unknown 错误只允许一次重试，取消、超时和最终失败都保持 fail-closed，不得回退宿主 shell。
 
-文件编辑使用兼容 provider 的 `apply_patch` function tool，而不是要求所有端点支持原生 patch call。工具先完整预检工作区边界、符号链接、大小、重复路径和可选 SHA-256，再以临时文件/rename 应用多文件批次；任何失败都尽力恢复原内容。权限规则只存在进程内，Session JSONL 不保存命令 prefix rules 或 patch staging 数据。
+文件编辑使用兼容 provider 的 `apply_patch` function tool，而不是要求所有端点支持原生 patch call。工具先完整预检工作区边界、符号链接、大小、重复路径和可选 SHA-256，再以临时文件/rename 应用多文件批次；任何失败都尽力恢复原内容。权限策略不进入 Session JSONL：用户 command prefix rules 写入平台配置目录，项目策略写入 `.everpeace/permissions.json` 时只允许收紧权限，避免仓库内容提升模型能力；patch staging 数据仍只存在进程内。
 
 ## Model shell timeout boundary
 
@@ -48,11 +48,11 @@ Agent Loop 可靠性预算彼此隔离：普通采样重试默认最多两次，
 
 ## 权限管理
 
-权限实现详见 [PERMISSIONS.md](./PERMISSIONS.md)：`/permissions` 提供 `read-only`、`ask`、`workspace-write`（默认）和 `full-access` 四档 profile。模型 shell 分别映射到固定版本 Codex CLI 的 `:read-only`、`:workspace` 或 `:danger-full-access`，sandbox 初始化失败时禁止回退为宿主直跑。文件工具始终限定工作目录，内置网页工具保留独立开关，MCP 使用另一条审批面。权限仅存在当前进程，跨 new/clear/resume 保留，重启恢复默认，不从 JSONL 恢复；变更权限不重建 Agent 或丢失 context。用户直接 `!` 继续走原生 PTY，不进入模型 sandbox 或 context。
+权限实现详见 [PERMISSIONS.md](./PERMISSIONS.md)：`/permissions` 提供 `read-only`、`ask`、`workspace-write`（默认）和 `full-access` 四档 profile。模型 shell 分别映射到固定版本 Codex CLI 的 `:read-only`、`:workspace` 或 `:danger-full-access`，sandbox 初始化失败时禁止回退为宿主直跑。文件工具始终限定工作目录，内置网页工具保留独立开关，MCP 使用另一条审批面。用户策略跨重启持久化在平台配置目录，项目策略可选地放在 `.everpeace/permissions.json` 并以 fail-closed 方式合并；权限切换不重建 Agent 或丢失 context，也不写入 Session JSONL。用户直接 `!` 继续走原生 PTY，不进入模型 sandbox 或 context。
 
 ## Codex Sandbox、MCP 与 Skills
 
-完整边界见 [CODEX_CAPABILITIES.md](./CODEX_CAPABILITIES.md)。sandbox 复用 `@openai/codex@0.155.1` 的平台后端而非复制 Rust 实现；Windows 模型 shell 固定用 PowerShell，其他平台用 Bash。MCP 复用 `codex mcp` 配置，以官方 TypeScript SDK 连接 stdio/Streamable HTTP，非 full-access 工具调用逐次审批。主机 Skills 扫描 Codex 项目/用户/admin/system 根，只把无名称冲突的 metadata catalog 预载到 instructions，显式 `$name` 在本轮完整注入，隐式匹配通过受路径约束的 `read_skill` 渐进读取。`/mcp` 是 transient 状态窗口；`/skills` 是不进入 session timeline/context 的多步管理向导，可在每次操作中选择项目或用户作用域，AI 创建单个 `SKILL.md`，或从公开 HTTPS GitHub/Git/SKILL.md/ZIP 来源先暂存、校验和预览，再明确确认安装。创建/安装不得覆盖任一发现根的同名 Skill，重复名称在解决前不得自动或显式调用。三者均不改变 JSONL schema；当前不包含完整 Plugin、OAuth、远端 Skill provider 或 managed-policy runtime，Skill 管理也不包含私有认证、更新或删除。
+完整边界见 [CODEX_CAPABILITIES.md](./CODEX_CAPABILITIES.md)。sandbox 复用 `@openai/codex@0.155.1` 的平台后端而非复制 Rust 实现；Windows 模型 shell 固定用 PowerShell，其他平台用 Bash。MCP 复用 `codex mcp` 配置，以官方 TypeScript SDK 连接 stdio/Streamable HTTP，非 full-access 的 tools、resources、prompts 调用逐次审批。主机 Skills 扫描 Codex 项目/用户/admin/system 根，只把无名称冲突的 metadata catalog 预载到 instructions，显式 `$name` 在本轮完整注入，隐式匹配通过受路径约束的 `read_skill` 渐进读取。`/mcp` 是 transient 状态窗口；`/skills` 是不进入 session timeline/context 的多步管理向导，可在每次操作中选择项目或用户作用域，AI 创建单个 `SKILL.md`，或从公开 HTTPS GitHub/Git/SKILL.md/ZIP 来源先暂存、校验和预览，再明确确认安装。创建/安装不得覆盖任一发现根的同名 Skill，重复名称在解决前不得自动或显式调用。三者均不改变 JSONL schema；当前不包含完整 Plugin、OAuth、远端 Skill provider 或 managed-policy runtime，Skill 管理也不包含私有认证、更新或删除。
 
 Git Skill 来源采用 shallow、no-checkout 克隆：先读取有界 Git tree 和候选 `SKILL.md` metadata，同名打包副本按规范 `skills/<name>` 路径优先去重，预检候选文件类型、数量和字节数后才 sparse checkout。原始 `SKILL.md` 清单数与去重后的不同 Skill 候选数使用独立上限，100 个候选限制只对去重结果生效，避免同一仓库中的 Codex/评审镜像副本在实际候选未超限时被提前拒绝。该顺序避免 Windows 在无关深层路径上提前失败，也防止为了一个 Skill 展开整个仓库工作树；它不改变公开 HTTPS、无认证、超时、无覆盖和显式确认边界。
 

@@ -282,6 +282,7 @@ export function EverpeaceApp({
   const titleControllers = useRef(new Set<AbortController>());
   const confirmationRef = useRef<PendingConfirmation | undefined>(undefined);
   const permissions = useRef(defaultPermissions());
+  const permissionsReady = useRef<Promise<void>>(Promise.resolve());
   const terminalCommandRunning = useRef(false);
   const commandOperation = useRef(0);
   const activeSessionId = useRef<string | undefined>(undefined);
@@ -335,6 +336,16 @@ export function EverpeaceApp({
     void dependencies.inputHistory?.load().then((entries) => { if (active) setInputHistory((current) => [...entries, ...current].slice(-1000)); }).catch(() => undefined);
     return () => { active = false; directController.current?.abort(); };
   }, [dependencies.inputHistory]);
+  useEffect(() => {
+    let active = true;
+    const load = dependencies.loadPermissions
+      ? dependencies.loadPermissions(workspacePath).then((policy) => {
+        if (active) permissions.current = policy;
+      })
+      : Promise.resolve();
+    permissionsReady.current = load.catch(() => undefined);
+    return () => { active = false; };
+  }, [dependencies, workspacePath]);
   const [confirmation, setConfirmation] = useState<PendingConfirmation>();
   useEffect(() => {
     const previous = previousFirstDisplayedId.current;
@@ -594,7 +605,7 @@ export function EverpeaceApp({
   ), [enterCommandView, returnToChat]);
 
   const executeBash = useCallback(
-    async (command: string, signal?: AbortSignal): Promise<BashResult> => {
+    async (command: string, signal?: AbortSignal, timeoutMs?: number): Promise<BashResult> => {
       const started = Date.now();
       setActiveCommand({ command, shell: process.platform === "win32" ? "PowerShell · Codex sandbox" : "Bash · Codex sandbox", source: "model" });
       let generation = 0;
@@ -609,7 +620,7 @@ export function EverpeaceApp({
         });
       };
       let result: BashResult;
-      try { result = await dependencies.runBash(command, permissions.current, signal, preview); }
+      try { result = await dependencies.runBash(command, permissions.current, signal, preview, timeoutMs); }
       finally { finished = true; setTerminalBusy(false); setTerminalOutput(undefined); setAgentTerminalPreview(undefined); setActiveCommand(undefined); }
       if (result === undefined) throw new Error("Bash did not return a result");
       const output = await renderTerminalOutput(commandOutput(result));
@@ -621,7 +632,7 @@ export function EverpeaceApp({
   );
 
   const executeVerification = useCallback(
-    async (command: string, signal?: AbortSignal, userInitiated = false): Promise<BashResult> => {
+    async (command: string, signal?: AbortSignal, timeoutMs?: number, userInitiated = false): Promise<BashResult> => {
       const permission = commandPermission(command, permissions.current);
       if (permission === "deny") {
         return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "Verification command denied by the active command rules" };
@@ -629,7 +640,7 @@ export function EverpeaceApp({
       if (!userInitiated && permission === "ask" && !(await requestBashConfirmation(`Run verification: ${command}`))) {
         return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "Verification command was not approved" };
       }
-      return executeBash(command, signal);
+      return executeBash(command, signal, timeoutMs);
     },
     [executeBash, requestBashConfirmation],
   );
@@ -1506,6 +1517,7 @@ export function EverpeaceApp({
 
   const runChat = useCallback(
     async (text: string, timelineRecorded = false, mode: AgentMode = agentMode) => {
+      await permissionsReady.current;
       if (abortController.current || directController.current) return;
       if (!agent || !activeModel) {
         append("error", "No model is active. Use /login or /model first.");
@@ -1708,6 +1720,7 @@ export function EverpeaceApp({
   }, [isCurrentCommandOperation, replaceCommandView, startCommandLoad, workspacePath]);
 
   const runManualVerification = useCallback(async (requested: string) => {
+    await permissionsReady.current;
     const operation = startCommandLoad("/verify · Workspace checks", "Discovering verification commands");
     const commands = await discoverVerificationCommands(workspacePath);
     if (!isCurrentCommandOperation(operation)) return;
@@ -1719,7 +1732,7 @@ export function EverpeaceApp({
       return;
     }
     replaceCommandView(infoView("/verify · Running", command.command));
-    const result = await runVerificationCommand(command, (value, signal) => executeVerification(value, signal, true));
+    const result = await runVerificationCommand(command, (value, signal, timeoutMs) => executeVerification(value, signal, timeoutMs, true));
     if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/verify · Result", JSON.stringify(result, null, 2), result.passed ? "default" : "error"));
   }, [executeVerification, isCurrentCommandOperation, replaceCommandView, startCommandLoad, workspacePath]);
 
@@ -1974,7 +1987,11 @@ export function EverpeaceApp({
             workspace={workspacePath}
             onChange={(policy) => {
               permissions.current = policy;
+              void dependencies.savePermissions?.(workspacePath, policy).catch(() => undefined);
               returnToChat();
+            }}
+            onSaveProject={(policy) => {
+              void dependencies.savePermissions?.(workspacePath, policy, "project").then(() => returnToChat()).catch(() => undefined);
             }}
             onBack={returnToChat}
           />

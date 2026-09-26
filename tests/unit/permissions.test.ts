@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import {
   bashPermission,
   codexSandboxProfile,
   commandPermission,
   defaultPermissions,
+  defaultPermissionPath,
+  loadPermissionPolicy,
   mcpPermission,
+  projectPermissionPath,
+  savePermissionPolicy,
   webPermission,
 } from "../../src/permissions/policy.js";
 
@@ -64,4 +71,37 @@ test("ask profile cannot be relaxed by an allow prefix rule", () => {
     web: true,
     commandRules: [{ prefix: "npm test", action: "allow" }],
   }), "ask");
+});
+
+test("permission policy paths are stable and persist without credentials", async () => {
+  assert.equal(defaultPermissionPath("win32", { APPDATA: "C:\\AppData" }, "C:\\Users\\test"), "C:\\AppData\\Everpeace\\permissions.json");
+  assert.equal(projectPermissionPath("C:\\repo"), "C:\\repo\\.everpeace\\permissions.json");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-policy-"));
+  try {
+    const userPath = path.join(root, "user.json");
+    const projectPath = path.join(root, "project.json");
+    await savePermissionPolicy({ mode: "ask", web: false, commandRules: [{ prefix: "pnpm test", action: "allow" }] }, root, { userPath, scope: "user" });
+    await savePermissionPolicy({ mode: "workspace-write", web: true }, root, { projectPath, scope: "project" });
+    const loaded = await loadPermissionPolicy(root, { userPath, projectPath });
+    assert.deepEqual(loaded, { mode: "ask", web: false, commandRules: [{ prefix: "pnpm test", action: "allow" }] });
+    assert.doesNotMatch(await fs.readFile(userPath, "utf8"), /api[_-]?key|token|secret/iu);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("permission policy writes serialize and leave no temporary files", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-policy-queue-"));
+  try {
+    const userPath = path.join(root, "user.json");
+    await Promise.all([
+      savePermissionPolicy({ mode: "ask", web: true }, root, { userPath, scope: "user" }),
+      savePermissionPolicy({ mode: "read-only", web: false }, root, { userPath, scope: "user" }),
+    ]);
+    const loaded = await loadPermissionPolicy(root, { userPath, projectPath: path.join(root, "missing-project.json") });
+    assert.deepEqual(loaded, { mode: "read-only", web: false });
+    assert.deepEqual(await fs.readdir(root), ["user.json"]);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });

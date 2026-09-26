@@ -83,11 +83,14 @@ export interface TuiDependencies {
     signal?: AbortSignal,
   ): Promise<string>;
   changeWorkspace(workspacePath: string): Promise<string>;
+  loadPermissions?(workspacePath: string): Promise<PermissionPolicy>;
+  savePermissions?(workspacePath: string, policy: PermissionPolicy, scope?: "user" | "project"): Promise<void>;
   runBash(
     command: string,
     policy: PermissionPolicy,
     signal?: AbortSignal,
     onOutput?: (output: BashOutputPreview) => void,
+    timeoutMs?: number,
   ): Promise<BashResult>;
   getMcpStatus?(): Promise<string>;
   getSkillsStatus?(): Promise<string>;

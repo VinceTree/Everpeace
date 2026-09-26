@@ -117,12 +117,12 @@ export function selectVerificationCommand(
 
 export async function runVerificationCommand(
   command: VerificationCommand,
-  run: (command: string, signal?: AbortSignal) => Promise<BashResult>,
+  run: (command: string, signal?: AbortSignal, timeoutMs?: number) => Promise<BashResult>,
   signal?: AbortSignal,
 ): Promise<VerificationResult> {
   const startedAt = Date.now();
   try {
-    const result = await run(command.command, signal);
+    const result = await run(command.command, signal, command.timeoutMs);
     return verificationFromBash(command, {
       ...result,
       stdout: retainOutput(result.stdout, MAX_OUTPUT_BYTES).text,

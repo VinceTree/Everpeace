@@ -20,7 +20,12 @@ import { DEFAULT_MODEL_BASH_TIMEOUT_MS, runBash } from "../../tools/bash.js";
 import { runTerminalCommand } from "../../tools/terminal.js";
 import type { TuiDependencies, TuiModelRegistry } from "./types.js";
 import { truncateEnd } from "../rendering/text-width.js";
-import { codexSandboxProfile, type PermissionPolicy } from "../../permissions/policy.js";
+import {
+  codexSandboxProfile,
+  loadPermissionPolicy,
+  savePermissionPolicy,
+  type PermissionPolicy,
+} from "../../permissions/policy.js";
 import { McpRuntime, formatMcpStatus } from "../../mcp/runtime.js";
 import { SkillCatalog, formatSkillsStatus } from "../../skills/catalog.js";
 import {
@@ -244,10 +249,16 @@ export function createDefaultTuiDependencies(
       await mcp.setWorkspace(process.cwd());
       return process.cwd();
     },
-    runBash(command, policy: PermissionPolicy, signal, onOutput) {
+    loadPermissions(workspacePath) {
+      return loadPermissionPolicy(workspacePath);
+    },
+    savePermissions(workspacePath, policy, scope = "user") {
+      return savePermissionPolicy(policy, workspacePath, { scope });
+    },
+    runBash(command, policy: PermissionPolicy, signal, onOutput, timeoutMs) {
       return runBash(command, {
         streamOutput: false,
-        timeoutMs: DEFAULT_MODEL_BASH_TIMEOUT_MS,
+        timeoutMs: timeoutMs ?? DEFAULT_MODEL_BASH_TIMEOUT_MS,
         sandbox: {
           permissionProfile: codexSandboxProfile(policy),
           readableRoots: skills.readableRoots(),

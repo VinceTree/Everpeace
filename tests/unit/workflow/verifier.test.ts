@@ -65,3 +65,13 @@ test("verification results are bounded and produce repair guidance", async () =>
   assert.ok(verification.stdout.length <= 1_048_576);
   assert.match(verificationPrompt(verification), /Diagnose the failure/u);
 });
+
+test("verification passes its command-specific timeout to the executor", async () => {
+  const command = { id: "fast", label: "Fast", command: "pnpm typecheck", tier: "fast" as const, timeoutMs: 4321 };
+  let received: number | undefined;
+  await runVerificationCommand(command, async (_command, _signal, timeoutMs) => {
+    received = timeoutMs;
+    return { stdout: "", stderr: "", exitCode: 0, signal: null };
+  });
+  assert.equal(received, 4321);
+});
