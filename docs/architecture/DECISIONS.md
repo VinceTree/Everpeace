@@ -1,5 +1,11 @@
 # Architecture Decisions
 
+## Coding workflow and verification
+
+普通 coding turn 使用进程内状态机协调理解、实现、验证、诊断和完成阶段，不替换 Responses/ReAct 工具循环，也不自动提交 Git。`apply_patch` 成功后立即选择有界快速检查，回合结束选择完整检查；命令只从工作区 manifest/锁文件和常见项目标志中发现，不执行任意脚本发现逻辑。验证 stdout/stderr 有界保留，失败作为结构化结果返回模型，修复次数超过三次后进入 `blocked`。
+
+`workspace_status`、`workspace_diff` 和 `/diff` 只读 Git 状态。最新 Agent turn 的 `/undo` 使用内存检查点保存每个文件的 before 内容和 after SHA-256；恢复前必须确认当前内容仍等于 after SHA，用户改动的文件跳过并报告冲突。检查点不写入 Session JSONL，`/new`、`/clear`、`/resume` 和新一轮 turn 都会隔离它；Session 只追加 workflow 阶段、变更路径和最后一次验证结果等元数据，持久化验证事件不包含 stdout/stderr/error。
+
 ## Shared sandbox process boundary and structured edits
 
 模型 Bash 与 Codex CLI JSON 请求必须共享同一条 bounded process executor，避免只在 `runCodexCli` 测试路径覆盖 Windows sandbox helper retry，而真实 Bash 仍绕过它。Windows sandbox helper setup/refresh/unknown 错误只允许一次重试，取消、超时和最终失败都保持 fail-closed，不得回退宿主 shell。

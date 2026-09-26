@@ -32,6 +32,21 @@ export interface ApplyPatchResult {
   error?: string;
 }
 
+export interface ApplyPatchPreviewFile {
+  path: string;
+  action: ApplyPatchAction;
+  beforeSha256: string | null;
+  afterSha256: string | null;
+  diff: string;
+}
+
+export interface ApplyPatchPreview {
+  status: "ready" | "rejected";
+  files: ApplyPatchPreviewFile[];
+  diff: string;
+  error?: string;
+}
+
 export const APPLY_PATCH_TOOL_DEFINITION = {
   type: "function",
   name: "apply_patch",
@@ -171,13 +186,25 @@ async function atomicWrite(target: string, content: string): Promise<void> {
   try { await fs.rename(temporary, target); } catch (error) { await fs.rm(temporary, { force: true }); throw error; }
 }
 
-export async function runApplyPatch(
+interface PreparedPatch {
+  operation: ApplyPatchOperation;
+  target: string;
+  before: { exists: boolean; content: string };
+  after?: string;
+}
+
+async function preparePatch(
   operations: readonly ApplyPatchOperation[],
   workspace: string,
-): Promise<ApplyPatchResult> {
-  if (operations.length === 0 || operations.length > MAX_OPERATIONS) return { status: "rejected", files: [], error: `apply_patch accepts 1-${MAX_OPERATIONS} operations` };
-  const root = await fs.realpath(workspace);
-  const prepared: Array<{ operation: ApplyPatchOperation; target: string; before: { exists: boolean; content: string }; after?: string }> = [];
+): Promise<{ prepared: PreparedPatch[] } | { error: string }> {
+  if (operations.length === 0 || operations.length > MAX_OPERATIONS) return { error: `apply_patch accepts 1-${MAX_OPERATIONS} operations` };
+  let root: string;
+  try {
+    root = await fs.realpath(workspace);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+  const prepared: PreparedPatch[] = [];
   const seen = new Set<string>();
   let patchBytes = 0;
   try {
@@ -204,9 +231,47 @@ export async function runApplyPatch(
       if (after !== undefined && Buffer.byteLength(after, "utf8") > MAX_FILE_BYTES) throw new Error("Patched file exceeds the 512 KiB limit");
       prepared.push({ operation, target, before, ...(after === undefined ? {} : { after }) });
     }
+    return { prepared };
   } catch (error) {
-    return { status: "rejected", files: [], error: error instanceof Error ? error.message : String(error) };
+    return { error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+function diffFor(item: PreparedPatch): string {
+  const oldLines = item.before.content.replace(/\r\n/gu, "\n").split("\n");
+  const newLines = (item.after ?? "").replace(/\r\n/gu, "\n").split("\n");
+  const oldHeader = item.before.exists ? `--- a/${item.operation.path}` : "--- /dev/null";
+  const newHeader = item.operation.action === "delete" ? "+++ /dev/null" : `+++ b/${item.operation.path}`;
+  const removed = item.before.exists ? oldLines.map((line) => `-${line}`) : [];
+  const added = item.operation.action === "delete" ? [] : newLines.map((line) => `+${line}`);
+  const oldCount = item.before.exists ? oldLines.length : 0;
+  const newCount = item.operation.action === "delete" ? 0 : newLines.length;
+  return [oldHeader, newHeader, `@@ -1,${oldCount} +1,${newCount} @@`, ...removed, ...added].join("\n");
+}
+
+export async function previewApplyPatch(
+  operations: readonly ApplyPatchOperation[],
+  workspace: string,
+): Promise<ApplyPatchPreview> {
+  const result = await preparePatch(operations, workspace);
+  if ("error" in result) return { status: "rejected", files: [], diff: "", error: result.error };
+  const files = result.prepared.map((item) => ({
+    path: item.operation.path,
+    action: item.operation.action,
+    beforeSha256: item.before.exists ? digest(item.before.content) : null,
+    afterSha256: item.after === undefined ? null : digest(item.after),
+    diff: diffFor(item),
+  }));
+  return { status: "ready", files, diff: files.map((file) => file.diff).join("\n") };
+}
+
+export async function runApplyPatch(
+  operations: readonly ApplyPatchOperation[],
+  workspace: string,
+): Promise<ApplyPatchResult> {
+  const preparedResult = await preparePatch(operations, workspace);
+  if ("error" in preparedResult) return { status: "rejected", files: [], error: preparedResult.error };
+  const prepared = preparedResult.prepared;
   const files: ApplyPatchFileResult[] = [];
   try {
     for (const item of prepared) {

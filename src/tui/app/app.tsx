@@ -3,7 +3,7 @@ import { Box, Text, useApp, useInput, usePaste, useStdout, useWindowSize } from 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentIO } from "../../agent/react-agent.js";
 import type { LoopPhase } from "../../agent/agent-loop.js";
-import { defaultPermissions } from "../../permissions/policy.js";
+import { commandPermission, defaultPermissions } from "../../permissions/policy.js";
 import { PermissionsPicker } from "../components/navigation/permissions-picker.js";
 import { renderTerminalOutput } from "../../tools/terminal.js";
 import { TextBrowser } from "../components/screens/text-browser.js";
@@ -29,7 +29,12 @@ import {
   type StatusSnapshot,
 } from "../../status/model-status.js";
 import type { BashOutputPreview, BashResult } from "../../tools/bash.js";
-import { runApplyPatch, type ApplyPatchOperation } from "../../tools/apply-patch.js";
+import { previewApplyPatch, runApplyPatch, type ApplyPatchOperation, type ApplyPatchResult } from "../../tools/apply-patch.js";
+import { CodingWorkflowRuntime } from "../../workflow/runtime.js";
+import type { WorkflowState } from "../../workflow/types.js";
+import { verificationPrompt } from "../../workflow/verifier.js";
+import { discoverVerificationCommands, runVerificationCommand, selectVerificationCommand } from "../../workflow/verifier.js";
+import { formatWorkspaceInspection, inspectWorkspace } from "../../tools/workspace.js";
 import { selectAgentOutputPreview } from "../rendering/command-output-preview.js";
 import { parseTuiInput, TUI_HELP } from "../commands/slash-commands.js";
 import { ApprovalConfirmation } from "../components/feedback/approval-confirmation.js";
@@ -280,6 +285,7 @@ export function EverpeaceApp({
   const terminalCommandRunning = useRef(false);
   const commandOperation = useRef(0);
   const activeSessionId = useRef<string | undefined>(undefined);
+  const workflowRuntime = useRef<CodingWorkflowRuntime | undefined>(undefined);
   const sessionTitlePending = useRef(false);
   const [timeline, setTimeline] = useState(initialTimeline);
   const [timelineEpoch, setTimelineEpoch] = useState(0);
@@ -355,6 +361,29 @@ export function EverpeaceApp({
     setLiveAssistant("");
     setLiveToolStatus(undefined);
   }, []);
+
+  const ensureWorkflow = useCallback((initialState?: WorkflowState, workflowWorkspace = workspacePath): CodingWorkflowRuntime => {
+    if (workflowRuntime.current?.workspacePath !== workflowWorkspace || initialState !== undefined) {
+      workflowRuntime.current = new CodingWorkflowRuntime({
+        workspacePath: workflowWorkspace,
+        ...(initialState ? { initialState } : {}),
+        onState: async (state) => {
+          const sessionId = activeSessionId.current;
+          if (sessionId) await dependencies.sessionStore.setWorkflow?.(sessionId, state);
+        },
+      });
+    }
+    if (!workflowRuntime.current) {
+      workflowRuntime.current = new CodingWorkflowRuntime({
+        workspacePath: workflowWorkspace,
+        onState: async (state) => {
+          const sessionId = activeSessionId.current;
+          if (sessionId) await dependencies.sessionStore.setWorkflow?.(sessionId, state);
+        },
+      });
+    }
+    return workflowRuntime.current;
+  }, [dependencies.sessionStore, workspacePath]);
 
   const appendText = useCallback((
     kind: HistoryKind,
@@ -591,6 +620,20 @@ export function EverpeaceApp({
     [appendCommand, dependencies, workspacePath],
   );
 
+  const executeVerification = useCallback(
+    async (command: string, signal?: AbortSignal, userInitiated = false): Promise<BashResult> => {
+      const permission = commandPermission(command, permissions.current);
+      if (permission === "deny") {
+        return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "Verification command denied by the active command rules" };
+      }
+      if (!userInitiated && permission === "ask" && !(await requestBashConfirmation(`Run verification: ${command}`))) {
+        return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "Verification command was not approved" };
+      }
+      return executeBash(command, signal);
+    },
+    [executeBash, requestBashConfirmation],
+  );
+
   const executeTerminalCommand = useCallback(
     async (
       command: string,
@@ -638,8 +681,16 @@ export function EverpeaceApp({
         await dependencies.sessionStore.setGoal(sessionId, goal);
         setActiveGoal(goal);
       },
-      async runApplyPatch(operations: readonly ApplyPatchOperation[]) {
+      async previewPatch(operations: readonly ApplyPatchOperation[]) {
+        return previewApplyPatch(operations, workspacePath);
+      },
+      async runApplyPatch(operations: readonly ApplyPatchOperation[], signal?: AbortSignal) {
+        const workflow = ensureWorkflow();
+        await workflow.capturePatch(operations);
         return runApplyPatch(operations, workspacePath);
+      },
+      async afterPatchApplied(operations: readonly ApplyPatchOperation[], result: ApplyPatchResult, signal?: AbortSignal) {
+        return ensureWorkflow().afterPatch(operations, result, executeVerification, signal);
       },
       runBash: executeBash,
       writeAssistant(text) {
@@ -667,7 +718,7 @@ export function EverpeaceApp({
         }
       },
     }),
-    [append, dependencies.sessionStore, executeBash, requestBashConfirmation, requestGoalConfirmation, requestMcpConfirmation, requestPatchConfirmation, requestPlanInput, requestWebConfirmation, reviewPlan, workspacePath],
+    [append, dependencies.sessionStore, ensureWorkflow, executeBash, executeVerification, requestBashConfirmation, requestGoalConfirmation, requestMcpConfirmation, requestPatchConfirmation, requestPlanInput, requestWebConfirmation, reviewPlan, workspacePath],
   );
 
   const contextWindow = activeModel
@@ -1040,6 +1091,8 @@ export function EverpeaceApp({
         clearQueuedGuidance();
         abortController.current?.abort();
         activeSessionId.current = loaded.summary.id;
+        workflowRuntime.current = undefined;
+        ensureWorkflow(loaded.workflow, restoredWorkspace);
         sessionTitlePending.current = loaded.summary.title_pending;
         nextId.current = restoredTimeline.length;
         resumeGoalPending.current = loaded.goal?.status === "active";
@@ -1074,7 +1127,7 @@ export function EverpeaceApp({
         throw error;
       }
     },
-    [clearQueuedGuidance, dependencies, onReplayOutput, workspacePath],
+    [clearQueuedGuidance, dependencies, ensureWorkflow, onReplayOutput, workspacePath],
   );
 
   const chooseSession = useCallback(
@@ -1213,6 +1266,7 @@ export function EverpeaceApp({
 
       abortController.current?.abort();
       activeSessionId.current = session.id;
+      workflowRuntime.current = undefined;
       sessionTitlePending.current = true;
       resumeGoalPending.current = false;
       nextId.current = 2;
@@ -1250,6 +1304,7 @@ export function EverpeaceApp({
     historyNavigationRef.current = { index: undefined, draft: "" };
     abortController.current?.abort();
     activeSessionId.current = undefined;
+    workflowRuntime.current = undefined;
     sessionTitlePending.current = false;
     setSessionContext([]);
     setSessionUsage(createEmptySessionUsage());
@@ -1511,7 +1566,12 @@ export function EverpeaceApp({
       try {
         let nextText = text;
         let nextMode = mode;
+        let workflowStarted = false;
         while (true) {
+          if (nextMode === "default" && !workflowStarted) {
+            await ensureWorkflow().beginTurn({ mode: "default" });
+            workflowStarted = true;
+          }
           const started = Date.now();
           const result = await agent.runTurn(nextText, controller.signal, { mode: nextMode }) ?? {};
           if (result.planDecision === "approve") {
@@ -1525,6 +1585,14 @@ export function EverpeaceApp({
             break;
           }
           if (nextMode === "plan") break;
+          const workflowResult = await ensureWorkflow().finishTurn(executeVerification, controller.signal);
+          if (workflowResult.verification && !workflowResult.verification.passed && ensureWorkflow().state.phase === "diagnose") {
+            nextText = verificationPrompt(workflowResult.verification);
+            nextMode = "default";
+            setLiveAssistant("");
+            setLiveToolStatus(`Diagnosing ${workflowResult.verification.command.label}`);
+            continue;
+          }
           const sessionId = activeSessionId.current;
           if (!sessionId) break;
           let goal = (await dependencies.sessionStore.load(sessionId)).goal;
@@ -1536,6 +1604,7 @@ export function EverpeaceApp({
           if (goal?.status !== "active") break;
           nextText = "Continue working toward the active session goal. Call get_goal, make concrete progress, verify the result, and update the goal when complete or genuinely blocked.";
           nextMode = "default";
+          workflowStarted = false;
           setLiveAssistant("");
           setLiveToolStatus("Continuing active goal");
         }
@@ -1580,7 +1649,7 @@ export function EverpeaceApp({
         }
       }
     },
-    [activeModel, agent, agentMode, append, appendTransient, clearQueuedGuidance, dependencies.sessionStore, startTitleGeneration, workspacePath],
+    [activeModel, agent, agentMode, append, appendTransient, clearQueuedGuidance, dependencies.sessionStore, ensureWorkflow, executeVerification, startTitleGeneration, workspacePath],
   );
 
   useEffect(() => {
@@ -1632,6 +1701,43 @@ export function EverpeaceApp({
     setQueuedGuidanceCount(queuedGuidance.current.length);
   }, [agent, append, finishConfirmation]);
 
+  const showWorkspaceDiff = useCallback(async () => {
+    const operation = startCommandLoad("/diff · Workspace changes", "Reading Git diff");
+    const inspection = await inspectWorkspace(workspacePath).catch((error: unknown) => ({ status: "error" as const, workspacePath, error: error instanceof Error ? error.message : String(error) }));
+    if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/diff · Workspace changes", formatWorkspaceInspection(inspection, true), inspection.status === "error" ? "error" : "default"));
+  }, [isCurrentCommandOperation, replaceCommandView, startCommandLoad, workspacePath]);
+
+  const runManualVerification = useCallback(async (requested: string) => {
+    const operation = startCommandLoad("/verify · Workspace checks", "Discovering verification commands");
+    const commands = await discoverVerificationCommands(workspacePath);
+    if (!isCurrentCommandOperation(operation)) return;
+    const command = requested.trim()
+      ? { id: "manual", label: "Manual verification", command: requested.trim(), tier: "full" as const, timeoutMs: 120_000 }
+      : selectVerificationCommand(commands, "full");
+    if (!command) {
+      replaceCommandView(infoView("/verify · No checks discovered", "No conventional verification command was found. Use /verify <command> to run an explicit check."));
+      return;
+    }
+    replaceCommandView(infoView("/verify · Running", command.command));
+    const result = await runVerificationCommand(command, (value, signal) => executeVerification(value, signal, true));
+    if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/verify · Result", JSON.stringify(result, null, 2), result.passed ? "default" : "error"));
+  }, [executeVerification, isCurrentCommandOperation, replaceCommandView, startCommandLoad, workspacePath]);
+
+  const undoWorkflow = useCallback(async () => {
+    if (abortController.current || directController.current) {
+      appendTransient("system", "Cannot undo while a command or model turn is active.");
+      return;
+    }
+    const result = await ensureWorkflow().undo();
+    appendTransient("system", result.status === "undone"
+      ? `Undid Agent changes: ${result.restored.join(", ") || "none"}`
+      : result.status === "conflict"
+        ? `Undo skipped files changed after the Agent turn: ${result.conflicts.join(", ")}`
+        : result.status === "empty"
+          ? "There is no Agent turn to undo."
+          : "The last Agent checkpoint is unavailable after restart.");
+  }, [appendTransient, ensureWorkflow]);
+
   const handleSubmit = useCallback(
     (input: string) => {
       const parsed = parseTuiInput(input);
@@ -1667,6 +1773,9 @@ export function EverpeaceApp({
       if (parsed.command === "/model") void openModelPicker();
       if (parsed.command === "/models") void showModels();
       if (parsed.command === "/status") showStatus();
+      if (parsed.command === "/diff") void showWorkspaceDiff();
+      if (parsed.command === "/verify") void runManualVerification(parsed.args ?? "");
+      if (parsed.command === "/undo") void undoWorkflow();
       if (parsed.command === "/compact") runCompact(parsed.args ?? "");
       if (parsed.command === "/permissions") enterCommandView({ kind: "permissions" });
       if (parsed.command === "/mcp") void showMcp();
@@ -1714,6 +1823,9 @@ export function EverpeaceApp({
       openModelPicker,
       openResume,
       openInfo,
+      runManualVerification,
+      showWorkspaceDiff,
+      undoWorkflow,
       handleGoal,
       rememberMemory,
       showMemory,

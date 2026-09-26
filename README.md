@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.2.15) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.16) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -121,6 +121,9 @@ TUI commands:
 - `/model`: Switch to a registered model and reset the conversation context.
 - `/models`: List all registered models and credential states.
 - `/status`: Show the current model, provider, context window, session token usage, and prompt-cache statistics.
+- `/diff`: Show the bounded current workspace Git status and diff.
+- `/verify [command]`: Run the discovered workspace check, or an explicit command.
+- `/undo`: Undo the latest Agent turn when its files are unchanged; user edits are never overwritten.
 - `/permissions`: Select read-only, ask-for-approval, workspace-write, or full-access mode and toggle web tools.
 - `/mcp`: Reload Codex MCP configuration, connect enabled servers, and inspect server/tool status.
 - `/skills`: Create, install, inspect, and explicitly invoke local Skills.
@@ -160,6 +163,7 @@ Behavior notes:
 - Permissions last for this process across `/new`, `/clear`, and `/resume`; restarting resets to `workspace-write` with web tools enabled. Changing permissions preserves context; JSONL never restores full access.
 - Model shell commands are launched through the pinned `@openai/codex@0.155.1` native OS sandbox and fail closed if that runtime cannot start. Windows model commands use PowerShell because Git Bash/MSYS cannot initialize inside the restricted token; macOS/Linux use Bash. Model shell calls have a 120-second default timeout and return a structured timeout result; direct `!` commands remain outside the model sandbox and keep user-controlled lifetime. See [design and limits](docs/architecture/PERMISSIONS.md).
 - Model edits use the workspace-scoped `apply_patch` tool when possible. It validates bounded unified diffs, prevents stale-file overwrites with optional SHA-256 checks, applies multi-file changes atomically, and reports rollback failures. The `/permissions` screen also supports process-local command prefix rules for model Bash; direct `!` commands are unaffected.
+- Coding turns use a single Agent workflow: patch success triggers a fast check, turn completion triggers a full check, and bounded failure output is fed back for up to three focused repairs. `workspace_status` and `workspace_diff` are read-only model tools. Workflow metadata is recoverable in Session JSONL, while file-content checkpoints remain in memory only.
 - `read-only` and `ask` require approval before each web request during normal chat; `workspace-write` and `full-access` skip that prompt. Plan mode also treats enabled public web access as read-only research and skips the per-request prompt, while disabling web still denies it. Search queries are sent to Bing, with DuckDuckGo as a fallback; opening a result sends a request to that site.
 - Web page reads allow only public HTTP/HTTPS targets, validate redirects, block local/private network addresses, apply time and response-size limits, and treat returned content as untrusted data.
 - Search availability and result quality depend on the external search services and the current network connection. A failed web request is returned to the model so it can explain the limitation or try another source.

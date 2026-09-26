@@ -6,7 +6,13 @@
 
 模型 sandbox Bash 与 `runCodexCli` 现在共享同一条 Codex CLI 进程执行边界，Windows helper setup/refresh 的瞬时错误最多重试一次，最终仍失败关闭。权限 profile 之上增加进程内 command prefix rules，最长前缀优先，`deny > ask > allow`，不持久化也不影响直接 `!`。
 
-默认聊天新增兼容 provider 的 `apply_patch` function tool。它只接受工作区相对路径、受限 unified diff 或完整文件内容，支持可选 SHA-256 防陈旧、原子多文件应用和失败回滚；Plan 模式仍为只读。该工具不改变 Session JSONL schema。
+默认聊天新增兼容 provider 的 `apply_patch` function tool。它只接受工作区相对路径、受限 unified diff 或完整文件内容，支持可选 SHA-256 防陈旧、原子多文件应用和失败回滚；Plan 模式仍为只读。工作流只向 Session JSONL 追加可恢复的阶段与验证元数据，不保存文件快照。
+
+## Coding workflow loop
+
+已加入单 Agent 的 Codex 风格 coding loop：普通请求按 `understand -> implement -> verify_fast -> diagnose -> verify_full -> review -> done` 推进；Plan 请求保持只读并在批准后回到同一 Session 执行。工作流自动发现常见 Node/Python/Rust/Go 检查，patch 成功后先运行快速检查，回合结束再运行完整检查；失败输出作为下一次模型输入，最多三次修复尝试，超过上限进入 `blocked`。
+
+模型可调用只读 `workspace_status`/`workspace_diff` 查看 Git 状态，用户可用 `/diff` 查看有界 diff、`/verify` 执行发现的检查或显式命令。最新 Agent 回合使用进程内检查点支持 `/undo`；只有文件仍匹配 Agent 写入后的 SHA-256 才恢复，检测到用户并发修改时跳过冲突文件。新 Session、`/clear`、`/resume` 会隔离检查点，重启后不提供文件内容回滚。
 
 ## Coding task benchmark foundation
 
@@ -96,6 +102,8 @@ Codex sandbox、MCP 与 Skills 接入：模型 shell 通过固定版本 Codex CL
 - [x] 模型 shell 映射 Codex `:read-only`、`:workspace`、`:danger-full-access`，sandbox 不可用时失败关闭；直接 `!` 保持原生 PTY。
 - [x] 模型 Bash 与 Codex CLI 共享 bounded process executor；Windows sandbox helper 瞬时 setup/refresh 错误最多重试一次，取消/超时仍失败关闭。
 - [x] 兼容 provider 的结构化 `apply_patch` function tool：工作区边界、unified diff、SHA-256 陈旧检查、多文件原子应用和失败回滚。
+- [x] 单 Agent coding workflow：patch 后快速验证、回合结束完整验证、失败诊断循环和有界 repair budget。
+- [x] `workspace_status` / `workspace_diff` 只读工具与 `/diff`、`/verify`、`/undo` 命令；检查点检测用户冲突且不持久化文件内容。
 - [x] 进程内 command prefix rules：最长前缀优先，冲突按 `deny > ask > allow`，不影响直接 `!`。
 - [x] MCP stdio/Streamable HTTP 工具发现、命名空间、调用、超时、取消、单服务器故障隔离和独立审批；`/mcp` 可刷新状态。
 - [x] Codex 主机 Skill roots、frontmatter 校验、metadata catalog、同名冲突隔离、显式 `$name`、隐式 `read_skill` 与相对资源约束。

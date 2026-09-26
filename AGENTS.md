@@ -45,7 +45,7 @@ git diff --check
 - 主 Agent 的 Responses usage 按 session 持久累计；标题请求不计入。切换模型保留累计 token，但在新模型完成响应前重置或未知当前 context 占用。
 - 原模型缺失时允许用户选择替代模型并保留 context；原工作目录不存在时拒绝恢复并保持当前会话不变。
 - JSONL 损坏必须按文件隔离；只允许忽略不完整的最后一行。旧记录缺少 `title_pending` 时按 `false` 处理。
-- JSONL 事件目前包括 `session_created`、`title_updated`、`timeline_entry`、`context_append`、`model_selected`、`usage_recorded` 和 `goal_updated`；改变 schema 时必须考虑向后兼容并补测试。`goal_updated` 保存 Session 绑定的 `/goal` 快照，旧文件没有该事件时按无目标兼容读取。
+- JSONL 事件目前包括 `session_created`、`title_updated`、`timeline_entry`、`context_append`、`model_selected`、`usage_recorded`、`goal_updated` 和 `workflow_updated`；改变 schema 时必须考虑向后兼容并补测试。`goal_updated` 保存 Session 绑定的 `/goal` 快照，`workflow_updated` 只保存 coding workflow 元数据，验证 stdout/stderr/error 与文件检查点不进入持久化；旧文件没有这些事件时按无目标/无 workflow 兼容读取。
 
 ## TUI 与终端不变量
 

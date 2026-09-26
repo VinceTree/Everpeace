@@ -9,6 +9,7 @@ import {
   type SessionModelRef,
   type SessionGoal,
 } from "../../../src/storage/session-store.js";
+import type { WorkflowState } from "../../../src/workflow/types.js";
 
 const model: SessionModelRef = {
   id: "model-1",
@@ -153,6 +154,44 @@ test("session store round-trips a goal and preserves it in the session summary",
     assert.equal(loaded.goal?.status, "complete");
     assert.equal(loaded.goal?.tokens_used, 40);
     assert.equal((await fixture.store.list()).sessions[0]?.goal?.goal_id, "goal-1");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("session store round-trips workflow metadata without storing file contents", async () => {
+  const fixture = await createFixture();
+  try {
+    const created = await fixture.store.create({ title: "workflow", titlePending: false, workspacePath: "C:\\repo", model });
+    const workflow: WorkflowState = {
+      task_id: "task-1",
+      phase: "verify_fast",
+      repair_attempts: 0,
+      max_repair_attempts: 3,
+      changed_paths: ["src/index.ts"],
+      checkpoint_available: true,
+      last_verification: {
+        command: { id: "node:typecheck", label: "Node typecheck", command: "pnpm run typecheck", tier: "fast", timeoutMs: 60_000 },
+        passed: true,
+        exitCode: 0,
+        stdout: "secret-token-from-check",
+        stderr: "",
+        durationMs: 12,
+        timedOut: false,
+      },
+      updated_at: "2026-09-16T00:00:00.000Z",
+    };
+    await fixture.store.setWorkflow(created.id, workflow);
+    const loaded = await fixture.store.load(created.id);
+    const persistedWorkflow = {
+      ...workflow,
+      last_verification: { ...workflow.last_verification!, stdout: "", stderr: "" },
+    };
+    assert.deepEqual(loaded.workflow, persistedWorkflow);
+    assert.deepEqual((await fixture.store.list()).sessions[0]?.workflow, persistedWorkflow);
+    const raw = await fs.readFile(path.join(fixture.directory, `${created.id}.jsonl`), "utf8");
+    assert.doesNotMatch(raw, /beforeContent|file contents/iu);
+    assert.doesNotMatch(raw, /secret-token-from-check/u);
   } finally {
     await fixture.cleanup();
   }

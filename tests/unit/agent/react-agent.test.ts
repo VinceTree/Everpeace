@@ -46,6 +46,7 @@ test("agent exposes apply_patch and persists its structured result before contin
             return { id: "patch", output_text: "", output: [{ type: "function_call", name: "apply_patch", call_id: "patch-1", arguments: JSON.stringify({ operations: [{ path: "file.txt", action: "create", content: "done\n" }] }) }] };
           }
           assert.ok(input.some((item) => item.type === "function_call_output" && String(item.output).includes('"status":"applied"')));
+          assert.ok(input.some((item) => item.type === "function_call_output" && String(item.output).includes('"verification_prompt":"verify now"')));
           return { id: "done", output_text: "verified", output: [] };
         },
       },
@@ -54,6 +55,7 @@ test("agent exposes apply_patch and persists its structured result before contin
       async confirmBash() { return true; },
       async runBash() { return bashResult(""); },
       async runApplyPatch() { return { status: "applied", files: [{ path: "file.txt", action: "create", status: "applied" }], diffSummary: "create file.txt" }; },
+      async afterPatchApplied() { return { prompt: "verify now" }; },
       writeAssistant() {},
     },
     onHistoryAppend: async (items) => { history.push(...items); },
@@ -679,6 +681,8 @@ test("workspace-write searches the web without per-request confirmation", async 
   assert.deepEqual(tools.map((tool) => tool.name), [
     "bash",
     "apply_patch",
+    "workspace_status",
+    "workspace_diff",
     "web_search",
     "web_fetch",
     "read_file",

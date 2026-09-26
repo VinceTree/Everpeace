@@ -1,3 +1,13 @@
+# 最新优化：单 Agent coding workflow 闭环
+
+状态快照：2026-09-26。本轮在现有 Agent 下加入 Codex 风格的单 Agent coding workflow：普通 coding turn 维护 understand/implement/verify/diagnose/review/done 状态；`apply_patch` 成功后先执行自动发现的快速检查，回合结束执行完整检查，失败输出会反馈给模型，最多三次修复尝试后进入 blocked。新增只读 `workspace_status`、`workspace_diff` 工具，以及 `/diff`、`/verify`、`/undo` 命令。
+
+- `/undo` 使用当前进程内的最新回合检查点和 after SHA-256 做冲突检测，用户改动的文件不会被覆盖；新 Session、`/clear`、`/resume` 和新一轮 turn 都会隔离检查点，重启后不恢复文件内容。
+- Session JSONL 以兼容的 `workflow_updated` 事件保存 phase、changed paths、repair 次数和最后一次验证结果；持久化快照清空验证 stdout/stderr/error，不写入 before/after 文件快照，旧 session 继续按无 workflow 元数据兼容读取。
+- 验证发现器覆盖 Node package scripts、Python pytest、Rust Cargo 和 Go test，并识别 `packageManager`/锁文件；输出最多保留 1 MiB。结构化 patch 预览会在 ask 权限下展示实际 diff。
+- 新增 workflow、checkpoint、verifier、workspace、patch preview 和 Session workflow 回归；当前 `pnpm test` 为 268 项通过、无失败、1 项按平台跳过，`pnpm typecheck` 与 `pnpm build` 通过，`git diff --check` 通过。idle-memory 定时用例此前出现过时序抖动，本次复跑通过。
+- 工作区展示号提升至 `0.2.16`；本轮提交并推送代码，提交使用 `[skip ci]` 跳过发布工作流，不创建 tag 或更新远程 Release。后续优先做真实 Windows Terminal 的 `/verify`、patch 审批、冲突撤销和 live provider smoke，再考虑 multi-agent orchestration。
+
 # 最新功能：Coding task benchmark 基础层
 
 ## 最新优化：Codex sandbox 执行链与结构化编辑

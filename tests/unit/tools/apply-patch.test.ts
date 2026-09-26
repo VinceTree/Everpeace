@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
-import { parseApplyPatchArguments, runApplyPatch } from "../../../src/tools/apply-patch.js";
+import { parseApplyPatchArguments, previewApplyPatch, runApplyPatch } from "../../../src/tools/apply-patch.js";
 
 async function withWorkspace(callback: (workspace: string) => Promise<void>): Promise<void> {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-apply-patch-"));
@@ -40,4 +40,15 @@ test("apply_patch rejects traversal, stale hashes, and invalid patch context wit
 test("apply_patch arguments require bounded, explicit operations", () => {
   assert.deepEqual(parseApplyPatchArguments(JSON.stringify({ operations: [{ path: "x.ts", action: "create", content: "x" }] })), [{ path: "x.ts", action: "create", content: "x" }]);
   assert.throws(() => parseApplyPatchArguments(JSON.stringify({ operations: [{ path: "x.ts", action: "rename" }] })), /action/i);
+});
+
+test("apply_patch preview validates and shows changes without mutating files", async () => {
+  await withWorkspace(async (workspace) => {
+    await fs.writeFile(path.join(workspace, "file.txt"), "before\n", "utf8");
+    const preview = await previewApplyPatch([{ path: "file.txt", action: "update", content: "after\n" }], workspace);
+    assert.equal(preview.status, "ready");
+    assert.match(preview.diff, /-before/u);
+    assert.match(preview.diff, /\+after/u);
+    assert.equal(await fs.readFile(path.join(workspace, "file.txt"), "utf8"), "before\n");
+  });
 });

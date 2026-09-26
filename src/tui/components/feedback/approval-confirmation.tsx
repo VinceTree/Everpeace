@@ -1,7 +1,7 @@
 import { ConfirmInput } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import React from "react";
-import { HighlightedCommand } from "../../rendering/rich-text.js";
+import { HighlightedCommand, RichOutput } from "../../rendering/rich-text.js";
 
 export interface ApprovalConfirmationProps {
   kind: "bash" | "patch" | "web" | "mcp" | "goal";
@@ -26,7 +26,7 @@ export function ApprovalConfirmation({
       <Text color="yellow">
         {isBash ? `The model wants to run ${shell}:` : isPatch ? "The model wants to edit workspace files:" : isMcp ? "The model wants to call an MCP tool:" : isGoal ? "The model wants to change the session goal:" : "The model wants to access the web:"}
       </Text>
-      {isBash ? <HighlightedCommand command={request} shell={shell} /> : <Text wrap="truncate-end">{request}</Text>}
+      {isBash ? <HighlightedCommand command={request} shell={shell} /> : isPatch ? <RichOutput text={request} /> : <Text wrap="truncate-end">{request}</Text>}
       <Box>
         <Text>{isBash ? "Run this command? " : isPatch ? "Apply this patch? " : isMcp ? "Allow this MCP tool call? " : isGoal ? "Allow this goal change? " : "Allow this web request? "}</Text>
         <ConfirmInput defaultChoice="cancel" onConfirm={onConfirm} onCancel={onCancel} />

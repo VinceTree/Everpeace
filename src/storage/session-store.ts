@@ -13,6 +13,7 @@ import {
   type StatusSnapshot,
   type TokenUsageSample,
 } from "../status/model-status.js";
+import type { WorkflowPhase, WorkflowState, VerificationResult } from "../workflow/types.js";
 
 const SESSION_FORMAT_VERSION = 1;
 
@@ -70,6 +71,7 @@ export interface SessionSummary {
   workspace_path: string;
   model: SessionModelRef;
   goal?: SessionGoal;
+  workflow?: WorkflowState;
 }
 
 export interface LoadedSession {
@@ -78,6 +80,7 @@ export interface LoadedSession {
   context: Array<Record<string, unknown>>;
   usage: SessionUsage;
   goal?: SessionGoal;
+  workflow?: WorkflowState;
 }
 
 export interface SessionListResult {
@@ -120,6 +123,7 @@ export interface SessionStoreLike {
   load(sessionId: string): Promise<LoadedSession>;
   setGoal(sessionId: string, goal: SessionGoal): Promise<void>;
   updateGoal(sessionId: string, patch: Partial<Pick<SessionGoal, "status" | "tokens_used" | "usage_complete" | "time_used_seconds" | "blocked_streak" | "updated_at">>): Promise<void>;
+  setWorkflow?(sessionId: string, workflow: WorkflowState): Promise<void>;
 }
 
 interface EventBase {
@@ -175,6 +179,11 @@ interface GoalUpdatedEvent extends EventBase {
   goal: SessionGoal;
 }
 
+interface WorkflowUpdatedEvent extends EventBase {
+  type: "workflow_updated";
+  workflow: WorkflowState;
+}
+
 type SessionEvent =
   | SessionCreatedEvent
   | TitleUpdatedEvent
@@ -183,7 +192,8 @@ type SessionEvent =
   | ContextCompactedEvent
   | ModelSelectedEvent
   | UsageRecordedEvent
-  | GoalUpdatedEvent;
+  | GoalUpdatedEvent
+  | WorkflowUpdatedEvent;
 
 export interface SessionStoreOptions {
   directory?: string;
@@ -343,6 +353,18 @@ function parseEvent(value: unknown): SessionEvent {
     return { ...base, type: "goal_updated", goal: value.goal };
   }
 
+  if (value.type === "workflow_updated") {
+    if (!isWorkflow(value.workflow)) throw new Error("Session workflow is invalid");
+    return {
+      ...base,
+      type: "workflow_updated",
+      workflow: {
+        ...value.workflow,
+        changed_paths: [...value.workflow.changed_paths],
+      },
+    };
+  }
+
   throw new Error(`Unsupported session event type: ${value.type}`);
 }
 
@@ -358,6 +380,52 @@ function isGoal(value: unknown): value is SessionGoal {
     typeof value.usage_complete === "boolean" && typeof value.time_used_seconds === "number" && value.time_used_seconds >= 0 &&
     (value.blocked_streak === undefined || (typeof value.blocked_streak === "number" && Number.isSafeInteger(value.blocked_streak) && value.blocked_streak >= 0)) &&
     isNonEmptyString(value.created_at) && isNonEmptyString(value.updated_at);
+}
+
+function isVerificationResult(value: unknown): value is VerificationResult {
+  if (!isRecord(value) || !isRecord(value.command)) return false;
+  return typeof value.command.id === "string" &&
+    typeof value.command.label === "string" &&
+    typeof value.command.command === "string" &&
+    (value.command.tier === "fast" || value.command.tier === "full") &&
+    typeof value.command.timeoutMs === "number" &&
+    typeof value.passed === "boolean" &&
+    (typeof value.exitCode === "number" || value.exitCode === null) &&
+    typeof value.stdout === "string" && typeof value.stderr === "string" &&
+    typeof value.durationMs === "number" && typeof value.timedOut === "boolean" &&
+    (value.skipped === undefined || typeof value.skipped === "boolean") &&
+    (value.error === undefined || typeof value.error === "string");
+}
+
+function isWorkflow(value: unknown): value is WorkflowState {
+  if (!isRecord(value)) return false;
+  const phases: WorkflowPhase[] = ["understand", "plan", "implement", "verify_fast", "diagnose", "verify_full", "review", "done", "blocked"];
+  return typeof value.task_id === "string" && phases.includes(value.phase as WorkflowPhase) &&
+    typeof value.repair_attempts === "number" && Number.isSafeInteger(value.repair_attempts) && value.repair_attempts >= 0 &&
+    typeof value.max_repair_attempts === "number" && Number.isSafeInteger(value.max_repair_attempts) && value.max_repair_attempts >= 0 &&
+    Array.isArray(value.changed_paths) && value.changed_paths.every((item) => typeof item === "string") &&
+    typeof value.checkpoint_available === "boolean" && typeof value.updated_at === "string" &&
+    (value.last_verification === undefined || isVerificationResult(value.last_verification));
+}
+
+function workflowSnapshot(workflow: WorkflowState): WorkflowState {
+  const verification = workflow.last_verification;
+  return {
+    ...workflow,
+    changed_paths: [...workflow.changed_paths],
+    ...(verification === undefined ? {} : {
+      last_verification: {
+        command: { ...verification.command },
+        passed: verification.passed,
+        exitCode: verification.exitCode,
+        stdout: "",
+        stderr: "",
+        durationMs: verification.durationMs,
+        timedOut: verification.timedOut,
+        ...(verification.skipped === undefined ? {} : { skipped: verification.skipped }),
+      },
+    }),
+  };
 }
 
 function parseSession(contents: string, filePath: string): LoadedSession {
@@ -392,6 +460,7 @@ function parseSession(contents: string, filePath: string): LoadedSession {
   let usage = createEmptySessionUsage(header.usage_tracking);
 
   let goal: SessionGoal | undefined;
+  let workflow: WorkflowState | undefined;
   for (const event of events.slice(1)) {
     updatedAt = event.at;
     if (event.type === "title_updated") {
@@ -413,6 +482,7 @@ function parseSession(contents: string, filePath: string): LoadedSession {
       usage = applyUsageSample(usage, event.usage);
     }
     if (event.type === "goal_updated") goal = { ...event.goal };
+    if (event.type === "workflow_updated") workflow = { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
   }
 
   return {
@@ -425,11 +495,13 @@ function parseSession(contents: string, filePath: string): LoadedSession {
       workspace_path: header.workspace_path,
       model,
       ...(goal ? { goal } : {}),
+      ...(workflow ? { workflow } : {}),
     },
     timeline,
     context,
     usage,
     ...(goal ? { goal } : {}),
+    ...(workflow ? { workflow } : {}),
   };
 }
 
@@ -578,6 +650,15 @@ export class SessionStore implements SessionStoreLike {
     const current = (await this.load(sessionId)).goal;
     if (!current) throw new Error("No goal exists for this session");
     await this.setGoal(sessionId, { ...current, ...patch, updated_at: patch.updated_at ?? this.#now().toISOString() });
+  }
+
+  setWorkflow(sessionId: string, workflow: WorkflowState): Promise<void> {
+    return this.#append(sessionId, {
+      version: SESSION_FORMAT_VERSION,
+      type: "workflow_updated",
+      at: this.#now().toISOString(),
+      workflow: workflowSnapshot(workflow),
+    });
   }
 
   async list(): Promise<SessionListResult> {

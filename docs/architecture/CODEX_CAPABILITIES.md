@@ -73,4 +73,4 @@ Windows 的 Codex restricted-token backend 可以运行系统 PowerShell，但 G
 
 ## Session 与兼容性
 
-本轮没有改变 JSONL schema。Skill catalog、MCP 连接和权限授权都不从 session 恢复；function call 与结果仍按既有 context 事件持久化。原有兼容端点如果不能接受动态 function tool schema，会把服务端错误正常返回给当前模型请求，不会改写注册信息或泄露凭据。
+Session JSONL 现以兼容方式追加 `workflow_updated` 事件，保存当前 workflow phase、变更路径、repair 次数和最后一次有界验证结果；持久化快照清空验证 stdout/stderr/error，旧文件缺少该事件时按无 workflow 元数据读取。工作流不会把文件 before/after 内容或检查点写入 JSONL，检查点只存在当前进程。Skill catalog、MCP 连接和权限授权都不从 session 恢复；function call 与结果仍按既有 context 事件持久化。原有兼容端点如果不能接受动态 function tool schema，会把服务端错误正常返回给当前模型请求，不会改写注册信息或泄露凭据。

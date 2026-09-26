@@ -12,6 +12,9 @@ Commands inside the agent:
   /model                    Switch the active model
   /models                   List registered models
   /status                   Show model, context, and token usage
+  /diff                     Show bounded workspace changes
+  /verify                   Run discovered checks, or /verify <command>
+  /undo                     Undo the latest Agent turn when safe
   /permissions              Select read-only, ask, workspace-write, or full-access tools
   /mcp                      Refresh and inspect Codex MCP servers and tools
   /skills                   Create, install, inspect, and use local skills
