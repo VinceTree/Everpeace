@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   bashPermission,
   codexSandboxProfile,
+  commandPermission,
   defaultPermissions,
   mcpPermission,
   webPermission,
@@ -39,4 +40,28 @@ test("workspace-write allows enabled public web tools without per-request approv
 test("disabling web always wins over the selected profile", () => {
   assert.equal(webPermission({ mode: "workspace-write", web: false }), "deny");
   assert.equal(webPermission({ mode: "full-access", web: false }), "deny");
+});
+
+test("command prefix rules use boundaries, longest match, and deny precedence", () => {
+  const policy = {
+    mode: "workspace-write" as const,
+    web: true,
+    commandRules: [
+      { prefix: "git", action: "deny" as const },
+      { prefix: "git status", action: "allow" as const },
+      { prefix: "git status --short", action: "ask" as const },
+    ],
+  };
+  assert.equal(commandPermission("git status --short", policy), "ask");
+  assert.equal(commandPermission("git status --short --branch", policy), "ask");
+  assert.equal(commandPermission("git status-all", policy), "deny");
+  assert.equal(commandPermission("git commit -am fix", policy), "deny");
+});
+
+test("ask profile cannot be relaxed by an allow prefix rule", () => {
+  assert.equal(commandPermission("npm test", {
+    mode: "ask",
+    web: true,
+    commandRules: [{ prefix: "npm test", action: "allow" }],
+  }), "ask");
 });

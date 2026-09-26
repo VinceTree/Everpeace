@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import { resolveBashLaunch, runBash, serializeBashResult } from "../../../src/tools/bash.js";
 
@@ -122,5 +125,33 @@ test("sandboxed Bash is routed through the pinned Codex CLI and native profile",
     assert.deepEqual(launch.args.slice(9), ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "echo safe"]);
   } else {
     assert.deepEqual(launch.args.slice(9), ["/bin/custom-bash", "-c", "echo safe"]);
+  }
+});
+
+test("sandboxed Bash uses the bounded Windows helper retry path", { skip: process.platform !== "win32" }, async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-bash-sandbox-"));
+  const scriptPath = path.join(directory, "fake-codex.mjs");
+  const statePath = path.join(directory, "attempts");
+  await fs.writeFile(statePath, "0", "utf8");
+  await fs.writeFile(scriptPath, [
+    "import { readFileSync, writeFileSync } from 'node:fs';",
+    "const state = process.env.EVERPEACE_TEST_STATE;",
+    "const attempts = Number(readFileSync(state, 'utf8')) + 1;",
+    "writeFileSync(state, String(attempts));",
+    "if (attempts === 1) { console.error('sandbox helper_unknown_error during setup refresh'); process.exit(17); }",
+    "console.log('sandbox-ready');",
+  ].join("\n"), "utf8");
+  try {
+    const result = await runBash("ignored", {
+      streamOutput: false,
+      cwd: directory,
+      env: { ...process.env, EVERPEACE_TEST_STATE: statePath },
+      sandbox: { permissionProfile: ":workspace", codexCliPath: scriptPath },
+    });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout.trim(), "sandbox-ready");
+    assert.equal(await fs.readFile(statePath, "utf8"), "2");
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
   }
 });

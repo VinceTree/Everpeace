@@ -25,7 +25,7 @@ Sandbox 和审批保持两层独立判断。CLI、平台二进制或 sandbox 初
 
 Windows 的 Codex restricted-token backend 可以运行系统 PowerShell，但 Git Bash/MSYS 在该令牌中会因自身服务初始化返回 `E_ACCESSDENIED`。因此 Windows 模型命令使用非交互 PowerShell；macOS/Linux 使用 Bash。用户亲自输入的 `!<command>` 仍走原有原生 PTY，不进入模型 sandbox，也不进入模型 context。
 
-这不是完整 Codex runtime：当前未接入 prefix rules、managed policy、自动审批 reviewer、网络代理域名策略或额外可写根 UI。`:workspace` 的实际文件与网络限制由固定版本 Codex 的当前平台 backend 执行。
+这不是完整 Codex runtime：当前未接入 managed policy、自动审批 reviewer、网络代理域名策略或额外可写根 UI。Everpeace 已加入进程内 command prefix rules，但它们不持久化，也不替代 Codex sandbox。`:workspace` 的实际文件与网络限制由固定版本 Codex 的当前平台 backend 执行。
 
 ## MCP
 
@@ -42,6 +42,8 @@ Windows 的 Codex restricted-token backend 可以运行系统 PowerShell，但 G
 除 `full-access` 外，每次 MCP tool call 都走独立审批；它不受内置 web 开关替代或放行。工具调用及结果和其他 function call 一样进入可恢复 Responses context；配置 header、bearer token 和 stdio 环境值只在连接时使用，不写入 session、transcript 或模型 instructions。
 
 当前范围只把 MCP tools 暴露给模型。Codex OAuth 凭据复用、`http_headers_helper`、resources、prompts、elicitation、sampling、tasks、list-changed 热更新和按工具持久审批策略尚未接入。OAuth/header-helper server 会以明确失败状态显示；不得声称与完整 Codex MCP runtime 等价。
+
+模型文件编辑通过统一兼容的 `apply_patch` function tool 接入，支持有界 unified diff、可选 hash、原子批次和回滚；它不是完整 Codex 原生 `apply_patch_call` wire protocol。
 
 ## Skills
 

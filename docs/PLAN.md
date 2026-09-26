@@ -4,6 +4,10 @@
 
 模型 Bash 不是无限等待的后台任务。生产 Agent 通过 `DEFAULT_MODEL_BASH_TIMEOUT_MS` 使用 120 秒有界执行时间；超时会终止子进程树，并向模型返回 `timed_out: true` 与结构化错误。用户直接 `!` 命令继续保持无默认超时，由用户负责取消。该边界不改变权限 profile、sandbox 映射或 Session JSONL schema。
 
+模型 sandbox Bash 与 `runCodexCli` 现在共享同一条 Codex CLI 进程执行边界，Windows helper setup/refresh 的瞬时错误最多重试一次，最终仍失败关闭。权限 profile 之上增加进程内 command prefix rules，最长前缀优先，`deny > ask > allow`，不持久化也不影响直接 `!`。
+
+默认聊天新增兼容 provider 的 `apply_patch` function tool。它只接受工作区相对路径、受限 unified diff 或完整文件内容，支持可选 SHA-256 防陈旧、原子多文件应用和失败回滚；Plan 模式仍为只读。该工具不改变 Session JSONL schema。
+
 ## Coding task benchmark foundation
 
 已加入独立 `src/benchmark` 评测层：任务定义包含 prompt、隔离工作区、标签、超时、验证命令和有界修复次数；harness 通过 adapter 接入，运行期间转发既有 `LoopEvent`/phase 并收集响应、工具失败、重试、stream recovery、compaction、steering 和取消指标。验证失败会进入 `diagnose` adapter 调用并重新验证，runner 记录每次尝试、workspace 前后 Git 快照和可选脱敏 artifact。Provider capability profile 只记录事实，不自动路由模型。
@@ -90,13 +94,16 @@ Codex sandbox、MCP 与 Skills 接入：模型 shell 通过固定版本 Codex CL
 - [x] `read_file` / `list_directory` 路径校验、内容上限、结构化失败返回。
 - [x] 权限独立窗口；切换不清空 context、不向 JSONL 写入授权。
 - [x] 模型 shell 映射 Codex `:read-only`、`:workspace`、`:danger-full-access`，sandbox 不可用时失败关闭；直接 `!` 保持原生 PTY。
+- [x] 模型 Bash 与 Codex CLI 共享 bounded process executor；Windows sandbox helper 瞬时 setup/refresh 错误最多重试一次，取消/超时仍失败关闭。
+- [x] 兼容 provider 的结构化 `apply_patch` function tool：工作区边界、unified diff、SHA-256 陈旧检查、多文件原子应用和失败回滚。
+- [x] 进程内 command prefix rules：最长前缀优先，冲突按 `deny > ask > allow`，不影响直接 `!`。
 - [x] MCP stdio/Streamable HTTP 工具发现、命名空间、调用、超时、取消、单服务器故障隔离和独立审批；`/mcp` 可刷新状态。
 - [x] Codex 主机 Skill roots、frontmatter 校验、metadata catalog、同名冲突隔离、显式 `$name`、隐式 `read_skill` 与相对资源约束。
 - [x] `/skills` 管理向导：项目/用户作用域、AI 单文件创建与校验、完整手动编辑、公开 GitHub/Git/SKILL.md/ZIP 暂存预览、显式安装确认、带作用域/状态/两行描述的已安装 Skill 目录、完整内容查看和 `$name` 回填。
 - [x] Skill 安装安全边界：仅公开 HTTPS、逐重定向公共地址校验、Git 重定向关闭、超时和大小/条目上限、路径穿越/符号链接/特殊文件拒绝、无覆盖暂存安装。
 - [x] 大型 Git Skill 来源先无检出克隆并检查有界仓库树，只检出按名称去重后的候选目录；Windows 长路径不再被无关仓库副本触发，单个受限 Skill 可包含最多 5,000 个条目。
 - [x] Git 仓库的原始 `SKILL.md` 清单上限与去重后的 100 个不同候选上限分离；包含大量同名平台/评审镜像副本的来源不会在名称去重前被错误拒绝。
-- [ ] 后续单独设计 MCP OAuth/resources/prompts/elicitation、Codex Plugin/远端 Skill provider、managed policy 和 prefix rules；当前不得宣称完整 runtime 等价。
+- [ ] 后续单独设计 MCP OAuth/resources/prompts/elicitation、Codex Plugin/远端 Skill provider 和 managed policy；当前不得宣称完整 runtime 等价。
 
 - [x] SessionStore、跨平台存储路径、串行追加和损坏文件隔离。
 - [x] Agent context 导入及增量持久化。

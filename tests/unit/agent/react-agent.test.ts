@@ -30,6 +30,39 @@ test("agent rejects overlapping turns and releases the guard after cancellation"
   await agent.runTurn("next");
 });
 
+test("agent exposes apply_patch and persists its structured result before continuing", async () => {
+  const history: Array<Record<string, unknown>> = [];
+  let patchCalls = 0;
+  const agent = new ReactAgent({
+    model: "test",
+    client: {
+      responses: {
+        async create(params) {
+          const input = params.input as Array<Record<string, unknown>>;
+          history.push(...input.slice(-2));
+          if (patchCalls++ === 0) {
+            const tools = params.tools as Array<Record<string, unknown>>;
+            assert.ok(tools.some((tool) => tool.name === "apply_patch"));
+            return { id: "patch", output_text: "", output: [{ type: "function_call", name: "apply_patch", call_id: "patch-1", arguments: JSON.stringify({ operations: [{ path: "file.txt", action: "create", content: "done\n" }] }) }] };
+          }
+          assert.ok(input.some((item) => item.type === "function_call_output" && String(item.output).includes('"status":"applied"')));
+          return { id: "done", output_text: "verified", output: [] };
+        },
+      },
+    },
+    io: {
+      async confirmBash() { return true; },
+      async runBash() { return bashResult(""); },
+      async runApplyPatch() { return { status: "applied", files: [{ path: "file.txt", action: "create", status: "applied" }], diffSummary: "create file.txt" }; },
+      writeAssistant() {},
+    },
+    onHistoryAppend: async (items) => { history.push(...items); },
+  });
+  await agent.runTurn("create file.txt");
+  assert.ok(history.some((item) => item.type === "function_call" && item.name === "apply_patch"));
+  assert.ok(history.some((item) => item.type === "function_call_output" && item.call_id === "patch-1"));
+});
+
 test("agent uses the native compaction output as the next context window", async () => {
   const createInputs: Array<Array<Record<string, unknown>>> = [];
   let compactInput: Array<Record<string, unknown>> | undefined;
@@ -645,6 +678,7 @@ test("workspace-write searches the web without per-request confirmation", async 
   const tools = requests[0]?.tools as Array<Record<string, unknown>>;
   assert.deepEqual(tools.map((tool) => tool.name), [
     "bash",
+    "apply_patch",
     "web_search",
     "web_fetch",
     "read_file",

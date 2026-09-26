@@ -31,6 +31,10 @@ Permission changes do not rebuild the agent or lose context. Every tool call che
 
 Model shell execution calls the pinned `@openai/codex@0.155.1` CLI instead of reimplementing OS policy. A missing CLI/platform binary, unsupported OS, or sandbox setup failure is returned as a failed tool result; Everpeace never retries the command directly on the host. Windows model commands use PowerShell because Git Bash/MSYS cannot initialize its service inside the Codex restricted token. macOS/Linux model commands use Bash.
 
+The model Bash path and other Codex CLI calls share one bounded process executor. A Windows sandbox helper setup/refresh/unknown failure may be retried once; cancellation, timeout, and the final failure remain fail-closed. The process-local `/permissions` command prefix rules are evaluated in addition to the profile: the longest matching prefix wins, equal-length conflicts resolve `deny > ask > allow`, and direct user `!` commands never consult these rules.
+
+Workspace edits prefer the compatibility `apply_patch` function tool. It is workspace-relative, bounded, symlink-aware, optionally hash-checked, and atomically applies a preflighted batch. It does not grant authority beyond the selected profile and does not persist patch contents outside the normal function-call context.
+
 File tools reject lexical traversal, resolved symlink/junction escapes, and Windows alternate streams. Reads accept regular UTF-8 text up to 128 KiB; nonrecursive directory lists cap at 500 entries. File content enters model context and therefore JSONL: avoid reading secrets. These tools do not access the keyring.
 
 ## Security Limits and Future Work

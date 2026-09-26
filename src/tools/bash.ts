@@ -5,7 +5,7 @@ import {
 } from "./bash-output-preview.js";
 import { stopProcessTree } from "./process-cancel.js";
 import { retainOutput } from "./command-record.js";
-import { codexCliLaunch } from "../codex/cli.js";
+import { codexCliLaunch, runCodexProcess } from "../codex/cli.js";
 
 export type { BashOutputPreview } from "./bash-output-preview.js";
 
@@ -120,20 +120,89 @@ export function resolveBashLaunch(
     return { command: bashPath, args: ["-c", command] };
   }
   const cwd = options.cwd ?? process.cwd();
+  return codexCliLaunch(resolveSandboxArgs(command, options, bashPath, cwd), options.sandbox.codexCliPath ? { codexCliPath: options.sandbox.codexCliPath } : {});
+}
+
+function resolveSandboxArgs(
+  command: string,
+  options: BashOptions,
+  bashPath: string,
+  cwd: string,
+): string[] {
+  const sandbox = options.sandbox;
+  if (!sandbox) throw new Error("Sandbox options are required");
   const sandboxCommand = process.platform === "win32"
     ? { command: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command] }
     : { command: bashPath, args: ["-c", command] };
-  return codexCliLaunch([
+  return [
     "sandbox",
     "-P",
-    options.sandbox.permissionProfile,
+    sandbox.permissionProfile,
     "-C",
     cwd,
-    ...(options.sandbox.readableRoots?.flatMap((root) => ["--sandbox-state-readable-root", root]) ?? []),
+    ...(sandbox.readableRoots?.flatMap((root) => ["--sandbox-state-readable-root", root]) ?? []),
     "--",
     sandboxCommand.command,
     ...sandboxCommand.args,
-  ], options.sandbox.codexCliPath ? { codexCliPath: options.sandbox.codexCliPath } : {});
+  ];
+}
+
+async function runSandboxBash(
+  command: string,
+  options: BashOptions,
+  env: NodeJS.ProcessEnv,
+  bashPath: string,
+  cwd: string,
+  streamOutput: boolean,
+): Promise<BashResult> {
+  const previewOutput = options.onOutput ? new BashOutputPreviewBuffer() : undefined;
+  let previewTimer: ReturnType<typeof setTimeout> | undefined;
+  const preview = () => {
+    if (!options.onOutput || !previewOutput || previewTimer) return;
+    previewTimer = setTimeout(() => {
+      previewTimer = undefined;
+      options.onOutput?.(previewOutput.snapshot());
+    }, 80);
+  };
+  let stdout = "";
+  let stderr = "";
+  let truncated = false;
+  const append = (kind: "stdout" | "stderr", chunk: string) => {
+    previewOutput?.push(chunk);
+    if (kind === "stdout") stdout += chunk;
+    else stderr += chunk;
+    const retained = retainOutput(kind === "stdout" ? stdout : stderr, 1024 * 1024);
+    if (kind === "stdout") stdout = retained.text;
+    else stderr = retained.text;
+    truncated ||= retained.truncated;
+    preview();
+    if (streamOutput) (kind === "stdout" ? process.stdout : process.stderr).write(chunk);
+  };
+  const result = await runCodexProcess(
+    resolveSandboxArgs(command, options, bashPath, cwd),
+    {
+      cwd,
+      env,
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+      ...(options.sandbox?.codexCliPath ? { codexCliPath: options.sandbox.codexCliPath } : {}),
+      onStdout: (chunk) => append("stdout", chunk),
+      onStderr: (chunk) => append("stderr", chunk),
+    },
+  );
+  if (previewTimer) clearTimeout(previewTimer);
+  const out = retainOutput(stdout);
+  const err = retainOutput(stderr);
+  return {
+    stdout: out.text,
+    stderr: err.text,
+    exitCode: result.exitCode,
+    signal: null,
+    truncated: truncated || out.truncated || err.truncated,
+    cancelled: result.cancelled,
+    ...(result.timedOut ? { timedOut: true } : {}),
+    ...(result.error ? { error: result.error } : {}),
+  };
 }
 
 export function runBash(
@@ -145,6 +214,10 @@ export function runBash(
   const streamOutput = options.streamOutput ?? true;
   const terminal = options.terminal ?? false;
   const cwd = options.cwd ?? process.cwd();
+
+  if (options.sandbox && !terminal) {
+    return runSandboxBash(command, options, env, bashPath, cwd, streamOutput);
+  }
 
   return new Promise((resolve) => {
     if (options.signal?.aborted) { resolve({ stdout: "", stderr: "", exitCode: null, signal: null, cancelled: true }); return; }

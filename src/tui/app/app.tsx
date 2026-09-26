@@ -29,6 +29,7 @@ import {
   type StatusSnapshot,
 } from "../../status/model-status.js";
 import type { BashOutputPreview, BashResult } from "../../tools/bash.js";
+import { runApplyPatch, type ApplyPatchOperation } from "../../tools/apply-patch.js";
 import { selectAgentOutputPreview } from "../rendering/command-output-preview.js";
 import { parseTuiInput, TUI_HELP } from "../commands/slash-commands.js";
 import { ApprovalConfirmation } from "../components/feedback/approval-confirmation.js";
@@ -103,7 +104,7 @@ type View =
 type CommandView = Exclude<View, { kind: "chat" }>;
 
 interface PendingConfirmation {
-  kind: "bash" | "web" | "mcp" | "goal";
+  kind: "bash" | "patch" | "web" | "mcp" | "goal";
   request: string;
   resolve(accepted: boolean): void;
 }
@@ -464,12 +465,14 @@ export function EverpeaceApp({
       confirmationRef.current = undefined;
       setConfirmation(undefined);
       if (!accepted) {
-        const label = pending?.kind === "web"
+      const label = pending?.kind === "web"
           ? "Web request rejected"
           : pending?.kind === "mcp"
             ? "MCP tool call rejected"
             : pending?.kind === "goal"
-              ? "Goal change rejected"
+            ? "Goal change rejected"
+            : pending?.kind === "patch"
+              ? "Patch rejected"
             : "Shell command rejected";
         append("system", pending?.kind === "mcp" ? label : `${label}: ${pending?.request ?? "unknown request"}`);
       }
@@ -486,6 +489,15 @@ export function EverpeaceApp({
         setConfirmation(pending);
       });
     },
+    [],
+  );
+
+  const requestPatchConfirmation = useCallback(
+    (summary: string): Promise<boolean> => new Promise((resolve) => {
+      const pending = { kind: "patch" as const, request: summary, resolve };
+      confirmationRef.current = pending;
+      setConfirmation(pending);
+    }),
     [],
   );
 
@@ -610,6 +622,7 @@ export function EverpeaceApp({
       getSessionId: () => activeSessionId.current,
       getPermissions: () => ({ ...permissions.current }),
       confirmBash: requestBashConfirmation,
+      confirmPatch: requestPatchConfirmation,
       confirmWeb: requestWebConfirmation,
       confirmMcp: requestMcpConfirmation,
       confirmGoal: requestGoalConfirmation,
@@ -624,6 +637,9 @@ export function EverpeaceApp({
         if (!sessionId) throw new Error("Goals require an active session");
         await dependencies.sessionStore.setGoal(sessionId, goal);
         setActiveGoal(goal);
+      },
+      async runApplyPatch(operations: readonly ApplyPatchOperation[]) {
+        return runApplyPatch(operations, workspacePath);
       },
       runBash: executeBash,
       writeAssistant(text) {
@@ -651,7 +667,7 @@ export function EverpeaceApp({
         }
       },
     }),
-    [append, dependencies.sessionStore, executeBash, requestBashConfirmation, requestGoalConfirmation, requestMcpConfirmation, requestPlanInput, requestWebConfirmation, reviewPlan],
+    [append, dependencies.sessionStore, executeBash, requestBashConfirmation, requestGoalConfirmation, requestMcpConfirmation, requestPatchConfirmation, requestPlanInput, requestWebConfirmation, reviewPlan, workspacePath],
   );
 
   const contextWindow = activeModel

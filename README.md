@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.2.14) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.15) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -159,6 +159,7 @@ Behavior notes:
 - `read_file` reads workspace UTF-8 files up to 128 KiB; `list_directory` lists up to 500 entries. Outside paths and resolved symlink escapes are rejected. File contents enter model context and persisted session data; avoid reading secrets.
 - Permissions last for this process across `/new`, `/clear`, and `/resume`; restarting resets to `workspace-write` with web tools enabled. Changing permissions preserves context; JSONL never restores full access.
 - Model shell commands are launched through the pinned `@openai/codex@0.155.1` native OS sandbox and fail closed if that runtime cannot start. Windows model commands use PowerShell because Git Bash/MSYS cannot initialize inside the restricted token; macOS/Linux use Bash. Model shell calls have a 120-second default timeout and return a structured timeout result; direct `!` commands remain outside the model sandbox and keep user-controlled lifetime. See [design and limits](docs/architecture/PERMISSIONS.md).
+- Model edits use the workspace-scoped `apply_patch` tool when possible. It validates bounded unified diffs, prevents stale-file overwrites with optional SHA-256 checks, applies multi-file changes atomically, and reports rollback failures. The `/permissions` screen also supports process-local command prefix rules for model Bash; direct `!` commands are unaffected.
 - `read-only` and `ask` require approval before each web request during normal chat; `workspace-write` and `full-access` skip that prompt. Plan mode also treats enabled public web access as read-only research and skips the per-request prompt, while disabling web still denies it. Search queries are sent to Bing, with DuckDuckGo as a fallback; opening a result sends a request to that site.
 - Web page reads allow only public HTTP/HTTPS targets, validate redirects, block local/private network addresses, apply time and response-size limits, and treat returned content as untrusted data.
 - Search availability and result quality depend on the external search services and the current network connection. A failed web request is returned to the model so it can explain the limitation or try another source.

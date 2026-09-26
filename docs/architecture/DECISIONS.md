@@ -1,5 +1,11 @@
 # Architecture Decisions
 
+## Shared sandbox process boundary and structured edits
+
+模型 Bash 与 Codex CLI JSON 请求必须共享同一条 bounded process executor，避免只在 `runCodexCli` 测试路径覆盖 Windows sandbox helper retry，而真实 Bash 仍绕过它。Windows sandbox helper setup/refresh/unknown 错误只允许一次重试，取消、超时和最终失败都保持 fail-closed，不得回退宿主 shell。
+
+文件编辑使用兼容 provider 的 `apply_patch` function tool，而不是要求所有端点支持原生 patch call。工具先完整预检工作区边界、符号链接、大小、重复路径和可选 SHA-256，再以临时文件/rename 应用多文件批次；任何失败都尽力恢复原内容。权限规则只存在进程内，Session JSONL 不保存命令 prefix rules 或 patch staging 数据。
+
 ## Model shell timeout boundary
 
 模型 Bash 调用必须有界：TUI 依赖层为模型命令设置 120 秒默认超时，`runBash` 在超时后终止完整子进程树，并保留已捕获输出。返回结果使用 `timedOut` 字段，序列化给模型时使用 `timed_out: true` 和明确错误文本；超时不是用户 Ctrl+C，因此 `cancelled` 保持 false。用户直接 `!` 走原生终端路径，不继承该默认超时。超时只限制执行时长，不绕过或改变 Codex sandbox 和审批策略。

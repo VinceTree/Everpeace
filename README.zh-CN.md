@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.2.14) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.15) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -159,6 +159,7 @@ Skills 从工作区到仓库根的 `.agents/skills`、项目 `.codex/skills`、`
 - 模型可以用 `read_file` 查看工作目录内不超过 128 KiB 的 UTF-8 文件，用 `list_directory` 列出最多 500 个目录项。拒绝目录外路径和符号链接越界。文件正文会进入模型 context 和 Session 文件，请避免读取机密。
 - 权限在当前进程内跨 `/new`、`/clear`、`/resume` 保留，重启恢复 `workspace-write`、网页工具开启；切换权限不丢失 context，恢复 JSONL 不会恢复完全访问授权。
 - 模型 shell 通过固定的 `@openai/codex@0.155.1` 原生 OS sandbox 启动，运行时无法启动则失败关闭。Windows 模型命令使用 PowerShell，因为 Git Bash/MSYS 无法在 restricted token 内初始化；macOS/Linux 使用 Bash。模型 shell 默认 120 秒超时，超时会以结构化结果返回；直接 `!` 不进入模型 sandbox，生命周期仍由用户控制。详见 [对标与安全限制](docs/architecture/PERMISSIONS.md)。
+- 模型编辑尽量使用限定在工作区内的 `apply_patch` 工具：校验有界 unified diff，可用 SHA-256 防止陈旧文件覆盖，多文件变更原子应用，并在失败时报告回滚状态。`/permissions` 还支持仅当前进程生效的模型 Bash 命令前缀规则；直接 `!` 不受影响。
 - 普通聊天中，`read-only` 和 `ask` 会在每个网页请求前审批；`workspace-write` 与 `full-access` 跳过该确认。Plan 模式把已开启的公共网页访问视为只读调研并跳过逐次确认，关闭网页工具时仍会拒绝请求。搜索词会先发送给 Bing，失败时回退到 DuckDuckGo；打开搜索结果时会向对应网站发送请求。
 - 网页读取只允许公共 HTTP/HTTPS 地址，会逐次检查重定向、阻止本机和内网地址，并限制超时与响应大小；返回内容始终作为不可信数据处理。
 - 搜索可用性和结果质量取决于外部搜索服务及当前网络。联网失败会作为工具结果返回模型，由模型说明限制或尝试其他来源。

@@ -1,5 +1,12 @@
 # 最新功能：Coding task benchmark 基础层
 
+## 最新优化：Codex sandbox 执行链与结构化编辑
+
+状态快照：2026-09-26。模型 Bash 现在与 Codex CLI JSON 请求共享 bounded process executor；Windows sandbox helper setup/refresh/unknown 错误最多重试一次，取消和超时保留输出并最终 fail-closed。新增进程内 command prefix rules 和兼容 provider 的 `apply_patch` function tool：工作区边界、符号链接、大小、SHA-256 陈旧检查和多文件原子回滚均在执行前验证。Session JSONL schema、直接 `!`、Plan 只读语义保持不变。工作区展示号同步升至 `0.2.15`；本次只提交并推送代码，不创建 tag 或远程 Release。
+
+- 新增 `apply_patch` create/update/delete、unified hunk、stale hash、路径安全和 Agent context 回归；新增 sandbox Bash 实际走 helper retry 的 Windows 用例。
+- 后续优先做真实 Windows Terminal/sandbox smoke、patch 后验证闭环和 benchmark 指标；再设计 hooks/plugins/MCP resources，不立即重构为多 Agent orchestrator。
+
 ## 最新优化：模型 Bash 有界执行
 
 状态快照：2026-09-26。模型 Bash 现在由 TUI 依赖层设置 120 秒默认超时；超时会终止子进程树，保留已捕获输出，并向模型返回 `timed_out: true` 与结构化错误。用户直接 `!` 命令不受该默认超时影响。权限 profile、Codex sandbox 映射、Session JSONL 和直接命令语义保持不变。
@@ -12,7 +19,7 @@
 
 - 新增 `docs/BENCHMARKING.md`，说明任务格式、adapter 接入和结果语义。
 - 新增只解析不执行命令的公开 issue catalog manifest、benchmark 指标、验证失败、任务超时、unsafe action、修复循环、workspace snapshot、artifact 脱敏和 capability profile 回归；benchmark 定向测试 14/14 通过。
-- `pnpm typecheck` 和 `pnpm build` 通过；本轮全量 `pnpm test` 为 248 项通过、无失败、1 项按平台跳过；benchmark 定向 14/14 通过。
+- `pnpm typecheck` 和 `pnpm build` 通过；本轮全量 `pnpm test` 为 255 项通过、无失败、1 项按平台跳过；benchmark 定向 14/14 通过。
 - 工作区展示号同步升至 `0.2.13`；本次只提交并推送代码，不创建 tag 或远程 Release。
 - 下一步：固定 15-20 个公开 issue 任务的 commit、准备脚本和审核后的验证命令，使用临时 worktree 生成多模型 baseline；日常目录继续使用显式检查点，不自动回滚。
 
