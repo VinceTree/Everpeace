@@ -95,15 +95,18 @@ export class CodingWorkflowRuntime {
     run: (command: string, signal?: AbortSignal, timeoutMs?: number) => Promise<BashResult>,
     signal?: AbortSignal,
   ): Promise<WorkflowRunResult> {
+    signal?.throwIfAborted();
     if (!this.#changed || this.#state.phase === "blocked") {
       await this.#set({ phase: this.#state.phase === "blocked" ? "blocked" : "done" });
       return { state: this.state, changed: this.#changed };
     }
     await this.#set({ phase: "verify_full" });
     const commands = await (this.#commandsPromise ?? discoverVerificationCommands(this.#workspacePath));
+    signal?.throwIfAborted();
     const command = selectVerificationCommand(commands, "full");
     if (!command) return this.#finishReview(signal, undefined);
     const verification = await runVerificationCommand(command, run, signal);
+    signal?.throwIfAborted();
     if (!verification.passed) {
       await this.#set({ phase: this.#nextFailurePhase(), last_verification: verification });
       return { state: this.state, verification, changed: true };
@@ -112,6 +115,7 @@ export class CodingWorkflowRuntime {
   }
 
   async #finishReview(signal: AbortSignal | undefined, verification: WorkflowRunResult["verification"]): Promise<WorkflowRunResult> {
+    signal?.throwIfAborted();
     await this.#set({ phase: "review", ...(verification ? { last_verification: verification } : {}) });
     if (!this.#review) {
       await this.#set({ phase: "done" });
@@ -120,7 +124,9 @@ export class CodingWorkflowRuntime {
     let review: WorkflowReviewResult;
     try {
       review = await this.#review(this.#state.changed_paths, signal);
+      signal?.throwIfAborted();
     } catch (error) {
+      if (signal?.aborted) throw error;
       review = { passed: false, error: error instanceof Error ? error.message : String(error) };
     }
     if (!review.passed) {

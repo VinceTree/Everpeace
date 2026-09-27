@@ -120,15 +120,18 @@ export async function runVerificationCommand(
   run: (command: string, signal?: AbortSignal, timeoutMs?: number) => Promise<BashResult>,
   signal?: AbortSignal,
 ): Promise<VerificationResult> {
+  signal?.throwIfAborted();
   const startedAt = Date.now();
   try {
     const result = await run(command.command, signal, command.timeoutMs);
+    signal?.throwIfAborted();
     return verificationFromBash(command, {
       ...result,
       stdout: retainOutput(result.stdout, MAX_OUTPUT_BYTES).text,
       stderr: retainOutput(result.stderr, MAX_OUTPUT_BYTES).text,
     }, Date.now() - startedAt);
   } catch (error) {
+    if (signal?.aborted) throw error;
     return {
       command,
       passed: false,

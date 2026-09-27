@@ -75,3 +75,13 @@ test("verification passes its command-specific timeout to the executor", async (
   });
   assert.equal(received, 4321);
 });
+
+test("verification cancellation aborts instead of becoming repair guidance", async () => {
+  const command = { id: "test", label: "Test", command: "pnpm test", tier: "full" as const, timeoutMs: 1000 };
+  const controller = new AbortController();
+  controller.abort(new Error("user cancelled"));
+  await assert.rejects(
+    runVerificationCommand(command, async () => ({ stdout: "", stderr: "", exitCode: null, signal: null, cancelled: true }), controller.signal),
+    /cancelled/u,
+  );
+});

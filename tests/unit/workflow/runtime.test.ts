@@ -59,6 +59,28 @@ test("workflow review runs after full verification and blocks completion on revi
   });
 });
 
+test("workflow cancellation does not become a repair attempt", async () => {
+  await withWorkspace(async (workspace) => {
+    await fs.writeFile(path.join(workspace, "package.json"), JSON.stringify({ scripts: { typecheck: "tsc" } }), "utf8");
+    const controller = new AbortController();
+    const runtime = new CodingWorkflowRuntime({
+      workspacePath: workspace,
+      review: async () => {
+        controller.abort(new Error("review cancelled"));
+        throw controller.signal.reason;
+      },
+    });
+    await runtime.beginTurn();
+    const operations: ApplyPatchOperation[] = [{ path: "file.txt", action: "create", content: "change\n" }];
+    await runtime.capturePatch(operations);
+    const applied = await runApplyPatch(operations, workspace);
+    await runtime.afterPatch(operations, applied, async () => successfulBash());
+    await assert.rejects(runtime.finishTurn(async () => successfulBash(), controller.signal), /cancelled/u);
+    assert.equal(runtime.state.phase, "review");
+    assert.equal(runtime.state.repair_attempts, 0);
+  });
+});
+
 test("workflow enters diagnosis after a failed verification and bounds repairs", async () => {
   await withWorkspace(async (workspace) => {
     await fs.writeFile(path.join(workspace, "package.json"), JSON.stringify({ scripts: { typecheck: "tsc" } }), "utf8");

@@ -1,16 +1,14 @@
-# 最新执行：Agent Loop P0/P1 安全门控与 workflow review
+# 最新执行：Agent Loop 与 coding workflow 取消边界
 
-状态快照：2026-09-27。本轮完成 Agent Loop 与上游 Codex turn/stream/tool runtime 的差异分析，并落实 P0/P1 的保守安全改进；同步展示版本为 `0.2.20`，未创建 tag、Release 或改变外部运行时协议。
+状态快照：2026-09-27。本轮审计当前 workflow 与 pinned Codex turn/stream/tool 边界，确认核心 loop 仍保持 `response.completed`、durable record、工具结果顺序、采样预算、取消和持久化 fail-closed 语义；未启用未经 provider 证据支持的 item-level 工具执行。
 
-P0：`runAgentLoop` 在 durable record 前拒绝缺失/重复 `call_id`、缺失名称或非字符串 arguments 的 function call，确保无效响应不会触发工具副作用。P1：并发准入支持 `readOnly`、`idempotent`、`parallelSafe` 和 `resourceKeys` 能力；共享资源键的调用拆分为独立批次。未知能力仍不并行，默认 `parallelToolCalls` 关闭时保持串行。
+修复一项实际差异：workflow 验证命令和 Git review 之前会把 AbortSignal 取消捕获为普通失败，导致进入 `diagnose` 并消耗 repair attempt。现在验证器在执行前/后检查 signal，review 也在 callback 前/后传播取消；用户取消直接终止当前 turn，不生成修复 prompt。
 
-本轮新增单 Agent workflow review checkpoint：完整验证成功后，TUI 对变更路径执行只读 Git 状态检查；路径丢失或 Git 检查失败时进入 `diagnose`，把有界错误反馈给下一轮模型。review 不修改工作区、不自动提交；未配置 review 的 runtime 保持原有完成路径。新增 workflow 回归覆盖 review 失败、阶段转移和 prompt 反馈。
+新增 verifier/runtime 取消回归测试。定向 workflow 测试 10 项通过；完整测试通过：279 项，278 通过、0 失败、1 项按平台跳过；`pnpm typecheck`、`pnpm build` 已通过；`git diff --check` 仅有 Windows 换行转换警告，无 whitespace error。未跟踪的 `.patch-node-pty/`、`benchmark/`、`question/`、`test-me/`、`tests/unit/codex/` 和 `{}` 未修改。
 
-ReactAgent 仅为内置文件读取、Skill 读取和同时声明 MCP `readOnlyHint`/`idempotentHint` 的工具提供并行能力；Bash、patch、web、MCP 写工具和工作流工具保持默认串行。当前仍未移植 item-level `output_item.done` 调度、pending input/token budget/stop hooks、完整 MCP lifecycle、Plugin/远端 provider 和多 Agent。
+剩余与 Codex 的有意差异：等待 `response.completed` 后批量执行工具；未接入完整 pending-input/token-budget/stop hooks、MCP OAuth/elicitation/tasks、managed policy、plugins、远端 provider 和多 Agent。固定 benchmark manifest、真实 provider smoke 和 Windows Terminal smoke 仍是 item-level 执行前置条件。
 
-验证：`pnpm test` 为 277 项，276 通过、0 失败、1 项按平台跳过；`pnpm typecheck`、`pnpm build`、`git diff --check` 均通过。完整测试出现既有 `Stdout` resize listener warning，但不影响测试结果。真实 Windows Terminal、live provider smoke 和固定 benchmark baseline 仍未验证。
-
-下一步：在固定任务 manifest、真实 provider smoke 和 recovery cursor 证据具备前，保持 `response.completed` 后整批工具执行，不实现 P1 item-level 调度；后续可继续补 MCP OAuth/elicitation/tasks 与 managed policy 边界。
+本轮完成：验证取消直接终止当前 turn，不生成修复 prompt；所有本地自动检查通过。未提交或推送，等待用户明确要求。
 
 
 # 最新执行：benchmark 基线准备

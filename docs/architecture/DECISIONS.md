@@ -8,6 +8,8 @@
 
 完整验证成功后，生产 TUI 对当前变更路径执行只读 Git review checkpoint；review 只确认变更仍可见，不修改工作区、不自动提交。失败进入 `diagnose`，错误作为有界 workflow prompt 返回模型；review 未配置时 runtime 保持原有 `review -> done` 路径。该检查点不新增 Session JSONL 字段，仍只保存阶段和最后验证元数据。
 
+验证命令和工作区 review 都属于当前 turn 的可取消阶段。收到 AbortSignal 后必须传播原始取消错误，不得把取消或关闭转换成普通 verification/review failure、`diagnose` 或 repair attempt；只有命令自身以非零退出结束且未取消时，才生成修复指导。
+
 ## Shared sandbox process boundary and structured edits
 
 模型 Bash 与 Codex CLI JSON 请求必须共享同一条 bounded process executor，避免只在 `runCodexCli` 测试路径覆盖 Windows sandbox helper retry，而真实 Bash 仍绕过它。Windows sandbox helper setup/refresh/unknown 错误只允许一次重试，取消、超时和最终失败都保持 fail-closed，不得回退宿主 shell。
