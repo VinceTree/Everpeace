@@ -31,6 +31,7 @@ export type SamplingErrorCategory =
 export type LoopEvent =
   | { type: "sampling_started" }
   | { type: "response_received"; response: LoopResponse }
+  | { type: "response_rejected"; reason: "incomplete" | "invalid_tool_call" }
   | { type: "tool_started"; call: ToolCall }
   | { type: "tool_finished"; call: ToolCall; output: string }
   | { type: "steering_applied"; count: number }
@@ -57,6 +58,7 @@ export interface AgentLoopOptions {
   signal?: AbortSignal;
   onPhase?(phase: LoopPhase): void;
   onEvent?(event: LoopEvent): void;
+  prepareStep?(): Promise<void>;
   applySteering?(): Promise<number>;
   maxRetries?: number;
   retryDelayMs?: number;
@@ -123,6 +125,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
   try {
     while (true) {
       signal?.throwIfAborted();
+      await options.prepareStep?.();
       options.onPhase?.("sampling");
       options.onEvent?.({ type: "sampling_started" });
       let response: LoopResponse;
@@ -138,6 +141,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
       }
       signal?.throwIfAborted();
       if (response.status && response.status !== "completed") {
+        options.onEvent?.({ type: "response_rejected", reason: "incomplete" });
         throw new Error(`Model response did not complete: ${response.status}`);
       }
       const calls = response.output.filter((item) => item.type === "function_call");
@@ -145,6 +149,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
       for (let callIndex = 0; callIndex < calls.length; callIndex++) {
         const call = calls[callIndex]! as ToolCall;
         if (typeof call.call_id !== "string" || !call.call_id || ids.has(call.call_id)) {
+          options.onEvent?.({ type: "response_rejected", reason: "invalid_tool_call" });
           throw new Error("Tool call has a missing or duplicate call_id");
         }
         ids.add(call.call_id);

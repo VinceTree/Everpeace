@@ -63,9 +63,18 @@ export interface BenchmarkProviderCapabilities {
 export interface BenchmarkMetricsSnapshot {
   durationMs: number;
   phases: readonly LoopPhase[];
+  samplingAttempts: number;
   responses: number;
+  responseRejections: number;
+  incompleteResponses: number;
+  invalidToolCalls: number;
   toolCalls: number;
+  toolResults: number;
+  unclosedToolCalls: number;
   toolFailures: number;
+  toolBatches: number;
+  toolResultOrder: readonly string[];
+  firstToolStartDelayMs: number | null;
   retries: number;
   streamRecoveries: number;
   successfulStreamRecoveries: number;

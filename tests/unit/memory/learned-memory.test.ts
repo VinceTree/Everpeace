@@ -180,7 +180,7 @@ test("memory retrieval prefers relevant active entries and respects chat policy"
 
 test("memory capture can wait for idle time before extracting", async () => {
   const directory = await temporaryDirectory();
-  let requests = 0;
+  let requests: number = 0;
   try {
     const store = new LearnedMemoryStore({ directory });
     const runtime = new LearnedMemoryRuntime({
@@ -194,8 +194,14 @@ test("memory capture can wait for idle time before extracting", async () => {
     });
     runtime.scheduleCapture({ workspacePath: "C:\\repo", userInput: "fix command output", transcript: "tool", assistantText: "done", toolCallCount: 1 });
     assert.equal(requests, 0);
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    let captureState: string | undefined;
+    for (let attempt = 0; attempt < 1_000; attempt += 1) {
+      captureState = (await runtime.status("C:\\repo")).capture?.state;
+      if (captureState === "succeeded") break;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
     assert.equal(requests, 1);
+    assert.equal(captureState, "succeeded");
     assert.equal((await store.read("project", "C:\\repo")).length, 1);
   } finally {
     await rm(directory, { recursive: true, force: true });

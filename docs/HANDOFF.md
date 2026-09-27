@@ -1,3 +1,16 @@
+# 最新执行：P0 基线、step snapshot 与协议回归
+
+状态快照：2026-09-27。本轮完成 P0 loop 基线和 follow-up step snapshot。`runAgentLoop` 在每个采样 step 开始调用 `prepareStep`；采样重试复用同一 snapshot，工具结果后的 follow-up 重新捕获 MCP/Skill 状态；dispatch 仍重新检查当前权限。运行时继续在 `response.completed` 后统一执行工具，item-level 工具执行未启用。
+
+已清理未接通的 item-level capability/recovery 草稿，恢复接口只保留已有 typed `recovery` adapter。新增与保留的回归覆盖 response rejection、重复/缺失 call_id、采样重试、SSE/buffered、stream recovery、取消、工具顺序、MCP dispatch 和 benchmark 指标。定向 Agent/benchmark 测试 54 项全部通过。
+
+本轮修复 learned-memory 回归中固定延时造成的异步写入竞态：测试现在等待真实 `capture.state === "succeeded"` 状态，不改变运行时行为。版本提升至 `0.2.18`；本轮只提交并推送代码，不创建 tag 或更新远程 Release。
+
+最终验证：`pnpm test` 为 274 项，273 通过、0 失败、1 项按平台跳过；`pnpm typecheck`、`pnpm build` 和 `git diff --check` 均通过。
+
+下一步先用固定 15-20 个 coding task 和真实 provider 采集 baseline，再决定是否实现 P1 item-level 工具执行；必须先证明 `output_item.done` 顺序、durable record 和 cursor recovery 能阻止重复副作用。真实 provider、Windows Terminal 和 live benchmark 仍未验证。
+
+
 ## 最新优化：持久化权限策略与 MCP resources/prompts
 
 状态快照：2026-09-26。本轮在现有单 Agent 核心上继续补齐 Codex 对齐缺口：`/permissions` 的用户策略现在按平台写入版本化配置文件，项目可选 `.everpeace/permissions.json` 以 fail-closed 方式合并；项目策略只能收紧 mode、关闭 web 或追加 deny/ask command rule，不能通过仓库内容提升权限。新增 MCP resources/prompts 的分页 function-call 映射（`list_resources`、`read_resource`、`list_prompts`、`get_prompt`），沿用 MCP 审批、超时、取消、有界结果和 context 持久化边界。工作流验证命令现在正确传递命令级 timeout。

@@ -20,7 +20,7 @@ import {
   type PermissionPolicy,
 } from "../permissions/policy.js";
 import { commandPermission } from "../permissions/policy.js";
-import type { McpRuntimeLike, McpSnapshot } from "../mcp/runtime.js";
+import type { McpRuntimeLike, McpSnapshot, McpToolInfo } from "../mcp/runtime.js";
 import {
   READ_SKILL_TOOL_DEFINITION,
   type SkillCatalogLike,
@@ -120,20 +120,7 @@ export interface ResponsesClientLike {
       params: Record<string, unknown>,
       options?: ResponsesRequestOptions,
     ): Promise<ResponseStreamLike> | ResponseStreamLike;
-    /** Optional provider-owned event cursor recovery. */
     recovery?: ResponseRecoveryAdapter;
-    /** Alias accepted for lightweight compatible clients. */
-    recover?(
-      params: Record<string, unknown>,
-      state: ResponseRecoveryState,
-      options?: ResponsesRequestOptions,
-    ): Promise<AgentResponse | ResponseStreamLike>;
-    /** Alias accepted for clients that expose the adapter as resume(). */
-    resume?(
-      params: Record<string, unknown>,
-      state: ResponseRecoveryState,
-      options?: ResponsesRequestOptions,
-    ): Promise<AgentResponse | ResponseStreamLike>;
   };
 }
 
@@ -277,6 +264,7 @@ export class ReactAgent {
   #pendingSteering: string[] = [];
   #sampleController: AbortController | undefined;
   #mcpSnapshot: McpSnapshot = { tools: [], instructions: "", servers: [] };
+  #stepMcpToolInfo: ReadonlyMap<string, McpToolInfo> = new Map();
   #skillTurn: SkillTurnContext | undefined;
   #learnedPrompt = "";
   #learnedPromptLoaded = false;
@@ -343,13 +331,26 @@ export class ReactAgent {
     let contextRecoveryRemaining = this.#contextRecoveryBudget;
     try {
       await this.#ensureLearnedPrompt(userInput);
-      if (this.#mcp && this.#turnMode === "default") this.#mcpSnapshot = await this.#mcp.ensureReady(signal);
-      if (this.#skills) this.#skillTurn = await this.#skills.prepareTurn(userInput);
       const goal = await this.#goalRuntime?.get();
       this.#goalPrompt = goal?.status === "active" ? `Active session goal: ${goal.objective}\nContinue until verified complete. Before completion, audit the objective and call update_goal with complete. Mark blocked only after the same blocker recurs for three consecutive goal turns.` : "";
       this.#history = repairToolContext(this.#history);
       await this.#record([{ role: "user", content: userInput }]);
       await runAgentLoop({
+        prepareStep: async () => {
+          if (this.#mcp && this.#turnMode === "default") {
+            this.#mcpSnapshot = await this.#mcp.ensureReady(signal);
+            const toolInfo = new Map<string, McpToolInfo>();
+            for (const tool of this.#mcpSnapshot.tools) {
+              const info = this.#mcp.toolInfo(tool.name);
+              if (info) toolInfo.set(tool.name, info);
+            }
+            this.#stepMcpToolInfo = toolInfo;
+          } else {
+            this.#mcpSnapshot = { tools: [], instructions: "", servers: [] };
+            this.#stepMcpToolInfo = new Map();
+          }
+          if (this.#skills) this.#skillTurn = await this.#skills.prepareTurn(userInput);
+        },
         sample: async () => {
           await this.#maybeAutoCompact(signal);
           try {
@@ -402,6 +403,8 @@ export class ReactAgent {
       } finally {
         this.#sampleController = undefined;
         this.#skillTurn = undefined;
+        this.#stepMcpToolInfo = new Map();
+        this.#mcpSnapshot = { tools: [], instructions: "", servers: [] };
         this.#running = false;
         this.#streamRecoveryRemaining = 0;
         this.#turnItems = undefined;
@@ -528,8 +531,9 @@ export class ReactAgent {
       this.#io.writeTool?.("Reading skill instructions");
       output = await this.#skills.read(call.arguments);
       this.#io.onToolProgress?.({ phase: "finished", name: call.name });
-    } else if (this.#turnMode !== "plan" && this.#mcp?.toolInfo(call.name)) {
-      const tool = this.#mcp.toolInfo(call.name)!;
+    } else if (this.#turnMode !== "plan" && this.#mcp && this.#stepMcpToolInfo.has(call.name)) {
+      const mcp = this.#mcp;
+      const tool = this.#stepMcpToolInfo.get(call.name)!;
       const detail = `${tool.serverName}/${tool.toolName} ${call.arguments}`;
       if (mcpPermission(policy) === "ask" && !(await this.#confirmTool(call.name, detail, () => this.#confirmMcp(detail)))) {
         signal?.throwIfAborted();
@@ -538,7 +542,7 @@ export class ReactAgent {
         signal?.throwIfAborted();
         this.#io.onToolProgress?.({ phase: "started", name: call.name, detail: `${tool.serverName}/${tool.toolName}` });
         this.#io.writeTool?.(`MCP tool: ${tool.serverName}/${tool.toolName}`);
-        output = await this.#mcp.call(call.name, call.arguments, signal);
+        output = await mcp.call(call.name, call.arguments, signal);
         this.#io.onToolProgress?.({ phase: "finished", name: call.name });
       }
     } else if (FILE_TOOL_DEFINITIONS.some((tool) => tool.name === call.name)) {
@@ -829,9 +833,7 @@ export class ReactAgent {
             () => { eventsSeen += 1; },
           );
         } catch (error) {
-          const adapter = this.#client.responses.recovery
-            ?? (this.#client.responses.recover === undefined ? undefined : { resume: this.#client.responses.recover.bind(this.#client.responses) })
-            ?? (this.#client.responses.resume === undefined ? undefined : { resume: this.#client.responses.resume.bind(this.#client.responses) });
+          const adapter = this.#client.responses.recovery;
           const state = error instanceof ResponseStreamIncompleteError
             ? (error as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState }).recoveryState
             : undefined;

@@ -24,6 +24,18 @@ Apache-2.0 许可证与改动归属位于 `third_party/codex/`，随构建包包
 
 请求层对连接、超时、限流、服务端和半截流错误默认最多重试两次，退避可取消；上下文超限和永久错误不进入普通重试。主循环请求关闭 SDK 内部重试，避免重试叠加。仅重试采样，不重跑此前工具；采样、stream recovery 和 context compaction 各自维护预算。`onPhase` 提供 sampling/tools/completed/cancelled/failed 扩展入口；`ReactAgent` 同实例拒绝并发 turn。
 
+
+## 优化路线边界
+
+item-level 执行只有在 provider 明确保证 `output_item.done` 顺序、durable record 和可恢复 cursor 时启用，否则继续当前 `response.completed` 后整批路径。step snapshot 已通过 `prepareStep` 落地：采样重试复用当前 snapshot，工具 follow-up 重新捕获 MCP/Skill 状态；dispatch 仍重新检查当前权限。并发仍需从工具名白名单迁移到保守能力声明和读写闸门，未明确证明无副作用的工具继续串行。
+
+benchmark 以固定 commit 的 15-20 个 coding task 建立 baseline；验证通过率是主指标，工具重复执行、未配对 function output、取消后的脏状态和 unsafe action 是阻断指标。hooks、MCP OAuth/elicitation/tasks、Plugin、远端 provider、多 Agent 和外部 app-server 不属于首轮 loop 优化，也不能以 no-op 或伪造成功方式提前暴露。
+
+## P0 实施状态
+
+已完成 P0 的低风险基线接入: `LoopEvent` 可报告 `response_rejected` 的 incomplete/invalid tool call 原因;benchmark collector 记录采样次数、响应拒绝、工具启动与结果闭合、结果顺序、批次数和首个工具启动延迟。上述数据只存在当前 benchmark 结果,不进入 Session JSONL。现有 loop 仍等待 `response.completed` 后执行工具,未启用 item-level 调度;需先用固定 coding task 集采集真实 provider baseline,再评估 P1。
+
+当前版本为 `0.2.18`;本轮仅更新工作区展示版本,不创建 tag 或远程 Release。完整测试 274 项中 273 项通过、1 项按平台跳过、0 项失败;类型检查、生产构建和 diff 检查通过。测试只证明模拟 Responses 与本地工具边界,不替代真实 provider、Windows Terminal 或 live benchmark smoke。
 ## 明确差异与后续优化
 
 上游是 Rust async runtime、流式 Responses 事件及多服务 Session；本地现在优先使用 Responses SSE。只有端点在尚未发出任何事件前明确拒绝 streaming 时，当前 Agent 才切换到 buffered `create`，并在该 Agent 生命周期内记住这个能力结果。连接中断、异常 EOF 和 `response.failed` 不会 fallback，而是按错误分类进行有界重试或失败。没有复制 Codex prompt、UI、账户登录或内部私有服务。

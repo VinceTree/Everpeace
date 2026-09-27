@@ -22,9 +22,19 @@ export interface BenchmarkMetricsCollector {
 export function createBenchmarkMetricsCollector(now: () => number = Date.now): BenchmarkMetricsCollector {
   const startedAt = now();
   const phases: LoopPhase[] = [];
+  const startedTools = new Set<string>();
+  const finishedTools = new Set<string>();
+  const toolResultOrder: string[] = [];
+  let samplingAttempts = 0;
   let responses = 0;
+  let responseRejections = 0;
+  let incompleteResponses = 0;
+  let invalidToolCalls = 0;
   let toolCalls = 0;
+  let toolResults = 0;
   let toolFailures = 0;
+  let toolBatches = 0;
+  let firstToolStartDelayMs: number | null = null;
   let retries = 0;
   let streamRecoveries = 0;
   let successfulStreamRecoveries = 0;
@@ -39,14 +49,31 @@ export function createBenchmarkMetricsCollector(now: () => number = Date.now): B
     },
     onEvent(event) {
       switch (event.type) {
+        case "sampling_started":
+          samplingAttempts += 1;
+          break;
         case "response_received":
           responses += 1;
           break;
-        case "tool_started":
-          toolCalls += 1;
+        case "response_rejected":
+          responseRejections += 1;
+          if (event.reason === "incomplete") incompleteResponses += 1;
+          if (event.reason === "invalid_tool_call") invalidToolCalls += 1;
           break;
+        case "tool_started": {
+          toolCalls += 1;
+          startedTools.add(event.call.call_id);
+          if (firstToolStartDelayMs === null) firstToolStartDelayMs = Math.max(0, now() - startedAt);
+          break;
+        }
         case "tool_finished":
+          toolResults += 1;
+          finishedTools.add(event.call.call_id);
+          toolResultOrder.push(event.call.call_id);
           if (isFailureOutput(event.output)) toolFailures += 1;
+          break;
+        case "tool_batch_started":
+          toolBatches += 1;
           break;
         case "retrying":
           retries += 1;
@@ -71,9 +98,18 @@ export function createBenchmarkMetricsCollector(now: () => number = Date.now): B
       return {
         durationMs: Math.max(0, end - startedAt),
         phases: [...phases],
+        samplingAttempts,
         responses,
+        responseRejections,
+        incompleteResponses,
+        invalidToolCalls,
         toolCalls,
+        toolResults,
+        unclosedToolCalls: [...startedTools].filter((callId) => !finishedTools.has(callId)).length,
         toolFailures,
+        toolBatches,
+        toolResultOrder: [...toolResultOrder],
+        firstToolStartDelayMs,
         retries,
         streamRecoveries,
         successfulStreamRecoveries,

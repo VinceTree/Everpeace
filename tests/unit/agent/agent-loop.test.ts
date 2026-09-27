@@ -74,6 +74,25 @@ test("sampling retry budget is shared across follow-up requests in one turn", as
   assert.equal(samples, 4);
 });
 
+test("prepares one immutable step across sampling retries and refreshes after follow-up tools", async () => {
+  let samples = 0;
+  let steps = 0;
+  const f = fixture({
+    async prepareStep() { steps++; },
+    async sample() {
+      samples++;
+      if (samples === 1) return { output: [call("a")], output_text: "" };
+      if (samples === 2) throw Object.assign(new Error("temporary"), { status: 503 });
+      return { output: [], output_text: "done" };
+    },
+    async dispatch() { return "ok"; },
+    retryDelayMs: 1,
+  });
+  await runAgentLoop(f.options);
+  assert.equal(samples, 3);
+  assert.equal(steps, 2);
+});
+
 test("nonretryable errors and exhausted retries fail instead of spinning", async () => {
   for (const status of [400, 401, 403, 503]) {
     let attempts = 0;
@@ -107,6 +126,29 @@ test("failed persistence prevents tool side effects and incomplete responses are
     async dispatch() { executed = true; return "ok"; } });
   await assert.rejects(runAgentLoop(incomplete.options), /incomplete/);
   assert.equal(executed, false);
+});
+
+test("incomplete and duplicate tool responses emit rejection diagnostics without execution", async () => {
+  const events: string[] = [];
+  let executions = 0;
+  const incomplete = fixture({
+    async sample() { return { output: [call("incomplete")], output_text: "", status: "incomplete" }; },
+    async dispatch() { executions += 1; return "unexpected"; },
+    onEvent(event) {
+      if (event.type === "response_rejected") events.push(event.reason);
+    },
+  });
+  await assert.rejects(runAgentLoop(incomplete.options), /incomplete/);
+  const duplicate = fixture({
+    async sample() { return { output: [call("same"), call("same")], output_text: "" }; },
+    async dispatch() { executions += 1; return "unexpected"; },
+    onEvent(event) {
+      if (event.type === "response_rejected") events.push(event.reason);
+    },
+  });
+  await assert.rejects(runAgentLoop(duplicate.options), /missing or duplicate/);
+  assert.equal(executions, 0);
+  assert.deepEqual(events, ["incomplete", "invalid_tool_call"]);
 });
 
 test("steering checkpoints skip unstarted tools and preserve every function output", async () => {

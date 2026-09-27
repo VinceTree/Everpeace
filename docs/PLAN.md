@@ -1,4 +1,59 @@
 # Everpeace Current Plan
+# Agent Loop 优化路线
+
+当前实现已经覆盖 Codex turn 的主要安全边界，但仍是“完整响应结束后统一执行工具”的简化适配。与上游可证据对比：Codex 在 `response.output_item.done` 后立即记录并排队工具 future；每个 follow-up 捕获独立的 step context；工具 runtime 通过共享读写闸门约束并发；turn 结束前综合 pending input、token budget、compaction 和 stop hooks。Everpeace 当前在 `response.completed` 后才把整批 function call 交给 `agent-loop.ts`，并发只由 `canRunInParallel` 的连续工具名判断，step context 由 `ReactAgent` 的当前 MCP/Skill 快照承担。
+
+## 优先级与阶段
+
+### P0：建立可比较的 loop 基线
+
+- **目标**：在修改协议前量化首个工具启动延迟、每轮采样次数、工具结果落盘顺序、取消收尾、重试/压缩次数和最终验证通过率。
+- **范围**：`src/agent/agent-loop.ts`、`src/agent/react-agent.ts`、`src/benchmark/metrics.ts`、`src/benchmark/types.ts`、`tests/unit/agent/agent-loop.test.ts` 及 benchmark adapter 测试。
+- **验收**：模拟 SSE、buffered、半截流、重复 call、工具失败、steering、取消和 context-limit；指标不进入 Session JSONL；默认串行工具的请求形状和安全结果保持不变。
+- **依赖/风险**：无协议改变，可先落地；没有真实 provider 数据前不以单次 benchmark 结果决定路由或自动策略。
+
+### P0 已完成
+
+- 已在 `LoopEvent` 中增加 `response_rejected` 诊断事件;不完整响应和缺失/重复 `call_id` 在任何工具执行前拒绝,保持副作用安全边界。
+- benchmark 内存指标已覆盖 sampling attempts、响应拒绝分类、工具启动/结果闭合、结果落盘顺序、并发批次数和首个工具启动延迟;指标不写入 Session JSONL。
+- 已补充 incomplete/duplicate 工具响应回归,并复用现有 SSE、buffered、半截流、stream recovery、取消和工具重试测试。
+- 定向 Agent/benchmark 测试通过后,再进入 item-level 工具执行前必须使用固定任务集采集 baseline;本轮未改变 provider 路由或工具执行时机。
+- 工作区展示号提升至 `0.2.18`;本轮只提交并推送代码,不创建 tag 或远程 Release。
+- 当前验证: `pnpm test` 为 274 项,273 通过、0 失败、1 项按平台跳过;`pnpm typecheck`、`pnpm build` 和 `git diff --check` 均通过。
+
+
+### P1：按 output item 建立工具边界
+
+- **目标**：在 provider 明确提供完整且有序的 `output_item.done` 事件时，先持久化已完成的非工具 item 或 function call，再启动对应工具，不等待整个 response 的其他 item；`response.completed` 仍是采样成功边界。
+- **范围**：`src/agent/react-agent.ts` 的 SSE consumer、`src/agent/agent-loop.ts` 的可选 item/future 接口、Responses 类型及 stream 回归测试。
+- **验收**：工具启动不早于对应 item 的 durable record；后续 item 或连接中断不会重复已记录/已执行工具；未收到 `response.completed` 时不发送 follow-up；不支持 item-level 执行的 buffered/provider 继续使用当前整批路径。
+- **依赖/风险**：需要明确 provider event 顺序和恢复 cursor 语义；任何无法证明顺序或恢复安全的端点必须退回当前整批执行，不能为了降低延迟牺牲幂等性。
+
+### P1：冻结每次 follow-up 的 step context（已完成）
+
+- **结果**：`runAgentLoop` 在每个采样 step 开始时调用 `prepareStep`；采样重试复用同一 snapshot，工具结果后的 follow-up 重新捕获 MCP/Skill 快照。
+- **范围**：`src/agent/agent-loop.ts`、`src/agent/react-agent.ts`、`tests/unit/agent/agent-loop.test.ts`。
+- **验收**：回归确认采样重试只准备一次，工具 follow-up 重新准备；MCP tool metadata 在 dispatch 时使用当前 step 的不可变映射；取消、拒绝和重试不会跨 snapshot 配对。
+- **边界**：权限仍在 dispatch 时重新检查；当前没有扩大 Session JSONL schema，也没有启用 item-level 工具执行。
+
+### P1：用能力声明替换隐式并发规则
+
+- **目标**：为工具声明只读、幂等、可并行和共享资源键，使用 Codex 风格的读写闸门；同资源写操作与读操作互斥，不同只读资源才允许并行，结果仍按模型顺序落盘。
+- **范围**：`src/agent/agent-loop.ts`、`src/agent/react-agent.ts` 工具目录、MCP tool metadata、`tests/unit/agent/agent-loop.test.ts`。
+- **验收**：`read_file`/`list_directory` 的现有安全并行回归继续通过；Bash、apply_patch、MCP 未明确声明时保持串行；混合读写、重复资源、stop、steering、取消和持久化失败均不丢 function output；默认 `parallelToolCalls=false` 不变。
+- **依赖/风险**：MCP server 声明不可信，不能单独授予本地文件或 shell 并发能力；无法证明无副作用时按串行处理。
+
+### P2：完整 turn 预算与可插拔扩展边界
+
+- **目标**：在前述状态机稳定后，再评估 pending input、token budget、stop/after hooks 和 provider-specific recovery 的组合语义；hooks 只作为显式能力，不改变现有完成/取消边界。
+- **范围**：`src/agent/agent-loop.ts`、`src/agent/react-agent.ts`、`docs/architecture/AGENT_LOOP.md`、针对预算/钩子的隔离测试。
+- **验收**：每个预算彼此隔离且可观测；compaction 不重复副作用工具；hook 阻止/继续有明确持久化输入；未实现能力不会以默认 no-op 或伪造成功暴露。
+- **依赖/风险**：依赖真实 provider 行为和前述 snapshot/stream 设计；在 benchmark baseline 前不引入多 Agent、外部 app-server 或完整 Codex runtime 重构。
+
+## Benchmark 门槛
+
+先固定 15-20 个有审核验证命令的 coding task，记录当前实现 baseline，再逐阶段比较：验证通过率为主指标，工具重复执行、未配对 output、取消后脏状态、unsafe action 和平均首个工具启动延迟为阻断指标。优化只有在不降低安全指标且对至少一类真实任务有稳定收益时进入下一阶段；provider capability 继续只记录观测事实，不自动路由。
+
 
 ## Model shell reliability
 

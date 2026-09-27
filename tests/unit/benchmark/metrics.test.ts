@@ -6,7 +6,11 @@ test("benchmark metrics collect loop reliability signals without changing loop e
   let clock = 100;
   const collector = createBenchmarkMetricsCollector(() => clock);
   collector.onPhase("sampling");
+  collector.onEvent({ type: "sampling_started" });
   collector.onEvent({ type: "response_received", response: { output: [], output_text: "" } });
+  collector.onEvent({ type: "response_rejected", reason: "incomplete" });
+  collector.onEvent({ type: "response_rejected", reason: "invalid_tool_call" });
+  collector.onEvent({ type: "tool_batch_started", calls: [] });
   collector.onEvent({ type: "tool_started", call: { type: "function_call", call_id: "a", name: "read_file", arguments: "{}" } });
   collector.onEvent({
     type: "tool_finished",
@@ -24,9 +28,18 @@ test("benchmark metrics collect loop reliability signals without changing loop e
   assert.deepEqual(collector.snapshot(), {
     durationMs: 75,
     phases: ["sampling", "cancelled"],
+    samplingAttempts: 1,
     responses: 1,
+    responseRejections: 2,
+    incompleteResponses: 1,
+    invalidToolCalls: 1,
     toolCalls: 1,
+    toolResults: 1,
+    unclosedToolCalls: 0,
     toolFailures: 1,
+    toolBatches: 1,
+    toolResultOrder: ["a"],
+    firstToolStartDelayMs: 0,
     retries: 1,
     streamRecoveries: 1,
     successfulStreamRecoveries: 1,
@@ -34,4 +47,5 @@ test("benchmark metrics collect loop reliability signals without changing loop e
     cancellations: 1,
     steeringApplications: 1,
   });
+
 });
