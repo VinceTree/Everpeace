@@ -24,6 +24,7 @@ P0 协议基线已完成：`LoopEvent` 报告 incomplete/invalid tool call；响
 - [x] P0：在 durable record 前拒绝无效或重复 function call 字段，工具副作用保持 fail-closed。
 - [x] P1：以 `readOnly`、`idempotent`、`parallelSafe`、`resourceKeys` 能力声明控制并发；共享资源键拆分批次，未知能力默认串行。
 - [x] P1 接入边界：仅内置文件/Skill 读取和同时声明 MCP read-only/idempotent 的工具可获得并发能力；Bash、patch、web、写 MCP 与工作流工具不变。
+- [x] 单 Agent workflow review checkpoint：完整验证成功后检查变更路径仍出现在 Git 状态；review 失败进入 `diagnose` 并把有界错误反馈给下一轮，未配置 review 时保持原有完成路径。
 - [ ] 后续：固定任务 manifest、真实 provider smoke 和 recovery cursor 证据不足前，不启用 `output_item.done` item-level 工具调度。
 
 ## 分阶段实施计划

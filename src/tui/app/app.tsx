@@ -374,25 +374,26 @@ export function EverpeaceApp({
   }, []);
 
   const ensureWorkflow = useCallback((initialState?: WorkflowState, workflowWorkspace = workspacePath): CodingWorkflowRuntime => {
+    const runtimeOptions = {
+      workspacePath: workflowWorkspace,
+      ...(initialState ? { initialState } : {}),
+      review: async (changedPaths: readonly string[], signal?: AbortSignal) => {
+        const inspection = await inspectWorkspace(workflowWorkspace, signal ? { signal } : {});
+        if (inspection.status === "error") return { passed: false, error: inspection.error ?? "Workspace review failed" };
+        const missing = changedPaths.filter((changedPath) => !inspection.git?.status.includes(changedPath));
+        return missing.length === 0
+          ? { passed: true }
+          : { passed: false, error: `Changed paths are not present in Git status: ${missing.join(", ")}` };
+      },
+      onState: async (state: WorkflowState) => {
+        const sessionId = activeSessionId.current;
+        if (sessionId) await dependencies.sessionStore.setWorkflow?.(sessionId, state);
+      },
+    };
     if (workflowRuntime.current?.workspacePath !== workflowWorkspace || initialState !== undefined) {
-      workflowRuntime.current = new CodingWorkflowRuntime({
-        workspacePath: workflowWorkspace,
-        ...(initialState ? { initialState } : {}),
-        onState: async (state) => {
-          const sessionId = activeSessionId.current;
-          if (sessionId) await dependencies.sessionStore.setWorkflow?.(sessionId, state);
-        },
-      });
+      workflowRuntime.current = new CodingWorkflowRuntime(runtimeOptions);
     }
-    if (!workflowRuntime.current) {
-      workflowRuntime.current = new CodingWorkflowRuntime({
-        workspacePath: workflowWorkspace,
-        onState: async (state) => {
-          const sessionId = activeSessionId.current;
-          if (sessionId) await dependencies.sessionStore.setWorkflow?.(sessionId, state);
-        },
-      });
-    }
+    if (!workflowRuntime.current) workflowRuntime.current = new CodingWorkflowRuntime(runtimeOptions);
     return workflowRuntime.current;
   }, [dependencies.sessionStore, workspacePath]);
 
@@ -1598,6 +1599,13 @@ export function EverpeaceApp({
           }
           if (nextMode === "plan") break;
           const workflowResult = await ensureWorkflow().finishTurn(executeVerification, controller.signal);
+          if (workflowResult.prompt && ensureWorkflow().state.phase === "diagnose") {
+            nextText = workflowResult.prompt;
+            nextMode = "default";
+            setLiveAssistant("");
+            setLiveToolStatus("Diagnosing workflow review");
+            continue;
+          }
           if (workflowResult.verification && !workflowResult.verification.passed && ensureWorkflow().state.phase === "diagnose") {
             nextText = verificationPrompt(workflowResult.verification);
             nextMode = "default";

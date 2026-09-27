@@ -36,6 +36,29 @@ test("workflow runs fast verification after a patch and full verification at tur
   });
 });
 
+test("workflow review runs after full verification and blocks completion on review failure", async () => {
+  await withWorkspace(async (workspace) => {
+    await fs.writeFile(path.join(workspace, "package.json"), JSON.stringify({ scripts: { typecheck: "tsc" } }), "utf8");
+    const reviews: string[][] = [];
+    const runtime = new CodingWorkflowRuntime({
+      workspacePath: workspace,
+      review: async (changedPaths) => {
+        reviews.push([...changedPaths]);
+        return { passed: false, error: "unreviewed change" };
+      },
+    });
+    await runtime.beginTurn();
+    const operations: ApplyPatchOperation[] = [{ path: "file.txt", action: "create", content: "change\n" }];
+    await runtime.capturePatch(operations);
+    const applied = await runApplyPatch(operations, workspace);
+    await runtime.afterPatch(operations, applied, async () => successfulBash());
+    const completed = await runtime.finishTurn(async () => successfulBash());
+    assert.equal(completed.state.phase, "diagnose");
+    assert.match(completed.prompt ?? "", /unreviewed change/u);
+    assert.deepEqual(reviews, [["file.txt"]]);
+  });
+});
+
 test("workflow enters diagnosis after a failed verification and bounds repairs", async () => {
   await withWorkspace(async (workspace) => {
     await fs.writeFile(path.join(workspace, "package.json"), JSON.stringify({ scripts: { typecheck: "tsc" } }), "utf8");

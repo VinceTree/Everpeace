@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { ApplyPatchOperation, ApplyPatchResult } from "../tools/apply-patch.js";
 import { TurnCheckpoint, type UndoResult } from "./checkpoint.js";
+import type { BashResult } from "../tools/bash.js";
 import { discoverVerificationCommands, runVerificationCommand, selectVerificationCommand, verificationPrompt } from "./verifier.js";
-import { createWorkflowState, type WorkflowPatchFollowup, type WorkflowRunResult, type WorkflowState } from "./types.js";
+import { createWorkflowState, type WorkflowPatchFollowup, type WorkflowReviewResult, type WorkflowRunResult, type WorkflowState, type VerificationCommand } from "./types.js";
 
 export interface WorkflowRuntimeOptions {
   workspacePath: string;
   initialState?: WorkflowState;
   onState?(state: WorkflowState): void | Promise<void>;
+  review?(changedPaths: readonly string[], signal?: AbortSignal): Promise<WorkflowReviewResult>;
   now?: () => string;
 }
 
@@ -20,15 +22,17 @@ export class CodingWorkflowRuntime {
   readonly #workspacePath: string;
   readonly #checkpoint: TurnCheckpoint;
   readonly #onState: ((state: WorkflowState) => void | Promise<void>) | undefined;
+  readonly #review: ((changedPaths: readonly string[], signal?: AbortSignal) => Promise<WorkflowReviewResult>) | undefined;
   readonly #now: () => string;
   #state: WorkflowState;
-  #commandsPromise: ReturnType<typeof discoverVerificationCommands> | undefined;
+  #commandsPromise: Promise<VerificationCommand[]> | undefined;
   #changed = false;
 
   constructor(options: WorkflowRuntimeOptions) {
     this.#workspacePath = options.workspacePath;
     this.#checkpoint = new TurnCheckpoint(options.workspacePath);
     this.#onState = options.onState;
+    this.#review = options.review;
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#state = options.initialState ?? createWorkflowState(randomUUID(), this.#now());
   }
@@ -58,7 +62,7 @@ export class CodingWorkflowRuntime {
   async afterPatch(
     operations: readonly ApplyPatchOperation[],
     result: ApplyPatchResult,
-    run: (command: string, signal?: AbortSignal, timeoutMs?: number) => Promise<import("../tools/bash.js").BashResult>,
+    run: (command: string, signal?: AbortSignal, timeoutMs?: number) => Promise<BashResult>,
     signal?: AbortSignal,
   ): Promise<WorkflowPatchFollowup> {
     if (result.status !== "applied") {
@@ -88,7 +92,7 @@ export class CodingWorkflowRuntime {
   }
 
   async finishTurn(
-    run: (command: string, signal?: AbortSignal, timeoutMs?: number) => Promise<import("../tools/bash.js").BashResult>,
+    run: (command: string, signal?: AbortSignal, timeoutMs?: number) => Promise<BashResult>,
     signal?: AbortSignal,
   ): Promise<WorkflowRunResult> {
     if (!this.#changed || this.#state.phase === "blocked") {
@@ -98,19 +102,36 @@ export class CodingWorkflowRuntime {
     await this.#set({ phase: "verify_full" });
     const commands = await (this.#commandsPromise ?? discoverVerificationCommands(this.#workspacePath));
     const command = selectVerificationCommand(commands, "full");
-    if (!command) {
-      await this.#set({ phase: "review" });
-      await this.#set({ phase: "done" });
-      return { state: this.state, changed: true };
-    }
+    if (!command) return this.#finishReview(signal, undefined);
     const verification = await runVerificationCommand(command, run, signal);
-    if (verification.passed) {
-      await this.#set({ phase: "review", last_verification: verification });
-      await this.#set({ phase: "done" });
+    if (!verification.passed) {
+      await this.#set({ phase: this.#nextFailurePhase(), last_verification: verification });
       return { state: this.state, verification, changed: true };
     }
-    await this.#set({ phase: this.#nextFailurePhase(), last_verification: verification });
-    return { state: this.state, verification, changed: true };
+    return this.#finishReview(signal, verification);
+  }
+
+  async #finishReview(signal: AbortSignal | undefined, verification: WorkflowRunResult["verification"]): Promise<WorkflowRunResult> {
+    await this.#set({ phase: "review", ...(verification ? { last_verification: verification } : {}) });
+    if (!this.#review) {
+      await this.#set({ phase: "done" });
+      return { state: this.state, ...(verification ? { verification } : {}), changed: true };
+    }
+    let review: WorkflowReviewResult;
+    try {
+      review = await this.#review(this.#state.changed_paths, signal);
+    } catch (error) {
+      review = { passed: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    if (!review.passed) {
+      const prompt = review.error
+        ? `Review failed: ${review.error}\n\nInspect the changed files, make a focused fix, and verify again.`
+        : "Review failed. Inspect the changed files, make a focused fix, and verify again.";
+      await this.#set({ phase: this.#nextFailurePhase() });
+      return { state: this.state, ...(verification ? { verification } : {}), review, prompt, changed: true };
+    }
+    await this.#set({ phase: "done" });
+    return { state: this.state, ...(verification ? { verification } : {}), review, changed: true };
   }
 
   async undo(): Promise<UndoResult> {

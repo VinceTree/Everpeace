@@ -48,9 +48,16 @@ export interface WorkflowPatchFollowup {
   prompt?: string;
 }
 
+export interface WorkflowReviewResult {
+  passed: boolean;
+  error?: string;
+}
+
 export interface WorkflowRunResult {
   state: WorkflowState;
   verification?: VerificationResult;
+  review?: WorkflowReviewResult;
+  prompt?: string;
   changed: boolean;
 }
 

@@ -6,6 +6,8 @@
 
 `workspace_status`、`workspace_diff` 和 `/diff` 只读 Git 状态。最新 Agent turn 的 `/undo` 使用内存检查点保存每个文件的 before 内容和 after SHA-256；恢复前必须确认当前内容仍等于 after SHA，用户改动的文件跳过并报告冲突。检查点不写入 Session JSONL，`/new`、`/clear`、`/resume` 和新一轮 turn 都会隔离它；Session 只追加 workflow 阶段、变更路径和最后一次验证结果等元数据，持久化验证事件不包含 stdout/stderr/error。
 
+完整验证成功后，生产 TUI 对当前变更路径执行只读 Git review checkpoint；review 只确认变更仍可见，不修改工作区、不自动提交。失败进入 `diagnose`，错误作为有界 workflow prompt 返回模型；review 未配置时 runtime 保持原有 `review -> done` 路径。该检查点不新增 Session JSONL 字段，仍只保存阶段和最后验证元数据。
+
 ## Shared sandbox process boundary and structured edits
 
 模型 Bash 与 Codex CLI JSON 请求必须共享同一条 bounded process executor，避免只在 `runCodexCli` 测试路径覆盖 Windows sandbox helper retry，而真实 Bash 仍绕过它。Windows sandbox helper setup/refresh/unknown 错误只允许一次重试，取消、超时和最终失败都保持 fail-closed，不得回退宿主 shell。
