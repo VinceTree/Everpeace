@@ -4,7 +4,7 @@
 
 已清理未接通的 item-level capability/recovery 草稿，恢复接口只保留已有 typed `recovery` adapter。新增与保留的回归覆盖 response rejection、重复/缺失 call_id、采样重试、SSE/buffered、stream recovery、取消、工具顺序、MCP dispatch 和 benchmark 指标。定向 Agent/benchmark 测试 54 项全部通过。
 
-本轮修复 learned-memory 回归中固定延时造成的异步写入竞态：测试现在等待真实 `capture.state === "succeeded"` 状态，不改变运行时行为。版本提升至 `0.2.18`；本轮只提交并推送代码，不创建 tag 或更新远程 Release。
+本轮修复 learned-memory 回归中固定延时造成的异步写入竞态：测试现在等待真实 `capture.state === "succeeded"` 状态，不改变运行时行为。版本提升至 `0.2.18`；提交 `f7f7b69` 已推送至 `origin/main`；本轮不创建 tag 或更新远程 Release。
 
 最终验证：`pnpm test` 为 274 项，273 通过、0 失败、1 项按平台跳过；`pnpm typecheck`、`pnpm build` 和 `git diff --check` 均通过。
 
