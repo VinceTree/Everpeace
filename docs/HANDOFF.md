@@ -8,7 +8,7 @@
 
 剩余与 Codex 的有意差异：等待 `response.completed` 后批量执行工具；未接入完整 pending-input/token-budget/stop hooks、MCP OAuth/elicitation/tasks、managed policy、plugins、远端 provider 和多 Agent。固定 benchmark manifest、真实 provider smoke 和 Windows Terminal smoke 仍是 item-level 执行前置条件。
 
-本轮完成：验证取消直接终止当前 turn，不生成修复 prompt；所有本地自动检查通过。未提交或推送，等待用户明确要求。
+本轮取消边界修复已提交并推送：`b442287`（`fix: preserve workflow cancellation semantics`）。随后将展示版本从 `0.2.20` 提升至 `0.2.21`，不创建 tag、不更新远程 Release；版本变更待验证后提交推送。
 
 
 # 最新执行：benchmark 基线准备
