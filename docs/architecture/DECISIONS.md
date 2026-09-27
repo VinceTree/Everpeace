@@ -38,6 +38,8 @@ Provider capability profile 只记录已观察的模型能力和 context window�
 
 Agent Loop 可靠性预算彼此隔离：普通采样重试默认最多两次，provider event-cursor 续接和 context compaction 各使用独立的一次性预算；半截 SSE 永不写入 context 或执行工具，续接失败回退到有界整轮重试。并行工具采用能力标记而非工具名泛化，默认 `parallelToolCalls=false`，显式开启后仅 `read_file`、`list_directory`、`read_skill` 可组成连续批次。批次同时执行但按模型调用顺序持久化，guidance/stop 等待整批结果落盘，副作用工具和审批永不自动并行。批次、续接和 retry 分类事件只供当前 UI/诊断使用，不扩展 Session JSONL schema。
 
+Agent Loop 的正常 follow-up sampling step 使用独立预算，默认每个 turn 最多 32 个逻辑 step；同一 step 内的网络重试、stream recovery 和 context compaction 不重复消耗该预算。达到上限时发出 `step_limit_reached` 诊断事件并以失败结束，不执行额外采样、不伪造完成，也不新增 Session JSONL 事件。该边界参考 xAI 官方 function-calling 示例中的显式 step count 停止模式；不代表已验证 Grok Build 的内部 runtime。
+
 
 ## 有界历史显示
 

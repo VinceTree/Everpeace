@@ -1,3 +1,14 @@
+## 最新执行：Agent Loop step budget 与快照边界
+
+状态快照：2026-09-27。本轮为正常 follow-up sampling 增加独立 step budget：默认每个 turn 最多 32 个逻辑 step，`ReactAgentOptions.maxSteps` 可配置；同一 step 的采样重试复用 `prepareStep` 的 MCP/Skill snapshot，工具 follow-up 才刷新 snapshot。达到上限发出 `step_limit_reached` 诊断事件并失败，不执行额外采样、不伪造完成、不新增 Session JSONL 事件。
+
+新增无限成功工具 follow-up 回归，验证 `maxSteps: 2` 时只采样两步并抛出上限错误；回归也覆盖 step 内重试不重复 prepare、工具后刷新 snapshot。修复过程中恢复了 `ReactAgent` 的 `onPhase`、`onEvent`、Skill/MCP 初始化和 `signal` 转发，避免诊断事件、渐进 Skill 读取及取消语义回归。
+
+已验证：取消回归 1 项通过；Agent Loop/ReactAgent 定向测试 54 项通过；完整测试 280 项，279 通过、0 失败、1 项按平台跳过；`pnpm typecheck`、`pnpm build` 已通过；`git diff --check` 仅有 Windows 换行转换警告。未跟踪的 `.patch-node-pty/`、`benchmark/`、`question/`、`test-me/`、`tests/unit/codex/` 和 `{}` 未修改。
+
+与 Codex/Grok Build 的有意差异保持不变：`response.completed` 后批量工具执行；未接入完整 pending-input/token-budget/stop hooks、MCP OAuth/elicitation/tasks、managed policy、plugins、远端 provider 和多 Agent。真实 provider、Windows Terminal、固定 benchmark manifest 仍未验证。
+
+
 # 最新执行：Agent Loop 与 coding workflow 取消边界
 
 状态快照：2026-09-27。本轮审计当前 workflow 与 pinned Codex turn/stream/tool 边界，确认核心 loop 仍保持 `response.completed`、durable record、工具结果顺序、采样预算、取消和持久化 fail-closed 语义；未启用未经 provider 证据支持的 item-level 工具执行。

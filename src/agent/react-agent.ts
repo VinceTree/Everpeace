@@ -161,6 +161,7 @@ export interface ReactAgentOptions {
   promptCacheOptions?: PromptCacheOptions;
   parallelToolCalls?: boolean;
   samplingRetryBudget?: number;
+  maxSteps?: number;
   streamRecoveryBudget?: number;
   contextRecoveryBudget?: number;
   web?: WebToolExecutor;
@@ -280,6 +281,7 @@ export class ReactAgent {
   #streamRecoveryRemaining = 0;
   readonly #parallelToolCalls: boolean;
   readonly #samplingRetryBudget: number;
+  readonly #maxSteps: number;
   readonly #streamRecoveryBudget: number;
   readonly #contextRecoveryBudget: number;
 
@@ -295,6 +297,7 @@ export class ReactAgent {
     this.#advancedPromptCacheEnabled = options.promptCacheOptions !== undefined;
     this.#parallelToolCalls = options.parallelToolCalls === true;
     this.#samplingRetryBudget = Math.max(0, options.samplingRetryBudget ?? 2);
+    this.#maxSteps = Math.max(1, Math.floor(options.maxSteps ?? 32));
     this.#streamRecoveryBudget = Math.max(0, options.streamRecoveryBudget ?? 1);
     this.#contextRecoveryBudget = Math.max(0, options.contextRecoveryBudget ?? 1);
     this.#web = options.web ?? createWebToolExecutor();
@@ -375,11 +378,12 @@ export class ReactAgent {
           assistantTexts.push(text);
           this.#io.writeAssistant(text);
         },
-        applySteering: () => this.#applyPendingSteering(),
-        ...(signal ? { signal } : {}),
         ...(this.#onPhase ? { onPhase: this.#onPhase } : {}),
         ...(this.#onEvent ? { onEvent: this.#onEvent } : {}),
+        applySteering: () => this.#applyPendingSteering(),
+        ...(signal ? { signal } : {}),
         retryBudgets: { sampling: this.#samplingRetryBudget },
+        maxSteps: this.#maxSteps,
         ...(this.#parallelToolCalls
           ? {
               toolCapabilities: (call: ToolCall) => {

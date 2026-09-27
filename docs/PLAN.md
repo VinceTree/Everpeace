@@ -19,6 +19,8 @@ P0 协议基线已完成：`LoopEvent` 报告 incomplete/invalid tool call；响
 
 这些验证证明当前整批执行路径的安全不变量，不证明真实 provider 的 item event 或 cursor 语义。现有 `src/benchmark` 只保留为隔离评测基础设施；没有固定任务 manifest 和真实 provider 数据前，不用 benchmark 结果推动协议改变，也不实现 item-level 调度。
 
+本轮新增正常 follow-up step budget：`runAgentLoop` 默认每个 turn 最多 32 个逻辑 sampling step，`ReactAgentOptions.maxSteps` 可覆盖。网络重试在同一 step 内复用 MCP/Skill snapshot，不重复消耗 step；工具执行完成后才进入下一 step。达到上限发出 `step_limit_reached` 诊断事件并失败结束，不执行额外采样、不伪造完成、不新增 Session JSONL 事件。该控制面与 xAI 官方 function-calling 示例中显式 step count 的停止模式一致，但不声称 Grok Build 内部实现已验证。
+
 ## 本轮已落实
 
 - [x] P0：在 durable record 前拒绝无效或重复 function call 字段，工具副作用保持 fail-closed。

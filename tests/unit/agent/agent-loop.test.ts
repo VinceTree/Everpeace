@@ -74,6 +74,23 @@ test("sampling retry budget is shared across follow-up requests in one turn", as
   assert.equal(samples, 4);
 });
 
+test("follow-up step budget stops successful infinite tool loops", async () => {
+  let samples = 0;
+  const events: string[] = [];
+  const f = fixture({
+    maxSteps: 2,
+    onEvent(event) { if (event.type === "step_limit_reached") events.push(`${event.type}:${event.maxSteps}`); },
+    async sample() {
+      samples += 1;
+      return { output: [call(`call-${samples}`)], output_text: "working" };
+    },
+    async dispatch() { return "ok"; },
+  });
+  await assert.rejects(runAgentLoop(f.options), /maximum of 2 sampling steps/);
+  assert.equal(samples, 2);
+  assert.deepEqual(events, ["step_limit_reached:2"]);
+});
+
 test("prepares one immutable step across sampling retries and refreshes after follow-up tools", async () => {
   let samples = 0;
   let steps = 0;

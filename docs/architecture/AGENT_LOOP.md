@@ -24,6 +24,8 @@ Apache-2.0 许可证与改动归属位于 `third_party/codex/`，随构建包包
 
 请求层对连接、超时、限流、服务端和半截流错误默认最多重试两次，退避可取消；上下文超限和永久错误不进入普通重试。主循环请求关闭 SDK 内部重试，避免重试叠加。仅重试采样，不重跑此前工具；采样、stream recovery 和 context compaction 各自维护预算。`onPhase` 提供 sampling/tools/completed/cancelled/failed 扩展入口；`ReactAgent` 同实例拒绝并发 turn。
 
+正常 follow-up sampling step 另有独立上限：默认每个 turn 32 个逻辑 step，可由 `ReactAgentOptions.maxSteps` 覆盖。step 内的采样重试复用同一 `prepareStep` 快照；工具结果完成后才清除快照并为下一 step 重新获取 MCP/Skill 状态。达到上限发送 `step_limit_reached` 诊断事件并抛错，既不继续采样也不写入伪造完成记录。该预算与采样重试、stream recovery、context compaction 分离，且不扩展 Session JSONL schema。
+
 
 ## 优化路线边界
 

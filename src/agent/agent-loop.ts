@@ -40,6 +40,7 @@ export type LoopEvent =
   | { type: "tool_batch_finished"; calls: ToolCall[]; outputs: string[] }
   | { type: "stream_recovery_started" }
   | { type: "stream_recovery_finished"; success?: boolean }
+  | { type: "step_limit_reached"; maxSteps: number }
   | { type: "compaction_started"; automatic: boolean }
   | { type: "compaction_completed"; automatic: boolean; usage: TokenUsageSample | null };
 
@@ -69,6 +70,7 @@ export interface AgentLoopOptions {
   prepareStep?(): Promise<void>;
   applySteering?(): Promise<number>;
   maxRetries?: number;
+  maxSteps?: number;
   retryDelayMs?: number;
   retryBudgets?: {
     sampling?: number;
@@ -152,16 +154,27 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
     total: Math.max(0, options.retryBudgets?.sampling ?? options.maxRetries ?? 2),
   };
   try {
+    const maxSteps = Math.max(1, Math.floor(options.maxSteps ?? 32));
+    let steps = 0;
+    let stepPrepared = false;
     while (true) {
       signal?.throwIfAborted();
-      await options.prepareStep?.();
+      if (steps >= maxSteps) {
+        options.onEvent?.({ type: "step_limit_reached", maxSteps });
+        throw new Error(`Agent turn exceeded the maximum of ${maxSteps} sampling steps`);
+      }
+      if (!stepPrepared) {
+        steps += 1;
+        await options.prepareStep?.();
+        stepPrepared = true;
+      }
       options.onPhase?.("sampling");
-      options.onEvent?.({ type: "sampling_started" });
       let response: LoopResponse;
       try {
         response = await sample(options, samplingBudget);
       } catch (error) {
         if (error instanceof LoopSteeredError) {
+          stepPrepared = false;
           const count = await options.applySteering?.() ?? 0;
           if (count > 0) options.onEvent?.({ type: "steering_applied", count });
           continue;
@@ -290,6 +303,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
         options.onPhase?.("completed");
         return;
       }
+      stepPrepared = false;
       const needsFollowUp = calls.length > 0 || response.end_turn === false;
       if (!needsFollowUp) {
         options.onPhase?.("completed");
