@@ -158,6 +158,14 @@ Responses usage 中的 `input_tokens_details.cached_tokens` 与 `cache_write_tok
 - /terminal-setup 仅支持已识别的稳定版 Windows Terminal 设置路径。用户确认后备份并追加 Shift+Enter sendInput LF，不覆盖已有绑定；提示全局影响。Preview/其他安装布局暂不自动配置。
 - pnpm 对 node-pty 1.1.0 应用局部补丁：处理关闭控制台时进程枚举竞争，并在自然退出后释放输入 socket 和 conout worker。使用 pnpm 安装本仓库以应用补丁；发布前需另验打包安装，普通 npm 下游安装不会自动继承根项目 pnpm 补丁。
 
+## Agent loop 对齐路线
+
+当前采用保守的 `response.completed` 后整批工具执行：响应必须先持久化，半截或失败响应、缺失/重复 `call_id` 不得启动工具。后续只有在 provider 明确证明 `output_item.done` 顺序、durable record 与 recovery cursor 安全时，才允许 capability-gated item-level 执行；未知端点继续现有路径。
+
+并发能力从工具名白名单迁移到显式 `read_only`、`idempotent`、`parallel_safe` 和资源键；未声明工具串行，MCP 元数据不单独授予本地并发权限。结果按模型顺序持久化，取消、steering、stop 和持久化失败不得留下未配对 function output。
+
+benchmark 只作为协议变更证据，不是自动路由或近期重构理由。hooks、完整 MCP lifecycle、Plugin/远端 provider、多 Agent 和外部 app-server 维持明确未实现边界，不用 no-op 或伪造成功暴露。
+
 ## 维护约束
 
 - Agent 主循环采用 Codex 核心控制流程的 TypeScript 适配，位于 `agent-loop.ts`；`ReactAgent` 保留为供应商/工具/持久化适配层。逐工具结果持久化，主请求重试由循环控制，明确不等同完整 Codex runtime。来源和差异见 `AGENT_LOOP.md`。

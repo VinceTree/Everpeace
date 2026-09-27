@@ -1,3 +1,22 @@
+# 最新执行：Agent Loop 路线规划与版本更新
+
+状态快照：2026-09-27。本轮完成 Agent Loop 与上游 Codex turn/stream/tool runtime 的差异分析，明确 P0/P1 实施边界；同步展示版本至 `0.2.19`。本轮尚未创建 tag、更新 Release 或改变运行时协议。
+
+当前关键差异：Everpeace 在 `response.completed` 后记录并整批执行 function call；Codex 可在 `output_item.done` 后记录并排队工具 future。Everpeace 的并发仍依赖少数只读工具白名单，缺少共享资源读写闸门；step snapshot 已通过 `prepareStep` 落地；pending input、token budget、stop/after hooks、完整 MCP lifecycle、Plugin/远端 provider 和多 Agent 仍未移植。
+
+决策：先保持现有 durable-record 和 function-output 配对不变量；下一实现阶段是工具能力声明与共享资源闸门。item-level 执行后置，只有在真实 provider 明确证明 item 顺序、durable record 与 recovery cursor 安全，并完成固定任务 manifest smoke 后才启用。benchmark 保留为隔离证据工具，不再作为近期开发主线，也不用于自动路由。
+
+下一步：先运行 P0/P1 相关验证，再在不改变默认串行语义的前提下，为内置工具定义 `read_only`、`idempotent`、`parallel_safe` 和资源键，补同资源读写互斥、不同只读资源并行、MCP/Bash/patch/web 默认串行及取消/steering/落盘失败回归。
+
+
+# 最新执行：benchmark 基线准备
+
+状态快照：2026-09-27。本轮未改变 Agent loop 或工具执行协议。已运行本地 no-op adapter smoke：`runBenchmarkTask` 成功完成一次 adapter attempt，验证命令退出码为 0，phase、前后 Git workspace snapshot 和结果状态均正常记录。
+
+当前仍没有可直接执行的 15-20 项 coding task 清单：仓库未提供同时具备固定 commit、审核验证命令和受信任准备步骤的任务 manifest；用户提供的未跟踪 `benchmark/` 目录是源码材料，不能据此推导公开 issue 任务或真实模型成绩。真实 provider、Windows Terminal 和 live benchmark baseline 仍未验证。
+
+下一步：准备并审核固定任务 manifest 与临时 clone/worktree 流程，再接入真实 provider adapter；在此之前保持 `response.completed` 后整批工具执行，不实现 P1 item-level 调度。
+
 # 最新执行：P0 基线、step snapshot 与协议回归
 
 状态快照：2026-09-27。本轮完成 P0 loop 基线和 follow-up step snapshot。`runAgentLoop` 在每个采样 step 开始调用 `prepareStep`；采样重试复用同一 snapshot，工具结果后的 follow-up 重新捕获 MCP/Skill 状态；dispatch 仍重新检查当前权限。运行时继续在 `response.completed` 后统一执行工具，item-level 工具执行未启用。
