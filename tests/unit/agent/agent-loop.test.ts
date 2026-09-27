@@ -151,6 +151,18 @@ test("incomplete and duplicate tool responses emit rejection diagnostics without
   assert.deepEqual(events, ["incomplete", "invalid_tool_call"]);
 });
 
+test("invalid function call fields are rejected before any tool runs", async () => {
+  let executions = 0;
+  const f = fixture({
+    async sample() {
+      return { output: [{ type: "function_call", call_id: "a", name: "bash" }], output_text: "" };
+    },
+    async dispatch() { executions += 1; return "unexpected"; },
+  });
+  await assert.rejects(runAgentLoop(f.options), /invalid fields/);
+  assert.equal(executions, 0);
+});
+
 test("steering checkpoints skip unstarted tools and preserve every function output", async () => {
   let samples = 0;
   let steer = false;
@@ -245,4 +257,23 @@ test("parallel batches stop at unsafe calls and preserve later serial work", asy
   });
   await runAgentLoop(f.options);
   assert.deepEqual(order, ["a", "b", "c"]);
+});
+
+test("capability resource conflicts split parallel batches", async () => {
+  const batches: string[][] = [];
+  const f = fixture({
+    async sample() {
+      return batches.length === 0
+        ? { output: [call("a"), call("b"), call("c")], output_text: "" }
+        : { output: [], output_text: "done" };
+    },
+    toolCapabilities() {
+      return { readOnly: true, idempotent: true, parallelSafe: true, resourceKeys: ["same"] };
+    },
+    onEvent(event) {
+      if (event.type === "tool_batch_started") batches.push(event.calls.map((item) => item.call_id));
+    },
+  });
+  await runAgentLoop(f.options);
+  assert.deepEqual(batches, [["a"], ["b"], ["c"]]);
 });

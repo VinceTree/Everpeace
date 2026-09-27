@@ -381,7 +381,21 @@ export class ReactAgent {
         ...(this.#onEvent ? { onEvent: this.#onEvent } : {}),
         retryBudgets: { sampling: this.#samplingRetryBudget },
         ...(this.#parallelToolCalls
-          ? { canRunInParallel: (call: ToolCall) => call.name === "read_file" || call.name === "list_directory" || call.name === READ_SKILL_TOOL_DEFINITION.name }
+          ? {
+              toolCapabilities: (call: ToolCall) => {
+                if (call.name === "read_file" || call.name === "list_directory") {
+                  return { readOnly: true, idempotent: true, parallelSafe: true, resourceKeys: [] };
+                }
+                if (call.name === READ_SKILL_TOOL_DEFINITION.name) {
+                  return { readOnly: true, idempotent: true, parallelSafe: true, resourceKeys: [] };
+                }
+                const info = this.#stepMcpToolInfo.get(call.name);
+                if (info?.annotations?.readOnlyHint === true && info.annotations.idempotentHint === true) {
+                  return { readOnly: true, idempotent: true, parallelSafe: true, resourceKeys: [`mcp:${info.serverName}`] };
+                }
+                return undefined;
+              },
+            }
           : {}),
       });
       if (this.#learnedMemory) {

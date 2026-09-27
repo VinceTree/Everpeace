@@ -1,6 +1,6 @@
 {
   "name": "everpeace",
-  "version": "0.2.19",
+  "version": "0.2.20",
   "description": "A sandboxed terminal ReAct agent with persistent sessions, MCP, skills, and web access.",
   "type": "module",
   "bin": {

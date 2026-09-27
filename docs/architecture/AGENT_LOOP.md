@@ -31,6 +31,12 @@ Apache-2.0 许可证与改动归属位于 `third_party/codex/`，随构建包包
 
 benchmark 只用于协议变更前建立证据，不是当前实现的替代品。hooks、多 Agent、完整 MCP lifecycle、Plugin/远端 provider 和外部 app-server 不属于首轮 loop 优化，也不能用 no-op 或伪造成功暴露。并发工具后续从工具名白名单迁移到保守能力声明和读写闸门；未明确证明无副作用的工具继续串行。
 
+## 工具能力与并发准入
+
+`runAgentLoop` 可接收可选的 `toolCapabilities`，声明 `readOnly`、`idempotent`、`parallelSafe` 和 `resourceKeys`。只有前三项均为真且批次内资源键不冲突时才允许并发；未知能力或共享资源键保持串行。旧的 `canRunInParallel` 仅作为兼容回调，在没有能力声明时使用，不改变默认串行语义。ReactAgent 只为内置只读文件/Skill 读取及 MCP 同时标记 read-only、idempotent 的工具声明能力。
+
+function call 仍先完整校验并 durable record，再 dispatch；无效或重复 call_id、缺少 name/arguments 的响应在落盘和副作用前拒绝。这是当前 `response.completed` 批处理模型的安全边界，不等价于 Codex 的 `output_item.done` item-level 调度。
+
 ## P0 实施状态
 
 P0 协议基线已完成：`LoopEvent` 可报告 `response_rejected`；incomplete/failed 响应、重复/缺失 `call_id`、SSE/buffered、半截流、stream recovery、取消、steering、工具顺序和结果配对均有回归。采样重试、stream recovery、context compaction 各自维护预算；结果不进入 Session JSONL。现有 loop 仍等待 `response.completed` 后执行工具，未启用 item-level 调度。

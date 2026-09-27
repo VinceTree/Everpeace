@@ -19,6 +19,13 @@ P0 协议基线已完成：`LoopEvent` 报告 incomplete/invalid tool call；响
 
 这些验证证明当前整批执行路径的安全不变量，不证明真实 provider 的 item event 或 cursor 语义。现有 `src/benchmark` 只保留为隔离评测基础设施；没有固定任务 manifest 和真实 provider 数据前，不用 benchmark 结果推动协议改变，也不实现 item-level 调度。
 
+## 本轮已落实
+
+- [x] P0：在 durable record 前拒绝无效或重复 function call 字段，工具副作用保持 fail-closed。
+- [x] P1：以 `readOnly`、`idempotent`、`parallelSafe`、`resourceKeys` 能力声明控制并发；共享资源键拆分批次，未知能力默认串行。
+- [x] P1 接入边界：仅内置文件/Skill 读取和同时声明 MCP read-only/idempotent 的工具可获得并发能力；Bash、patch、web、写 MCP 与工作流工具不变。
+- [ ] 后续：固定任务 manifest、真实 provider smoke 和 recovery cursor 证据不足前，不启用 `output_item.done` item-level 工具调度。
+
 ## 分阶段实施计划
 
 ### P0：守住现有整批路径（当前阶段）

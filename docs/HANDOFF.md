@@ -1,12 +1,14 @@
-# 最新执行：Agent Loop 路线规划与版本更新
+# 最新执行：Agent Loop P0/P1 安全门控
 
-状态快照：2026-09-27。本轮完成 Agent Loop 与上游 Codex turn/stream/tool runtime 的差异分析，明确 P0/P1 实施边界；同步展示版本至 `0.2.19`。本轮尚未创建 tag、更新 Release 或改变运行时协议。
+状态快照：2026-09-27。本轮完成 Agent Loop 与上游 Codex turn/stream/tool runtime 的差异分析，并落实 P0/P1 的保守安全改进；同步展示版本提升至 `0.2.20`，未创建 tag、Release 或改变外部运行时协议。
 
-当前关键差异：Everpeace 在 `response.completed` 后记录并整批执行 function call；Codex 可在 `output_item.done` 后记录并排队工具 future。Everpeace 的并发仍依赖少数只读工具白名单，缺少共享资源读写闸门；step snapshot 已通过 `prepareStep` 落地；pending input、token budget、stop/after hooks、完整 MCP lifecycle、Plugin/远端 provider 和多 Agent 仍未移植。
+P0：`runAgentLoop` 现在在 durable record 前拒绝缺失/重复 `call_id`、缺失名称或非字符串 arguments 的 function call，确保无效响应不会触发工具副作用。P1：并发准入支持 `readOnly`、`idempotent`、`parallelSafe` 和 `resourceKeys` 能力；共享资源键的调用拆分为独立批次。未知能力仍不并行，默认 `parallelToolCalls` 关闭时保持串行。
 
-决策：先保持现有 durable-record 和 function-output 配对不变量；下一实现阶段是工具能力声明与共享资源闸门。item-level 执行后置，只有在真实 provider 明确证明 item 顺序、durable record 与 recovery cursor 安全，并完成固定任务 manifest smoke 后才启用。benchmark 保留为隔离证据工具，不再作为近期开发主线，也不用于自动路由。
+ReactAgent 仅为内置文件读取、Skill 读取和同时声明 MCP `readOnlyHint`/`idempotentHint` 的工具提供并行能力；Bash、patch、web、MCP 写工具和工作流工具保持默认串行。当前仍未移植 item-level `output_item.done` 调度、pending input/token budget/stop hooks、完整 MCP lifecycle、Plugin/远端 provider 和多 Agent。
 
-下一步：先运行 P0/P1 相关验证，再在不改变默认串行语义的前提下，为内置工具定义 `read_only`、`idempotent`、`parallel_safe` 和资源键，补同资源读写互斥、不同只读资源并行、MCP/Bash/patch/web 默认串行及取消/steering/落盘失败回归。
+验证：Agent Loop 定向测试 15 项通过，`pnpm typecheck` 通过；完整测试、build、真实 Windows Terminal 和 live provider smoke 待本轮收尾执行。
+
+下一步：运行完整回归并更新架构/计划文档；只有在固定任务 manifest 和真实 provider smoke 证明 durable record、顺序及 recovery cursor 安全后，才评估 item-level 工具执行。
 
 
 # 最新执行：benchmark 基线准备

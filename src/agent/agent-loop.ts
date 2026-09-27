@@ -49,6 +49,14 @@ export class LoopSteeredError extends Error {
     this.name = "LoopSteeredError";
   }
 }
+export interface ToolCapabilities {
+  readOnly: boolean;
+  idempotent: boolean;
+  parallelSafe: boolean;
+  resourceKeys: readonly string[];
+}
+
+export type ToolCapabilityResolver = (call: ToolCall) => ToolCapabilities | undefined;
 
 export interface AgentLoopOptions {
   sample(): Promise<LoopResponse>;
@@ -67,7 +75,28 @@ export interface AgentLoopOptions {
     streamRecovery?: number;
     compaction?: number;
   };
+  toolCapabilities?(call: ToolCall): ToolCapabilities | undefined;
   canRunInParallel?(call: ToolCall): boolean;
+}
+
+function canRunInParallel(options: AgentLoopOptions, call: ToolCall): boolean {
+  const capabilities = options.toolCapabilities?.(call);
+  if (capabilities) return capabilities.readOnly && capabilities.idempotent && capabilities.parallelSafe;
+  return options.canRunInParallel?.(call) === true;
+}
+
+function resourcesCanShare(options: AgentLoopOptions, batch: readonly ToolCall[], candidate: ToolCall): boolean {
+  const resolver = options.toolCapabilities;
+  if (!resolver) return true;
+  const candidateCapabilities = resolver(candidate);
+  if (!candidateCapabilities) return true;
+  for (const existing of batch) {
+    const existingCapabilities = resolver(existing);
+    if (!existingCapabilities) continue;
+    const shared = existingCapabilities.resourceKeys.some((key) => candidateCapabilities.resourceKeys.includes(key));
+    if (shared) return false;
+  }
+  return true;
 }
 
 export function classifySamplingError(error: unknown): SamplingErrorCategory {
@@ -147,8 +176,12 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
       const calls = response.output.filter((item) => item.type === "function_call");
       const ids = new Set<string>();
       for (let callIndex = 0; callIndex < calls.length; callIndex++) {
-        const call = calls[callIndex]! as ToolCall;
-        if (typeof call.call_id !== "string" || !call.call_id || ids.has(call.call_id)) {
+        const call = calls[callIndex]! as Partial<ToolCall>;
+        if (typeof call.call_id !== "string" || !call.call_id || typeof call.name !== "string" || !call.name || typeof call.arguments !== "string") {
+          options.onEvent?.({ type: "response_rejected", reason: "invalid_tool_call" });
+          throw new Error("Tool call has invalid fields");
+        }
+        if (ids.has(call.call_id)) {
           options.onEvent?.({ type: "response_rejected", reason: "invalid_tool_call" });
           throw new Error("Tool call has a missing or duplicate call_id");
         }
@@ -170,12 +203,12 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
       let stopAfterTools = false;
       for (let callIndex = 0; callIndex < calls.length; callIndex++) {
         const call = calls[callIndex]! as ToolCall;
-        const parallel = options.canRunInParallel?.(call) === true;
+        const parallel = canRunInParallel(options, call);
         if (parallel) {
           const batch: ToolCall[] = [];
           for (let index = callIndex; index < calls.length; index++) {
             const candidate = calls[index] as ToolCall;
-            if (options.canRunInParallel?.(candidate) !== true) break;
+            if (!canRunInParallel(options, candidate) || !resourcesCanShare(options, batch, candidate)) break;
             batch.push(candidate);
           }
           options.onEvent?.({ type: "tool_batch_started", calls: batch });
