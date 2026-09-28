@@ -15,6 +15,7 @@ import {
   type TokenUsageSample,
 } from "../status/model-status.js";
 import type { WorkflowPhase, WorkflowState, VerificationResult } from "../workflow/types.js";
+import type { LearnedMemoryPolicy } from "../memory/learned-memory.js";
 
 const SESSION_FORMAT_VERSION = 1;
 
@@ -73,6 +74,7 @@ export interface SessionSummary {
   model: SessionModelRef;
   goal?: SessionGoal;
   workflow?: WorkflowState;
+  memory_policy?: LearnedMemoryPolicy;
 }
 
 export interface LoadedSession {
@@ -82,6 +84,7 @@ export interface LoadedSession {
   usage: SessionUsage;
   goal?: SessionGoal;
   workflow?: WorkflowState;
+  memoryPolicy?: LearnedMemoryPolicy;
 }
 
 export interface SessionListResult {
@@ -125,6 +128,7 @@ export interface SessionStoreLike {
   setGoal(sessionId: string, goal: SessionGoal): Promise<void>;
   updateGoal(sessionId: string, patch: Partial<Pick<SessionGoal, "status" | "tokens_used" | "usage_complete" | "time_used_seconds" | "blocked_streak" | "updated_at">>): Promise<void>;
   setWorkflow?(sessionId: string, workflow: WorkflowState): Promise<void>;
+  setMemoryPolicy?(sessionId: string, policy: LearnedMemoryPolicy): Promise<void>;
 }
 
 interface EventBase {
@@ -185,6 +189,11 @@ interface WorkflowUpdatedEvent extends EventBase {
   workflow: WorkflowState;
 }
 
+interface MemoryPolicyUpdatedEvent extends EventBase {
+  type: "memory_policy_updated";
+  policy: LearnedMemoryPolicy;
+}
+
 type SessionEvent =
   | SessionCreatedEvent
   | TitleUpdatedEvent
@@ -194,7 +203,8 @@ type SessionEvent =
   | ModelSelectedEvent
   | UsageRecordedEvent
   | GoalUpdatedEvent
-  | WorkflowUpdatedEvent;
+  | WorkflowUpdatedEvent
+  | MemoryPolicyUpdatedEvent;
 
 export interface SessionStoreOptions {
   directory?: string;
@@ -366,6 +376,13 @@ function parseEvent(value: unknown): SessionEvent {
     };
   }
 
+  if (value.type === "memory_policy_updated") {
+    if (!isRecord(value.policy) || typeof value.policy.readExisting !== "boolean" || typeof value.policy.captureFuture !== "boolean") {
+      throw new Error("Session memory policy is invalid");
+    }
+    return { ...base, type: "memory_policy_updated", policy: { readExisting: value.policy.readExisting, captureFuture: value.policy.captureFuture } };
+  }
+
   throw new Error(`Unsupported session event type: ${value.type}`);
 }
 
@@ -462,6 +479,7 @@ function parseSession(contents: string, filePath: string): LoadedSession {
 
   let goal: SessionGoal | undefined;
   let workflow: WorkflowState | undefined;
+  let memoryPolicy: LearnedMemoryPolicy | undefined;
   for (const event of events.slice(1)) {
     updatedAt = event.at;
     if (event.type === "title_updated") {
@@ -484,6 +502,7 @@ function parseSession(contents: string, filePath: string): LoadedSession {
     }
     if (event.type === "goal_updated") goal = { ...event.goal };
     if (event.type === "workflow_updated") workflow = { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
+    if (event.type === "memory_policy_updated") memoryPolicy = { ...event.policy };
   }
 
   return {
@@ -497,12 +516,14 @@ function parseSession(contents: string, filePath: string): LoadedSession {
       model,
       ...(goal ? { goal } : {}),
       ...(workflow ? { workflow } : {}),
+      ...(memoryPolicy ? { memory_policy: memoryPolicy } : {}),
     },
     timeline,
     context,
     usage,
     ...(goal ? { goal } : {}),
     ...(workflow ? { workflow } : {}),
+    ...(memoryPolicy ? { memoryPolicy } : {}),
   };
 }
 
@@ -659,6 +680,15 @@ export class SessionStore implements SessionStoreLike {
       type: "workflow_updated",
       at: this.#now().toISOString(),
       workflow: workflowSnapshot(workflow),
+    });
+  }
+
+  setMemoryPolicy(sessionId: string, policy: LearnedMemoryPolicy): Promise<void> {
+    return this.#append(sessionId, {
+      version: SESSION_FORMAT_VERSION,
+      type: "memory_policy_updated",
+      at: this.#now().toISOString(),
+      policy: { ...policy },
     });
   }
 

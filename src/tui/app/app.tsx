@@ -909,9 +909,12 @@ export function EverpeaceApp({
       "Reading memory snapshot",
     );
     try {
-      const text = dependencies.getMemoryPrompt
-        ? await dependencies.getMemoryPrompt(workspacePath)
-        : "Memory is unavailable in this integration.";
+      const snapshot = agent?.getMemorySnapshot?.();
+      const text = snapshot
+        ? `Snapshot ${snapshot.revision} loaded ${snapshot.loadedAt}\n\n${snapshot.text || "No learned experience was injected."}`
+        : dependencies.getMemoryPrompt
+          ? await dependencies.getMemoryPrompt(workspacePath)
+          : "Memory is unavailable in this integration.";
       if (!isCurrentCommandOperation(operation)) return;
       replaceCommandView(infoView(
         "/memory view · Injected experience",
@@ -925,7 +928,7 @@ export function EverpeaceApp({
         "error",
       ));
     }
-  }, [dependencies, isCurrentCommandOperation, replaceCommandView, startCommandLoad, workspacePath]);
+  }, [agent, dependencies, isCurrentCommandOperation, replaceCommandView, startCommandLoad, workspacePath]);
 
   const toggleMemory = useCallback((enabled: boolean) => {
     void (async () => {
@@ -943,10 +946,15 @@ export function EverpeaceApp({
   }, [dependencies, replaceCommandView, showMemory]);
 
   const updateMemoryPolicy = useCallback((patch: Partial<LearnedMemoryPolicy>) => {
-    setMemoryPolicy((current) => ({ ...current, ...patch }));
+    const next = { ...memoryPolicy, ...patch };
+    setMemoryPolicy(next);
     agent?.setMemoryPolicy?.(patch);
+    const sessionId = activeSessionId.current;
+    if (sessionId) void dependencies.sessionStore.setMemoryPolicy?.(sessionId, next).catch((error: unknown) => {
+      appendTransient("error", `Memory policy save failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
     void showMemory(false);
-  }, [agent, showMemory]);
+  }, [agent, appendTransient, dependencies.sessionStore, memoryPolicy, showMemory]);
 
   const clearMemory = useCallback((scope: LearnedScope) => {
     void (async () => {
@@ -1128,6 +1136,7 @@ export function EverpeaceApp({
           setActiveModel(model);
           setAgentMode("default");
           setActiveGoal(loaded.goal);
+          setMemoryPolicy(loaded.memoryPolicy ?? { readExisting: true, captureFuture: true });
           setWorkspacePath(restoredWorkspace);
           setSessionEpoch((current) => current + 1);
           setInputKey((current) => current + 1);
@@ -1293,6 +1302,7 @@ export function EverpeaceApp({
         setSessionUsage(createEmptySessionUsage());
         setAgentMode("default");
         setActiveGoal(undefined);
+        setMemoryPolicy({ readExisting: true, captureFuture: true });
         setResumedInputHistory(undefined);
         historyNavigationRef.current = { index: undefined, draft: "" };
         setSessionEpoch((current) => current + 1);
@@ -1324,6 +1334,7 @@ export function EverpeaceApp({
     resumeGoalPending.current = false;
     setAgentMode("default");
     setActiveGoal(undefined);
+    setMemoryPolicy({ readExisting: true, captureFuture: true });
     const banner: TimelineEntry = {
       id: nextId.current++,
       kind: "banner",
@@ -1589,12 +1600,18 @@ export function EverpeaceApp({
           const started = Date.now();
           const result = await agent.runTurn(nextText, controller.signal, { mode: nextMode }) ?? {};
           if (result.stopReason) {
+            await agent.finishMemoryTurn?.("stopped");
             setLiveAssistant("");
             const sessionId = activeSessionId.current;
             if (sessionId) setActiveGoal((await dependencies.sessionStore.load(sessionId)).goal);
-            append("system", result.stopReason === "budget_limited"
+            const stoppedMessage = result.stopReason === "budget_limited"
               ? "Goal token budget reached. Work stopped before further tools or model requests."
-              : "Goal usage could not be measured reliably. Work stopped before further tools or model requests.");
+              : result.stopReason === "usage_limited"
+                ? "Goal usage could not be measured reliably. Work stopped before further tools or model requests."
+                : result.stopReason === "step_limit"
+                  ? "Agent step limit reached. Work stopped without reporting completion."
+                  : "Agent turn deadline reached. Work stopped without reporting completion.";
+            append("system", stoppedMessage);
             break;
           }
           if (result.planDecision === "approve") {
@@ -1610,6 +1627,7 @@ export function EverpeaceApp({
           if (nextMode === "plan") break;
           const workflowResult = await ensureWorkflow().finishTurn(executeVerification, controller.signal);
           if (workflowResult.prompt && ensureWorkflow().state.phase === "diagnose") {
+            await agent.finishMemoryTurn?.("failed");
             nextText = workflowResult.prompt;
             nextMode = "default";
             setLiveAssistant("");
@@ -1617,12 +1635,14 @@ export function EverpeaceApp({
             continue;
           }
           if (workflowResult.verification && !workflowResult.verification.passed && ensureWorkflow().state.phase === "diagnose") {
+            await agent.finishMemoryTurn?.("failed");
             nextText = verificationPrompt(workflowResult.verification);
             nextMode = "default";
             setLiveAssistant("");
             setLiveToolStatus(`Diagnosing ${workflowResult.verification.command.label}`);
             continue;
           }
+          await agent.finishMemoryTurn?.(ensureWorkflow().state.phase === "done" ? "verified" : "unverified");
           const sessionId = activeSessionId.current;
           if (!sessionId) break;
           let goal = (await dependencies.sessionStore.load(sessionId)).goal;
@@ -1639,6 +1659,7 @@ export function EverpeaceApp({
           setLiveToolStatus("Continuing active goal");
         }
       } catch (error) {
+        await agent.finishMemoryTurn?.(controller.signal.aborted ? "cancelled" : "failed").catch(() => undefined);
         if (controller.signal.aborted) {
           const sessionId = activeSessionId.current;
           if (mode === "default" && sessionId) {

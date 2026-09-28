@@ -250,6 +250,20 @@ test("session files written before title_pending default to a completed title", 
   }
 });
 
+test("session memory policy round-trips while legacy sessions keep defaults external", async () => {
+  const fixture = await createFixture();
+  try {
+    const created = await fixture.store.create({ title: "memory", titlePending: false, workspacePath: "C:\\repo", model });
+    assert.equal((await fixture.store.load(created.id)).memoryPolicy, undefined);
+    await fixture.store.setMemoryPolicy(created.id, { readExisting: false, captureFuture: true });
+    const loaded = await fixture.store.load(created.id);
+    assert.deepEqual(loaded.memoryPolicy, { readExisting: false, captureFuture: true });
+    assert.deepEqual(loaded.summary.memory_policy, loaded.memoryPolicy);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("session store loads usage totals, context resets, and legacy status snapshots", async () => {
   const fixture = await createFixture();
   try {

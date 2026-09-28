@@ -349,7 +349,7 @@ test("plan mode can use enabled web tools without approval", async () => {
   assert.equal(requests, 2);
 });
 
-test("agent loads learned memory once and captures a completed substantive turn", async () => {
+test("agent refreshes learned memory per step and captures only after verification", async () => {
   const instructions: string[] = [];
   const prompts: string[] = [];
   const captures: unknown[] = [];
@@ -384,12 +384,75 @@ test("agent loads learned memory once and captures a completed substantive turn"
     io: { async confirmBash() { return false; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
   });
   await agent.runTurn("inspect the repository");
+  assert.equal(captures.length, 0);
+  await agent.finishMemoryTurn("verified");
   await agent.runTurn("continue");
-  assert.equal(loadCount, 1);
+  await agent.finishMemoryTurn("verified");
+  assert.equal(loadCount, 3);
   assert.equal(captures.length, 2);
   assert.match(instructions[0]!, /Prefer the existing test style/u);
   assert.match(prompts[1]!, /README\.md/u);
   assert.equal((captures[0] as { toolCallCount: number }).toolCallCount, 1);
+});
+
+test("a failed new turn cannot finalize stale learning material from an earlier turn", async () => {
+  const outcomes: unknown[] = [];
+  let requests = 0;
+  const learnedMemory = {
+    async loadPrompt() { return ""; },
+    scheduleCapture() {},
+    async finishTurn(turn: unknown, outcome: unknown) { outcomes.push({ turn, outcome }); },
+    async remember() {},
+    async status() { return { enabled: true, projectEntries: 0, userEntries: 0, recent: [] }; },
+    async setEnabled() {},
+    async clear() {},
+  };
+  const agent = new ReactAgent({
+    model: "test",
+    samplingRetryBudget: 0,
+    learnedMemory,
+    client: { responses: { async create() {
+      requests += 1;
+      if (requests === 1) return { id: "done", output_text: "Completed", output: [] };
+      throw new Error("fixture sampling failure");
+    } } },
+    io: { async confirmBash() { return false; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+  await agent.runTurn("first turn");
+  await assert.rejects(agent.runTurn("second turn"), /fixture sampling failure/u);
+  await agent.finishMemoryTurn("failed");
+  assert.deepEqual(outcomes, []);
+});
+
+test("disabled memory reading removes lookup from the tool snapshot and rejects dispatch", async () => {
+  let requests = 0;
+  let lookups = 0;
+  const learnedMemory = {
+    async loadPrompt() { return ""; },
+    isReadEnabled() { return false; },
+    getPolicy() { return { readExisting: true, captureFuture: true }; },
+    async lookup() { lookups += 1; return undefined; },
+    scheduleCapture() {},
+    async remember() {},
+    async status() { return { enabled: false, projectEntries: 0, userEntries: 0, recent: [] }; },
+    async setEnabled() {},
+    async clear() {},
+  };
+  const agent = new ReactAgent({
+    model: "test",
+    learnedMemory,
+    client: { responses: { async create(params) {
+      requests += 1;
+      assert.equal((params.tools as Array<{ name?: string }>).some((tool) => tool.name === "memory_lookup"), false);
+      if (requests === 1) return { id: "lookup", output_text: "", output: [{ type: "function_call", name: "memory_lookup", call_id: "memory-1", arguments: '{"id":"fixture-id"}' }] };
+      const output = params.input as Array<Record<string, unknown>>;
+      assert.match(String(output.find((item) => item.type === "function_call_output")?.output), /denied/u);
+      return { id: "done", output_text: "done", output: [] };
+    } } },
+    io: { async confirmBash() { return false; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+  await agent.runTurn("do not use memory");
+  assert.equal(lookups, 0);
 });
 
 test("agent confirms, runs Bash, and returns its output to the model", async () => {

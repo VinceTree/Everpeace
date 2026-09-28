@@ -38,7 +38,7 @@ Provider capability profile 只记录已观察的模型能力和 context window�
 
 Agent Loop 可靠性预算彼此隔离：普通采样重试默认最多两次，provider event-cursor 续接和 context compaction 各使用独立的一次性预算；半截 SSE 永不写入 context 或执行工具，续接失败回退到有界整轮重试。并行工具采用能力标记而非工具名泛化，默认 `parallelToolCalls=false`，显式开启后仅 `read_file`、`list_directory`、`read_skill` 可组成连续批次。批次同时执行但按模型调用顺序持久化，guidance/stop 等待整批结果落盘，副作用工具和审批永不自动并行。批次、续接和 retry 分类事件只供当前 UI/诊断使用，不扩展 Session JSONL schema。
 
-Agent Loop 的正常 follow-up sampling step 使用独立预算，默认每个 turn 最多 32 个逻辑 step；同一 step 内的网络重试、stream recovery 和 context compaction 不重复消耗该预算。达到上限时发出 `step_limit_reached` 诊断事件并以失败结束，不执行额外采样、不伪造完成，也不新增 Session JSONL 事件。该边界参考 xAI 官方 function-calling 示例中的显式 step count 停止模式；不代表已验证 Grok Build 的内部 runtime。
+Agent Loop 的正常 follow-up sampling step 使用独立预算，默认每个 turn 最多 32 个逻辑 step；同一 step 内的网络重试、stream recovery 和 context compaction 不重复消耗该预算。达到上限时发出 `step_limit_reached` 并返回结构化 `step_limit`；可选的正整数 `maxTurnDurationMs` 到期时返回 `deadline_exceeded`。两类受限停止都禁止额外工具、采样、workflow 修复和 Goal 续跑，不伪造完成，也不新增 Session JSONL 事件。该边界参考 xAI 官方 function-calling 示例中的显式 step count 停止模式；不代表已验证 Grok Build 的内部 runtime。
 
 
 ## 有界历史显示
@@ -72,12 +72,14 @@ Git Skill 来源采用 shallow、no-checkout 克隆：先读取有界 Git tree �
 
 ## Learned 经验记忆
 
-- Learned 经验与 Session JSONL 分离，写入平台应用状态目录：项目条目按规范化工作区路径哈希隔离，用户条目单独保存；不会自动修改仓库文件。
-- 正常完成且有实质内容的轮次才进入后台提炼。生产运行时 capture 等待 session idle grace period，取消、失败、trivial turn 和关闭当前聊天 capture 的轮次不写入；显式 `/memory remember` 可直接写入用户偏好。
-- 新 Agent 实例只在第一次模型请求前读取一次 learned 快照；刚写入的经验不反灌当前 prompt。注入内容被包裹为不可信背景，当前用户指令、工具结果和仓库状态优先。
-- Markdown 条目包含兼容旧文件的 id、kind、confidence、status、evidence 和来源 session metadata；写入/读取两侧均做秘密脱敏、提示标签中和、去重及 100 条上限。召回按当前问题、项目范围、状态、置信度和新鲜度评分，并受独立字符预算限制，不再无条件注入全部条目。
-- 全局 automatic learning 开关与当前聊天的 `readExisting` / `captureFuture` 策略分离；当前聊天策略只影响当前 Agent，不写入 Session JSONL。`/memory` 支持查看/切换两项策略、归档最新条目和清理范围。所有 UI 操作仍是 transient，不进入 timeline、Session JSONL 或模型 context。
-- Learned memory 只提供不可信 recall，不替代 `AGENTS.md`、项目文档、当前用户指令、权限策略、Session context 或 Responses compaction。
+- Learned 经验与对话 context 分离，写入平台应用状态目录：项目条目按规范化工作区路径哈希隔离，用户条目单独保存；不会自动修改仓库文件。详细格式和生命周期见 [MEMORY.md](./MEMORY.md)。
+- 每个逻辑 step 按当前问题和已访问文件生成不可变 `MemorySnapshot`；普通网络重试复用该快照，工具 follow-up 或 guidance 后重新检索。`/memory view` 只显示最近一次实际注入的 revision、加载时间和内容。
+- 只有 workflow 验证成功或用户明确要求长期记忆的轮次进入持久队列。生产运行时等待五分钟真实空闲；前台 turn 会暂停后台请求，任务可跨 Agent 重建和进程重启恢复，使用租约、去重键、单并发、每次最多五项、60 秒超时和最多两次重试。
+- 后台先提取最多三条带来源候选，再做确定性去重与冲突检查；有多条可合并候选时才调用模型提出合并，程序校验后写入 Markdown。无法可靠判断的冲突保持 review，不进入 active 召回；旧 Markdown 继续作为 legacy 来源。
+- 输入先结构化脱敏再裁剪，输出再次脱敏；覆盖 JSON 凭据字段、Bearer/token 和完整或不完整 PEM。长期条目保留完整时间与证据，active 配额按 scope 限制为 100，归档和候选不挤占该配额；读改写使用跨进程锁与原子替换。
+- 全局开关同时控制读取和自动学习；当前聊天的 `readExisting` / `captureFuture` 策略通过兼容性 `memory_policy_updated` 事件随 Session 保存和恢复。关闭读取会使下一次请求刷新为空快照并撤下 `memory_lookup`，关闭捕获会取消待处理任务并阻止迟到结果回写。
+- 召回使用中文双字片段、英文、路径和标识符匹配，按完整条目装入字符预算。主 prompt 只包含短索引；只读 `memory_lookup` 可按 ID 查看当前 scope 内的脱敏详情，Plan 模式也可使用。
+- Memory 模型 usage 单独显示，缺失时标记 unknown，不计入前台 context 占用或 Goal 预算。Learned memory 只提供不可信 recall，不替代 `AGENTS.md`、项目文档、当前用户指令、权限策略、Session context 或 Responses compaction。
 
 ## Plan 与 Goal
 

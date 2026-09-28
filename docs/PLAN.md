@@ -95,7 +95,7 @@ benchmark 只用于在协议变更前建立证据，不是当前实现路线的�
 
 模型明确返回 context-limit 错误时，当前 turn 最多额外调用一次原生 compaction 并恢复采样；普通 400 不触发压缩，压缩失败不重试。SSE 必须收到 `response.completed`，能力拒绝只在首个事件前回退 buffered；网络中断、异常 EOF 和半截响应不执行工具，按现有两次采样重试边界处理。
 
-Agent Loop 平衡优化：采样错误现在按连接、超时、限流、服务端、半截流、上下文超限和永久错误分类，采样、stream recovery、context compaction 预算彼此隔离。Responses client 可显式提供 event-cursor recovery adapter；成功续接只返回一个完整响应，失败回到有界整轮重试。`parallelToolCalls` 默认关闭，只有显式开启时才发送 `parallel_tool_calls: true`，并只允许 `read_file`、`list_directory`、`read_skill` 进入按原始调用顺序落盘的并行批次；Bash、MCP、网页、审批和 Goal/Plan 写操作保持串行。
+Agent Loop 平衡优化：采样错误现在按连接、超时、限流、服务端、半截流、上下文超限和永久错误分类，采样、stream recovery、context compaction 预算彼此隔离。Responses client 可显式提供 event-cursor recovery adapter；成功续接只返回一个完整响应，失败回到有界整轮重试。`parallelToolCalls` 默认关闭，只有显式开启时才发送 `parallel_tool_calls: true`；`read_file`、`list_directory`、`read_skill` 使用有界滑动任务池并按原始顺序落盘，Bash、MCP、网页、审批和 Goal/Plan 写操作保持串行屏障。`step_limit` 与可选 `deadline_exceeded` 使用结构化停止结果，并记录不含内容的采样、退避、压缩和工具耗时。
 
 ## Prompt cache
 
@@ -115,7 +115,7 @@ Agent Loop 平衡优化：采样错误现在按连接、超时、限流、服务
 
 ## Learned 经验记忆
 
-已接入独立的 learned memory：实质且正常完成的回合在 idle grace period 后由当前模型后台提炼项目经验；显式长期偏好进入用户级文档。经验存放在平台应用状态目录，不进入 Session JSONL 或仓库；新 Agent 实例首轮按当前问题召回相关条目，并以不可信背景注入。条目包含兼容旧 Markdown 的 metadata、来源 evidence、状态和置信度，召回使用可解释的本地评分与字符预算，不引入远程后端或向量检索。`/memory` 提供全局暂停/恢复、当前聊天读写策略、归档最新条目、分别清理和显式记忆入口。
+已接入独立的 learned memory 两阶段本地流水线：workflow 验证后的轮次先形成带来源候选，再确定性去重、冲突审查并按需调用普通模型合并，最后写入兼容旧格式的 Markdown。任务持久化并在五分钟真实空闲后单并发运行，支持重启恢复、租约回收、幂等提交、取消和存储代次防迟到回写。每个逻辑 step 按问题、中文/英文词、路径和实际访问文件刷新 `MemorySnapshot`，普通网络重试复用快照；主 prompt 注入短索引，只读 `memory_lookup` 按 ID 提供脱敏证据详情。聊天级读写策略随 Session JSONL 保存，Memory usage 独立展示，不引入远程后端或向量检索。详细边界见 `architecture/MEMORY.md`。
 
 ## 实时 Agent 进度与运行中纠正
 

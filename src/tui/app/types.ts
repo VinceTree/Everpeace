@@ -16,6 +16,8 @@ import type {
   LearnedMemoryPolicy,
   LearnedMemoryStatus,
   LearnedScope,
+  LearnedTurnOutcome,
+  MemorySnapshot,
 } from "../../memory/learned-memory.js";
 import type {
   StatusSnapshot,
@@ -29,6 +31,8 @@ export interface AgentSession {
   requestSteering?(text: string): boolean;
   setMemoryPolicy?(policy: Partial<LearnedMemoryPolicy>): void;
   getMemoryPolicy?(): LearnedMemoryPolicy | undefined;
+  getMemorySnapshot?(): MemorySnapshot | undefined;
+  finishMemoryTurn?(outcome: LearnedTurnOutcome): Promise<void>;
 }
 
 export interface AgentRestoreOptions {

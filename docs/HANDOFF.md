@@ -1,3 +1,15 @@
+## 最新执行：Agent Loop 有界任务池与 learned memory 生命周期
+
+状态快照：2026-09-28。Agent Loop 的安全读取并行从固定整批等待改为滑动有界任务池，保留默认串行、`maxParallelTools=4`、原始顺序持久化及写操作/MCP/审批串行屏障。新增可选 `maxTurnDurationMs`，step 上限和期限分别返回 `step_limit`、`deadline_exceeded`；TUI 对两者停止 workflow 修复和 Goal 自动续跑，不报告完成。循环事件新增不含请求内容的 sampling、retry delay、compaction、tool wait 和 tool execution 耗时，结果携带 step 数和轮次耗时。
+
+Learned memory 已改为每个逻辑 step 刷新的 `MemorySnapshot`，普通网络重试复用、guidance 和工具 follow-up 刷新；召回支持中文片段、路径、标识符及本轮实际访问文件，并按完整条目装入预算。`/memory view` 显示最近一次实际注入内容；聊天读写策略通过兼容性 `memory_policy_updated` 事件随 Session 保存和恢复，全局开关明确同时控制读取与学习。只读 `memory_lookup` 在 Default/Plan 中按 ID 提供脱敏详情，关闭读取时从工具快照撤下并在 dispatch 再次拒绝。
+
+后台学习从 Agent 内单 timer 改为共享 runtime 的持久任务队列：workflow 验证后调用 `finishTurn`，生产等待五分钟真实空闲，前台 `beginTurn` 暂停后台工作；队列单并发、每次最多五项、60 秒超时、最多两次重试，支持去重、租约和重启恢复。提取最多三条带来源候选，确定性检查重复与冲突，多条非冲突候选按 project/user 作用域分别请求模型合并并保留证据；review 候选不进入 active memory。新轮次会先清除尚未结算的旧学习材料，失败不能错误提交前一轮结果。Markdown 保持旧格式兼容并增加完整时间，读改写使用跨进程锁和原子替换；输入先脱敏再裁剪、输出再次脱敏，覆盖 JSON 凭据、Bearer/token 和不完整 PEM。Memory 模型 usage 单独显示，缺失时标记 unknown。
+
+新增回归覆盖滑动窗口、期限、结构化停止、按 step 刷新、全局/聊天读取关闭、连续轮次持久队列、重启恢复、未验证结果、跨作用域合并、中文召回、时间往返、JSON/PEM 脱敏、冲突待审及 Session policy。架构说明见 `docs/architecture/AGENT_LOOP.md` 与 `docs/architecture/MEMORY.md`。展示版本保持 `0.2.22`；交付提交使用 `[skip ci]`，不创建 tag 或更新远程 Release。
+
+验证结果：Windows Node 22 下完整 `pnpm test` 最终复跑为 312 项，311 通过、0 失败、1 项按平台跳过；`pnpm typecheck` 与 `pnpm build` 通过。针对本次文件的 `git diff --check` 通过；全工作区检查仅报告用户已有 `.gitignore` 与 `LICENSE` 的 CRLF 换行差异，未改动这两项或其他既有未跟踪内容。
+
 ## 最新执行：Agent Loop 交叉边界与有界调度
 
 状态快照：2026-09-28。本轮按已批准计划完成三批改动，保持单 Agent、默认串行、兼容端点及 `response.completed` 后整批执行工具。

@@ -105,7 +105,7 @@ TUI 使用原生 inline 模式，普通滚轮可以浏览已完成的 Everpeace 
 
 第一次普通提问会创建本地 JSONL session。Everpeace 会保存对话记录和继续聊天所需的模型上下文，同时在后台单独调用当前模型，根据第一次提问生成简短名称。带信息或选择界面的 slash command 会打开独立临时窗口，隐藏 banner、历史、输入框和全局状态栏。命令窗口水平、垂直居中，最大宽度 80 列，并在窄终端自动缩小、保留安全边距。按 `Esc` 后原子重放并返回同一个 session，窗口内容不会加入历史。直接 `!` 命令的输出仍属于可恢复记录。`/new` 会立即创建并进入一个空 session，第一次提问后再替换临时名称。`/resume` 会按名称和最后活动时间列出本机全部 session，恢复原模型、原工作目录及上下文，并继续追加到同一个文件。Windows 下 session 默认保存在 `%APPDATA%\Everpeace\sessions`。
 
-Everpeace 还会维护独立的 learned 经验记忆。每次有实质内容且正常完成的对话在短暂 idle grace period 后，当前模型会在后台提炼可复用的项目经验；只有用户明确表达长期偏好时才写入用户级记忆。记忆位于平台应用状态目录（Windows 为 `%APPDATA%\Everpeace\memory`），不会写入仓库，只在新 Agent 实例的第一次请求中按当前问题召回相关条目，并作为不可信背景注入。条目会脱敏、去重、记录来源和状态，并受召回预算限制；当前用户指令和实际仓库证据始终优先。
+Everpeace 还会维护独立的 learned 经验记忆。workflow 验证完成并真实空闲五分钟后，当前模型可在后台提取最多三条带证据候选并整理无冲突经验；持久队列可跨 Agent 重建和进程重启恢复，前台工作会暂停后台请求。只有用户明确表达长期偏好时才写入用户级记忆。记忆位于平台应用状态目录（Windows 为 `%APPDATA%\Everpeace\memory`），不会写入仓库。每个逻辑 Agent step 都会根据当前问题和实际读取文件刷新带 revision 的快照，网络重试复用该快照；主 prompt 只注入不可信短索引，只读 `memory_lookup` 可按 ID 查看脱敏证据。输入在裁剪前脱敏，输出在保存前再次脱敏，无法可靠判断的冲突保留待审；当前用户指令和实际仓库证据始终优先。
 
 `/status` 会打开居中的独立 Codex 风格命令窗口，只显示状态详情和 `Esc` 返回提示。它显示当前模型、根据 `base_url` 识别的供应商、接口地址、工作目录、Session ID、当前 context 占用，以及主 Responses API 循环累计的输入/输出 token、prompt cache 读取量、写入量和命中率。Usage 总量会随 session 持久化并由 `/resume` 恢复，但状态窗口本身不会加入 transcript；恢复后再次执行 `/status` 即可查看累计值。后台标题请求不计入统计。prompt cache 只对官方 OpenAI endpoint 使用按 Session ID 生成的 key；GPT-5.6 及以后型号额外使用隐式缓存与 `30m` TTL，并发送会话亲和性 header。其他兼容端点不会额外发送缓存参数；provider 没有返回缓存详情时显示 `N/A`。已知官方 model ID 使用文档公布的 context 上限，未知型号和自定义兼容端点显示 `N/A`，不会猜测。
 
@@ -127,7 +127,7 @@ TUI 命令：
 - `/permissions`：选择只读、逐条审批、工作区写入或完全访问模式，开关网页工具，并保存用户/项目命令策略。
 - `/mcp`：重新加载 Codex MCP 配置、连接已启用服务器并查看 tool/resource/prompt 状态。
 - `/skills`：创建、安装、查看并显式调用本地 Skills。
-- `/memory`：查看 learned 经验、暂停/恢复自动积累、切换当前聊天是否读取或记录 memory、归档或清理条目、使用 `/memory view` 查看实际注入快照，或使用 `/memory remember <偏好>` 保存长期用户偏好。
+- `/memory`：查看 learned 经验和独立的 Memory 模型用量、全局启用或关闭读取与自动学习、切换当前聊天是否读取或记录 memory、归档或清理条目、使用 `/memory view` 查看最近一次实际注入快照，或使用 `/memory remember <偏好>` 保存长期用户偏好。聊天策略会随 Session 恢复。
 - `/plan`：进入严格只读规划模式，回答结构化策略问题，并在批准计划后执行。执行器会拒绝该 step 未提供的工具，包括编辑和 Goal 写操作。
 - `/goal <目标> [--tokens N]`：创建、查看、暂停、恢复并自动持续执行当前 Session 目标。收到 usage 后达到预算或无法可靠计量时，会停止后续工具、模型请求和自动验证修复，并显示原因；正在进行的单次请求可能超过剩余额度。
 - `/compact`：使用供应商原生的 Responses 压缩接口替换模型 context，同时保留完整可见 transcript 和 Session 历史。模型轮次或直接命令运行时会拒绝执行；已知 context window 达到 80% 后，会在下一次模型请求前自动压缩，明确的 context-limit 响应每轮最多额外触发一次自动恢复压缩。同一步的网络重试不会重复阈值压缩；压缩消耗仍累计，压缩后的 context 占用在下一次模型响应前显示未知。

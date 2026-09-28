@@ -92,6 +92,7 @@ export function createDefaultTuiDependencies(
   const skillManager = new SkillManager({ workspacePath: process.cwd(), catalog: skills });
   const mcp = new McpRuntime({ workspacePath: process.cwd(), version });
   const learnedMemoryStore = new LearnedMemoryStore();
+  let activeLearnedMemory: LearnedMemoryRuntime | undefined;
   return {
     registry,
     version,
@@ -135,7 +136,10 @@ export function createDefaultTuiDependencies(
         model: model.model_name,
         idleDelayMs: 5 * 60 * 1000,
         minTranscriptChars: 200,
+        sessionId: () => io.getSessionId?.(),
       });
+      void activeLearnedMemory?.dispose();
+      activeLearnedMemory = learnedMemory;
       const goalRuntime = io.getGoal && io.setGoal
         ? new GoalRuntime({ getGoal: io.getGoal, setGoal: io.setGoal })
         : undefined;
@@ -190,22 +194,25 @@ export function createDefaultTuiDependencies(
       });
     },
     async getMemoryStatus(workspacePath) {
-      return learnedMemoryStore.status(workspacePath);
+      return activeLearnedMemory?.status(workspacePath) ?? learnedMemoryStore.status(workspacePath);
     },
     async getMemoryPrompt(workspacePath) {
-      return learnedMemoryStore.prompt(workspacePath);
+      const snapshot = activeLearnedMemory?.getSnapshot();
+      return snapshot
+        ? `Snapshot ${snapshot.revision} loaded ${snapshot.loadedAt}\n\n${snapshot.text || "No learned experience was injected."}`
+        : "No memory snapshot has been injected in this agent session yet.";
     },
     async setMemoryEnabled(enabled) {
-      await learnedMemoryStore.setEnabled(enabled);
+      await (activeLearnedMemory?.setEnabled(enabled) ?? learnedMemoryStore.setEnabled(enabled));
     },
     async clearMemory(scope, workspacePath) {
-      await learnedMemoryStore.clear(scope, workspacePath);
+      await (activeLearnedMemory?.clear(scope, workspacePath) ?? learnedMemoryStore.clear(scope, workspacePath));
     },
     async archiveMemory(scope, workspacePath, id) {
-      await learnedMemoryStore.updateEntry(scope, workspacePath, id, { status: "archived" });
+      await (activeLearnedMemory?.archive(scope, workspacePath, id) ?? learnedMemoryStore.updateEntry(scope, workspacePath, id, { status: "archived" }));
     },
     async deleteMemoryEntry(scope, workspacePath, id) {
-      await learnedMemoryStore.deleteEntry(scope, workspacePath, id);
+      await (activeLearnedMemory?.deleteEntry(scope, workspacePath, id) ?? learnedMemoryStore.deleteEntry(scope, workspacePath, id));
     },
     async rememberMemory(model, workspacePath, text, signal) {
       const client = createProviderClient(model.base_url, model.api_key);
@@ -220,7 +227,11 @@ export function createDefaultTuiDependencies(
         },
         model: model.model_name,
       });
-      await runtime.remember(workspacePath, text, signal);
+      try {
+        await runtime.remember(workspacePath, text, signal);
+      } finally {
+        await runtime.dispose();
+      }
     },
     async generateSessionTitle(model, firstQuestion, signal) {
       const client = createProviderClient(model.base_url, model.api_key);

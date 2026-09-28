@@ -86,7 +86,9 @@ test("follow-up step budget stops successful infinite tool loops", async () => {
     },
     async dispatch() { return "ok"; },
   });
-  await assert.rejects(runAgentLoop(f.options), /maximum of 2 sampling steps/);
+  const result = await runAgentLoop(f.options);
+  assert.equal(result.stopReason, "step_limit");
+  assert.equal(result.steps, 2);
   assert.equal(samples, 2);
   assert.deepEqual(events, ["step_limit_reached:2"]);
 });
@@ -277,11 +279,15 @@ test("parallel batches stop at unsafe calls and preserve later serial work", asy
   assert.deepEqual(order, ["a", "b", "c"]);
 });
 
-test("capability resource conflicts split parallel batches", async () => {
+test("capability resource conflicts serialize calls within the bounded pool", async () => {
   const batches: string[][] = [];
+  let active = 0;
+  let peak = 0;
+  let samples = 0;
   const f = fixture({
     async sample() {
-      return batches.length === 0
+      samples += 1;
+      return samples === 1
         ? { output: [call("a"), call("b"), call("c")], output_text: "" }
         : { output: [], output_text: "done" };
     },
@@ -291,7 +297,15 @@ test("capability resource conflicts split parallel batches", async () => {
     onEvent(event) {
       if (event.type === "tool_batch_started") batches.push(event.calls.map((item) => item.call_id));
     },
+    async dispatch(tool) {
+      active += 1;
+      peak = Math.max(peak, active);
+      await Promise.resolve();
+      active -= 1;
+      return tool.call_id;
+    },
   });
   await runAgentLoop(f.options);
-  assert.deepEqual(batches, [["a"], ["b"], ["c"]]);
+  assert.deepEqual(batches, [["a", "b", "c"]]);
+  assert.equal(peak, 1);
 });

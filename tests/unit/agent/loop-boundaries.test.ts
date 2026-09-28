@@ -38,16 +38,57 @@ test("invalid loop and adapter budgets are rejected before requests", async () =
 
 test("response-boundary guidance consumes steps and refreshes snapshots", async () => {
   let samples = 0, prepared = 0, pending = false;
-  await assert.rejects(runAgentLoop(loop({
+  const result = await runAgentLoop(loop({
     maxSteps: 2,
     prepareStep: async () => { prepared++; },
     sample: async () => { samples++; return response(); },
     onEvent(event) { if (event.type === "response_received") pending = true; },
     hasPendingSteering: () => pending,
     applySteering: async () => { pending = false; return 1; },
-  })), /maximum of 2/);
+  }));
+  assert.equal(result.stopReason, "step_limit");
   assert.equal(samples, 2);
   assert.equal(prepared, 2);
+});
+
+test("turn deadlines stop sampling and expose a structured reason", async () => {
+  let requests = 0;
+  const result = await runAgentLoop(loop({
+    maxTurnDurationMs: 10,
+    sample: async (signal) => {
+      requests += 1;
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, 1_000);
+        signal?.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+      });
+      return response();
+    },
+  }));
+  assert.equal(requests, 1);
+  assert.equal(result.stopReason, "deadline_exceeded");
+  assert.equal(result.steps, 1);
+});
+
+test("parallel reads use a sliding bounded window without waiting for the whole first group", async () => {
+  const gates = new Map<string, () => void>();
+  const started: string[] = [];
+  let requests = 0;
+  const turn = runAgentLoop(loop({
+    maxParallelTools: 2,
+    sample: async () => ++requests === 1 ? response([call("a"), call("b"), call("c")]) : response(),
+    canRunInParallel: () => true,
+    dispatch: async (tool) => {
+      started.push(tool.call_id);
+      if (tool.call_id === "a") await new Promise<void>((resolve) => gates.set("a", resolve));
+      return tool.call_id;
+    },
+  }));
+  for (let attempt = 0; attempt < 20 && started.length < 2; attempt += 1) await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(started, ["a", "b"]);
+  assert.equal(started.includes("c"), false);
+  gates.get("a")?.();
+  await turn;
+  assert.deepEqual(started, ["a", "b", "c"]);
 });
 
 test("Plan rejects unadvertised side-effect tools in buffered and SSE responses", async () => {
@@ -157,10 +198,23 @@ test("MCP hints never parallelize approval or dispatch", async () => {
 test("parallel reads are bounded, ordered and cannot cross a write", async () => {
   let requests = 0, active = 0, peak = 0;
   const records: string[] = [], started: string[] = [];
+  let releaseFirstPair!: () => void;
+  const firstPair = new Promise<void>((resolve) => { releaseFirstPair = resolve; });
   await runAgentLoop(loop({ maxParallelTools: 2,
     sample: async () => ++requests === 1 ? response([call("a"), call("b"), call("c"), call("w", "write"), call("d")]) : response(),
     toolCapabilities: (tool) => ({ readOnly: tool.name !== "write", idempotent: true, parallelSafe: true, resourceKeys: [] }),
-    dispatch: async (tool) => { started.push(tool.call_id); active++; peak = Math.max(peak, active); if (tool.name === "write") assert.equal(active, 1); await Promise.resolve(); active--; return tool.call_id; },
+    dispatch: async (tool) => {
+      started.push(tool.call_id);
+      active++;
+      peak = Math.max(peak, active);
+      if (tool.name === "write") assert.equal(active, 1);
+      if (tool.call_id === "a" || tool.call_id === "b") {
+        if (active === 2) releaseFirstPair();
+        await firstPair;
+      }
+      active--;
+      return tool.call_id;
+    },
     record: async (items) => { for (const item of items) if (item.type === "function_call_output") records.push(String(item.call_id)); },
   }));
   assert.equal(peak, 2);
@@ -176,7 +230,8 @@ test("cancellation closes later calls without starting another parallel batch", 
     dispatch: async (tool) => { started.push(tool.call_id); await Promise.resolve(); controller.abort(); return "done"; },
     record: async (items) => { records.push(...items); },
   })), /abort/i);
-  assert.deepEqual(started, ["a", "b"]);
+  assert.deepEqual(started, ["a"]);
+  assert.match(String(records.find((item) => item.type === "function_call_output" && item.call_id === "b")?.output), /cancelled/);
   assert.match(String(records.find((item) => item.type === "function_call_output" && item.call_id === "c")?.output), /cancelled/);
 });
 
@@ -262,7 +317,7 @@ test("guidance during a parallel batch closes unstarted calls before the user me
     hasPendingSteering: () => pending,
     applySteering: async () => { pending = false; history.push({ role: "user", content: "correction" }); return 1; },
   }));
-  assert.deepEqual(started, ["a", "b"]);
+  assert.deepEqual(started, ["a"]);
   assert.deepEqual(repairToolContext(history), history);
   assert.equal(history.at(-1)?.role, "user");
   assert.match(String(history.find((item) => item.type === "function_call_output" && item.call_id === "c")?.output), /steered/);

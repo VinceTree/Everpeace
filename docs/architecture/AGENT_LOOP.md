@@ -18,13 +18,15 @@ Apache-2.0 许可证与改动归属位于 `third_party/codex/`，随构建包包
 - `src/agent/react-agent.ts`：现有入口兼容适配器，负责 Responses 请求、指令、工具权限、工具路由、usage、恢复 context、可选 stream recovery adapter 和持久化 callback。
 - `src/agent/repair-context.ts`：旧不完整工具上下文修复。
 
-每次收到 completed 请求后先持久化响应，再执行工具；每个串行结果立即持久化后才进入下一工具。由 step capability 明确标记的 `read_file`、`list_directory`、`read_skill` 可组成连续批次，批次内同时执行，结果仍按模型原始顺序落盘，guidance 和 stop 在整批落盘后统一应用。取消时为所有已启动或未完成调用记录结构化结果，并为未启动调用补齐 `cancelled`、`steered` 或 `skipped`，之后抛出取消错误。持久化失败停止任务，不能在调用记录保存失败后执行副作用。SSE 在 `response.completed` 之前结束或断开时不会把半截输出当作成功，也不会启动工具；若 provider 显式提供 recovery adapter，当前 turn 只消耗独立续接预算，续接失败回退到默认最多两次的有界整轮采样重试。
+每次收到 completed 请求后先持久化响应，再执行工具；每个串行结果立即持久化后才进入下一工具。由 step capability 明确标记的 `read_file`、`list_directory`、`read_skill` 可组成连续读取区间，并由滑动的有界任务池执行：某项完成后即可补入下一项，不等待固定批次中的慢任务；结果仍按模型原始顺序落盘，同时限制已完成但尚未落盘的结果数量。guidance、取消、预算和持久化错误在启动下一项前检查，写操作、MCP 和审批构成串行屏障，不跨屏障重排。取消时为所有已启动或未完成调用记录结构化结果，并为未启动调用补齐 `cancelled`、`steered` 或 `skipped`，之后抛出取消错误。持久化失败停止任务，不能在调用记录保存失败后执行副作用。SSE 在 `response.completed` 之前结束或断开时不会把半截输出当作成功，也不会启动工具；若 provider 显式提供 recovery adapter，当前 turn 只消耗独立续接预算，续接失败回退到默认最多两次的有界整轮采样重试。
 
 只要存在 function call 或端点明确返回 `end_turn: false` 就继续采样。没有工具且没有明确继续信号时结束；兼容不提供 `end_turn` 的端点。非 completed 状态返回错误，不执行其中可能不完整的工具调用。call_id 缺失/重复在持久化前拒绝。
 
 请求层对连接、超时、限流、服务端和半截流错误默认最多重试两次，退避可取消；上下文超限和永久错误不进入普通重试。主循环请求关闭 SDK 内部重试，避免重试叠加。仅重试采样，不重跑此前工具；采样、stream recovery 和 context compaction 各自维护预算。`onPhase` 提供 sampling/tools/completed/cancelled/failed 扩展入口；`ReactAgent` 同实例拒绝并发 turn。
 
-正常 follow-up sampling step 另有独立上限：默认每个 turn 32 个逻辑 step，可由 `ReactAgentOptions.maxSteps` 覆盖。step 内的采样重试复用同一 `prepareStep` 快照；工具结果完成后才清除快照并为下一 step 重新获取 MCP/Skill 状态。达到上限发送 `step_limit_reached` 诊断事件并抛错，既不继续采样也不写入伪造完成记录。该预算与采样重试、stream recovery、context compaction 分离，且不扩展 Session JSONL schema。
+正常 follow-up sampling step 另有独立上限：默认每个 turn 32 个逻辑 step，可由 `ReactAgentOptions.maxSteps` 覆盖。step 内的采样重试复用同一 `prepareStep` 快照；工具结果完成后才清除快照并为下一 step 重新获取 MCP/Skill/Memory 状态。达到上限返回结构化 `step_limit`；可选 `maxTurnDurationMs` 使用同一停止协议返回 `deadline_exceeded`，默认不设置期限。限制触发后不再启动工具、采样、workflow 修复或 Goal 续跑，也不报告任务完成。该预算与采样重试、stream recovery、context compaction 分离，且不扩展 Session JSONL schema。
+
+`LoopEvent.timing_recorded` 提供采样、退避、压缩、工具顺序等待和工具执行耗时；事件只含操作类型与时长，不记录 prompt、工具参数或凭据。`AgentLoopResult` 同时返回逻辑 step 数与轮次耗时，供 TUI 和 benchmark 诊断使用。
 
 
 ## 优化路线边界
