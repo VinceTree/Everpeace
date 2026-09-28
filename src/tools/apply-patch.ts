@@ -2,12 +2,18 @@ import { createHash } from "node:crypto";
 import { constants, promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { isProtectedPatchPath } from "./sandbox-policy.js";
 
 const MAX_OPERATIONS = 20;
 const MAX_PATCH_BYTES = 512 * 1024;
 const MAX_FILE_BYTES = 512 * 1024;
 
 export type ApplyPatchAction = "create" | "update" | "delete";
+
+export interface ApplyPatchOptions {
+  /** Set only by the host after the user selected full access; never model arguments. */
+  allowProtectedPaths?: boolean;
+}
 
 export interface ApplyPatchOperation {
   path: string;
@@ -196,6 +202,7 @@ interface PreparedPatch {
 async function preparePatch(
   operations: readonly ApplyPatchOperation[],
   workspace: string,
+  options: ApplyPatchOptions,
 ): Promise<{ prepared: PreparedPatch[] } | { error: string }> {
   if (operations.length === 0 || operations.length > MAX_OPERATIONS) return { error: `apply_patch accepts 1-${MAX_OPERATIONS} operations` };
   let root: string;
@@ -213,6 +220,9 @@ async function preparePatch(
       if (patchBytes > MAX_PATCH_BYTES) throw new Error("Patch batch exceeds the 512 KiB limit");
       const target = path.resolve(workspace, operation.path);
       await assertSafeTarget(root, target);
+      const relative = path.relative(root, target);
+      if (relative.includes(":")) throw new Error("Alternate data streams are not supported");
+      if (!options.allowProtectedPaths && isProtectedPatchPath(relative)) throw new Error("Editing protected workspace metadata requires full access");
       const key = path.relative(root, target).toLowerCase();
       if (seen.has(key)) throw new Error(`Duplicate patch path: ${operation.path}`);
       seen.add(key);
@@ -252,8 +262,9 @@ function diffFor(item: PreparedPatch): string {
 export async function previewApplyPatch(
   operations: readonly ApplyPatchOperation[],
   workspace: string,
+  options: ApplyPatchOptions = {},
 ): Promise<ApplyPatchPreview> {
-  const result = await preparePatch(operations, workspace);
+  const result = await preparePatch(operations, workspace, options);
   if ("error" in result) return { status: "rejected", files: [], diff: "", error: result.error };
   const files = result.prepared.map((item) => ({
     path: item.operation.path,
@@ -268,8 +279,9 @@ export async function previewApplyPatch(
 export async function runApplyPatch(
   operations: readonly ApplyPatchOperation[],
   workspace: string,
+  options: ApplyPatchOptions = {},
 ): Promise<ApplyPatchResult> {
-  const preparedResult = await preparePatch(operations, workspace);
+  const preparedResult = await preparePatch(operations, workspace, options);
   if ("error" in preparedResult) return { status: "rejected", files: [], error: preparedResult.error };
   const prepared = preparedResult.prepared;
   const files: ApplyPatchFileResult[] = [];

@@ -120,15 +120,15 @@ test("sandboxed Bash is routed through the pinned Codex CLI and native profile",
     "--sandbox-state-readable-root",
     "C:\\skills",
   ]);
-  assert.equal(launch.args[8], "--");
+  assert.deepEqual(launch.args.slice(8, 12), ["--include-managed-config", "-c", "shell_environment_policy.ignore_default_excludes=false", "--"]);
   if (process.platform === "win32") {
-    assert.deepEqual(launch.args.slice(9), ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "echo safe"]);
+    assert.deepEqual(launch.args.slice(12), ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "echo safe"]);
   } else {
-    assert.deepEqual(launch.args.slice(9), ["/bin/custom-bash", "-c", "echo safe"]);
+    assert.deepEqual(launch.args.slice(12), ["/bin/custom-bash", "-c", "echo safe"]);
   }
 });
 
-test("sandboxed Bash uses the bounded Windows helper retry path", { skip: process.platform !== "win32" }, async () => {
+test("sandboxed Bash never replays a payload based on helper-like stderr", { skip: process.platform !== "win32" }, async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-bash-sandbox-"));
   const scriptPath = path.join(directory, "fake-codex.mjs");
   const statePath = path.join(directory, "attempts");
@@ -148,9 +148,9 @@ test("sandboxed Bash uses the bounded Windows helper retry path", { skip: proces
       env: { ...process.env, EVERPEACE_TEST_STATE: statePath },
       sandbox: { permissionProfile: ":workspace", codexCliPath: scriptPath },
     });
-    assert.equal(result.exitCode, 0);
-    assert.equal(result.stdout.trim(), "sandbox-ready");
-    assert.equal(await fs.readFile(statePath, "utf8"), "2");
+    assert.equal(result.exitCode, 17);
+    assert.equal(result.stdout, "");
+    assert.equal(await fs.readFile(statePath, "utf8"), "1");
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

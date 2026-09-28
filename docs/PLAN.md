@@ -1,4 +1,9 @@
 # Everpeace Current Plan
+
+## Sandbox 优化路线
+
+对 Codex、oh-my-pi、Grok Build 的固定源码比较、选择依据和验收见 [architecture/SANDBOX.md](architecture/SANDBOX.md)。第一批已完成：payload 不重放、shell managed requirements opt-in、启动前环境过滤、结构化编辑控制目录保护和取消/只读复查。后续依次落实统一权限快照与原生 `.everpeace` 保护、隔离文件 worker、平台命令解析及独立 shell 网络策略，再补进程所有权和诊断/性能基线。保持 Windows 优先、固定原生后端、现有 inline TUI 和直接 `!` 语义。
+
 # Agent Loop 优化路线
 
 ## 当前结论
@@ -65,7 +70,7 @@ benchmark 只用于在协议变更前建立证据，不是当前实现路线的�
 
 模型 Bash 不是无限等待的后台任务。生产 Agent 通过 `DEFAULT_MODEL_BASH_TIMEOUT_MS` 使用 120 秒有界执行时间；超时会终止子进程树，并向模型返回 `timed_out: true` 与结构化错误。用户直接 `!` 命令继续保持无默认超时，由用户负责取消。该边界不改变权限 profile、sandbox 映射或 Session JSONL schema。
 
-模型 sandbox Bash 与 `runCodexCli` 现在共享同一条 Codex CLI 进程执行边界，Windows helper setup/refresh 的瞬时错误最多重试一次，最终仍失败关闭。权限 profile 之上增加持久化 command prefix rules，最长前缀优先，`deny > ask > allow`；用户策略写入平台配置，项目 `.everpeace/permissions.json` 只能收紧，不影响直接 `!`。
+模型 sandbox Bash 与 `runCodexCli` 现在共享同一条 Codex CLI 进程执行边界，模型 payload 不按 helper 输出文案重试；仅无 payload 的 helper 调用保留最多一次重试，最终仍失败关闭。权限 profile 之上增加持久化 command prefix rules，最长前缀优先，`deny > ask > allow`；用户策略写入平台配置，项目 `.everpeace/permissions.json` 只能收紧，不影响直接 `!`。
 
 默认聊天新增兼容 provider 的 `apply_patch` function tool。它只接受工作区相对路径、受限 unified diff 或完整文件内容，支持可选 SHA-256 防陈旧、原子多文件应用和失败回滚；Plan 模式仍为只读。工作流只向 Session JSONL 追加可恢复的阶段与验证元数据，不保存文件快照。
 
@@ -161,7 +166,7 @@ Codex sandbox、MCP 与 Skills 接入：模型 shell 通过固定版本 Codex CL
 - [x] `read_file` / `list_directory` 路径校验、内容上限、结构化失败返回。
 - [x] 权限独立窗口；切换不清空 context、不向 JSONL 写入授权。
 - [x] 模型 shell 映射 Codex `:read-only`、`:workspace`、`:danger-full-access`，sandbox 不可用时失败关闭；直接 `!` 保持原生 PTY。
-- [x] 模型 Bash 与 Codex CLI 共享 bounded process executor；Windows sandbox helper 瞬时 setup/refresh 错误最多重试一次，取消/超时仍失败关闭。
+- [x] 模型 Bash 与 Codex CLI 共享 bounded process executor；模型 payload 不根据 helper 文案重试；无 payload helper 保留有界重试，取消/超时仍失败关闭。
 - [x] 兼容 provider 的结构化 `apply_patch` function tool：工作区边界、unified diff、SHA-256 陈旧检查、多文件原子应用和失败回滚。
 - [x] 单 Agent coding workflow：patch 后快速验证、回合结束完整验证、失败诊断循环和有界 repair budget。
 - [x] `workspace_status` / `workspace_diff` 只读工具与 `/diff`、`/verify`、`/undo` 命令；检查点检测用户冲突且不持久化文件内容。

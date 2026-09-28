@@ -695,12 +695,14 @@ export function EverpeaceApp({
         setActiveGoal(goal);
       },
       async previewPatch(operations: readonly ApplyPatchOperation[]) {
-        return previewApplyPatch(operations, workspacePath);
+        return previewApplyPatch(operations, workspacePath, { allowProtectedPaths: permissions.current.mode === "full-access" });
       },
       async runApplyPatch(operations: readonly ApplyPatchOperation[], signal?: AbortSignal) {
         const workflow = ensureWorkflow();
         await workflow.capturePatch(operations);
-        return runApplyPatch(operations, workspacePath);
+        signal?.throwIfAborted();
+        if (permissions.current.mode === "read-only") return { status: "rejected", files: [], error: "The read-only profile does not allow file edits" };
+        return runApplyPatch(operations, workspacePath, { allowProtectedPaths: permissions.current.mode === "full-access" });
       },
       async afterPatchApplied(operations: readonly ApplyPatchOperation[], result: ApplyPatchResult, signal?: AbortSignal) {
         return ensureWorkflow().afterPatch(operations, result, executeVerification, signal);

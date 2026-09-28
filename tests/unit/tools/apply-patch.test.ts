@@ -52,3 +52,21 @@ test("apply_patch preview validates and shows changes without mutating files", a
     assert.equal(await fs.readFile(path.join(workspace, "file.txt"), "utf8"), "before\n");
   });
 });
+
+test("patch preview and execution protect control metadata and reject the whole batch", async () => {
+  await withWorkspace(async (workspace) => {
+    for (const directory of [".git", ".codex", ".agents", ".everpeace"]) {
+      await fs.mkdir(path.join(workspace, directory));
+      const operations = [
+        { path: "ordinary.txt", action: "create" as const, content: "allowed" },
+        { path: `${directory}/settings`, action: "create" as const, content: "untrusted override" },
+      ];
+      assert.equal((await previewApplyPatch(operations, workspace)).status, "rejected");
+      assert.equal((await runApplyPatch(operations, workspace)).status, "rejected");
+      await assert.rejects(fs.access(path.join(workspace, "ordinary.txt")));
+      const fullAccess = await runApplyPatch([operations[1]!], workspace, { allowProtectedPaths: true });
+      assert.equal(fullAccess.status, "applied");
+    }
+    assert.equal((await runApplyPatch([{ path: "normal.txt:stream", action: "create", content: "hidden" }], workspace, { allowProtectedPaths: true })).status, "rejected");
+  });
+});

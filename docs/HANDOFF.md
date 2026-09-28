@@ -1,3 +1,13 @@
+## 最新执行：Sandbox 对比与首批加固
+
+状态快照：2026-09-28。对照固定 Codex `c0d26949`、oh-my-pi `cabfa74e`、Grok Build `f0e3be11`，并单独核对已安装后端 `0.155.1` 源码及 CLI 参数。保留原生后端；完整差异、选择理由、优先级与阶段 B/C 验收在 `architecture/SANDBOX.md`。
+
+已修复模型 payload 因 helper 输出文案被重复执行的路径（成功退出也不重试），显式传入 `--include-managed-config`，Node launcher 启动前过滤凭据/启动注入变量；结构化编辑保护控制目录并拒绝 ADS，workflow checkpoint 后重查取消和只读权限。直接用户 PTY/MCP 环境不变。原有用户未跟踪 `tests/unit/codex/` 未修改，新增测试位于 `tests/unit/tools/sandbox-boundaries.test.ts`。
+
+真实 Windows 临时目录探针：workspace 内可写、非 temp 的工作区外兄弟目录拒写、read-only 拒写、`.git` 拒写；temp 区有独立写入例外，不能作为越界拒写断言。`.everpeace` 仍可被 shell 写入，当前仅修复结构化编辑入口，统一原生保护明确列为后续，不声称全工具隔离。Linux/macOS 原生、网络和全终端审批未验收。
+
+验证：定向工具测试 19 项，18 通过、1 项平台跳过；最终完整 `pnpm test` 317 项，316 通过、0 失败、1 项平台跳过；`pnpm typecheck`、`pnpm build` 通过。本次范围 `git diff --check` 通过；全工作区检查仅报告既有 `.gitignore`、`LICENSE` CRLF 差异。首次完整测试曾出现 Memory 跨作用域候选后台等待超时；该文件与最新 sandbox 回归定向 18/18 通过，随后全量复跑通过，未修改 Memory 代码，不能将复跑成功视为已修复该偶发问题。展示版本更新为 `0.2.23`；交付提交使用 `[skip ci]`，不创建 tag 或更新远程 Release；既有未跟踪内容保留。
+
 ## 最新执行：Agent Loop 有界任务池与 learned memory 生命周期
 
 状态快照：2026-09-28。Agent Loop 的安全读取并行从固定整批等待改为滑动有界任务池，保留默认串行、`maxParallelTools=4`、原始顺序持久化及写操作/MCP/审批串行屏障。新增可选 `maxTurnDurationMs`，step 上限和期限分别返回 `step_limit`、`deadline_exceeded`；TUI 对两者停止 workflow 修复和 Goal 自动续跑，不报告完成。循环事件新增不含请求内容的 sampling、retry delay、compaction、tool wait 和 tool execution 耗时，结果携带 step 数和轮次耗时。

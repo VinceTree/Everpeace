@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.2.22) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.23) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -162,7 +162,8 @@ Skills 从工作区到仓库根的 `.agents/skills`、项目 `.codex/skills`、`
 - 模型可以用 `read_file` 查看工作目录内不超过 128 KiB 的 UTF-8 文件，用 `list_directory` 列出最多 500 个目录项。拒绝目录外路径和符号链接越界。文件正文会进入模型 context 和 Session 文件，请避免读取机密。
 - 用户权限保存于平台配置目录，重启后仍会恢复；`/permissions` 也可把项目策略写入 `.everpeace/permissions.json`。项目策略只允许收紧用户策略，不能提升权限。切换权限不丢失 context，恢复 JSONL 不会恢复完全访问授权。
 - 模型 shell 通过固定的 `@openai/codex@0.155.1` 原生 OS sandbox 启动，运行时无法启动则失败关闭。Windows 模型命令使用 PowerShell，因为 Git Bash/MSYS 无法在 restricted token 内初始化；macOS/Linux 使用 Bash。模型 shell 默认 120 秒超时，超时会以结构化结果返回；直接 `!` 不进入模型 sandbox，生命周期仍由用户控制。详见 [对标与安全限制](docs/architecture/PERMISSIONS.md)。
-- 模型编辑尽量使用限定在工作区内的 `apply_patch` 工具：校验有界 unified diff，可用 SHA-256 防止陈旧文件覆盖，多文件变更原子应用，并在失败时报告回滚状态。`/permissions` 还支持持久化的模型 Bash 命令前缀规则；直接 `!` 不受影响。
+- 模型 shell 显式遵守后端 managed requirements，启动 wrapper 前过滤继承的凭据及启动注入变量；命令输出不能触发 payload 自动重放。直接 `!` 保留用户环境。对比依据与后续路线见 [Sandbox 对比与优化计划](docs/architecture/SANDBOX.md)。
+- 模型编辑尽量使用限定在工作区内的 `apply_patch` 工具：校验有界 unified diff，可用 SHA-256 防止陈旧文件覆盖，多文件变更原子应用，并在失败时报告回滚状态。预览与执行默认保护 `.git`、`.codex`、`.agents`、`.everpeace`，明确选择 full-access 后才能通过编辑器修改；始终拒绝 Windows ADS。这些编辑器校验不代表所有工具都已由同一 OS sandbox 隔离。`/permissions` 还支持持久化的模型 Bash 命令前缀规则；直接 `!` 不受影响。
 - 普通 coding 回合使用单 Agent 工作流：patch 成功后先做快速检查，回合结束再做完整检查；失败输出会反馈给模型，最多进行三次有界修复。模型可使用只读 `workspace_status` 和 `workspace_diff` 查看 Git 状态。工作流阶段元数据可随 Session 恢复，但文件内容检查点只保存在当前进程内。
 - 普通聊天中，`read-only` 和 `ask` 会在每个网页请求前审批；`workspace-write` 与 `full-access` 跳过该确认。Plan 模式把已开启的公共网页访问视为只读调研并跳过逐次确认，关闭网页工具时仍会拒绝请求。搜索词会先发送给 Bing，失败时回退到 DuckDuckGo；打开搜索结果时会向对应网站发送请求。
 - 网页读取只允许公共 HTTP/HTTPS 地址，会逐次检查重定向、阻止本机和内网地址，并限制超时与响应大小；返回内容始终作为不可信数据处理。

@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.2.22) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.23) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -162,7 +162,8 @@ Behavior notes:
 - `read_file` reads workspace UTF-8 files up to 128 KiB; `list_directory` lists up to 500 entries. Outside paths and resolved symlink escapes are rejected. File contents enter model context and persisted session data; avoid reading secrets.
 - User permissions persist in the platform configuration directory and survive restart; `/permissions` can also save a project policy under `.everpeace/permissions.json`. Project policy is fail-closed: it may restrict the user policy but cannot elevate it. Changing permissions preserves context; JSONL never restores full access.
 - Model shell commands are launched through the pinned `@openai/codex@0.155.1` native OS sandbox and fail closed if that runtime cannot start. Windows model commands use PowerShell because Git Bash/MSYS cannot initialize inside the restricted token; macOS/Linux use Bash. Model shell calls have a 120-second default timeout and return a structured timeout result; direct `!` commands remain outside the model sandbox and keep user-controlled lifetime. See [design and limits](docs/architecture/PERMISSIONS.md).
-- Model edits use the workspace-scoped `apply_patch` tool when possible. It validates bounded unified diffs, prevents stale-file overwrites with optional SHA-256 checks, applies multi-file changes atomically, and reports rollback failures. The `/permissions` screen also supports persisted command prefix rules for model Bash; direct `!` commands are unaffected.
+- Model shell launches include backend managed requirements and filter inherited credential/startup variables before the launcher starts. Command output cannot trigger automatic payload replay. Direct `!` commands retain the user environment. See the [sandbox comparison and optimization plan](docs/architecture/SANDBOX.md).
+- Model edits use the workspace-scoped `apply_patch` tool when possible. It validates bounded unified diffs, prevents stale-file overwrites with optional SHA-256 checks, applies multi-file changes atomically, and reports rollback failures. Patch preview and execution protect `.git`, `.codex`, `.agents`, and `.everpeace` unless full access was explicitly selected; alternate data streams remain blocked. These editor guards are not a common OS sandbox for every tool. The `/permissions` screen also supports persisted command prefix rules for model Bash; direct `!` commands are unaffected.
 - Coding turns use a single Agent workflow: patch success triggers a fast check, turn completion triggers a full check, and bounded failure output is fed back for up to three focused repairs. `workspace_status` and `workspace_diff` are read-only model tools. Workflow metadata is recoverable in Session JSONL, while file-content checkpoints remain in memory only.
 - `read-only` and `ask` require approval before each web request during normal chat; `workspace-write` and `full-access` skip that prompt. Plan mode also treats enabled public web access as read-only research and skips the per-request prompt, while disabling web still denies it. Search queries are sent to Bing, with DuckDuckGo as a fallback; opening a result sends a request to that site.
 - Web page reads allow only public HTTP/HTTPS targets, validate redirects, block local/private network addresses, apply time and response-size limits, and treat returned content as untrusted data.

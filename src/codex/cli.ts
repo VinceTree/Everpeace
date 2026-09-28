@@ -67,7 +67,10 @@ export function runCodexProcess(
     }
 
     const platform = options.platform ?? process.platform;
-    const retryable = platform === "win32" && args[0] === "sandbox";
+    // stdout/stderr cannot prove that a payload has not started. Only the legacy
+    // profile-only invocation is known to contain no command (with or without --).
+    const retryable = platform === "win32" && args.length === 3 && args[0] === "sandbox"
+      && args[1] === "-P" && [":read-only", ":workspace", ":danger-full-access"].includes(args[2]!);
     let attempts = 0;
     const timeoutMs = typeof options.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
       ? Math.max(1, Math.min(Math.floor(options.timeoutMs), 2_147_483_647))
@@ -144,8 +147,9 @@ export function runCodexProcess(
         });
       });
       child.on("close", (exitCode) => {
+        if (settled) return;
         options.signal?.removeEventListener("abort", cancel);
-        const helperError = isSandboxHelperSetupError(`${stdout}\n${stderr}`);
+        const helperError = retryable && exitCode !== 0 && isSandboxHelperSetupError(stderr);
         if (
           retryable
           && !options.signal?.aborted

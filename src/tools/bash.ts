@@ -6,6 +6,7 @@ import {
 import { stopProcessTree } from "./process-cancel.js";
 import { retainOutput } from "./command-record.js";
 import { codexCliLaunch, runCodexProcess } from "../codex/cli.js";
+import { modelShellEnvironment } from "./sandbox-policy.js";
 
 export type { BashOutputPreview } from "./bash-output-preview.js";
 
@@ -141,6 +142,9 @@ function resolveSandboxArgs(
     "-C",
     cwd,
     ...(sandbox.readableRoots?.flatMap((root) => ["--sandbox-state-readable-root", root]) ?? []),
+    "--include-managed-config",
+    "-c",
+    "shell_environment_policy.ignore_default_excludes=false",
     "--",
     sandboxCommand.command,
     ...sandboxCommand.args,
@@ -209,7 +213,7 @@ export function runBash(
   command: string,
   options: BashOptions = {},
 ): Promise<BashResult> {
-  const env = options.env ?? process.env;
+  const env = options.sandbox ? modelShellEnvironment(options.env ?? process.env) : options.env ?? process.env;
   const bashPath = options.bashPath ?? resolveBashPath(env);
   const streamOutput = options.streamOutput ?? true;
   const terminal = options.terminal ?? false;

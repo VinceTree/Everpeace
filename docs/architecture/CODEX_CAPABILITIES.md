@@ -12,7 +12,7 @@ Everpeace 没有复制整套 Rust runtime；它固定依赖 `@openai/codex@0.155
 
 ## Sandbox
 
-模型发起的命令统一经 `codex sandbox -P <profile> -C <workspace> -- <shell>` 启动。profile 映射为：
+模型发起的命令统一经 `codex sandbox -P <profile> -C <workspace> --include-managed-config -- <shell>` 启动，并显式开启后端默认环境凭据排除。启动 Node wrapper 前也会过滤继承的凭据/启动注入变量；不会根据命令输出自动重放 payload。固定源码对比与后续统一策略计划见 [SANDBOX.md](./SANDBOX.md)。profile 映射为：
 
 | Everpeace mode | 审批 | Codex profile |
 | --- | --- | --- |

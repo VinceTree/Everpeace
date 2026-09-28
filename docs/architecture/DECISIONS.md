@@ -10,9 +10,15 @@
 
 验证命令和工作区 review 都属于当前 turn 的可取消阶段。收到 AbortSignal 后必须传播原始取消错误，不得把取消或关闭转换成普通 verification/review failure、`diagnose` 或 repair attempt；只有命令自身以非零退出结束且未取消时，才生成修复指导。
 
+## Sandbox hardening and follow-up policy boundary
+
+固定源码对比与分阶段计划见 [SANDBOX.md](./SANDBOX.md)。保留固定原生后端，模型 shell 显式传入 `--include-managed-config`，启动 Node wrapper 前过滤继承的凭据及启动注入变量，同时启用后端默认凭据排除。直接 `!` 与 MCP 的环境不走这个过滤器。该过滤不承诺阻止从可读文件或显式后端配置获取凭据。
+
+结构化编辑保护 `.git`、`.codex`、`.agents`、`.everpeace`，full-access 例外由宿主根据实时权限设置，模型参数不能放开；Windows ADS 仍拒绝。预检拒绝整个批次，workflow checkpoint 后再检查取消与只读权限。Windows 原生探针确认 `.everpeace` 仍可通过 shell 写入，统一原生保护和隔离文件 worker 属于后续阶段，不得声称全部工具已隔离。
+
 ## Shared sandbox process boundary and structured edits
 
-模型 Bash 与 Codex CLI JSON 请求必须共享同一条 bounded process executor，避免只在 `runCodexCli` 测试路径覆盖 Windows sandbox helper retry，而真实 Bash 仍绕过它。Windows sandbox helper setup/refresh/unknown 错误只允许一次重试，取消、超时和最终失败都保持 fail-closed，不得回退宿主 shell。
+模型 Bash 与 Codex CLI JSON 请求必须共享同一条 bounded process executor，避免只在 `runCodexCli` 测试路径覆盖 Windows sandbox helper retry，而真实 Bash 仍绕过它。携带 `--` payload 的 sandbox 命令不得根据 stdout/stderr 中的 helper 文案自动重试；只有无 payload 的 helper 调用保留一次重试，且成功退出不得重试。取消、超时和最终失败都保持 fail-closed，不得回退宿主 shell。
 
 文件编辑使用兼容 provider 的 `apply_patch` function tool，而不是要求所有端点支持原生 patch call。工具先完整预检工作区边界、符号链接、大小、重复路径和可选 SHA-256，再以临时文件/rename 应用多文件批次；任何失败都尽力恢复原内容。权限策略不进入 Session JSONL：用户 command prefix rules 写入平台配置目录，项目策略写入 `.everpeace/permissions.json` 时只允许收紧权限，避免仓库内容提升模型能力；patch staging 数据仍只存在进程内。
 
