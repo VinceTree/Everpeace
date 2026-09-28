@@ -8,8 +8,8 @@ Everpeace 已覆盖 Codex turn 的主要安全边界，但仍是保守的 TypeSc
 | 优先级 | 差异 | 当前实现 | 风险/收益判断 |
 | --- | --- | --- | --- |
 | P0 | durable record 与工具启动时机 | 等 `response.completed` 后记录整批 response，再执行整批 function call | 当前最安全；提前执行只有在 provider 顺序、幂等和 cursor recovery 可证明时才有收益 |
-| P1 | 工具并发闸门 | 仅按连续工具名白名单并行，未建共享资源读写锁 | 混合读写和同资源访问无法表达；应先保守串行，再引入能力声明 |
-| P1 | step context | 每个采样 step `prepareStep`，工具 follow-up 重新捕获 MCP/Skill 快照 | 已满足基本快照边界；后续需让工具能力和资源键成为同一不可变 snapshot |
+| P1 | 工具并发闸门 | 能力声明、资源冲突检查和默认 4 项有界读取批次；审批、MCP 与写操作串行 | 不跨写操作重排；未引入通用读写锁调度器 |
+| P1 | step context | 每个采样 step `prepareStep`，工具 follow-up 重新捕获 MCP/Skill 快照 | 工具定义、准入及能力使用隔离 snapshot；重试复用，guidance 刷新 |
 | P2 | turn 收尾编排 | 已有 compaction、steering、重试和取消，但没有上游完整 pending-input、token-budget、stop-hook runtime | 扩展面大，必须逐项显式建模，不能用 no-op 冒充支持 |
 | P2 | provider/runtime 扩展 | stream recovery 依赖 typed adapter；未移植 hooks、完整 MCP lifecycle、Plugin/远端 provider、多 Agent | 与核心 loop 解耦，暂不阻塞单 Agent 正确性 |
 
@@ -25,26 +25,22 @@ P0 协议基线已完成：`LoopEvent` 报告 incomplete/invalid tool call；响
 
 - [x] P0：在 durable record 前拒绝无效或重复 function call 字段，工具副作用保持 fail-closed。
 - [x] P1：以 `readOnly`、`idempotent`、`parallelSafe`、`resourceKeys` 能力声明控制并发；共享资源键拆分批次，未知能力默认串行。
-- [x] P1 接入边界：仅内置文件/Skill 读取和同时声明 MCP read-only/idempotent 的工具可获得并发能力；Bash、patch、web、写 MCP 与工作流工具不变。
+- [x] P1 接入边界：仅内置文件/Skill 读取可获得并发能力；MCP annotations 不授予并发权限，所有 MCP、审批及写操作串行。
 - [x] 单 Agent workflow review checkpoint：完整验证成功后检查变更路径仍出现在 Git 状态；review 失败进入 `diagnose` 并把有界错误反馈给下一轮，未配置 review 时保持原有完成路径。
 - [x] workflow cancellation boundary：验证器和 Git review 收到 AbortSignal 后立即传播取消，不把用户取消转换成 `diagnose` 或消耗 repair attempt。
 - [ ] 后续：固定任务 manifest、真实 provider smoke 和 recovery cursor 证据不足前，不启用 `output_item.done` item-level 工具调度。
 
-## 分阶段实施计划
+## 当前交叉边界修复
 
-### P0：守住现有整批路径（当前阶段）
+- [x] 工具准入与不可变 step snapshot：Plan 和默认模式都拒绝当前请求未提供的工具，执行时重查权限。
+- [x] Steering：先补齐 outputs 后追加用户消息，持久化成功才出队，所有重新准备的 step 计入预算。
+- [x] Goal：预算及 usage 不完整触发结构化停止，TUI 不进入 workflow 自动修复或目标续跑，不当作成功完成。
+- [x] `PersistenceError`：context、usage、Goal 和 workflow 存储失败立即停止，不触发模型重试或后续工具。
+- [x] 显式并行默认关闭；开启后 `maxParallelTools` 默认 4，结果有序保存，取消/steering 在批次检查点处理。
+- [x] 自动压缩移到 step 准备阶段；压缩消耗与压缩后占用分离，后者未知直到新 response usage 到达。
+- [x] 新采样发送 `sampling_started`；SSE 恢复缓存仅在有 adapter 时保留，默认 8 MiB，溢出后退回有界整请求恢复。
 
-- **范围**：`src/agent/agent-loop.ts`、`src/agent/react-agent.ts`、`tests/unit/agent/agent-loop.test.ts`、`tests/unit/agent/react-agent.test.ts`。
-- **动作**：保持 `response.completed` 为采样成功边界；保持响应 durable record 先于任何副作用；继续为每个已启动/未启动调用补齐结果；明确采样、stream recovery、compaction 的独立预算。
-- **不变量**：半截 response、`response.failed`、缺失/重复 `call_id` 不执行工具；工具结果按模型顺序持久化；重试不重跑已完成工具；取消和持久化失败 fail-closed。
-- **验收**：定向 loop/stream/context/取消回归；类型检查、构建和 diff 检查；不增加 Session JSONL 事件。
-
-### P1：能力声明与共享资源闸门
-
-- **范围**：`src/agent/agent-loop.ts`、工具定义/目录、MCP tool metadata、`src/agent/react-agent.ts` 及 loop 回归。
-- **动作**：为内置工具和可信本地工具声明 `read_only`、`idempotent`、`parallel_safe` 与资源键；以共享资源键实现读锁/写锁 admission；MCP 声明默认不授予本地并发权限。
-- **迁移**：先把现有 `read_file`、`list_directory`、`read_skill` 白名单映射为显式能力；未声明工具继续串行；保留结果按模型顺序落盘。
-- **验收**：不同只读资源可并行；同资源读/写及任意写操作互斥；Bash、`apply_patch`、MCP、网页、审批和 Goal/Plan 写操作默认串行；stop、steering、取消和落盘失败不丢 output。
+## 后续实施计划
 
 ### P1：条件式 output-item 执行（后置阶段）
 
@@ -56,7 +52,7 @@ P0 协议基线已完成：`LoopEvent` 报告 incomplete/invalid tool call；响
 ### P2：显式 turn 编排扩展
 
 - **范围**：`src/agent/agent-loop.ts`、`src/agent/react-agent.ts`、隔离测试和架构文档。
-- **顺序**：先建 pending input drain 和 token budget 状态，再评估 stop/after hooks，最后接入 provider-specific recovery；每项都定义持久化点、预算、取消和错误分类。
+- **顺序**：在现有 pending input drain、Goal budget 闸门和 typed recovery 基础上，再单独评估 stop/after hooks 与 provider-specific 扩展；每项都定义持久化点、预算、取消和错误分类。
 - **验收**：每个预算独立且可观测；compaction 不重复副作用工具；hook 的阻止/继续输入有明确 context 记录；未实现能力不暴露伪成功接口。
 - **明确不做**：本阶段不重构外部 app-server，不引入多 Agent，不以 benchmark 促成自动路由。
 

@@ -105,9 +105,11 @@ test("session store replaces model context on compaction and counts its usage", 
     assert.deepEqual(loaded.usage, {
       input_tokens: 90,
       output_tokens: 10,
-      context_tokens: 88,
+      context_tokens: null,
       complete: true,
     });
+    await fixture.store.appendUsage(created.id, { input_tokens: 12, output_tokens: 2, total_tokens: 14 });
+    assert.equal((await fixture.store.load(created.id)).usage.context_tokens, 14);
   } finally {
     await fixture.cleanup();
   }

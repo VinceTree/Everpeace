@@ -1,3 +1,18 @@
+## 最新执行：Agent Loop 交叉边界与有界调度
+
+状态快照：2026-09-28。本轮按已批准计划完成三批改动，保持单 Agent、默认串行、兼容端点及 `response.completed` 后整批执行工具。
+
+- Step 深复制 MCP/Skill metadata 与工具定义，广告工具和 dispatch 使用同一集合；Plan 中伪造编辑或 Goal 写工具会返回 denied，执行时继续检查实时权限。
+- Steering 改为先查看队列、补齐调用结果、再提交用户消息；提交成功才出队，新 guidance 重建 step 并计入步数上限。完成前检查 pending input，取消/正常错误收尾保留已接收消息，持久化失败不在原失败路径内自动重试。
+- Goal 的 budget_limited/usage_limited 通过结构化 `stopReason` 和 `stopped` phase 传到 TUI；后续工具、采样、workflow 自动修复及 Goal 续跑停止，不产生伪完成，也不安排成功经验提炼。已返回 usage 如实累计，单次在途请求仍可能超过剩余限额。
+- Context、usage、Goal 和 workflow 存储错误使用 `PersistenceError`，不会触发模型网络重试或被当作普通工具失败继续执行。所有步数、重试、并发配置校验有限整数。
+- 显式开启并行后，内置文件/Skill 读取默认最多 4 项；MCP、审批及写操作串行。结果按原顺序落盘，取消后不启动新批次。
+- 自动阈值压缩移到 step 准备阶段，不随普通采样重试重复；压缩 usage 计入累计消耗，压缩后占用设为未知，TUI 与 Session 恢复采用同一语义。SSE 恢复日志仅在有 adapter 时保留，默认 8 MiB，超限退回有界整请求恢复，不裁剪最终内容或参数。新采样发出 sampling_started 清理 UI 临时状态。
+
+验证：新增 20 项回归，完整 `pnpm test` 300 项，299 通过、0 失败、1 项按平台跳过；`pnpm typecheck`、`pnpm build` 通过。使用 Windows Node 22.19.0 / pnpm 10.22.0，因现有 node_modules 的 esbuild 为 Windows 构建，WSL Node 不适用。本次修改范围的 `git diff --check` 通过；全仓检查仍报告用户已有 `.gitignore`、`LICENSE` 的 CRLF trailing whitespace，未修改这两个文件。未跟踪的 `.patch-node-pty/`、`benchmark/`、`question/`、`test-me/`、`tests/unit/codex/` 和 `{}` 未修改。
+
+按用户后续要求，展示版本已从 `0.2.21` 更新为 `0.2.22`（package.json 与中英文 README 同步）；本次使用 `[skip ci]` 提交并推送，跳过自动发布工作流，不创建 tag 或更新远程 Release。真实 provider 和交互式 Windows Terminal smoke 仍未执行；下一步继续固定 benchmark manifest 与真实 provider/cursor 证据，不启用 item-level 工具执行。公共类型与详细边界见 `architecture/AGENT_LOOP.md`；相关 PLAN、DECISIONS 与中英文 README 已同步。
+
 ## 最新执行：Agent Loop step budget 与快照边界
 
 状态快照：2026-09-27。本轮为正常 follow-up sampling 增加独立 step budget：默认每个 turn 最多 32 个逻辑 step，`ReactAgentOptions.maxSteps` 可配置；同一 step 的采样重试复用 `prepareStep` 的 MCP/Skill snapshot，工具 follow-up 才刷新 snapshot。达到上限发出 `step_limit_reached` 诊断事件并失败，不执行额外采样、不伪造完成、不新增 Session JSONL 事件。

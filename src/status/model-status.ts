@@ -161,6 +161,11 @@ export function createEmptySessionUsage(complete = true): SessionUsage {
   };
 }
 
+/** Compaction usage measures work consumed, not the size of the replacement context. */
+export function applyCompactionUsage(current: SessionUsage, sample: TokenUsageSample | null): SessionUsage {
+  return { ...applyUsageSample(current, sample), context_tokens: null };
+}
+
 export function applyUsageSample(
   current: SessionUsage,
   sample: TokenUsageSample | null,

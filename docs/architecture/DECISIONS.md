@@ -168,7 +168,7 @@ Responses usage 中的 `input_tokens_details.cached_tokens` 与 `cache_write_tok
 
 当前采用保守的 `response.completed` 后整批工具执行：响应必须先持久化，半截或失败响应、缺失/重复 `call_id` 不得启动工具。后续只有在 provider 明确证明 `output_item.done` 顺序、durable record 与 recovery cursor 安全时，才允许 capability-gated item-level 执行；未知端点继续现有路径。
 
-并发能力从工具名白名单迁移到显式 `read_only`、`idempotent`、`parallel_safe` 和资源键；未声明工具串行，MCP 元数据不单独授予本地并发权限。结果按模型顺序持久化，取消、steering、stop 和持久化失败不得留下未配对 function output。
+并发能力已从工具名白名单迁移到显式 `read_only`、`idempotent`、`parallel_safe` 和资源键；未声明工具串行，MCP 元数据不单独授予本地并发权限。结果按模型顺序持久化，取消、steering、stop 和持久化失败不得留下未配对 function output。
 
 benchmark 只作为协议变更证据，不是自动路由或近期重构理由。hooks、完整 MCP lifecycle、Plugin/远端 provider、多 Agent 和外部 app-server 维持明确未实现边界，不用 no-op 或伪造成功暴露。
 
@@ -178,3 +178,14 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 
 - 功能、行为、接口或验证结果发生变化时，同步更新 `docs/PLAN.md`、本文件及 `docs/HANDOFF.md` 中受影响的内容。
 - 根级 `AGENTS.md` 只保存跨 Session 长期有效的项目事实和工作约束；易变化的进度、验证结果及下一步统一记录在 `docs/HANDOFF.md`。
+
+
+## Agent loop 交叉边界
+
+- `hasPendingSteering` 只查看队列，`applySteering` 只在工具调用全部闭合后提交。guidance 保存成功才出队，响应完成后的 steering 也重建 step 并受同一正常步数上限约束。
+- 广告工具、准入和能力来自隔离的 step snapshot；Plan 禁止操作不能通过模型返回未提供的工具绕过。实时权限继续在 dispatch 检查。
+- `AgentTurnResult.stopReason` 为预算停止提供独立控制路径，`stopped` 不等同于 `completed`；TUI 不继续 workflow 自动修复或 Goal 自动采样。限额在收到 usage 后生效，不声称能提前预测单次请求消耗。
+- 持久化失败使用 `PersistenceError`，不走网络重试，不降级为模型可继续处理的工具错误。存储事件类型保持兼容。
+- 默认串行保持不变，显式并行只开放内置文件/Skill 读取，默认批次上限 4；MCP 和审批全部串行，远端 metadata 不授予本地并发权限。共享资源键冲突拆分批次，写调用作为屏障。
+- 自动压缩按 step 准备一次；压缩 usage 累计到消耗，替换后的 context 占用标为未知，恢复 Session 也不把压缩消耗当作占用。
+- SSE event log 只为 recovery adapter 保留，默认最多 8 MiB；超限释放恢复缓存且放弃当前响应续接，仍完整消费内容，失败走有界整请求重试。

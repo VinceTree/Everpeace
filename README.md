@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.2.21) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.22) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -128,9 +128,9 @@ TUI commands:
 - `/mcp`: Reload Codex MCP configuration, connect enabled servers, and inspect server/tool/resource/prompt status.
 - `/skills`: Create, install, inspect, and explicitly invoke local Skills.
 - `/memory`: View learned experience, pause/resume automatic capture, enable or disable memory reading/capture for the current chat, inspect the injected snapshot with `/memory view`, archive or clear entries, or run `/memory remember <preference>` to save a lasting user preference.
-- `/plan`: Enter strict read-only planning mode, answer structured strategy questions, and approve a plan before execution.
-- `/goal <objective> [--tokens N]`: Create, inspect, pause, resume, and automatically continue a persistent session goal.
-- `/compact`: Replace the model context with the provider's native compacted context while keeping the full visible transcript and session history. It rejects while a model turn or direct command is active; known context windows compact automatically at 80% usage, and an explicit context-limit response can trigger one additional automatic recovery compaction.
+- `/plan`: Enter strict read-only planning mode, answer structured strategy questions, and approve a plan before execution. Dispatch rejects tools not offered in that step, including editing and Goal mutations.
+- `/goal <objective> [--tokens N]`: Create, inspect, pause, resume, and automatically continue a persistent session goal. Once returned usage reaches the budget or cannot be measured reliably, further tools, model requests, and automatic verification/repair stop with an explanation. An in-flight request can exceed the remaining budget.
+- `/compact`: Replace the model context with the provider's native compacted context while keeping the full visible transcript and session history. It rejects while a model turn or direct command is active; known context windows compact automatically at 80% usage, and an explicit context-limit response can trigger one additional automatic recovery compaction. Network retries within a step do not repeat threshold compaction. Compaction usage still counts toward consumption; context occupancy remains unknown until the next model response.
 - `/outputs`: Browse retained command output with paged details, highlighted commands, and unified-diff rendering.
 - `/history`: Browse or explicitly clear global input history (not sessions).
 - `/terminal-setup`: Preview and optionally configure Shift+Enter in stable Windows Terminal; confirmation creates a settings backup before applying a global key binding.

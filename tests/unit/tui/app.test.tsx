@@ -20,6 +20,7 @@ import type {
 import type { BashResult } from "../../../src/tools/bash.js";
 import {
   applyUsageSample,
+  applyCompactionUsage,
   createEmptySessionUsage,
   resetContextUsage,
   type TokenUsageSample,
@@ -147,7 +148,7 @@ function createMemorySessionStore(): MemorySessionStore {
     async compactContext(sessionId, items, _automatic, usage) {
       const session = requireSession(sessionId);
       session.context = items.map((item) => ({ ...item }));
-      session.usage = applyUsageSample(session.usage, usage);
+      session.usage = applyCompactionUsage(session.usage, usage);
       session.summary.updated_at = timestamp();
     },
     async appendUsage(sessionId, usage: TokenUsageSample | null) {
@@ -2074,4 +2075,29 @@ test("/permissions is transient and changes the live policy without rebuilding t
   assert.equal(created, before);
   assert.equal(fixture.sessionStore.sessions.size, 0);
   view.unmount();
+});
+
+test("budget stop bypasses workflow completion and automatic continuation", async () => {
+  for (const stopReason of ["budget_limited", "usage_limited"] as const) {
+    const model: RegisteredModel = { id: "budget", model_name: "test", base_url: "https://example.com/v1", api_key: "secret" };
+    let turns = 0, commands = 0;
+    const phases: string[] = [];
+    const fixture = createFixture({ initial: [model], createAgent: () => ({
+      async runTurn() { turns++; return { stopReason }; },
+    }) });
+    fixture.dependencies.sessionStore.setWorkflow = async (_id, state) => { phases.push(state.phase); };
+    fixture.dependencies.runBash = async () => { commands++; return { stdout: "", stderr: "", exitCode: 0, signal: null }; };
+    const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+    try {
+      await tick();
+      view.stdin.write("bounded task");
+      await tick();
+      view.stdin.write("\r");
+      await waitFor(() => (view.lastFrame() ?? "").includes("Work stopped before further tools or model requests"));
+      assert.equal(turns, 1);
+      assert.equal(commands, 0);
+      assert.deepEqual(phases, ["understand"]);
+      assert.doesNotMatch(view.lastFrame() ?? "", /Model request failed/);
+    } finally { view.unmount(); }
+  }
 });

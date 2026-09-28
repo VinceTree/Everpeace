@@ -2,6 +2,7 @@
 // Upstream revision and differences: docs/architecture/AGENT_LOOP.md.
 // Copyright 2025 OpenAI. Licensed under Apache-2.0; see third_party/codex/LICENSE.
 import { setTimeout as delay } from "node:timers/promises";
+import { PersistenceError } from "../storage/persistence-error.js";
 import type { TokenUsageSample } from "../status/model-status.js";
 export interface LoopResponse {
   output: Array<Record<string, unknown>>;
@@ -17,7 +18,7 @@ export interface ToolCall extends Record<string, unknown> {
   arguments: string;
 }
 
-export type LoopPhase = "sampling" | "tools" | "completed" | "cancelled" | "failed";
+export type LoopPhase = "sampling" | "tools" | "completed" | "stopped" | "cancelled" | "failed";
 
 export type SamplingErrorCategory =
   | "connection"
@@ -59,6 +60,21 @@ export interface ToolCapabilities {
 
 export type ToolCapabilityResolver = (call: ToolCall) => ToolCapabilities | undefined;
 
+export type LoopStopReason = "budget_limited" | "usage_limited";
+export class LoopStoppedError extends Error {
+  constructor(readonly reason: LoopStopReason) {
+    super(`Agent turn stopped: ${reason}`);
+    this.name = "LoopStoppedError";
+  }
+}
+export interface AgentLoopResult { stopReason?: LoopStopReason }
+
+export function integerBudget(name: string, value: number | undefined, fallback: number, minimum = 0): number {
+  const result = value ?? fallback;
+  if (!Number.isSafeInteger(result) || result < minimum) throw new RangeError(`${name} must be a finite integer >= ${minimum}`);
+  return result;
+}
+
 export interface AgentLoopOptions {
   sample(): Promise<LoopResponse>;
   record(items: readonly Record<string, unknown>[]): Promise<void>;
@@ -68,7 +84,10 @@ export interface AgentLoopOptions {
   onPhase?(phase: LoopPhase): void;
   onEvent?(event: LoopEvent): void;
   prepareStep?(): Promise<void>;
+  hasPendingSteering?(): boolean;
   applySteering?(): Promise<number>;
+  checkStop?(): Promise<LoopStopReason | undefined>;
+  maxParallelTools?: number;
   maxRetries?: number;
   maxSteps?: number;
   retryDelayMs?: number;
@@ -81,27 +100,8 @@ export interface AgentLoopOptions {
   canRunInParallel?(call: ToolCall): boolean;
 }
 
-function canRunInParallel(options: AgentLoopOptions, call: ToolCall): boolean {
-  const capabilities = options.toolCapabilities?.(call);
-  if (capabilities) return capabilities.readOnly && capabilities.idempotent && capabilities.parallelSafe;
-  return options.canRunInParallel?.(call) === true;
-}
-
-function resourcesCanShare(options: AgentLoopOptions, batch: readonly ToolCall[], candidate: ToolCall): boolean {
-  const resolver = options.toolCapabilities;
-  if (!resolver) return true;
-  const candidateCapabilities = resolver(candidate);
-  if (!candidateCapabilities) return true;
-  for (const existing of batch) {
-    const existingCapabilities = resolver(existing);
-    if (!existingCapabilities) continue;
-    const shared = existingCapabilities.resourceKeys.some((key) => candidateCapabilities.resourceKeys.includes(key));
-    if (shared) return false;
-  }
-  return true;
-}
-
 export function classifySamplingError(error: unknown): SamplingErrorCategory {
+  if (error instanceof PersistenceError || error instanceof LoopSteeredError || error instanceof LoopStoppedError) return "permanent";
   if (!error || typeof error !== "object") return "permanent";
   const { status, name, retryable: explicitlyRetryable } = error as {
     status?: unknown;
@@ -131,10 +131,15 @@ async function sample(
 ): Promise<LoopResponse> {
   for (let attempt = 0; ; attempt++) {
     options.signal?.throwIfAborted();
+    const stopReason = await options.checkStop?.();
+    if (stopReason) throw new LoopStoppedError(stopReason);
     try {
       return await options.sample();
     } catch (error) {
       options.signal?.throwIfAborted();
+      if (error instanceof PersistenceError) throw error;
+      const stopReason = await options.checkStop?.();
+      if (stopReason) throw new LoopStoppedError(stopReason);
       const category = classifySamplingError(error);
       if (budget.remaining <= 0 || !retryable(category)) throw error;
       budget.remaining -= 1;
@@ -147,36 +152,66 @@ async function sample(
 }
 
 /** Keep transport, tool permissions, and durable history outside turn control. */
-export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
+export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoopResult> {
   const { signal } = options;
-  const samplingBudget = {
-    remaining: Math.max(0, options.retryBudgets?.sampling ?? options.maxRetries ?? 2),
-    total: Math.max(0, options.retryBudgets?.sampling ?? options.maxRetries ?? 2),
+  const retries = integerBudget("sampling retry budget", options.retryBudgets?.sampling ?? options.maxRetries, 2);
+  integerBudget("maxRetries", options.maxRetries, 2);
+  integerBudget("stream recovery budget", options.retryBudgets?.streamRecovery, 1);
+  integerBudget("compaction budget", options.retryBudgets?.compaction, 1);
+  const maxSteps = integerBudget("maxSteps", options.maxSteps, 32, 1);
+  const maxParallelTools = integerBudget("maxParallelTools", options.maxParallelTools, 4, 1);
+  const samplingBudget = { remaining: retries, total: retries };
+  const closeCalls = async (calls: readonly ToolCall[], status: string, reason?: string) => {
+    for (const call of calls) {
+      await options.record([{ type: "function_call_output", call_id: call.call_id,
+        output: JSON.stringify({ status, ...(reason ? { reason } : {}) }) }]);
+    }
+  };
+  const steer = async (remaining: readonly ToolCall[] = []): Promise<boolean> => {
+    if (!options.hasPendingSteering?.()) return false;
+    await closeCalls(remaining, "steered");
+    const count = await options.applySteering?.() ?? 0;
+    if (count) options.onEvent?.({ type: "steering_applied", count });
+    return count > 0;
+  };
+  const stop = async (remaining: readonly ToolCall[] = []): Promise<AgentLoopResult | undefined> => {
+    const reason = await options.checkStop?.();
+    if (!reason) return undefined;
+    await closeCalls(remaining, "skipped", reason);
+    await steer();
+    options.onPhase?.("stopped");
+    return { stopReason: reason };
   };
   try {
-    const maxSteps = Math.max(1, Math.floor(options.maxSteps ?? 32));
     let steps = 0;
-    let stepPrepared = false;
     while (true) {
       signal?.throwIfAborted();
+      const stopped = await stop();
+      if (stopped) return stopped;
+      await steer();
       if (steps >= maxSteps) {
         options.onEvent?.({ type: "step_limit_reached", maxSteps });
         throw new Error(`Agent turn exceeded the maximum of ${maxSteps} sampling steps`);
       }
-      if (!stepPrepared) {
-        steps += 1;
-        await options.prepareStep?.();
-        stepPrepared = true;
-      }
+      steps += 1;
+      await options.prepareStep?.();
+      signal?.throwIfAborted();
+      const preparedStop = await stop();
+      if (preparedStop) return preparedStop;
+      // Guidance arriving during preparation must reach the next request snapshot.
+      if (await steer()) continue;
       options.onPhase?.("sampling");
       let response: LoopResponse;
       try {
         response = await sample(options, samplingBudget);
       } catch (error) {
+        if (error instanceof LoopStoppedError) {
+          await steer();
+          options.onPhase?.("stopped");
+          return { stopReason: error.reason };
+        }
         if (error instanceof LoopSteeredError) {
-          stepPrepared = false;
-          const count = await options.applySteering?.() ?? 0;
-          if (count > 0) options.onEvent?.({ type: "steering_applied", count });
+          await steer();
           continue;
         }
         throw error;
@@ -186,10 +221,9 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
         options.onEvent?.({ type: "response_rejected", reason: "incomplete" });
         throw new Error(`Model response did not complete: ${response.status}`);
       }
-      const calls = response.output.filter((item) => item.type === "function_call");
+      const calls = response.output.filter((item) => item.type === "function_call") as ToolCall[];
       const ids = new Set<string>();
-      for (let callIndex = 0; callIndex < calls.length; callIndex++) {
-        const call = calls[callIndex]! as Partial<ToolCall>;
+      for (const call of calls) {
         if (typeof call.call_id !== "string" || !call.call_id || typeof call.name !== "string" || !call.name || typeof call.arguments !== "string") {
           options.onEvent?.({ type: "response_rejected", reason: "invalid_tool_call" });
           throw new Error("Tool call has invalid fields");
@@ -200,114 +234,99 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
         }
         ids.add(call.call_id);
       }
-      // Never execute a side effect until its request is durably recorded.
+      // Resolve capability metadata once, before asynchronous dispatch begins.
+      const capabilities = calls.map((call) => {
+        const value = options.toolCapabilities?.(call);
+        return value ? { ...value, resourceKeys: [...value.resourceKeys] } : undefined;
+      });
+      const parallel = calls.map((call, index) => {
+        const capability = capabilities[index];
+        return capability
+          ? capability.readOnly && capability.idempotent && capability.parallelSafe
+          : options.canRunInParallel?.(call) === true;
+      });
       await options.record(response.output);
       options.onEvent?.({ type: "response_received", response });
-      const responseSteeringCount = await options.applySteering?.() ?? 0;
-      if (responseSteeringCount > 0) {
-        for (const call of calls) {
-          await options.record([{ type: "function_call_output", call_id: call.call_id, output: JSON.stringify({ status: "steered" }) }]);
-        }
-        options.onEvent?.({ type: "steering_applied", count: responseSteeringCount });
-        continue;
+      if (signal?.aborted) {
+        await closeCalls(calls, "cancelled");
+        signal.throwIfAborted();
       }
+      const responseStop = await stop(calls);
+      if (responseStop) return responseStop;
+      if (await steer(calls)) continue;
       if (response.output_text.trim()) options.assistant(response.output_text.trim());
       if (calls.length) options.onPhase?.("tools");
       let stopAfterTools = false;
-      for (let callIndex = 0; callIndex < calls.length; callIndex++) {
-        const call = calls[callIndex]! as ToolCall;
-        const parallel = canRunInParallel(options, call);
-        if (parallel) {
-          const batch: ToolCall[] = [];
-          for (let index = callIndex; index < calls.length; index++) {
-            const candidate = calls[index] as ToolCall;
-            if (!canRunInParallel(options, candidate) || !resourcesCanShare(options, batch, candidate)) break;
-            batch.push(candidate);
+      for (let index = 0; index < calls.length;) {
+        if (signal?.aborted) {
+          await closeCalls(calls.slice(index), "cancelled");
+          signal.throwIfAborted();
+        }
+        const toolStop = await stop(calls.slice(index));
+        if (toolStop) return toolStop;
+        if (await steer(calls.slice(index))) break;
+        const start = index;
+        const batch = [calls[index]!];
+        const resourceKeys = new Set(capabilities[index]?.resourceKeys ?? []);
+        if (parallel[index]) {
+          while (index + batch.length < calls.length && batch.length < maxParallelTools) {
+            const next = index + batch.length;
+            const keys = capabilities[next]?.resourceKeys ?? [];
+            if (!parallel[next] || keys.some((key) => resourceKeys.has(key))) break;
+            batch.push(calls[next]!);
+            keys.forEach((key) => resourceKeys.add(key));
           }
           options.onEvent?.({ type: "tool_batch_started", calls: batch });
-          const results = await Promise.all(batch.map(async (batchCall) => {
-            options.onEvent?.({ type: "tool_started", call: batchCall });
-            let output: string;
-            let stop = false;
-            try {
-              signal?.throwIfAborted();
-              const result = typeof batchCall.name === "string" && typeof batchCall.arguments === "string"
-                ? await options.dispatch(batchCall)
-                : JSON.stringify({ status: "error", error: "Invalid tool call fields" });
-              output = typeof result === "string" ? result : result.output;
-              stop = typeof result === "object" && result.stop === true;
-            } catch (error) {
-              output = JSON.stringify(signal?.aborted
-                ? { status: "cancelled" }
-                : { status: "error", error: error instanceof Error ? error.message : String(error) });
-            }
-            return { call: batchCall, output, stop };
-          }));
-          for (const result of results) {
-            await options.record([{ type: "function_call_output", call_id: result.call.call_id, output: result.output }]);
-            options.onEvent?.({ type: "tool_finished", call: result.call, output: result.output });
-            stopAfterTools ||= result.stop;
-          }
-          options.onEvent?.({ type: "tool_batch_finished", calls: batch, outputs: results.map((result) => result.output) });
-          callIndex += batch.length - 1;
-          if (stopAfterTools) {
-            for (const skipped of calls.slice(callIndex + 1)) {
-              await options.record([{ type: "function_call_output", call_id: skipped.call_id, output: JSON.stringify({ status: "skipped" }) }]);
-            }
-            break;
-          }
-          const batchSteeringCount = await options.applySteering?.() ?? 0;
-          if (batchSteeringCount > 0) {
-            for (const skipped of calls.slice(callIndex + 1)) {
-              await options.record([{ type: "function_call_output", call_id: skipped.call_id, output: JSON.stringify({ status: "steered" }) }]);
-            }
-            options.onEvent?.({ type: "steering_applied", count: batchSteeringCount });
-            break;
-          }
-          continue;
         }
-        options.onEvent?.({ type: "tool_started", call: call as ToolCall });
-        let output: string;
-        try {
-          signal?.throwIfAborted();
-          const result = typeof call.name === "string" && typeof call.arguments === "string"
-            ? await options.dispatch(call as ToolCall)
-            : JSON.stringify({ status: "error", error: "Invalid tool call fields" });
-          output = typeof result === "string" ? result : result.output;
-          stopAfterTools = typeof result === "object" && result.stop === true;
-        } catch (error) {
-          output = JSON.stringify(signal?.aborted
-            ? { status: "cancelled" }
-            : { status: "error", error: error instanceof Error ? error.message : String(error) });
+        // Await every started operation even when one reports a fatal failure.
+        const results = await Promise.all(batch.map(async (call) => {
+          let output: string;
+          let stop = false;
+          try {
+            signal?.throwIfAborted();
+            options.onEvent?.({ type: "tool_started", call });
+            const result = await options.dispatch(call);
+            output = typeof result === "string" ? result : result.output;
+            stop = typeof result === "object" && result.stop === true;
+          } catch (error) {
+            if (error instanceof PersistenceError) return { call, fatal: error };
+            output = JSON.stringify(signal?.aborted ? { status: "cancelled" }
+              : { status: "error", error: error instanceof Error ? error.message : String(error) });
+          }
+          return { call, output, stop };
+        }));
+        for (const result of results) {
+          if (result.fatal) throw result.fatal;
+          await options.record([{ type: "function_call_output", call_id: result.call.call_id, output: result.output }]);
+          options.onEvent?.({ type: "tool_finished", call: result.call, output: result.output! });
+          stopAfterTools ||= result.stop === true;
         }
-        // Checkpoint each result; a later interrupted tool cannot erase it.
-        await options.record([{ type: "function_call_output", call_id: call.call_id, output }]);
-        options.onEvent?.({ type: "tool_finished", call: call as ToolCall, output });
+        if (parallel[start]) options.onEvent?.({ type: "tool_batch_finished", calls: batch, outputs: results.map((result) => result.output!) });
+        index += batch.length;
+        if (signal?.aborted) {
+          await closeCalls(calls.slice(index), "cancelled");
+          signal.throwIfAborted();
+        }
+        const batchStop = await stop(calls.slice(index));
+        if (batchStop) return batchStop;
         if (stopAfterTools) {
-          for (const skipped of calls.slice(callIndex + 1)) {
-            await options.record([{ type: "function_call_output", call_id: skipped.call_id, output: JSON.stringify({ status: "skipped" }) }]);
-          }
+          await closeCalls(calls.slice(index), "skipped");
+          await steer();
           break;
         }
-        const steeringCount = await options.applySteering?.() ?? 0;
-        if (steeringCount > 0) {
-          for (const skipped of calls.slice(callIndex + 1)) {
-            await options.record([{ type: "function_call_output", call_id: skipped.call_id, output: JSON.stringify({ status: "steered" }) }]);
-          }
-          options.onEvent?.({ type: "steering_applied", count: steeringCount });
-          break;
-        }
+        if (await steer(calls.slice(index))) break;
       }
       signal?.throwIfAborted();
+      const finalStop = await stop();
+      if (finalStop) return finalStop;
       if (stopAfterTools) {
         options.onPhase?.("completed");
-        return;
+        return {};
       }
-      stepPrepared = false;
-      const needsFollowUp = calls.length > 0 || response.end_turn === false;
-      if (!needsFollowUp) {
+      if (await steer()) continue;
+      if (calls.length === 0 && response.end_turn !== false) {
         options.onPhase?.("completed");
-        return;
+        return {};
       }
     }
   } catch (error) {

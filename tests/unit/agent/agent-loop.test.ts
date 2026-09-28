@@ -193,6 +193,7 @@ test("steering checkpoints skip unstarted tools and preserve every function outp
       if (item.call_id === "a") steer = true;
       return "ok";
     },
+    hasPendingSteering: () => steer,
     async applySteering() {
       if (!steer) return 0;
       steer = false;

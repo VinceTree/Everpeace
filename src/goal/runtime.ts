@@ -1,3 +1,4 @@
+import { persistState } from "../storage/persistence-error.js";
 import { randomUUID } from "node:crypto";
 import type { SessionGoal, GoalStatus } from "../storage/session-store.js";
 
@@ -50,8 +51,16 @@ export class GoalRuntime {
     this.#id = id;
   }
 
+  async #getGoal(): Promise<SessionGoal | undefined> {
+    return persistState("Goal state read failed", () => this.#store.getGoal());
+  }
+
+  async #setGoal(goal: SessionGoal): Promise<void> {
+    await persistState("Goal persistence failed", () => this.#store.setGoal(goal));
+  }
+
   async get(): Promise<SessionGoal | undefined> {
-    return this.#store.getGoal();
+    return this.#getGoal();
   }
 
   async create(input: GoalCreateInput): Promise<SessionGoal> {
@@ -60,7 +69,7 @@ export class GoalRuntime {
     if (input.tokenBudget !== undefined && (!Number.isSafeInteger(input.tokenBudget) || input.tokenBudget <= 0)) {
       throw new Error("Goal token budget must be a positive integer");
     }
-    const existing = await this.#store.getGoal();
+    const existing = await this.#getGoal();
     if (existing && !TERMINAL.has(existing.status)) {
       throw new Error("Cannot create a new goal while this session has an unfinished goal");
     }
@@ -70,46 +79,46 @@ export class GoalRuntime {
       token_budget: input.tokenBudget ?? null, tokens_used: 0, usage_complete: true,
       time_used_seconds: 0, blocked_streak: 0, created_at: at, updated_at: at,
     };
-    await this.#store.setGoal(goal);
+    await this.#setGoal(goal);
     return goal;
   }
 
   async update(status: Extract<GoalStatus, "complete" | "blocked" | "paused">): Promise<SessionGoal> {
-    const goal = await this.#store.getGoal();
+    const goal = await this.#getGoal();
     if (!goal) throw new Error("No active goal exists for this session");
     if (status === "blocked") {
       const blockedStreak = (goal.blocked_streak ?? 0) + 1;
       const updated = { ...goal, blocked_streak: blockedStreak, updated_at: this.#now().toISOString() };
       if (blockedStreak < 3) {
-        await this.#store.setGoal(updated);
+        await this.#setGoal(updated);
         throw new Error("A goal can be marked blocked only after the same blocker recurs for three consecutive turns");
       }
       updated.status = status;
-      await this.#store.setGoal(updated);
+      await this.#setGoal(updated);
       return updated;
     }
     const updated = { ...goal, status, blocked_streak: 0, updated_at: this.#now().toISOString() };
-    await this.#store.setGoal(updated);
+    await this.#setGoal(updated);
     return updated;
   }
 
   async resume(): Promise<SessionGoal> {
-    const goal = await this.#store.getGoal();
+    const goal = await this.#getGoal();
     if (!goal || (goal.status !== "paused" && goal.status !== "blocked")) throw new Error("Only a paused or blocked goal can be resumed");
     const updated = { ...goal, status: "active" as const, blocked_streak: 0, updated_at: this.#now().toISOString() };
-    await this.#store.setGoal(updated);
+    await this.#setGoal(updated);
     return updated;
   }
 
   async recordUsage(usage: GoalUsage): Promise<SessionGoal | undefined> {
-    const goal = await this.#store.getGoal();
+    const goal = await this.#getGoal();
     if (!goal || goal.status !== "active") return goal;
     const tokensUsed = Math.max(goal.tokens_used, usage.tokensUsed);
     let status: GoalStatus = goal.status;
     if (goal.token_budget !== null && tokensUsed >= goal.token_budget) status = "budget_limited";
     else if (goal.token_budget !== null && !usage.usageComplete) status = "usage_limited";
     const updated = { ...goal, tokens_used: tokensUsed, usage_complete: usage.usageComplete, time_used_seconds: Math.max(goal.time_used_seconds, usage.timeUsedSeconds), status, updated_at: this.#now().toISOString() };
-    if (JSON.stringify(updated) !== JSON.stringify(goal)) await this.#store.setGoal(updated);
+    if (JSON.stringify(updated) !== JSON.stringify(goal)) await this.#setGoal(updated);
     return updated;
   }
 

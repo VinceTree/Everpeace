@@ -1,3 +1,4 @@
+import { persistState } from "../storage/persistence-error.js";
 import { randomUUID } from "node:crypto";
 import type { ApplyPatchOperation, ApplyPatchResult } from "../tools/apply-patch.js";
 import { TurnCheckpoint, type UndoResult } from "./checkpoint.js";
@@ -167,6 +168,6 @@ export class CodingWorkflowRuntime {
   }
 
   async #save(): Promise<void> {
-    await this.#onState?.(this.state);
+    await persistState("Workflow persistence failed", () => this.#onState?.(this.state));
   }
 }

@@ -23,6 +23,7 @@ import type {
 } from "../../storage/session-store.js";
 import {
   applyUsageSample,
+  applyCompactionUsage,
   createEmptySessionUsage,
   resetContextUsage,
   resolveModelStatusMetadata,
@@ -754,14 +755,14 @@ export function EverpeaceApp({
               const sessionId = activeSessionId.current;
               if (sessionId === undefined) throw new Error("Context compaction requires an active session");
               await dependencies.sessionStore.compactContext(sessionId, items, automatic, usage);
-              setSessionUsage((current) => applyUsageSample(current, usage));
+              setSessionUsage((current) => applyCompactionUsage(current, usage));
             },
             async onUsage(usage) {
-              setSessionUsage((current) => applyUsageSample(current, usage));
               const sessionId = activeSessionId.current;
               if (sessionId !== undefined) {
                 await dependencies.sessionStore.appendUsage(sessionId, usage);
               }
+              setSessionUsage((current) => applyUsageSample(current, usage));
             },
             onPhase(phase) {
               setAgentPhase(phase);
@@ -1587,6 +1588,15 @@ export function EverpeaceApp({
           }
           const started = Date.now();
           const result = await agent.runTurn(nextText, controller.signal, { mode: nextMode }) ?? {};
+          if (result.stopReason) {
+            setLiveAssistant("");
+            const sessionId = activeSessionId.current;
+            if (sessionId) setActiveGoal((await dependencies.sessionStore.load(sessionId)).goal);
+            append("system", result.stopReason === "budget_limited"
+              ? "Goal token budget reached. Work stopped before further tools or model requests."
+              : "Goal usage could not be measured reliably. Work stopped before further tools or model requests.");
+            break;
+          }
           if (result.planDecision === "approve") {
             approvedPlan = true;
             setAgentMode("default");

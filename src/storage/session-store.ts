@@ -5,6 +5,7 @@ import path from "node:path";
 import { isCommandRecord, type CommandRecord } from "../tools/command-record.js";
 import {
   applyUsageSample,
+  applyCompactionUsage,
   createEmptySessionUsage,
   isStatusSnapshot,
   isTokenUsageSample,
@@ -471,7 +472,7 @@ function parseSession(contents: string, filePath: string): LoadedSession {
     if (event.type === "context_append") context.push(...event.items);
     if (event.type === "context_compacted") {
       context = event.items.map((item) => ({ ...item }));
-      usage = applyUsageSample(usage, event.usage);
+      usage = applyCompactionUsage(usage, event.usage);
     }
     if (event.type === "model_selected") {
       model = event.model;

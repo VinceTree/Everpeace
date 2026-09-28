@@ -1,4 +1,5 @@
-import { LoopSteeredError, runAgentLoop, type LoopEvent, type LoopPhase, type ToolCall } from "./agent-loop.js";
+import { LoopSteeredError, LoopStoppedError, runAgentLoop, type LoopEvent, type LoopPhase, type ToolCall, type LoopStopReason, integerBudget } from "./agent-loop.js";
+import { PersistenceError, persistState } from "../storage/persistence-error.js";
 import { repairToolContext } from "./repair-context.js";
 import {
   isContextLimitError,
@@ -162,6 +163,8 @@ export interface ReactAgentOptions {
   parallelToolCalls?: boolean;
   samplingRetryBudget?: number;
   maxSteps?: number;
+  maxParallelTools?: number;
+  recoveryCacheMaxBytes?: number;
   streamRecoveryBudget?: number;
   contextRecoveryBudget?: number;
   web?: WebToolExecutor;
@@ -188,6 +191,7 @@ export interface AgentTurnOptions {
 }
 
 export interface AgentTurnResult {
+  stopReason?: LoopStopReason;
   planDecision?: PlanReviewDecision;
   approvedPlan?: string;
 }
@@ -236,6 +240,14 @@ function isUnsupportedPromptCacheOptionsError(error: unknown): boolean {
   return /prompt[ _-]?cache|cache[ _-]?breakpoint/iu.test(serialized);
 }
 
+function freezeSnapshot<T>(value: T): T {
+  if (value && typeof value === "object") {
+    for (const child of Object.values(value)) freezeSnapshot(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 export class ReactAgent {
   #running = false;
   readonly #onPhase: ((phase: LoopPhase) => void) | undefined;
@@ -265,6 +277,10 @@ export class ReactAgent {
   #pendingSteering: string[] = [];
   #sampleController: AbortController | undefined;
   #mcpSnapshot: McpSnapshot = { tools: [], instructions: "", servers: [] };
+  #stepTools: ReadonlyArray<Record<string, unknown>> = [];
+  #stepToolNames = new Set<string>();
+  #turnInput: string[] = [];
+  #turnGoalId: string | undefined;
   #stepMcpToolInfo: ReadonlyMap<string, McpToolInfo> = new Map();
   #skillTurn: SkillTurnContext | undefined;
   #learnedPrompt = "";
@@ -282,6 +298,8 @@ export class ReactAgent {
   readonly #parallelToolCalls: boolean;
   readonly #samplingRetryBudget: number;
   readonly #maxSteps: number;
+  readonly #maxParallelTools: number;
+  readonly #recoveryCacheMaxBytes: number;
   readonly #streamRecoveryBudget: number;
   readonly #contextRecoveryBudget: number;
 
@@ -296,10 +314,12 @@ export class ReactAgent {
     this.#promptCacheOptions = options.promptCacheOptions;
     this.#advancedPromptCacheEnabled = options.promptCacheOptions !== undefined;
     this.#parallelToolCalls = options.parallelToolCalls === true;
-    this.#samplingRetryBudget = Math.max(0, options.samplingRetryBudget ?? 2);
-    this.#maxSteps = Math.max(1, Math.floor(options.maxSteps ?? 32));
-    this.#streamRecoveryBudget = Math.max(0, options.streamRecoveryBudget ?? 1);
-    this.#contextRecoveryBudget = Math.max(0, options.contextRecoveryBudget ?? 1);
+    this.#samplingRetryBudget = integerBudget("samplingRetryBudget", options.samplingRetryBudget, 2);
+    this.#maxSteps = integerBudget("maxSteps", options.maxSteps, 32, 1);
+    this.#maxParallelTools = integerBudget("maxParallelTools", options.maxParallelTools, 4, 1);
+    this.#recoveryCacheMaxBytes = integerBudget("recoveryCacheMaxBytes", options.recoveryCacheMaxBytes, 8 * 1024 * 1024);
+    this.#streamRecoveryBudget = integerBudget("streamRecoveryBudget", options.streamRecoveryBudget, 1);
+    this.#contextRecoveryBudget = integerBudget("contextRecoveryBudget", options.contextRecoveryBudget, 1);
     this.#web = options.web ?? createWebToolExecutor();
     this.#mcp = options.mcp;
     this.#skills = options.skills;
@@ -329,37 +349,46 @@ export class ReactAgent {
     this.#turnItems = turnItems;
     this.#turnMode = options.mode ?? "default";
     this.#turnResult = {};
+    this.#turnInput = [userInput];
     this.#streamRecoveryRemaining = this.#streamRecoveryBudget;
     const assistantTexts: string[] = [];
     let contextRecoveryRemaining = this.#contextRecoveryBudget;
+    let persistenceFailed = false;
     try {
       await this.#ensureLearnedPrompt(userInput);
       const goal = await this.#goalRuntime?.get();
+      this.#turnGoalId = goal?.status === "active" ? goal.goal_id : undefined;
       this.#goalPrompt = goal?.status === "active" ? `Active session goal: ${goal.objective}\nContinue until verified complete. Before completion, audit the objective and call update_goal with complete. Mark blocked only after the same blocker recurs for three consecutive goal turns.` : "";
       this.#history = repairToolContext(this.#history);
+      await this.#applyPendingSteering();
       await this.#record([{ role: "user", content: userInput }]);
-      await runAgentLoop({
+      const loopResult = await runAgentLoop({
         prepareStep: async () => {
           if (this.#mcp && this.#turnMode === "default") {
-            this.#mcpSnapshot = await this.#mcp.ensureReady(signal);
+            this.#mcpSnapshot = structuredClone(await this.#mcp.ensureReady(signal));
             const toolInfo = new Map<string, McpToolInfo>();
             for (const tool of this.#mcpSnapshot.tools) {
               const info = this.#mcp.toolInfo(tool.name);
-              if (info) toolInfo.set(tool.name, info);
+              if (info) toolInfo.set(tool.name, structuredClone(info));
             }
             this.#stepMcpToolInfo = toolInfo;
           } else {
             this.#mcpSnapshot = { tools: [], instructions: "", servers: [] };
             this.#stepMcpToolInfo = new Map();
           }
-          if (this.#skills) this.#skillTurn = await this.#skills.prepareTurn(userInput);
+          if (this.#skills) this.#skillTurn = structuredClone(await this.#skills.prepareTurn(this.#turnInput.join("\n")));
+          this.#stepTools = freezeSnapshot(structuredClone(this.#buildTools()));
+          this.#stepToolNames = new Set(this.#stepTools.map((tool) => String(tool.name)));
+          await this.#maybeAutoCompact(signal);
         },
         sample: async () => {
-          await this.#maybeAutoCompact(signal);
           try {
             return await this.#requestResponse([...this.#history], signal);
           } catch (error) {
             signal?.throwIfAborted();
+            if (error instanceof PersistenceError) throw error;
+            const stopped = await this.#checkGoalStop();
+            if (stopped) throw new LoopStoppedError(stopped);
             if (
               contextRecoveryRemaining > 0 &&
               this.#client.responses.compact !== undefined &&
@@ -367,6 +396,8 @@ export class ReactAgent {
             ) {
               contextRecoveryRemaining -= 1;
               await this.#compactContext(true, signal);
+              const stopReason = await this.#checkGoalStop();
+              if (stopReason) throw new LoopStoppedError(stopReason);
               return this.#requestResponse([...this.#history], signal);
             }
             throw error;
@@ -380,29 +411,30 @@ export class ReactAgent {
         },
         ...(this.#onPhase ? { onPhase: this.#onPhase } : {}),
         ...(this.#onEvent ? { onEvent: this.#onEvent } : {}),
+        hasPendingSteering: () => this.#pendingSteering.length > 0,
         applySteering: () => this.#applyPendingSteering(),
+        checkStop: () => this.#checkGoalStop(),
         ...(signal ? { signal } : {}),
         retryBudgets: { sampling: this.#samplingRetryBudget },
         maxSteps: this.#maxSteps,
+        maxParallelTools: this.#maxParallelTools,
         ...(this.#parallelToolCalls
           ? {
               toolCapabilities: (call: ToolCall) => {
+                if (!this.#stepToolNames.has(call.name)) return undefined;
                 if (call.name === "read_file" || call.name === "list_directory") {
                   return { readOnly: true, idempotent: true, parallelSafe: true, resourceKeys: [] };
                 }
                 if (call.name === READ_SKILL_TOOL_DEFINITION.name) {
                   return { readOnly: true, idempotent: true, parallelSafe: true, resourceKeys: [] };
                 }
-                const info = this.#stepMcpToolInfo.get(call.name);
-                if (info?.annotations?.readOnlyHint === true && info.annotations.idempotentHint === true) {
-                  return { readOnly: true, idempotent: true, parallelSafe: true, resourceKeys: [`mcp:${info.serverName}`] };
-                }
                 return undefined;
               },
             }
           : {}),
       });
-      if (this.#learnedMemory) {
+      this.#turnResult = { ...this.#turnResult, ...loopResult };
+      if (this.#learnedMemory && !loopResult.stopReason) {
         const sessionId = this.#io.getSessionId?.();
         const learnedTurn: LearnedTurn = {
           workspacePath: this.#workspacePath,
@@ -415,13 +447,24 @@ export class ReactAgent {
         this.#learnedMemory.scheduleCapture(learnedTurn);
       }
       return { ...this.#turnResult };
+    } catch (error) {
+      persistenceFailed = error instanceof PersistenceError;
+      throw error;
     } finally {
       try {
-        if (signal?.aborted) await this.#applyPendingSteering();
+        if (!persistenceFailed && this.#pendingSteering.length > 0) {
+          const repaired = repairToolContext(this.#history);
+          // Only trailing missing results can remain here; persist them before guidance.
+          await this.#record(repaired.slice(this.#history.length));
+          await this.#applyPendingSteering();
+        }
       } finally {
         this.#sampleController = undefined;
         this.#skillTurn = undefined;
         this.#stepMcpToolInfo = new Map();
+        this.#stepTools = [];
+        this.#stepToolNames.clear();
+        this.#turnGoalId = undefined;
         this.#mcpSnapshot = { tools: [], instructions: "", servers: [] };
         this.#running = false;
         this.#streamRecoveryRemaining = 0;
@@ -454,6 +497,10 @@ export class ReactAgent {
   }
 
   async #dispatchTool(call: ToolCall, signal?: AbortSignal): Promise<string | { output: string; stop?: boolean }> {
+    signal?.throwIfAborted();
+    if (!this.#stepToolNames.has(call.name)) {
+      return JSON.stringify({ status: "denied", error: `Tool is unavailable in the current step: ${call.name}` });
+    }
     const policy = this.#io.getPermissions?.() ?? defaultPermissions();
     let output: string;
     if (call.name === "request_user_input" && this.#turnMode === "plan" && this.#planInteraction) {
@@ -474,12 +521,15 @@ export class ReactAgent {
       const args = JSON.parse(call.arguments) as { objective?: unknown; token_budget?: unknown };
       if (typeof args.objective !== "string") return JSON.stringify({ error: "Goal objective is required" });
       if (!(await this.#io.confirmGoal?.(`Create goal: ${args.objective}`))) return JSON.stringify({ status: "rejected" });
+      signal?.throwIfAborted();
       const goal = await this.#goalRuntime.create({ objective: args.objective, ...(typeof args.token_budget === "number" ? { tokenBudget: args.token_budget } : {}) });
+      this.#turnGoalId = goal.goal_id;
       return JSON.stringify({ goal });
     } else if (call.name === "update_goal" && this.#goalRuntime) {
       const args = JSON.parse(call.arguments) as { status?: unknown };
       if (args.status !== "complete" && args.status !== "blocked" && args.status !== "paused") return JSON.stringify({ error: "Invalid goal status" });
       if (args.status === "paused" && !(await this.#io.confirmGoal?.("Pause the active goal"))) return JSON.stringify({ status: "rejected" });
+      signal?.throwIfAborted();
       return JSON.stringify({ goal: await this.#goalRuntime.update(args.status) });
     } else if (call.name === BASH_TOOL_DEFINITION.name && this.#turnMode === "plan") {
       output = JSON.stringify({ status: "denied", error: "Bash is unavailable in Plan mode" });
@@ -527,7 +577,13 @@ export class ReactAgent {
           this.#io.onToolProgress?.({ phase: "started", name: call.name });
           this.#io.writeTool?.("Applying workspace patch");
           const result = await this.#io.runApplyPatch(operations, signal);
-          const followup = await this.#io.afterPatchApplied?.(operations, result, signal);
+          let followup: WorkflowPatchFollowup | void;
+          try {
+            followup = await this.#io.afterPatchApplied?.(operations, result, signal);
+          } catch (error) {
+            if (signal?.aborted || error instanceof PersistenceError) throw error;
+            throw new PersistenceError("Workflow follow-up failed", error);
+          }
           output = JSON.stringify({
             ...result,
             ...(followup?.verification ? { verification: followup.verification } : {}),
@@ -640,7 +696,7 @@ export class ReactAgent {
   }
 
   async #persist(items: readonly Record<string, unknown>[]): Promise<void> {
-    if (items.length > 0) await this.#onHistoryAppend?.(items);
+    if (items.length > 0) await persistState("Context persistence failed", () => this.#onHistoryAppend?.(items));
   }
 
   async #runWebTool(
@@ -662,6 +718,7 @@ export class ReactAgent {
     input: Array<Record<string, unknown>>,
     signal?: AbortSignal,
   ): Promise<AgentResponse> {
+    if (this.#pendingSteering.length > 0) throw new LoopSteeredError();
     const controller = new AbortController();
     this.#sampleController = controller;
     const requestSignal = this.#client.responses.stream === undefined
@@ -686,14 +743,9 @@ export class ReactAgent {
     const usage = normalizeTokenUsageSample(response.usage);
     this.#contextTokens = usage?.total_tokens ?? null;
     if (this.#onUsage) {
-      await this.#onUsage(usage);
+      await persistState("Usage persistence failed", () => this.#onUsage!(usage));
     }
-    if (this.#goalRuntime) {
-      const current = await this.#goalRuntime.get();
-      if (current?.status === "active") {
-        await this.#goalRuntime.recordUsage({ tokensUsed: current.tokens_used + (usage ? usage.input_tokens + usage.output_tokens : 0), usageComplete: current.usage_complete && usage !== null, timeUsedSeconds: current.time_used_seconds });
-      }
-    }
+    await this.#recordGoalUsage(usage);
     if (response.status && response.status !== "completed") {
       throw new ModelResponseError(response);
     }
@@ -743,15 +795,17 @@ export class ReactAgent {
       }
       const items = response.output.map((item) => ({ ...item }));
       const usage = normalizeTokenUsageSample(response.usage);
-      await this.#onContextCompacted?.(items, automatic, usage);
+      signal?.throwIfAborted();
+      await persistState("Compaction persistence failed", () => this.#onContextCompacted?.(items, automatic, usage));
       this.#history = items;
-      this.#contextTokens = usage?.total_tokens ?? null;
+      this.#contextTokens = null;
+      await this.#recordGoalUsage(usage);
       const result = { items, usage };
       this.#onEvent?.({ type: "compaction_completed", automatic, usage });
       return result;
     } catch (error) {
       if (signal?.aborted) throw error;
-      if (error instanceof ContextCompactionError) throw error;
+      if (error instanceof ContextCompactionError || error instanceof PersistenceError) throw error;
       throw new ContextCompactionError(
         error instanceof Error ? error.message : String(error),
         { cause: error },
@@ -773,6 +827,31 @@ export class ReactAgent {
       this.#advancedPromptCacheEnabled = false;
       return this.#createResponseAttempt(input, signal, false, recoveryBudget);
     }
+  }
+
+  #buildTools(): Array<Record<string, unknown>> {
+    return this.#turnMode === "plan"
+      ? [
+          WEB_SEARCH_TOOL_DEFINITION,
+          WEB_FETCH_TOOL_DEFINITION,
+          WORKSPACE_STATUS_TOOL_DEFINITION,
+          WORKSPACE_DIFF_TOOL_DEFINITION,
+          ...FILE_TOOL_DEFINITIONS,
+          ...PLAN_TOOL_DEFINITIONS,
+          ...(this.#skillTurn && this.#skillTurn.skills.length > 0 ? [READ_SKILL_TOOL_DEFINITION] : []),
+        ]
+      : [
+          BASH_TOOL_DEFINITION,
+          APPLY_PATCH_TOOL_DEFINITION,
+          WORKSPACE_STATUS_TOOL_DEFINITION,
+          WORKSPACE_DIFF_TOOL_DEFINITION,
+          WEB_SEARCH_TOOL_DEFINITION,
+          WEB_FETCH_TOOL_DEFINITION,
+          ...FILE_TOOL_DEFINITIONS,
+          ...this.#mcpSnapshot.tools.map((tool) => ({ ...tool })),
+          ...(this.#goalRuntime ? GOAL_TOOL_DEFINITIONS : []),
+          ...(this.#skillTurn && this.#skillTurn.skills.length > 0 ? [READ_SKILL_TOOL_DEFINITION] : []),
+        ];
   }
 
   async #createResponseAttempt(
@@ -808,33 +887,11 @@ export class ReactAgent {
           ...input,
         ]
       : input;
-    const tools = this.#turnMode === "plan"
-      ? [
-          WEB_SEARCH_TOOL_DEFINITION,
-          WEB_FETCH_TOOL_DEFINITION,
-          WORKSPACE_STATUS_TOOL_DEFINITION,
-          WORKSPACE_DIFF_TOOL_DEFINITION,
-          ...FILE_TOOL_DEFINITIONS,
-          ...PLAN_TOOL_DEFINITIONS,
-          ...(this.#skillTurn && this.#skillTurn.skills.length > 0 ? [READ_SKILL_TOOL_DEFINITION] : []),
-        ]
-      : [
-          BASH_TOOL_DEFINITION,
-          APPLY_PATCH_TOOL_DEFINITION,
-          WORKSPACE_STATUS_TOOL_DEFINITION,
-          WORKSPACE_DIFF_TOOL_DEFINITION,
-          WEB_SEARCH_TOOL_DEFINITION,
-          WEB_FETCH_TOOL_DEFINITION,
-          ...FILE_TOOL_DEFINITIONS,
-          ...this.#mcpSnapshot.tools,
-          ...(this.#goalRuntime ? GOAL_TOOL_DEFINITIONS : []),
-          ...(this.#skillTurn && this.#skillTurn.skills.length > 0 ? [READ_SKILL_TOOL_DEFINITION] : []),
-        ];
     const params = {
         model: this.#model,
         ...(useAdvancedLayout ? {} : { instructions: `${stableInstructions}\n${dynamicInstructions}` }),
         input: requestInput,
-        tools,
+        tools: structuredClone(this.#stepTools),
         tool_choice: "auto",
         parallel_tool_calls: this.#parallelToolCalls,
         store: false,
@@ -842,6 +899,7 @@ export class ReactAgent {
         ...cache.params,
       };
     const options = { maxRetries: 0, ...(signal ? { signal } : {}), ...cache.options };
+    this.#onEvent?.({ type: "sampling_started" });
     if (this.#responseTransport === "stream" && this.#client.responses.stream) {
       let eventsSeen = 0;
       try {
@@ -867,6 +925,7 @@ export class ReactAgent {
               this.#onEvent?.({ type: "stream_recovery_finished" });
               return result;
             } catch (recoveryError) {
+              if (recoveryError instanceof PersistenceError) throw recoveryError;
               this.#onEvent?.({ type: "stream_recovery_finished", success: false });
               // The adapter owns cursor recovery. If it cannot rebuild a
               // complete response, let the loop's bounded whole-request retry
@@ -880,6 +939,7 @@ export class ReactAgent {
         if (signal?.aborted) throw error;
         if (eventsSeen === 0 && isStreamUnsupportedError(error)) {
           this.#responseTransport = "buffered";
+          this.#onEvent?.({ type: "sampling_started" });
           return this.#client.responses.create(params, options);
         }
         throw error;
@@ -896,12 +956,20 @@ export class ReactAgent {
     let outputText = "";
     const items = new Map<string, ResponseOutputItem>();
     const events: Array<Record<string, unknown>> = [];
+    let eventsSeen = 0;
+    let recoveryBytes = 0;
+    let retainEvents = this.#client.responses.recovery !== undefined;
     let lastEventId: string | undefined;
     let responseId: string | undefined;
     try {
       for await (const event of stream) {
         onEvent();
-        events.push(event);
+        eventsSeen += 1;
+        if (retainEvents) {
+          recoveryBytes += Buffer.byteLength(JSON.stringify(event), "utf8");
+          if (recoveryBytes <= this.#recoveryCacheMaxBytes) events.push(event);
+          else { retainEvents = false; events.length = 0; }
+        }
         if (typeof event.id === "string") lastEventId = event.id;
         if (event.response && typeof event.response === "object" && typeof (event.response as Record<string, unknown>).id === "string") {
           responseId = (event.response as Record<string, unknown>).id as string;
@@ -962,10 +1030,11 @@ export class ReactAgent {
       }
       }
     } catch (error) {
-      if (error instanceof ModelResponseError) throw error;
+      if (error instanceof ModelResponseError || error instanceof PersistenceError) throw error;
       if (error instanceof ResponseStreamIncompleteError) {
         const incomplete = error as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState };
-        if (incomplete.recoveryState === undefined) {
+        if (!retainEvents) delete incomplete.recoveryState;
+        if (retainEvents && incomplete.recoveryState === undefined) {
           incomplete.recoveryState = {
             events,
             ...(lastEventId === undefined ? {} : { lastEventId }),
@@ -974,9 +1043,9 @@ export class ReactAgent {
         }
         throw incomplete;
       }
-      if (events.length > 0) {
+      if (eventsSeen > 0) {
         const incomplete = new ResponseStreamIncompleteError({ cause: error });
-        (incomplete as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState }).recoveryState = {
+        if (retainEvents) (incomplete as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState }).recoveryState = {
           events,
           ...(lastEventId === undefined ? {} : { lastEventId }),
           ...(responseId === undefined ? {} : { responseId }),
@@ -987,7 +1056,7 @@ export class ReactAgent {
     }
     if (!response) {
       const incomplete = new ResponseStreamIncompleteError();
-      (incomplete as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState }).recoveryState = {
+      if (retainEvents) (incomplete as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState }).recoveryState = {
         events,
         ...(lastEventId === undefined ? {} : { lastEventId }),
         ...(responseId === undefined ? {} : { responseId }),
@@ -1034,8 +1103,27 @@ export class ReactAgent {
 
   async #applyPendingSteering(): Promise<number> {
     if (this.#pendingSteering.length === 0) return 0;
-    const pending = this.#pendingSteering.splice(0);
-    for (const text of pending) await this.#record([{ role: "user", content: text }]);
-    return pending.length;
+    const count = this.#pendingSteering.length;
+    for (let index = 0; index < count; index++) {
+      const text = this.#pendingSteering[0]!;
+      await this.#record([{ role: "user", content: text }]);
+      this.#pendingSteering.shift();
+      this.#turnInput.push(text);
+    }
+    return count;
+  }
+
+  async #checkGoalStop(): Promise<LoopStopReason | undefined> {
+    if (!this.#turnGoalId) return undefined;
+    const goal = await this.#goalRuntime?.get();
+    if (goal?.goal_id === this.#turnGoalId && (goal.status === "budget_limited" || goal.status === "usage_limited")) return goal.status;
+    return undefined;
+  }
+
+  async #recordGoalUsage(usage: TokenUsageSample | null): Promise<void> {
+    const current = await this.#goalRuntime?.get();
+    if (current?.goal_id === this.#turnGoalId && current?.status === "active") {
+      await this.#goalRuntime!.recordUsage({ tokensUsed: current.tokens_used + (usage ? usage.input_tokens + usage.output_tokens : 0), usageComplete: current.usage_complete && usage !== null, timeUsedSeconds: current.time_used_seconds });
+    }
   }
 }

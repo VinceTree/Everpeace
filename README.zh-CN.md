@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.2.21) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.22) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -128,9 +128,9 @@ TUI 命令：
 - `/mcp`：重新加载 Codex MCP 配置、连接已启用服务器并查看 tool/resource/prompt 状态。
 - `/skills`：创建、安装、查看并显式调用本地 Skills。
 - `/memory`：查看 learned 经验、暂停/恢复自动积累、切换当前聊天是否读取或记录 memory、归档或清理条目、使用 `/memory view` 查看实际注入快照，或使用 `/memory remember <偏好>` 保存长期用户偏好。
-- `/plan`：进入严格只读规划模式，回答结构化策略问题，并在批准计划后执行。
-- `/goal <目标> [--tokens N]`：创建、查看、暂停、恢复并自动持续执行当前 Session 目标。
-- `/compact`：使用供应商原生的 Responses 压缩接口替换模型 context，同时保留完整可见 transcript 和 Session 历史。模型轮次或直接命令运行时会拒绝执行；已知 context window 达到 80% 后，会在下一次模型请求前自动压缩，明确的 context-limit 响应每轮最多额外触发一次自动恢复压缩。
+- `/plan`：进入严格只读规划模式，回答结构化策略问题，并在批准计划后执行。执行器会拒绝该 step 未提供的工具，包括编辑和 Goal 写操作。
+- `/goal <目标> [--tokens N]`：创建、查看、暂停、恢复并自动持续执行当前 Session 目标。收到 usage 后达到预算或无法可靠计量时，会停止后续工具、模型请求和自动验证修复，并显示原因；正在进行的单次请求可能超过剩余额度。
+- `/compact`：使用供应商原生的 Responses 压缩接口替换模型 context，同时保留完整可见 transcript 和 Session 历史。模型轮次或直接命令运行时会拒绝执行；已知 context window 达到 80% 后，会在下一次模型请求前自动压缩，明确的 context-limit 响应每轮最多额外触发一次自动恢复压缩。同一步的网络重试不会重复阈值压缩；压缩消耗仍累计，压缩后的 context 占用在下一次模型响应前显示未知。
 - `/outputs`：分页浏览保留输出、已高亮的命令及 unified diff。
 - `/history`：浏览或明确确认后清空全局输入历史，不删除 Session。
 - `/terminal-setup`：预览并可选配置稳定版 Windows Terminal 的 Shift+Enter；确认后先备份设置，再新增全局按键绑定。
