@@ -1,3 +1,21 @@
+## 最新执行：个人开发 Agent 可靠闭环
+
+状态快照：2026-09-29。首批个人开发优化已实现但尚未提交：默认提示定位为个人软件开发搭档；每个逻辑 step 安全加载根级 `AGENTS.md` 与 `package.json` scripts。Git 工作区在 turn 开始记录结构化 NUL status 和有界内容指纹，可识别模型 shell 对干净文件、已有脏文件、未跟踪文件、删除及中文路径造成的本轮变化；非 Git shell 和追踪超限失败关闭为未验证，结构化 patch 与 `/undo` 继续使用进程内 SHA-256 检查点。
+
+Node/TypeScript 最终验证改为重新发现当前 manifest，按 `typecheck`、`lint`、`test`、`build` 串行执行全部已声明脚本并在首败停止；修复后重跑完整集合，没有检查命令返回 unavailable。工作流持久结果新增 `verified`、`unverified`、`failed`、`no_changes` 及脱敏 suite 元数据；stdout/stderr/error、文件内容和 undo checkpoint 不进入 JSONL。修复预算按真实诊断轮计数，三次后 blocked 不可由后续 patch 绕过。宿主显示变更与检查摘要，只把 verified coding turn 交给成功 learned-memory capture；模型的 Goal complete 请求延迟到宿主验证结算，失败、取消或未验证会丢弃待完成请求并停止自动 Goal 续跑。
+
+新增回归覆盖完整 Node 检查顺序、test 通过但 build 失败、本轮创建 package.json、无检查命令、干净/既有脏/中文未跟踪 shell 变化、非 Git 限制、三轮修复上限、Goal 延迟完成、项目规则注入、Memory outcome 和 Session 脱敏兼容。Windows Node 22 下最终 `pnpm test` 为 337 项：336 通过、0 失败、1 项按平台跳过；`pnpm typecheck`、`pnpm build` 及本次文件的 `git diff --check` 通过。全工作区 diff 检查仍只报告用户已有 `.gitignore`、`LICENSE` 的 CRLF 差异，本轮未改动二者。当前执行环境不能启动真实 Windows Terminal GUI，也未使用真实供应商凭据，因此交互式“失败→修复→完整通过” live provider smoke 仍待手工验收。工作区原有 sandbox/permissions 和其他未跟踪改动均保留，未提交、未推送、未发布。
+
+## 最新执行：Sandbox 有效策略与原生元数据保护
+
+状态快照：2026-09-28。`0.2.23` 的第一阶段提交 `6b21950` 已推送到 `origin/main`，提交使用 `[skip ci]`；远端 main SHA 已核对一致，`git ls-remote` 确认不存在 `v0.2.23` tag，未调用或更新远程 Release。
+
+下一阶段首段已实现但尚未提交：每次模型 Bash 前冻结 workspace/read roots、控制路径、网络、环境、审批范围与后端 profile；workspace/ask 使用完整原生 `:workspace` 子 profile，将 `.git`、`.codex`、`.agents`、`.everpeace` 设为只读并拒绝模型读取平台 Everpeace 状态根。宿主先创建 `.everpeace`，拒绝 symlink/junction，解决 Windows 对不存在 deny target 不生效的问题。新增独立的持久 shell 网络开关，通过原生 `--sandbox-state-disable-network` 执行，不复用 web/MCP；full-access 继续显式例外，managed policy 冲突失败关闭。
+
+命令策略改为检查每个顶层复合命令段；嵌套解释器、命令替换和无法可靠解析的语法要求审批，未解析内容中的明确 deny 仍拒绝。Bash、patch 和 workflow 验证审批后都会校验权限 revision，变化时不启动旧操作；权限保存后重新加载用户/项目交集，项目限制不会在界面切换后暂时失效。Windows 原生回归验证普通工作区写入成功、`.everpeace` 写入失败，并验证平台状态文件内容不可读。
+
+验证：相关 Agent/权限/sandbox/TUI 定向均通过，最新策略/sandbox/TUI 组合为 71 项中 70 通过、1 项平台跳过；Memory 文件单独 14/14 通过；最新串行完整测试 325 项中 324 通过、0 失败、1 项平台跳过；`pnpm typecheck` 与 `pnpm build` 通过。默认并发 `pnpm test` 两次分别在既有 Memory 后台等待用例出现 2 项和 1 项超时，其余通过；失败用例单独与串行完整运行均通过，本轮未修改 Memory 代码，仍应作为并发测试波动跟踪。隔离文件 worker 及 Linux/macOS 原生网络/文件验收留在下一段。
+
 ## 最新执行：Sandbox 对比与首批加固
 
 状态快照：2026-09-28。对照固定 Codex `c0d26949`、oh-my-pi `cabfa74e`、Grok Build `f0e3be11`，并单独核对已安装后端 `0.155.1` 源码及 CLI 参数。保留原生后端；完整差异、选择理由、优先级与阶段 B/C 验收在 `architecture/SANDBOX.md`。

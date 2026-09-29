@@ -172,6 +172,8 @@ test("session store round-trips workflow metadata without storing file contents"
       max_repair_attempts: 3,
       changed_paths: ["src/index.ts"],
       checkpoint_available: true,
+      result: "failed",
+      tracking_limited: false,
       last_verification: {
         command: { id: "node:typecheck", label: "Node typecheck", command: "pnpm run typecheck", tier: "fast", timeoutMs: 60_000 },
         passed: true,
@@ -181,6 +183,20 @@ test("session store round-trips workflow metadata without storing file contents"
         durationMs: 12,
         timedOut: false,
       },
+      last_verification_suite: {
+        status: "failed",
+        results: [{
+          command: { id: "node:typecheck", label: "Node typecheck", command: "pnpm run typecheck", tier: "fast", timeoutMs: 60_000 },
+          passed: false,
+          exitCode: 1,
+          stdout: "suite-secret-output",
+          stderr: "suite-secret-error",
+          durationMs: 12,
+          timedOut: false,
+          error: "secret execution error",
+        }],
+        skipped: [{ id: "node:build", label: "Node build", command: "pnpm run build", tier: "full", timeoutMs: 120_000 }],
+      },
       updated_at: "2026-09-16T00:00:00.000Z",
     };
     await fixture.store.setWorkflow(created.id, workflow);
@@ -188,12 +204,20 @@ test("session store round-trips workflow metadata without storing file contents"
     const persistedWorkflow = {
       ...workflow,
       last_verification: { ...workflow.last_verification!, stdout: "", stderr: "" },
+      last_verification_suite: {
+        ...workflow.last_verification_suite!,
+        results: workflow.last_verification_suite!.results.map((result) => {
+          const { error: _error, ...metadata } = result;
+          return { ...metadata, stdout: "", stderr: "" };
+        }),
+      },
     };
     assert.deepEqual(loaded.workflow, persistedWorkflow);
     assert.deepEqual((await fixture.store.list()).sessions[0]?.workflow, persistedWorkflow);
     const raw = await fs.readFile(path.join(fixture.directory, `${created.id}.jsonl`), "utf8");
     assert.doesNotMatch(raw, /beforeContent|file contents/iu);
     assert.doesNotMatch(raw, /secret-token-from-check/u);
+    assert.doesNotMatch(raw, /suite-secret-output|suite-secret-error|secret execution error/u);
   } finally {
     await fixture.cleanup();
   }

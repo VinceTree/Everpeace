@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import {
+  analyzeCommand,
   bashPermission,
   codexSandboxProfile,
   commandPermission,
@@ -49,6 +50,23 @@ test("disabling web always wins over the selected profile", () => {
   assert.equal(webPermission({ mode: "full-access", web: false }), "deny");
 });
 
+test("project policy can independently disable model shell networking", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-network-policy-"));
+  try {
+    const userPath = path.join(root, "user.json");
+    const projectPath = path.join(root, "project.json");
+    await savePermissionPolicy({ mode: "workspace-write", web: true }, root, { userPath, scope: "user" });
+    await savePermissionPolicy({ mode: "workspace-write", web: true, shellNetwork: "deny" }, root, { projectPath, scope: "project" });
+    assert.deepEqual(await loadPermissionPolicy(root, { userPath, projectPath }), {
+      mode: "workspace-write",
+      web: true,
+      shellNetwork: "deny",
+    });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("command prefix rules use boundaries, longest match, and deny precedence", () => {
   const policy = {
     mode: "workspace-write" as const,
@@ -63,6 +81,32 @@ test("command prefix rules use boundaries, longest match, and deny precedence", 
   assert.equal(commandPermission("git status --short --branch", policy), "ask");
   assert.equal(commandPermission("git status-all", policy), "deny");
   assert.equal(commandPermission("git commit -am fix", policy), "deny");
+});
+
+test("command rules inspect every top-level executable segment", () => {
+  const policy = {
+    mode: "workspace-write" as const,
+    web: true,
+    commandRules: [
+      { prefix: "git status", action: "allow" as const },
+      { prefix: "git commit", action: "deny" as const },
+    ],
+  };
+  assert.equal(commandPermission("git status --short && git commit -am unsafe", policy), "deny");
+  assert.equal(commandPermission("git status --short; echo done", policy), "allow");
+  assert.deepEqual(analyzeCommand("printf 'a;b' | cat").segments, ["printf 'a;b'", "cat"]);
+});
+
+test("nested interpreters require approval and cannot hide an explicit deny", () => {
+  const base = { mode: "workspace-write" as const, web: true };
+  assert.equal(commandPermission("bash -c 'echo nested'", base), "ask");
+  assert.equal(commandPermission("/usr/bin/python3 -c 'print(1)'", base), "ask");
+  assert.equal(commandPermission("\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -Command 'Get-ChildItem'", base), "ask");
+  assert.equal(commandPermission("bash -c 'git commit -am unsafe'", {
+    ...base,
+    commandRules: [{ prefix: "git commit", action: "deny" }],
+  }), "deny");
+  assert.equal(commandPermission("echo $(git status)", base), "ask");
 });
 
 test("ask profile cannot be relaxed by an allow prefix rule", () => {

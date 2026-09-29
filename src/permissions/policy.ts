@@ -18,6 +18,8 @@ export interface CommandPrefixRule {
 export interface PermissionPolicy {
   mode: PermissionMode;
   web: boolean;
+  /** Omitted means the selected native profile controls shell networking. */
+  shellNetwork?: "deny";
   commandRules?: readonly CommandPrefixRule[];
 }
 
@@ -52,6 +54,7 @@ function isPolicy(value: unknown): value is PermissionPolicy {
   const record = value as Record<string, unknown>;
   if (record.mode !== "read-only" && record.mode !== "ask" && record.mode !== "workspace-write" && record.mode !== "full-access") return false;
   if (typeof record.web !== "boolean") return false;
+  if (record.shellNetwork !== undefined && record.shellNetwork !== "deny") return false;
   if (record.commandRules !== undefined && (!Array.isArray(record.commandRules) || !record.commandRules.every((rule) => {
     if (!rule || typeof rule !== "object" || Array.isArray(rule)) return false;
     const item = rule as Record<string, unknown>;
@@ -65,7 +68,12 @@ function normalizePolicy(policy: PermissionPolicy): PermissionPolicy {
   const rules = (policy.commandRules ?? [])
     .map((rule) => ({ prefix: rule.prefix.trim(), action: rule.action }))
     .filter((rule) => rule.prefix.length > 0);
-  return { mode: policy.mode, web: policy.web, ...(rules.length ? { commandRules: rules } : {}) };
+  return {
+    mode: policy.mode,
+    web: policy.web,
+    ...(policy.shellNetwork === "deny" ? { shellNetwork: "deny" as const } : {}),
+    ...(rules.length ? { commandRules: rules } : {}),
+  };
 }
 
 function restrictiveMode(left: PermissionMode, right: PermissionMode): PermissionMode {
@@ -96,6 +104,7 @@ export async function loadPermissionPolicy(
         result = {
           mode: restrictiveMode(result.mode, next.mode),
           web: result.web && next.web,
+          ...(result.shellNetwork === "deny" || next.shellNetwork === "deny" ? { shellNetwork: "deny" as const } : {}),
           ...(rules.length ? { commandRules: rules } : {}),
         };
       }
@@ -153,6 +162,93 @@ function matchesPrefix(command: string, prefix: string): boolean {
     && (normalizedCommand === normalizedPrefix || normalizedCommand.startsWith(`${normalizedPrefix} `));
 }
 
+export interface CommandAnalysis {
+  segments: readonly string[];
+  unresolved: boolean;
+}
+
+/** Split top-level shell chains conservatively; ambiguous nesting requires approval. */
+export function analyzeCommand(command: string): CommandAnalysis {
+  const segments: string[] = [];
+  let current = "";
+  let quote: "single" | "double" | undefined;
+  let escaped = false;
+  let unresolved = false;
+  const push = () => {
+    const segment = current.trim();
+    if (segment) segments.push(segment);
+    current = "";
+  };
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index]!;
+    const next = command[index + 1];
+    if (escaped) {
+      current += character;
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote !== "single") {
+      current += character;
+      escaped = true;
+      continue;
+    }
+    if (character === "'" && quote !== "double") {
+      quote = quote === "single" ? undefined : "single";
+      current += character;
+      continue;
+    }
+    if (character === '"' && quote !== "single") {
+      quote = quote === "double" ? undefined : "double";
+      current += character;
+      continue;
+    }
+    if (quote !== "single" && (character === "`" || (character === "$" && next === "("))) {
+      unresolved = true;
+    }
+    if (!quote && (character === "(" || character === ")" || character === "{" || character === "}")) {
+      unresolved = true;
+    }
+    if (!quote && (character === ";" || character === "\n" || character === "\r" || character === "|" || character === "&")) {
+      push();
+      if (character === "&" && next !== "&") unresolved = true;
+      if ((character === "|" || character === "&") && next === character) index += 1;
+      continue;
+    }
+    current += character;
+  }
+  push();
+  if (quote || escaped || segments.length === 0) unresolved = true;
+  if (segments.some((segment) => /(?:^|[\\/\s"'])(?:bash|sh|zsh|fish|cmd|powershell|pwsh|node|python\d*|perl|ruby)(?:\.exe)?(?=$|[\s"'])/iu.test(segment)
+    && /(?:^|\s)(?:-c|\/c|-command|-e)(?:\s|$)/iu.test(segment))) unresolved = true;
+  return { segments, unresolved };
+}
+
+export function permissionPolicyRevision(policy: PermissionPolicy): string {
+  return JSON.stringify({
+    mode: policy.mode,
+    web: policy.web,
+    shellNetwork: policy.shellNetwork ?? "profile-default",
+    commandRules: [...(policy.commandRules ?? [])]
+      .map((rule) => ({ prefix: rule.prefix.trim(), action: rule.action }))
+      .sort((left, right) => left.prefix.localeCompare(right.prefix) || left.action.localeCompare(right.action)),
+  });
+}
+
+function segmentPermission(
+  segment: string,
+  rules: readonly CommandPrefixRule[],
+): CommandRuleAction | undefined {
+  const matching = rules
+    .filter((rule) => matchesPrefix(segment, rule.prefix))
+    .sort((left, right) => right.prefix.trim().length - left.prefix.trim().length);
+  const selected = matching[0];
+  if (!selected) return undefined;
+  const sameLength = matching.filter((rule) => rule.prefix.trim().length === selected.prefix.trim().length);
+  if (sameLength.some((rule) => rule.action === "deny")) return "deny";
+  if (sameLength.some((rule) => rule.action === "ask")) return "ask";
+  return "allow";
+}
+
 /** Resolve the persisted command rule before the profile's global gate. */
 export function commandPermission(
   command: string,
@@ -161,16 +257,21 @@ export function commandPermission(
   const profilePermission = bashPermission(policy);
   if (profilePermission === "deny") return "deny";
   const rules = policy.commandRules ?? [];
-  const matching = rules
-    .filter((rule) => matchesPrefix(command, rule.prefix))
-    .sort((left, right) => right.prefix.trim().length - left.prefix.trim().length);
-  const selected = matching[0];
-  if (!selected) return profilePermission;
-  const sameLength = matching.filter((rule) => rule.prefix.trim().length === selected.prefix.trim().length);
-  if (sameLength.some((rule) => rule.action === "deny")) return "deny";
-  if (sameLength.some((rule) => rule.action === "ask")) return "ask";
-  if (profilePermission === "ask" && selected.action === "allow") return "ask";
-  return selected.action;
+  const analysis = analyzeCommand(command);
+  let result: "ask" | "allow" = profilePermission;
+  for (const segment of analysis.segments) {
+    const selected = segmentPermission(segment, rules);
+    if (selected === "deny") return "deny";
+    if (selected === "ask") result = "ask";
+  }
+  // A deny rule embedded behind a wrapper or nested interpreter must not be
+  // downgraded to a user-overridable approval.
+  if (analysis.unresolved && rules.some((rule) => {
+    const prefix = rule.prefix.trim().toLowerCase();
+    return rule.action === "deny" && prefix.length > 0 && command.toLowerCase().includes(prefix);
+  })) return "deny";
+  if (analysis.unresolved) return "ask";
+  return result;
 }
 
 export function webPermission(policy: PermissionPolicy): "deny" | "ask" | "allow" {

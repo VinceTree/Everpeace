@@ -4,6 +4,11 @@ import React, { useState } from "react";
 import type { CommandRuleAction, PermissionPolicy } from "../../../permissions/policy.js";
 import { CommandSurface } from "../screens/command-surface.js";
 
+function setShellNetwork(policy: PermissionPolicy, deny: boolean): PermissionPolicy {
+  const { shellNetwork: _shellNetwork, ...rest } = policy;
+  return deny ? { ...rest, shellNetwork: "deny" } : rest;
+}
+
 export function PermissionsPicker({ policy, workspace, onChange, onSaveProject, onBack }: {
   policy: PermissionPolicy;
   workspace: string;
@@ -38,11 +43,12 @@ export function PermissionsPicker({ policy, workspace, onChange, onSaveProject, 
       <Text>Mode: {policy.mode}</Text>
       <Text wrap="truncate-middle">File tools: {workspace}</Text>
       <Text>Model shell sandbox: Codex native OS enforcement</Text>
+      <Text>Model shell network: {policy.shellNetwork === "deny" ? "blocked by native backend" : "profile default"}</Text>
       <Text>Web tools: {policy.web ? "enabled" : "disabled"}</Text>
       <Text>Command rules: {rules.length === 0 ? "none" : rules.map((rule) => `${rule.action} ${rule.prefix}`).join(" · ")}</Text>
       {confirmFull ? <>
         <Text color="yellow">Full access selects the Codex danger-full-access profile and skips tool approvals. Model commands can modify files outside the workspace and access the network.</Text>
-        <ConfirmInput defaultChoice="cancel" onCancel={() => setConfirmFull(false)} onConfirm={() => onChange({ ...policy, mode: "full-access" })} />
+        <ConfirmInput defaultChoice="cancel" onCancel={() => setConfirmFull(false)} onConfirm={() => onChange({ ...setShellNetwork(policy, false), mode: "full-access" })} />
       </> : <Select
         defaultValue={policy.mode}
         options={[
@@ -51,6 +57,7 @@ export function PermissionsPicker({ policy, workspace, onChange, onSaveProject, 
           { label: "Workspace write: sandboxed edits; web allowed; MCP asks", value: "workspace-write" },
           { label: "Full access: no tool approvals", value: "full-access" },
           { label: policy.web ? "Disable web tools" : "Enable web tools", value: "web" },
+          ...(policy.mode === "full-access" ? [] : [{ label: policy.shellNetwork === "deny" ? "Use profile-default shell network" : "Block model shell network", value: "shell-network" }]),
           { label: "Add command prefix rule", value: "add-rule" },
           { label: "Save current policy for this project", value: "save-project" },
           ...(rules.length > 0 ? [{ label: "Clear command prefix rules", value: "clear-rules" }] : []),
@@ -58,6 +65,7 @@ export function PermissionsPicker({ policy, workspace, onChange, onSaveProject, 
         onChange={(value) => {
           if (value === "full-access") setConfirmFull(true);
           else if (value === "web") onChange({ ...policy, web: !policy.web });
+          else if (value === "shell-network") onChange(setShellNetwork(policy, policy.shellNetwork !== "deny"));
           else if (value === "add-rule") setAddingRule(true);
           else if (value === "save-project") onSaveProject?.(policy);
           else if (value === "clear-rules") onChange({ ...policy, commandRules: [] });

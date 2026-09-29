@@ -14,7 +14,7 @@ import {
   type StatusSnapshot,
   type TokenUsageSample,
 } from "../status/model-status.js";
-import type { WorkflowPhase, WorkflowState, VerificationResult } from "../workflow/types.js";
+import type { VerificationSuiteResult, WorkflowPhase, WorkflowState, VerificationResult } from "../workflow/types.js";
 import type { LearnedMemoryPolicy } from "../memory/learned-memory.js";
 
 const SESSION_FORMAT_VERSION = 1;
@@ -415,6 +415,16 @@ function isVerificationResult(value: unknown): value is VerificationResult {
     (value.error === undefined || typeof value.error === "string");
 }
 
+function isVerificationSuite(value: unknown): value is VerificationSuiteResult {
+  if (!isRecord(value)) return false;
+  return (value.status === "passed" || value.status === "failed" || value.status === "unavailable") &&
+    Array.isArray(value.results) && value.results.every(isVerificationResult) &&
+    Array.isArray(value.skipped) && value.skipped.every((command) => isRecord(command) &&
+      typeof command.id === "string" && typeof command.label === "string" && typeof command.command === "string" &&
+      (command.tier === "fast" || command.tier === "full") && typeof command.timeoutMs === "number") &&
+    (value.reason === undefined || typeof value.reason === "string");
+}
+
 function isWorkflow(value: unknown): value is WorkflowState {
   if (!isRecord(value)) return false;
   const phases: WorkflowPhase[] = ["understand", "plan", "implement", "verify_fast", "diagnose", "verify_full", "review", "done", "blocked"];
@@ -423,24 +433,38 @@ function isWorkflow(value: unknown): value is WorkflowState {
     typeof value.max_repair_attempts === "number" && Number.isSafeInteger(value.max_repair_attempts) && value.max_repair_attempts >= 0 &&
     Array.isArray(value.changed_paths) && value.changed_paths.every((item) => typeof item === "string") &&
     typeof value.checkpoint_available === "boolean" && typeof value.updated_at === "string" &&
-    (value.last_verification === undefined || isVerificationResult(value.last_verification));
+    (value.result === undefined || value.result === "verified" || value.result === "unverified" || value.result === "failed" || value.result === "no_changes") &&
+    (value.tracking_limited === undefined || typeof value.tracking_limited === "boolean") &&
+    (value.last_verification === undefined || isVerificationResult(value.last_verification)) &&
+    (value.last_verification_suite === undefined || isVerificationSuite(value.last_verification_suite));
+}
+
+function verificationSnapshot(verification: VerificationResult): VerificationResult {
+  return {
+    command: { ...verification.command },
+    passed: verification.passed,
+    exitCode: verification.exitCode,
+    stdout: "",
+    stderr: "",
+    durationMs: verification.durationMs,
+    timedOut: verification.timedOut,
+    ...(verification.skipped === undefined ? {} : { skipped: verification.skipped }),
+  };
 }
 
 function workflowSnapshot(workflow: WorkflowState): WorkflowState {
   const verification = workflow.last_verification;
+  const suite = workflow.last_verification_suite;
   return {
     ...workflow,
     changed_paths: [...workflow.changed_paths],
-    ...(verification === undefined ? {} : {
-      last_verification: {
-        command: { ...verification.command },
-        passed: verification.passed,
-        exitCode: verification.exitCode,
-        stdout: "",
-        stderr: "",
-        durationMs: verification.durationMs,
-        timedOut: verification.timedOut,
-        ...(verification.skipped === undefined ? {} : { skipped: verification.skipped }),
+    ...(verification === undefined ? {} : { last_verification: verificationSnapshot(verification) }),
+    ...(suite === undefined ? {} : {
+      last_verification_suite: {
+        status: suite.status,
+        results: suite.results.map(verificationSnapshot),
+        skipped: suite.skipped.map((command) => ({ ...command })),
+        ...(suite.reason ? { reason: suite.reason } : {}),
       },
     }),
   };

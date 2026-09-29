@@ -1,0 +1,198 @@
+import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
+import { createReadStream, promises as fs } from "node:fs";
+import path from "node:path";
+
+const MAX_STATUS_BYTES = 2 * 1024 * 1024;
+const MAX_TRACKED_PATHS = 10_000;
+const MAX_FINGERPRINT_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_FINGERPRINT_TOTAL_BYTES = 64 * 1024 * 1024;
+
+interface GitResult {
+  exitCode: number | null;
+  stdout: Buffer;
+  stderr: string;
+  truncated: boolean;
+}
+
+interface PathState {
+  status: string;
+  fingerprint: string;
+}
+
+interface WorkspaceStatusSnapshot {
+  available: boolean;
+  complete: boolean;
+  paths: Map<string, PathState>;
+  reason?: string;
+}
+
+export interface WorkspaceChangeObservation {
+  available: boolean;
+  complete: boolean;
+  changedPaths: string[];
+  reason?: string;
+}
+
+function inside(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`));
+}
+
+function runGitStatus(workspacePath: string): Promise<GitResult> {
+  return new Promise((resolve) => {
+    const child = spawn("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=no"], {
+      cwd: workspacePath,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stdout: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderr = "";
+    let truncated = false;
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (stdoutBytes >= MAX_STATUS_BYTES) { truncated = true; return; }
+      const retained = chunk.subarray(0, MAX_STATUS_BYTES - stdoutBytes);
+      stdout.push(retained);
+      stdoutBytes += retained.length;
+      if (retained.length !== chunk.length) truncated = true;
+    });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-64 * 1024); });
+    child.once("error", (error) => resolve({ exitCode: null, stdout: Buffer.concat(stdout), stderr: error.message, truncated }));
+    child.once("close", (exitCode) => resolve({ exitCode, stdout: Buffer.concat(stdout), stderr, truncated }));
+  });
+}
+
+function parsePorcelainStatus(value: Buffer): Array<{ path: string; status: string }> {
+  const records = value.toString("utf8").split("\0");
+  const result: Array<{ path: string; status: string }> = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record) continue;
+    if (record.length < 4 || record[2] !== " ") throw new Error("Git returned an invalid porcelain status record");
+    const status = record.slice(0, 2);
+    result.push({ status, path: record.slice(3) });
+    if (status.includes("R") || status.includes("C")) {
+      const previousPath = records[index + 1];
+      if (!previousPath) throw new Error("Git returned an incomplete rename status record");
+      result.push({ status: `${status}:source`, path: previousPath });
+      index += 1;
+    }
+  }
+  return result;
+}
+
+async function fingerprintPath(root: string, relativePath: string, budget: { bytes: number }): Promise<{ value: string; complete: boolean }> {
+  const target = path.resolve(root, relativePath);
+  if (!inside(path.resolve(root), target)) return { value: "outside", complete: false };
+  try {
+    const stat = await fs.lstat(target);
+    if (stat.isSymbolicLink()) return { value: `symlink:${await fs.readlink(target)}`, complete: true };
+    if (!stat.isFile()) return { value: `other:${stat.mode}:${stat.size}`, complete: true };
+    if (stat.size > MAX_FINGERPRINT_FILE_BYTES || budget.bytes + stat.size > MAX_FINGERPRINT_TOTAL_BYTES) {
+      return { value: `limited:${stat.size}:${stat.mtimeMs}`, complete: false };
+    }
+    budget.bytes += stat.size;
+    const hash = createHash("sha256");
+    await new Promise<void>((resolve, reject) => {
+      const stream = createReadStream(target);
+      stream.on("data", (chunk: Buffer | string) => hash.update(chunk));
+      stream.once("error", reject);
+      stream.once("end", resolve);
+    });
+    return { value: `file:${stat.size}:${hash.digest("hex")}`, complete: true };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { value: "missing", complete: true };
+    return { value: `error:${error instanceof Error ? error.message : String(error)}`, complete: false };
+  }
+}
+
+async function captureStatus(workspacePath: string): Promise<WorkspaceStatusSnapshot> {
+  const result = await runGitStatus(workspacePath);
+  if (result.exitCode !== 0) {
+    return {
+      available: false,
+      complete: false,
+      paths: new Map(),
+      reason: result.stderr.trim() || "Workspace is not a Git repository",
+    };
+  }
+  if (result.truncated) {
+    return { available: true, complete: false, paths: new Map(), reason: "Git status exceeded the tracking limit" };
+  }
+  let records: Array<{ path: string; status: string }>;
+  try { records = parsePorcelainStatus(result.stdout); }
+  catch (error) {
+    return { available: true, complete: false, paths: new Map(), reason: error instanceof Error ? error.message : String(error) };
+  }
+  if (records.length > MAX_TRACKED_PATHS) {
+    return { available: true, complete: false, paths: new Map(), reason: "Git status contains too many changed paths to track safely" };
+  }
+  const budget = { bytes: 0 };
+  const paths = new Map<string, PathState>();
+  let complete = true;
+  for (const record of records) {
+    const fingerprint = await fingerprintPath(workspacePath, record.path, budget);
+    complete &&= fingerprint.complete;
+    paths.set(record.path, { status: record.status, fingerprint: fingerprint.value });
+  }
+  return {
+    available: true,
+    complete,
+    paths,
+    ...(complete ? {} : { reason: "One or more changed files exceeded the fingerprint limits" }),
+  };
+}
+
+/** Tracks changes relative to the dirty state that existed when a coding task began. */
+export class WorkspaceChangeTracker {
+  readonly #workspacePath: string;
+  #baseline: WorkspaceStatusSnapshot | undefined;
+
+  constructor(workspacePath: string) { this.#workspacePath = workspacePath; }
+
+  async begin(): Promise<WorkspaceChangeObservation> {
+    this.#baseline = await captureStatus(this.#workspacePath);
+    return this.#compare(this.#baseline);
+  }
+
+  async observe(): Promise<WorkspaceChangeObservation> {
+    if (!this.#baseline) await this.begin();
+    return this.#compare(await captureStatus(this.#workspacePath));
+  }
+
+  #compare(current: WorkspaceStatusSnapshot): WorkspaceChangeObservation {
+    const baseline = this.#baseline;
+    if (!baseline || !baseline.available || !current.available) {
+      return {
+        available: false,
+        complete: false,
+        changedPaths: [],
+        reason: current.reason ?? baseline?.reason ?? "Workspace tracking is unavailable",
+      };
+    }
+    if (!baseline.complete || !current.complete) {
+      return {
+        available: true,
+        complete: false,
+        changedPaths: [],
+        reason: current.reason ?? baseline.reason ?? "Workspace tracking is incomplete",
+      };
+    }
+    const changedPaths = new Set<string>();
+    for (const candidate of new Set([...baseline.paths.keys(), ...current.paths.keys()])) {
+      const before = baseline.paths.get(candidate);
+      const after = current.paths.get(candidate);
+      if (before?.status !== after?.status || before?.fingerprint !== after?.fingerprint) changedPaths.add(candidate);
+    }
+    return { available: true, complete: true, changedPaths: [...changedPaths].sort((left, right) => left.localeCompare(right)) };
+  }
+}
+
+export const workspaceTrackerLimits = {
+  maxStatusBytes: MAX_STATUS_BYTES,
+  maxTrackedPaths: MAX_TRACKED_PATHS,
+  maxFingerprintFileBytes: MAX_FINGERPRINT_FILE_BYTES,
+  maxFingerprintTotalBytes: MAX_FINGERPRINT_TOTAL_BYTES,
+} as const;

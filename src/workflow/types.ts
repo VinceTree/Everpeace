@@ -32,6 +32,17 @@ export interface VerificationResult {
   error?: string;
 }
 
+export type VerificationSuiteStatus = "passed" | "failed" | "unavailable";
+
+export interface VerificationSuiteResult {
+  status: VerificationSuiteStatus;
+  results: VerificationResult[];
+  skipped: VerificationCommand[];
+  reason?: string;
+}
+
+export type WorkflowResultClassification = "verified" | "unverified" | "failed" | "no_changes";
+
 export interface WorkflowState {
   task_id: string;
   phase: WorkflowPhase;
@@ -39,7 +50,10 @@ export interface WorkflowState {
   max_repair_attempts: number;
   changed_paths: string[];
   checkpoint_available: boolean;
+  result?: WorkflowResultClassification;
+  tracking_limited?: boolean;
   last_verification?: VerificationResult;
+  last_verification_suite?: VerificationSuiteResult;
   updated_at: string;
 }
 
@@ -56,6 +70,7 @@ export interface WorkflowReviewResult {
 export interface WorkflowRunResult {
   state: WorkflowState;
   verification?: VerificationResult;
+  verificationSuite?: VerificationSuiteResult;
   review?: WorkflowReviewResult;
   prompt?: string;
   changed: boolean;

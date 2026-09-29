@@ -349,6 +349,30 @@ test("TUI accepts chat and renders the assistant response", async () => {
   view.unmount();
 });
 
+test("host workflow settles no-change goals without marking learned memory verified", async () => {
+  const model: RegisteredModel = { id: "workflow-outcome", model_name: "test", base_url: "https://example.com/v1", api_key: "secret" };
+  const completions: boolean[] = [];
+  const memoryOutcomes: string[] = [];
+  const fixture = createFixture({
+    initial: [model],
+    createAgent: (_model, io) => ({
+      async runTurn() { io.writeAssistant("done"); return { goalCompletionRequested: true }; },
+      async finalizePendingGoalCompletion(allow) { completions.push(allow); },
+      async finishMemoryTurn(outcome) { memoryOutcomes.push(outcome); },
+    }),
+  });
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await tick();
+    view.stdin.write("answer without edits");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => completions.length > 0);
+    assert.deepEqual(completions, [true]);
+    assert.deepEqual(memoryOutcomes, ["unverified"]);
+  } finally { view.unmount(); }
+});
+
 test("/compact replaces persisted model context without removing the visible transcript", async () => {
   const model: RegisteredModel = {
     id: "compact-model",

@@ -3,7 +3,7 @@ import { Box, Text, useApp, useInput, usePaste, useStdout, useWindowSize } from 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentIO } from "../../agent/react-agent.js";
 import type { LoopPhase } from "../../agent/agent-loop.js";
-import { commandPermission, defaultPermissions } from "../../permissions/policy.js";
+import { commandPermission, defaultPermissions, permissionPolicyRevision } from "../../permissions/policy.js";
 import { PermissionsPicker } from "../components/navigation/permissions-picker.js";
 import { renderTerminalOutput } from "../../tools/terminal.js";
 import { TextBrowser } from "../components/screens/text-browser.js";
@@ -31,10 +31,10 @@ import {
 } from "../../status/model-status.js";
 import type { BashOutputPreview, BashResult } from "../../tools/bash.js";
 import { previewApplyPatch, runApplyPatch, type ApplyPatchOperation, type ApplyPatchResult } from "../../tools/apply-patch.js";
-import { CodingWorkflowRuntime } from "../../workflow/runtime.js";
+import { CodingWorkflowRuntime, formatWorkflowSummary } from "../../workflow/runtime.js";
 import type { WorkflowState } from "../../workflow/types.js";
 import { verificationPrompt } from "../../workflow/verifier.js";
-import { discoverVerificationCommands, runVerificationCommand, selectVerificationCommand } from "../../workflow/verifier.js";
+import { discoverVerificationCommands, runVerificationSuite, selectVerificationCommands } from "../../workflow/verifier.js";
 import { formatWorkspaceInspection, inspectWorkspace } from "../../tools/workspace.js";
 import { selectAgentOutputPreview } from "../rendering/command-output-preview.js";
 import { parseTuiInput, TUI_HELP } from "../commands/slash-commands.js";
@@ -378,14 +378,6 @@ export function EverpeaceApp({
     const runtimeOptions = {
       workspacePath: workflowWorkspace,
       ...(initialState ? { initialState } : {}),
-      review: async (changedPaths: readonly string[], signal?: AbortSignal) => {
-        const inspection = await inspectWorkspace(workflowWorkspace, signal ? { signal } : {});
-        if (inspection.status === "error") return { passed: false, error: inspection.error ?? "Workspace review failed" };
-        const missing = changedPaths.filter((changedPath) => !inspection.git?.status.includes(changedPath));
-        return missing.length === 0
-          ? { passed: true }
-          : { passed: false, error: `Changed paths are not present in Git status: ${missing.join(", ")}` };
-      },
       onState: async (state: WorkflowState) => {
         const sessionId = activeSessionId.current;
         if (sessionId) await dependencies.sessionStore.setWorkflow?.(sessionId, state);
@@ -635,12 +627,17 @@ export function EverpeaceApp({
 
   const executeVerification = useCallback(
     async (command: string, signal?: AbortSignal, timeoutMs?: number, userInitiated = false): Promise<BashResult> => {
-      const permission = commandPermission(command, permissions.current);
+      const reviewedPolicy = permissions.current;
+      const revision = permissionPolicyRevision(reviewedPolicy);
+      const permission = commandPermission(command, reviewedPolicy);
       if (permission === "deny") {
         return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "Verification command denied by the active command rules" };
       }
       if (!userInitiated && permission === "ask" && !(await requestBashConfirmation(`Run verification: ${command}`))) {
         return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "Verification command was not approved" };
+      }
+      if (!userInitiated && permissionPolicyRevision(permissions.current) !== revision) {
+        return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "Permission policy changed while the verification command was being reviewed" };
       }
       return executeBash(command, signal, timeoutMs);
     },
@@ -707,7 +704,13 @@ export function EverpeaceApp({
       async afterPatchApplied(operations: readonly ApplyPatchOperation[], result: ApplyPatchResult, signal?: AbortSignal) {
         return ensureWorkflow().afterPatch(operations, result, executeVerification, signal);
       },
-      runBash: executeBash,
+      async runBash(command: string, signal?: AbortSignal) {
+        try {
+          return await executeBash(command, signal);
+        } finally {
+          await ensureWorkflow().observeShellExecution();
+        }
+      },
       writeAssistant(text) {
         setLiveAssistant("");
         append("assistant", text);
@@ -1598,10 +1601,13 @@ export function EverpeaceApp({
           if (nextMode === "default" && !workflowStarted) {
             await ensureWorkflow().beginTurn({ mode: "default" });
             workflowStarted = true;
+          } else if (nextMode === "default" && ensureWorkflow().state.phase === "diagnose") {
+            await ensureWorkflow().startRepairTurn();
           }
           const started = Date.now();
           const result = await agent.runTurn(nextText, controller.signal, { mode: nextMode }) ?? {};
           if (result.stopReason) {
+            await agent.finalizePendingGoalCompletion?.(false);
             await agent.finishMemoryTurn?.("stopped");
             setLiveAssistant("");
             const sessionId = activeSessionId.current;
@@ -1644,7 +1650,15 @@ export function EverpeaceApp({
             setLiveToolStatus(`Diagnosing ${workflowResult.verification.command.label}`);
             continue;
           }
-          await agent.finishMemoryTurn?.(ensureWorkflow().state.phase === "done" ? "verified" : "unverified");
+          const workflowOutcome = workflowResult.state.result;
+          await agent.finalizePendingGoalCompletion?.(workflowOutcome === "verified" || workflowOutcome === "no_changes");
+          await agent.finishMemoryTurn?.(
+            workflowOutcome === "verified" ? "verified"
+              : workflowOutcome === "failed" ? "failed"
+                : "unverified",
+          );
+          const workflowSummary = formatWorkflowSummary(workflowResult);
+          if (workflowSummary) append("system", workflowSummary);
           const sessionId = activeSessionId.current;
           if (!sessionId) break;
           let goal = (await dependencies.sessionStore.load(sessionId)).goal;
@@ -1654,6 +1668,12 @@ export function EverpeaceApp({
             setActiveGoal(goal);
           }
           if (goal?.status !== "active") break;
+          if (workflowResult.state.phase === "blocked" || workflowOutcome === "unverified") {
+            append("system", workflowResult.state.phase === "blocked"
+              ? "Automatic repair stopped after the workflow repair limit. The active goal was not marked complete."
+              : "Automatic goal continuation stopped because the coding changes could not be fully verified.");
+            break;
+          }
           nextText = "Continue working toward the active session goal. Call get_goal, make concrete progress, verify the result, and update the goal when complete or genuinely blocked.";
           nextMode = "default";
           workflowStarted = false;
@@ -1661,6 +1681,7 @@ export function EverpeaceApp({
           setLiveToolStatus("Continuing active goal");
         }
       } catch (error) {
+        await agent.finalizePendingGoalCompletion?.(false).catch(() => undefined);
         await agent.finishMemoryTurn?.(controller.signal.aborted ? "cancelled" : "failed").catch(() => undefined);
         if (controller.signal.aborted) {
           const sessionId = activeSessionId.current;
@@ -1765,16 +1786,16 @@ export function EverpeaceApp({
     const operation = startCommandLoad("/verify · Workspace checks", "Discovering verification commands");
     const commands = await discoverVerificationCommands(workspacePath);
     if (!isCurrentCommandOperation(operation)) return;
-    const command = requested.trim()
-      ? { id: "manual", label: "Manual verification", command: requested.trim(), tier: "full" as const, timeoutMs: 120_000 }
-      : selectVerificationCommand(commands, "full");
-    if (!command) {
+    const selected = requested.trim()
+      ? [{ id: "manual", label: "Manual verification", command: requested.trim(), tier: "full" as const, timeoutMs: 120_000 }]
+      : selectVerificationCommands(commands, "full");
+    if (selected.length === 0) {
       replaceCommandView(infoView("/verify · No checks discovered", "No conventional verification command was found. Use /verify <command> to run an explicit check."));
       return;
     }
-    replaceCommandView(infoView("/verify · Running", command.command));
-    const result = await runVerificationCommand(command, (value, signal, timeoutMs) => executeVerification(value, signal, timeoutMs, true));
-    if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/verify · Result", JSON.stringify(result, null, 2), result.passed ? "default" : "error"));
+    replaceCommandView(infoView("/verify · Running", selected.map((command) => command.command).join("\n")));
+    const result = await runVerificationSuite(selected, (value, signal, timeoutMs) => executeVerification(value, signal, timeoutMs, true));
+    if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/verify · Result", JSON.stringify(result, null, 2), result.status === "passed" ? "default" : "error"));
   }, [executeVerification, isCurrentCommandOperation, replaceCommandView, startCommandLoad, workspacePath]);
 
   const undoWorkflow = useCallback(async () => {
@@ -2027,12 +2048,30 @@ export function EverpeaceApp({
             policy={permissions.current}
             workspace={workspacePath}
             onChange={(policy) => {
-              permissions.current = policy;
-              void dependencies.savePermissions?.(workspacePath, policy).catch(() => undefined);
-              returnToChat();
+              void (async () => {
+                try {
+                  await dependencies.savePermissions?.(workspacePath, policy);
+                  permissions.current = dependencies.loadPermissions
+                    ? await dependencies.loadPermissions(workspacePath)
+                    : policy;
+                } catch {
+                  // Keep the prior effective policy when persistence or reload fails.
+                } finally {
+                  returnToChat();
+                }
+              })();
             }}
             onSaveProject={(policy) => {
-              void dependencies.savePermissions?.(workspacePath, policy, "project").then(() => returnToChat()).catch(() => undefined);
+              void (async () => {
+                try {
+                  await dependencies.savePermissions?.(workspacePath, policy, "project");
+                  if (dependencies.loadPermissions) permissions.current = await dependencies.loadPermissions(workspacePath);
+                } catch {
+                  // Keep the prior effective policy when persistence or reload fails.
+                } finally {
+                  returnToChat();
+                }
+              })();
             }}
             onBack={returnToChat}
           />

@@ -12,7 +12,7 @@ Everpeace 没有复制整套 Rust runtime；它固定依赖 `@openai/codex@0.155
 
 ## Sandbox
 
-模型发起的命令统一经 `codex sandbox -P <profile> -C <workspace> --include-managed-config -- <shell>` 启动，并显式开启后端默认环境凭据排除。启动 Node wrapper 前也会过滤继承的凭据/启动注入变量；不会根据命令输出自动重放 payload。固定源码对比与后续统一策略计划见 [SANDBOX.md](./SANDBOX.md)。profile 映射为：
+模型发起的命令统一经 `codex sandbox` 启动并包含 `--include-managed-config`。read-only/full-access 选择内置 profile；ask/workspace-write 使用宿主按当前工作区生成的完整 `:workspace` 子 profile，保护控制目录和平台应用状态。每次调用前冻结有效策略并显式开启后端默认环境凭据排除；启动 Node wrapper 前也会过滤继承的凭据/启动注入变量，不会根据命令输出自动重放 payload。固定源码对比与后续统一策略计划见 [SANDBOX.md](./SANDBOX.md)。profile 映射为：
 
 | Everpeace mode | 审批 | Codex profile |
 | --- | --- | --- |
@@ -25,7 +25,7 @@ Sandbox 和审批保持两层独立判断。CLI、平台二进制或 sandbox 初
 
 Windows 的 Codex restricted-token backend 可以运行系统 PowerShell，但 Git Bash/MSYS 在该令牌中会因自身服务初始化返回 `E_ACCESSDENIED`。因此 Windows 模型命令使用非交互 PowerShell；macOS/Linux 使用 Bash。用户亲自输入的 `!<command>` 仍走原有原生 PTY，不进入模型 sandbox，也不进入模型 context。
 
-这不是完整 Codex runtime：当前未接入 managed policy、自动审批 reviewer、网络代理域名策略或额外可写根 UI。Everpeace 的用户 command prefix rules 持久化在平台配置目录；可选的项目策略只能收紧模式、关闭 web 或追加 deny/ask 规则，不能通过仓库文件提升权限，也不替代 Codex sandbox。`:workspace` 的实际文件与网络限制由固定版本 Codex 的当前平台 backend 执行。
+这不是完整 Codex runtime：当前会把后端 managed requirements 纳入 profile 解析，但未把同一策略扩展到全部宿主工具，也未接入自动审批 reviewer、代理域名策略或额外可写根 UI。Everpeace 的用户 command rules 和独立 shell 网络开关持久化在平台配置目录；可选的项目策略只能收紧模式、关闭 web/shell 网络或追加 deny/ask 规则，不能通过仓库文件提升权限，也不替代原生 sandbox。复合命令逐段检查，嵌套解释器和含糊语法转为审批；`:workspace` 的实际文件与网络限制仍由固定版本后端执行。
 
 ## MCP
 

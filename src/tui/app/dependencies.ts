@@ -17,11 +17,11 @@ import type { RegisteredModel } from "../../storage/model-registry.js";
 import { SessionStore } from "../../storage/session-store.js";
 import { InputHistory } from "../../storage/input-history.js";
 import { DEFAULT_MODEL_BASH_TIMEOUT_MS, runBash } from "../../tools/bash.js";
+import { createEffectiveSandboxPolicy } from "../../tools/sandbox-policy.js";
 import { runTerminalCommand } from "../../tools/terminal.js";
 import type { TuiDependencies, TuiModelRegistry } from "./types.js";
 import { truncateEnd } from "../rendering/text-width.js";
 import {
-  codexSandboxProfile,
   loadPermissionPolicy,
   savePermissionPolicy,
   type PermissionPolicy,
@@ -267,12 +267,14 @@ export function createDefaultTuiDependencies(
       return savePermissionPolicy(policy, workspacePath, { scope });
     },
     runBash(command, policy: PermissionPolicy, signal, onOutput, timeoutMs) {
+      const cwd = process.cwd();
+      const sandboxPolicy = createEffectiveSandboxPolicy(policy, cwd, skills.readableRoots());
       return runBash(command, {
+        cwd,
         streamOutput: false,
         timeoutMs: timeoutMs ?? DEFAULT_MODEL_BASH_TIMEOUT_MS,
         sandbox: {
-          permissionProfile: codexSandboxProfile(policy),
-          readableRoots: skills.readableRoots(),
+          policy: sandboxPolicy,
         },
         ...(signal ? { signal } : {}),
         ...(onOutput ? { onOutput } : {}),

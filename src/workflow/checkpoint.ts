@@ -18,6 +18,12 @@ export interface UndoResult {
   error?: string;
 }
 
+export interface CheckpointReviewResult {
+  passed: boolean;
+  conflicts: string[];
+  error?: string;
+}
+
 function digest(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
@@ -81,7 +87,6 @@ export class TurnCheckpoint {
   }
 
   clear(): void {
-    if (this.#files.size === 0) return;
     this.#files.clear();
     this.#available = true;
   }
@@ -142,5 +147,19 @@ export class TurnCheckpoint {
       conflicts,
       ...(conflicts.length > 0 ? { error: "Some files changed after the Agent turn and were not overwritten." } : {}),
     };
+  }
+
+  async reviewCurrent(): Promise<CheckpointReviewResult> {
+    const conflicts: string[] = [];
+    for (const item of this.#files.values()) {
+      try {
+        const current = await readFile(this.#root, item.path);
+        const currentSha = current.exists ? digest(current.content) : null;
+        if (currentSha !== item.afterSha256) conflicts.push(item.path);
+      } catch { conflicts.push(item.path); }
+    }
+    return conflicts.length === 0
+      ? { passed: true, conflicts: [] }
+      : { passed: false, conflicts, error: `Files changed after their structured edit: ${conflicts.join(", ")}` };
   }
 }

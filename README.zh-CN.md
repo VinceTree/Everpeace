@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.2.23) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.24) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -124,7 +124,7 @@ TUI 命令：
 - `/diff`：查看当前工作区的有界 Git 状态和 diff。
 - `/verify [command]`：运行自动发现的工作区检查，或执行显式命令。
 - `/undo`：在文件仍未被用户改动时撤销最新 Agent 回合；不会覆盖用户修改。
-- `/permissions`：选择只读、逐条审批、工作区写入或完全访问模式，开关网页工具，并保存用户/项目命令策略。
+- `/permissions`：选择只读、逐条审批、工作区写入或完全访问模式，分别控制公共网页和模型 shell 联网，并保存用户/项目命令策略。
 - `/mcp`：重新加载 Codex MCP 配置、连接已启用服务器并查看 tool/resource/prompt 状态。
 - `/skills`：创建、安装、查看并显式调用本地 Skills。
 - `/memory`：查看 learned 经验和独立的 Memory 模型用量、全局启用或关闭读取与自动学习、切换当前聊天是否读取或记录 memory、归档或清理条目、使用 `/memory view` 查看最近一次实际注入快照，或使用 `/memory remember <偏好>` 保存长期用户偏好。聊天策略会随 Session 恢复。
@@ -160,11 +160,13 @@ Skills 从工作区到仓库根的 `.agents/skills`、项目 `.codex/skills`、`
 
 - 权限档位把 sandbox 范围与审批分开：`read-only` 对模型 shell、网页和 MCP 逐项审批，并使用 Codex `:read-only`；`ask` 逐项审批，shell 获批后使用 `:workspace`；`workspace-write` 在 `:workspace` 内免逐条 shell 审批，已开启的公共网页工具也免逐次确认，MCP 仍单独审批；`full-access` 二次明确确认后选择 `:danger-full-access` 并跳过工具审批。
 - 模型可以用 `read_file` 查看工作目录内不超过 128 KiB 的 UTF-8 文件，用 `list_directory` 列出最多 500 个目录项。拒绝目录外路径和符号链接越界。文件正文会进入模型 context 和 Session 文件，请避免读取机密。
-- 用户权限保存于平台配置目录，重启后仍会恢复；`/permissions` 也可把项目策略写入 `.everpeace/permissions.json`。项目策略只允许收紧用户策略，不能提升权限。切换权限不丢失 context，恢复 JSONL 不会恢复完全访问授权。
+- 用户权限保存于平台配置目录，重启后仍会恢复；`/permissions` 也可把项目策略写入 `.everpeace/permissions.json`。项目策略只允许收紧用户策略、关闭模型 shell 网络或公共网页，不能提升权限。shell 网络开关由原生后端执行，不改变 web 或 MCP 权限。切换权限不丢失 context，恢复 JSONL 不会恢复完全访问授权。
 - 模型 shell 通过固定的 `@openai/codex@0.155.1` 原生 OS sandbox 启动，运行时无法启动则失败关闭。Windows 模型命令使用 PowerShell，因为 Git Bash/MSYS 无法在 restricted token 内初始化；macOS/Linux 使用 Bash。模型 shell 默认 120 秒超时，超时会以结构化结果返回；直接 `!` 不进入模型 sandbox，生命周期仍由用户控制。详见 [对标与安全限制](docs/architecture/PERMISSIONS.md)。
-- 模型 shell 显式遵守后端 managed requirements，启动 wrapper 前过滤继承的凭据及启动注入变量；命令输出不能触发 payload 自动重放。直接 `!` 保留用户环境。对比依据与后续路线见 [Sandbox 对比与优化计划](docs/architecture/SANDBOX.md)。
-- 模型编辑尽量使用限定在工作区内的 `apply_patch` 工具：校验有界 unified diff，可用 SHA-256 防止陈旧文件覆盖，多文件变更原子应用，并在失败时报告回滚状态。预览与执行默认保护 `.git`、`.codex`、`.agents`、`.everpeace`，明确选择 full-access 后才能通过编辑器修改；始终拒绝 Windows ADS。这些编辑器校验不代表所有工具都已由同一 OS sandbox 隔离。`/permissions` 还支持持久化的模型 Bash 命令前缀规则；直接 `!` 不受影响。
-- 普通 coding 回合使用单 Agent 工作流：patch 成功后先做快速检查，回合结束再做完整检查；失败输出会反馈给模型，最多进行三次有界修复。模型可使用只读 `workspace_status` 和 `workspace_diff` 查看 Git 状态。工作流阶段元数据可随 Session 恢复，但文件内容检查点只保存在当前进程内。
+- 每次模型 shell 启动前都会捕获不可变的有效策略，显式遵守后端 managed requirements，并过滤继承的凭据及启动注入变量。workspace/ask 模式使用原生子 profile：`.git`、`.codex`、`.agents` 和由宿主预先创建的 `.everpeace` 控制目录保持只读，模型也不能读取 Everpeace 的全局状态目录。命令输出不能触发 payload 自动重放；full-access 与直接 `!` 保留各自已说明的权限。对比依据与后续路线见 [Sandbox 对比与优化计划](docs/architecture/SANDBOX.md)。
+- 模型编辑尽量使用限定在工作区内的 `apply_patch` 工具：校验有界 unified diff，可用 SHA-256 防止陈旧文件覆盖，多文件变更原子应用，并在失败时报告回滚状态。预览与执行默认保护 `.git`、`.codex`、`.agents`、`.everpeace`，明确选择 full-access 后才能通过编辑器修改；始终拒绝 Windows ADS。持久化的模型 Bash 规则会检查每个顶层命令段；含糊的命令替换和嵌套解释器必须审批，明确 deny 继续失败关闭。审批等待期间权限变化会使该审批失效。直接 `!` 不受影响。
+- 普通 coding 回合使用单 Agent 的个人开发工作流。每个逻辑 step 都会重新读取工作区根级 `AGENTS.md` 和 `package.json` 中声明的 scripts，作为低于当前用户与开发者指令的项目背景。patch 成功后先做快速检查；Node/TypeScript 最终验证会重新读取 manifest，并按 `typecheck → lint → test → build` 顺序运行所有已声明脚本，首个失败后停止。没有发现检查命令时会标记为未验证，而不是通过。
+- Git 状态使用 NUL 分隔的结构化结果解析，并把变更文件指纹与任务开始时的既有脏状态比较，因此模型 shell 对已有脏文件的再次修改、未跟踪文件和中文路径也会进入同一验证闭环。追踪超限、非 Git 项目的 shell 改动、审批拒绝或修复次数耗尽时都不能报告为已验证。`workspace_status`、`workspace_diff` 仍为只读工具；`/undo` 继续只覆盖未被再次修改的结构化编辑。
+- 模型回复结束与工作流验证完成采用不同状态。宿主会显示观察到的路径和完整检查结果，只有真正验证通过的 coding 回合才能进入成功经验提炼；活动 Goal 的完成请求会等宿主接受最终验证后才落盘。Session JSONL 只保存兼容的结果元数据，不保存检查输出、错误正文、文件内容或撤销检查点。
 - 普通聊天中，`read-only` 和 `ask` 会在每个网页请求前审批；`workspace-write` 与 `full-access` 跳过该确认。Plan 模式把已开启的公共网页访问视为只读调研并跳过逐次确认，关闭网页工具时仍会拒绝请求。搜索词会先发送给 Bing，失败时回退到 DuckDuckGo；打开搜索结果时会向对应网站发送请求。
 - 网页读取只允许公共 HTTP/HTTPS 地址，会逐次检查重定向、阻止本机和内网地址，并限制超时与响应大小；返回内容始终作为不可信数据处理。
 - 搜索可用性和结果质量取决于外部搜索服务及当前网络。联网失败会作为工具结果返回模型，由模型说明限制或尝试其他来源。

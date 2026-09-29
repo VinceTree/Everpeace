@@ -7,7 +7,9 @@ import type { BashResult } from "../../../src/tools/bash.js";
 import {
   discoverVerificationCommands,
   runVerificationCommand,
+  runVerificationSuite,
   selectVerificationCommand,
+  selectVerificationCommands,
   verificationPrompt,
 } from "../../../src/workflow/verifier.js";
 
@@ -76,6 +78,30 @@ test("verification passes its command-specific timeout to the executor", async (
   assert.equal(received, 4321);
 });
 
+test("full verification runs every Node check in order and stops at the first failure", async () => {
+  await withWorkspace(async (workspace) => {
+    await fs.writeFile(path.join(workspace, "package.json"), JSON.stringify({
+      scripts: { build: "build", test: "test", lint: "lint", typecheck: "typecheck" },
+    }), "utf8");
+    const commands = selectVerificationCommands(await discoverVerificationCommands(workspace), "full");
+    assert.deepEqual(commands.map((command) => command.id), ["node:typecheck", "node:lint", "node:test", "node:build"]);
+    const executed: string[] = [];
+    const suite = await runVerificationSuite(commands, async (command) => {
+      executed.push(command);
+      return { stdout: "", stderr: "", exitCode: command.endsWith("test") ? 1 : 0, signal: null };
+    });
+    assert.equal(suite.status, "failed");
+    assert.deepEqual(executed, ["pnpm run typecheck", "pnpm run lint", "pnpm run test"]);
+    assert.deepEqual(suite.skipped.map((command) => command.command), ["pnpm run build"]);
+  });
+});
+
+test("empty verification suite is unavailable rather than passed", async () => {
+  const suite = await runVerificationSuite([], async () => successfulResult());
+  assert.equal(suite.status, "unavailable");
+  assert.equal(suite.results.length, 0);
+});
+
 test("verification cancellation aborts instead of becoming repair guidance", async () => {
   const command = { id: "test", label: "Test", command: "pnpm test", tier: "full" as const, timeoutMs: 1000 };
   const controller = new AbortController();
@@ -85,3 +111,7 @@ test("verification cancellation aborts instead of becoming repair guidance", asy
     /cancelled/u,
   );
 });
+
+function successfulResult(): BashResult {
+  return { stdout: "", stderr: "", exitCode: 0, signal: null };
+}

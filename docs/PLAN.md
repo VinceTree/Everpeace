@@ -1,8 +1,14 @@
 # Everpeace Current Plan
 
+## 个人开发 Agent 可靠闭环
+
+首批个人开发优化以 Node/TypeScript 单包项目和 Windows 为主：默认 Agent 定位为个人软件开发搭档，每个逻辑 step 安全读取根级 `AGENTS.md` 与 `package.json` scripts；Git 工作区使用结构化 NUL status 和内容指纹把任务开始时的既有脏状态与本轮 shell/patch 变化分开。最终验证重新发现当前 manifest，并串行执行所有已声明的 `typecheck`、`lint`、`test`、`build`，首败停止，修复后重跑完整集合。
+
+工作流结果独立记录 `verified`、`unverified`、`failed` 和 `no_changes`。没有检查、文件追踪不完整、取消、审批拒绝、预算停止及修复耗尽均不能成为验证成功；Goal 的完成请求由工作流验证后结算，成功 learned memory 只接受真实 `verified` 结果。Session 仅持久化脱敏检查元数据。首批不覆盖 monorepo 调度、多 Agent、跨项目管理、自动依赖安装、部署或 Git 提交。
+
 ## Sandbox 优化路线
 
-对 Codex、oh-my-pi、Grok Build 的固定源码比较、选择依据和验收见 [architecture/SANDBOX.md](architecture/SANDBOX.md)。第一批已完成：payload 不重放、shell managed requirements opt-in、启动前环境过滤、结构化编辑控制目录保护和取消/只读复查。后续依次落实统一权限快照与原生 `.everpeace` 保护、隔离文件 worker、平台命令解析及独立 shell 网络策略，再补进程所有权和诊断/性能基线。保持 Windows 优先、固定原生后端、现有 inline TUI 和直接 `!` 语义。
+对 Codex、oh-my-pi、Grok Build 的固定源码比较、选择依据和验收见 [architecture/SANDBOX.md](architecture/SANDBOX.md)。第一批已完成 payload 不重放、managed requirements、启动前环境过滤和结构化编辑保护；第二批已完成不可变有效策略、原生 `.everpeace`/全局状态保护、审批 revision 复查、顶层复合命令分析及独立 shell 网络开关。下一步实现隔离文件 worker，并完成 Linux/macOS 网络与文件原生验收，再补进程所有权和诊断/性能基线。保持 Windows 优先、固定原生后端、现有 inline TUI 和直接 `!` 语义。
 
 # Agent Loop 优化路线
 

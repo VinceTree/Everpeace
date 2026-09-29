@@ -2,7 +2,7 @@ import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 import type { BashResult } from "../tools/bash.js";
 import { retainOutput } from "../tools/command-record.js";
-import type { VerificationCommand, VerificationResult, VerificationTier } from "./types.js";
+import type { VerificationCommand, VerificationResult, VerificationSuiteResult, VerificationTier } from "./types.js";
 import { verificationFromBash } from "./types.js";
 
 const MAX_MANIFEST_BYTES = 256 * 1024;
@@ -83,11 +83,12 @@ export async function discoverVerificationCommands(workspacePath: string): Promi
   const commands: VerificationCommand[] = [];
   const packageJson = await readJson(path.join(workspacePath, "package.json"));
   if (packageJson) {
-    const fast = scriptCommand(packageJson, workspacePath, "typecheck", "fast") ?? scriptCommand(packageJson, workspacePath, "lint", "fast");
-    if (fast) commands.push(fast);
-    for (const script of ["test", "typecheck", "lint", "build"] as const) {
-      const command = scriptCommand(packageJson, workspacePath, script, "full");
-      if (command && !commands.some((item) => item.id === command.id)) commands.push(command);
+    const fastScript = packageJson.scripts?.typecheck !== undefined ? "typecheck"
+      : packageJson.scripts?.lint !== undefined ? "lint"
+        : undefined;
+    for (const script of ["typecheck", "lint", "test", "build"] as const) {
+      const command = scriptCommand(packageJson, workspacePath, script, script === fastScript ? "fast" : "full");
+      if (command) commands.push(command);
     }
     return commands;
   }
@@ -105,6 +106,15 @@ export async function discoverVerificationCommands(workspacePath: string): Promi
     commands.push({ id: "go:test", label: "Go tests", command: "go test ./...", tier: "full", timeoutMs: DEFAULT_FULL_TIMEOUT_MS });
   }
   return commands;
+}
+
+export function selectVerificationCommands(
+  commands: readonly VerificationCommand[],
+  tier: VerificationTier,
+): VerificationCommand[] {
+  if (tier === "full") return commands.map((command) => ({ ...command }));
+  const selected = selectVerificationCommand(commands, tier);
+  return selected ? [{ ...selected }] : [];
 }
 
 export function selectVerificationCommand(
@@ -143,6 +153,40 @@ export async function runVerificationCommand(
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+export async function runVerificationSuite(
+  commands: readonly VerificationCommand[],
+  run: (command: string, signal?: AbortSignal, timeoutMs?: number) => Promise<BashResult>,
+  signal?: AbortSignal,
+): Promise<VerificationSuiteResult> {
+  if (commands.length === 0) {
+    return {
+      status: "unavailable",
+      results: [],
+      skipped: [],
+      reason: "No conventional verification command was discovered",
+    };
+  }
+  const results: VerificationResult[] = [];
+  for (let index = 0; index < commands.length; index += 1) {
+    signal?.throwIfAborted();
+    const result = await runVerificationCommand(commands[index]!, run, signal);
+    results.push(result);
+    if (!result.passed) {
+      return {
+        status: "failed",
+        results,
+        skipped: commands.slice(index + 1).map((command) => ({ ...command })),
+      };
+    }
+  }
+  return { status: "passed", results, skipped: [] };
+}
+
+export function verificationSuitePrompt(suite: VerificationSuiteResult): string {
+  const failure = suite.results.find((result) => !result.passed);
+  return failure ? verificationPrompt(failure) : suite.reason ?? "Verification was unavailable.";
 }
 
 export function verificationPrompt(result: VerificationResult): string {

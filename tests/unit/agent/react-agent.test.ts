@@ -7,10 +7,48 @@ import {
 } from "../../../src/agent/react-agent.js";
 import type { BashResult } from "../../../src/tools/bash.js";
 import type { PermissionPolicy } from "../../../src/permissions/policy.js";
+import { GoalRuntime } from "../../../src/goal/runtime.js";
+import type { SessionGoal } from "../../../src/storage/session-store.js";
 
 function bashResult(stdout: string): BashResult {
   return { stdout, stderr: "", exitCode: 0, signal: null };
 }
+
+test("agent defers goal completion until the host accepts workflow verification", async () => {
+  let goal: SessionGoal | undefined;
+  const goalRuntime = new GoalRuntime({
+    getGoal: async () => goal,
+    setGoal: async (next) => { goal = next; },
+  });
+  await goalRuntime.create({ objective: "finish the change" });
+  const requests: Array<Record<string, unknown>> = [];
+  const responses = [
+    { id: "complete", output_text: "", output: [{ type: "function_call", name: "update_goal", arguments: '{"status":"complete"}', call_id: "goal-complete" }] },
+    { id: "done", output_text: "done", output: [] },
+  ];
+  const agent = new ReactAgent({
+    model: "test",
+    goalRuntime,
+    client: { responses: { async create(params) { requests.push(params); return responses.shift()!; } } },
+    io: { async confirmBash() { return false; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+  const result = await agent.runTurn("finish");
+  assert.equal(result.goalCompletionRequested, true);
+  assert.equal(goal?.status, "active");
+  assert.match(JSON.stringify(requests[1]?.input), /pending_verification/u);
+  await agent.finalizePendingGoalCompletion(false);
+  assert.equal(goal?.status, "active");
+  await agent.finalizePendingGoalCompletion(true);
+  assert.equal(goal?.status, "active");
+
+  responses.push(
+    { id: "complete-again", output_text: "", output: [{ type: "function_call", name: "update_goal", arguments: '{"status":"complete"}', call_id: "goal-complete-again" }] },
+    { id: "done-again", output_text: "done", output: [] },
+  );
+  await agent.runTurn("finish after verification");
+  await agent.finalizePendingGoalCompletion(true);
+  assert.equal(goal?.status, "complete");
+});
 
 test("agent rejects overlapping turns and releases the guard after cancellation", async () => {
   const controller = new AbortController();
@@ -510,6 +548,42 @@ test("agent confirms, runs Bash, and returns its output to the model", async () 
   const toolOutput = history.find((item) => item.type === "function_call_output");
   assert.ok(toolOutput);
   assert.match(String(toolOutput.output), /\/repo/);
+});
+
+test("agent invalidates a Bash approval when the permission policy changes", async () => {
+  let policy: PermissionPolicy = { mode: "ask", web: true };
+  let executions = 0;
+  const requests: Array<Record<string, unknown>> = [];
+  const responses = [
+    { id: "command", output_text: "", output: [{ type: "function_call", name: "bash", arguments: '{"command":"pwd"}', call_id: "call-policy" }] },
+    { id: "done", output_text: "stopped", output: [] },
+  ];
+  const agent = new ReactAgent({
+    model: "test",
+    client: { responses: { async create(params) {
+      requests.push(params);
+      const response = responses.shift();
+      assert.ok(response);
+      return response;
+    } } },
+    io: {
+      getPermissions: () => policy,
+      async confirmBash() {
+        policy = { mode: "read-only", web: false };
+        return true;
+      },
+      async runBash() {
+        executions += 1;
+        return bashResult("unexpected");
+      },
+      writeAssistant() {},
+    },
+  });
+
+  await agent.runTurn("inspect");
+  assert.equal(executions, 0);
+  const followup = requests[1]?.input as Array<Record<string, unknown>>;
+  assert.match(String(followup.find((item) => item.type === "function_call_output")?.output), /permission policy changed/iu);
 });
 
 test("agent tells the model when the user rejects Bash", async () => {

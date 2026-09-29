@@ -1,6 +1,6 @@
 # Sandbox comparison and optimization plan
 
-Audit date: 2026-09-28. Baseline: Everpeace 0.2.22. This is a comparison of inspected implementations, not a universal ranking or a claim of equivalent enforcement.
+Audit date: 2026-09-28. Comparison baseline: Everpeace 0.2.22; implementation continued on 0.2.23. This is a comparison of inspected implementations, not a universal ranking or a claim of equivalent enforcement.
 
 ## Fixed references
 
@@ -44,13 +44,13 @@ Environment filtering is name-based defense in depth, not complete secret discov
 
 ## Phase B — unify policy across shell and file tools
 
-Implement this as a separately validated policy change; Phase A must not be presented as completing it.
+Phase B is being delivered in independently validated slices:
 
-1. Define an immutable effective policy containing workspace roots, protected paths, network mode, environment policy, approval scope and backend identity. Refresh before each new command; recheck current policy after approval. Preserve project-only restrictions when user settings change.
-2. Extend the native profile to make `.everpeace` and the application's user-global permission/state paths read-only to model execution. Validate missing directories, creation after launch, case folding, Windows junctions, rename/parent replacement and Linux/macOS behavior. Do not silently drop unsupported denies. Keep full access an explicit exception.
-3. Route read/list/edit through an isolated local worker or supported pinned filesystem executor with the same effective policy. Keep AuthStorage, Session storage and the TUI in the host. Define brokered file access rather than granting the worker access to the keyring or all application state.
-4. Replace raw prefix approval with platform-aware command analysis. Every executable segment must pass; nested interpreters and unresolved syntax require whole-command approval or denial. Intersect project restrictions independently of user allows. Do not advertise regex filtering as reliable shell parsing.
-5. Add a shell-network control distinct from public web and MCP. Default to the existing profile behavior for compatibility; any network denial must be enforced by the selected backend. Unsupported enforcement fails closed. Domain allowlists require a managed proxy and cannot be inferred from the web toggle.
+1. [x] Define an immutable effective policy containing workspace roots, protected paths, network mode, environment policy, approval scope and backend identity. Refresh before each new command and invalidate an approval if the live policy revision changed. Project policy continues to be intersected by the existing loader.
+2. [x] Use a complete native child of `:workspace` to make workspace control directories read-only and the application's user-global permission/state root inaccessible to model execution. The host materializes `.everpeace` before launch because an absent Windows target is not denied, and rejects a redirected control path. Managed conflicts fail closed; full access remains explicit. Windows verifies writes, rename/delete resistance and the missing-target behavior. Linux/macOS native verification remains open.
+3. [ ] Route read/list/edit through an isolated local worker or supported pinned filesystem executor with the same effective policy. Keep AuthStorage, Session storage and the TUI in the host. Define brokered file access rather than granting the worker access to the keyring or all application state.
+4. [x] Replace single raw-command prefix evaluation with conservative top-level command analysis. Every `;`, newline, pipe and conditional segment is evaluated; nested interpreters, substitutions and unresolved syntax require approval, while embedded explicit denies remain denied. This is intentionally documented as a conservative analyzer rather than a full shell parser.
+5. [x] Add a persisted shell-network control distinct from public web and MCP. It defaults to the existing profile behavior and requests native denial with `--sandbox-state-disable-network`; a backend refusal fails the command. Selecting full access clears the user-level deny, while a restrictive project deny remains effective and may fail closed if the backend cannot compose that profile. Domain allowlists remain out of scope because they require a managed proxy. Cross-platform native denial probes remain part of acceptance.
 
 Acceptance: same protected targets fail through shell and patch; malicious project configuration cannot expand roots or weaken rules; denied compound commands never launch; permission changes invalidate stale approvals; Windows/Linux/macOS tests identify actual enforcement and capability failures. No migration of permissions into Session JSONL.
 
@@ -65,6 +65,6 @@ Acceptance: fake launch failures cause no fallback or replay; cancellation leave
 
 ## Native smoke evidence and limits
 
-Windows Node with the installed pinned backend was exercised using disposable directories and fixed fixture commands, without model/API requests. Workspace writes succeeded, non-temp sibling writes failed, read-only workspace writes failed, and `.git` writes failed. A sibling inside the system temp directory was writable, as a temporary-directory grant permits; this is not a workspace escape test. `.everpeace` remained writable via shell and is explicitly tracked in Phase B.
+Windows Node with the installed pinned backend was exercised using disposable directories and fixed fixture commands, without model/API requests. The built-in profile allowed `.everpeace`, confirming the original gap. The new complete child profile then allowed an ordinary workspace write while rejecting `.everpeace` file creation, rename and delete attempts; the automated native regression covers ordinary write plus protected write. Non-temp sibling writes, read-only workspace writes and `.git` writes also failed. A sibling inside the system temp directory was writable, as a temporary-directory grant permits; this is not a workspace escape test.
 
 Linux/macOS native isolation, live terminal approval flows, process-tree ownership and network-denial probes are not covered by these Windows filesystem results. Automated counts and the latest full-validation status belong in `../HANDOFF.md`.

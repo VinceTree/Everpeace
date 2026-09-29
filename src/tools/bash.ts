@@ -6,7 +6,13 @@ import {
 import { stopProcessTree } from "./process-cancel.js";
 import { retainOutput } from "./command-record.js";
 import { codexCliLaunch, runCodexProcess } from "../codex/cli.js";
-import { modelShellEnvironment } from "./sandbox-policy.js";
+import {
+  materializeSandboxControlPaths,
+  modelShellEnvironment,
+  nativePermissionProfileArgs,
+  type EffectiveSandboxPolicy,
+  type NativePermissionProfile,
+} from "./sandbox-policy.js";
 
 export type { BashOutputPreview } from "./bash-output-preview.js";
 
@@ -40,8 +46,9 @@ export interface BashOptions {
    */
   terminal?: boolean;
   sandbox?: {
-    permissionProfile: ":read-only" | ":workspace" | ":danger-full-access";
+    permissionProfile?: NativePermissionProfile;
     readableRoots?: readonly string[];
+    policy?: EffectiveSandboxPolicy;
     codexCliPath?: string;
   };
 }
@@ -132,16 +139,18 @@ function resolveSandboxArgs(
 ): string[] {
   const sandbox = options.sandbox;
   if (!sandbox) throw new Error("Sandbox options are required");
+  const permissionProfile = sandbox.policy?.permissionProfile ?? sandbox.permissionProfile;
+  if (!permissionProfile) throw new Error("Sandbox permission profile is required");
   const sandboxCommand = process.platform === "win32"
     ? { command: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command] }
     : { command: bashPath, args: ["-c", command] };
   return [
     "sandbox",
-    "-P",
-    sandbox.permissionProfile,
+    ...(sandbox.policy ? nativePermissionProfileArgs(sandbox.policy) : ["-P", permissionProfile]),
     "-C",
     cwd,
-    ...(sandbox.readableRoots?.flatMap((root) => ["--sandbox-state-readable-root", root]) ?? []),
+    ...((sandbox.policy?.readableRoots ?? sandbox.readableRoots)?.flatMap((root) => ["--sandbox-state-readable-root", root]) ?? []),
+    ...(sandbox.policy?.networkMode === "deny" ? ["--sandbox-state-disable-network"] : []),
     "--include-managed-config",
     "-c",
     "shell_environment_policy.ignore_default_excludes=false",
@@ -213,6 +222,22 @@ export function runBash(
   command: string,
   options: BashOptions = {},
 ): Promise<BashResult> {
+  if (options.signal?.aborted) {
+    return Promise.resolve({ stdout: "", stderr: "", exitCode: null, signal: null, cancelled: true });
+  }
+  if (options.sandbox?.policy) {
+    try {
+      materializeSandboxControlPaths(options.sandbox.policy);
+    } catch (error) {
+      return Promise.resolve({
+        stdout: "",
+        stderr: "",
+        exitCode: null,
+        signal: null,
+        error: `Could not prepare sandbox control paths: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  }
   const env = options.sandbox ? modelShellEnvironment(options.env ?? process.env) : options.env ?? process.env;
   const bashPath = options.bashPath ?? resolveBashPath(env);
   const streamOutput = options.streamOutput ?? true;

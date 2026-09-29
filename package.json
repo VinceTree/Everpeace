@@ -1,6 +1,6 @@
 {
   "name": "everpeace",
-  "version": "0.2.23",
+  "version": "0.2.24",
   "description": "A sandboxed terminal ReAct agent with persistent sessions, MCP, skills, and web access.",
   "type": "module",
   "bin": {
@@ -18,7 +18,7 @@
     "clean": "node --eval \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "pnpm clean && tsc -p tsconfig.build.json",
     "start": "node dist/cli/index.js",
-    "test": "tsx --test tests/**/*.test.{ts,tsx}",
+    "test": "tsx --test --test-concurrency=4 tests/**/*.test.{ts,tsx}",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

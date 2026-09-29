@@ -4,6 +4,12 @@
 
 普通 coding turn 使用进程内状态机协调理解、实现、验证、诊断和完成阶段，不替换 Responses/ReAct 工具循环，也不自动提交 Git。`apply_patch` 成功后立即选择有界快速检查，回合结束选择完整检查；命令只从工作区 manifest/锁文件和常见项目标志中发现，不执行任意脚本发现逻辑。验证 stdout/stderr 有界保留，失败作为结构化结果返回模型，修复次数超过三次后进入 `blocked`。
 
+首批个人开发语义以 Node/TypeScript 单包项目为目标。每个逻辑 step 读取根级 `AGENTS.md` 和 `package.json` scripts；该内容属于低优先级项目背景，不能提升权限或覆盖当前用户/开发者指令，网络重试复用同一 step 快照。最终检查不再选择单条命令，而是重新发现当前 manifest，按 `typecheck`、`lint`、`test`、`build` 串行首败停止；不存在检查时返回 `unavailable`，不能等价为成功。
+
+工作区跟踪以任务开始时的 Git dirty state 为基线，解析 `git status --porcelain=v1 -z --untracked-files=all` 并为候选路径计算有界内容指纹。最终 changed paths 是当前状态相对该基线的差值，因此已有脏文件被模型再次修改、未跟踪文件、删除、空格及非 ASCII 路径都可识别；超出路径/字节限制时失败关闭为 tracking limited。非 Git 项目的结构化 patch 继续用进程内 SHA-256 checkpoint 校验，非 Git shell 修改只可标为未验证。`/undo` 不扩展到 shell 修改。
+
+`WorkflowState.result` 区分 `verified`、`unverified`、`failed`、`no_changes`，完整检查保存为 `VerificationSuiteResult`。Session 的兼容 `workflow_updated` 事件只保存命令、退出码、耗时、跳过项和整体状态，移除 stdout、stderr、error 与文件内容。模型请求 Goal complete 时先返回 pending；宿主仅在最终 `verified` 或确定无改动时提交完成状态。Memory 的 verified outcome 同样只来源于工作流结果，宿主生成的摘要报告观察路径、已运行/跳过检查和限制原因。
+
 `workspace_status`、`workspace_diff` 和 `/diff` 只读 Git 状态。最新 Agent turn 的 `/undo` 使用内存检查点保存每个文件的 before 内容和 after SHA-256；恢复前必须确认当前内容仍等于 after SHA，用户改动的文件跳过并报告冲突。检查点不写入 Session JSONL，`/new`、`/clear`、`/resume` 和新一轮 turn 都会隔离它；Session 只追加 workflow 阶段、变更路径和最后一次验证结果等元数据，持久化验证事件不包含 stdout/stderr/error。
 
 完整验证成功后，生产 TUI 对当前变更路径执行只读 Git review checkpoint；review 只确认变更仍可见，不修改工作区、不自动提交。失败进入 `diagnose`，错误作为有界 workflow prompt 返回模型；review 未配置时 runtime 保持原有 `review -> done` 路径。该检查点不新增 Session JSONL 字段，仍只保存阶段和最后验证元数据。
@@ -14,7 +20,11 @@
 
 固定源码对比与分阶段计划见 [SANDBOX.md](./SANDBOX.md)。保留固定原生后端，模型 shell 显式传入 `--include-managed-config`，启动 Node wrapper 前过滤继承的凭据及启动注入变量，同时启用后端默认凭据排除。直接 `!` 与 MCP 的环境不走这个过滤器。该过滤不承诺阻止从可读文件或显式后端配置获取凭据。
 
-结构化编辑保护 `.git`、`.codex`、`.agents`、`.everpeace`，full-access 例外由宿主根据实时权限设置，模型参数不能放开；Windows ADS 仍拒绝。预检拒绝整个批次，workflow checkpoint 后再检查取消与只读权限。Windows 原生探针确认 `.everpeace` 仍可通过 shell 写入，统一原生保护和隔离文件 worker 属于后续阶段，不得声称全部工具已隔离。
+结构化编辑保护 `.git`、`.codex`、`.agents`、`.everpeace`，full-access 例外由宿主根据实时权限设置，模型参数不能放开；Windows ADS 仍拒绝。预检拒绝整个批次，workflow checkpoint 后再检查取消与只读权限。
+
+每个模型命令启动前从实时用户/项目权限、cwd 和 Skill 读取根生成不可变有效策略。workspace/ask 使用完整覆盖的原生 `:workspace` 子 profile，把控制目录设为只读、平台 Everpeace 状态根设为不可访问；宿主先创建 `.everpeace` 并拒绝其为符号链接或 junction，避免 Windows 对不存在 deny target 的空洞。full-access 明确保留例外，managed requirement 冲突失败关闭。Windows 原生回归已验证普通文件可写而 `.everpeace` 写入失败；Linux/macOS 仍待原生验收。
+
+命令规则按顶层 shell 段分别检查；命令替换、未闭合语法与嵌套解释器转为逐条审批，未解析内容中出现明确 deny 仍拒绝。该保守分析器不冒充完整 shell parser。审批期间权限 revision 变化会使 Bash、patch 或自动验证的旧审批失效。模型 shell 网络使用独立持久开关，关闭时只通过原生后端 deny 参数执行，不复用 web/MCP 开关；选择 full-access 清除用户级网络 deny，项目级 deny 继续收紧，后端无法组合时失败关闭。隔离文件 worker 仍属于后续阶段，因此不得声称所有宿主文件工具共享 OS 隔离。
 
 ## Shared sandbox process boundary and structured edits
 

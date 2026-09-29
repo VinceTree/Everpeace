@@ -33,6 +33,7 @@ export interface AgentSession {
   getMemoryPolicy?(): LearnedMemoryPolicy | undefined;
   getMemorySnapshot?(): MemorySnapshot | undefined;
   finishMemoryTurn?(outcome: LearnedTurnOutcome): Promise<void>;
+  finalizePendingGoalCompletion?(allow: boolean): Promise<void>;
 }
 
 export interface AgentRestoreOptions {
