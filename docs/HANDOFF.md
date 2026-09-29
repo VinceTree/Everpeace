@@ -1,10 +1,10 @@
 ## 最新执行：个人开发 Agent 可靠闭环
 
-状态快照：2026-09-29。首批个人开发优化已实现但尚未提交：默认提示定位为个人软件开发搭档；每个逻辑 step 安全加载根级 `AGENTS.md` 与 `package.json` scripts。Git 工作区在 turn 开始记录结构化 NUL status 和有界内容指纹，可识别模型 shell 对干净文件、已有脏文件、未跟踪文件、删除及中文路径造成的本轮变化；非 Git shell 和追踪超限失败关闭为未验证，结构化 patch 与 `/undo` 继续使用进程内 SHA-256 检查点。
+状态快照：2026-09-29。首批个人开发优化已随 `0.2.24` 提交 `bd582af` 并推送到 `origin/main`：默认提示定位为个人软件开发搭档；每个逻辑 step 安全加载根级 `AGENTS.md` 与 `package.json` scripts。Git 工作区在 turn 开始记录结构化 NUL status 和有界内容指纹，可识别模型 shell 对干净文件、已有脏文件、未跟踪文件、删除及中文路径造成的本轮变化；非 Git shell 和追踪超限失败关闭为未验证，结构化 patch 与 `/undo` 继续使用进程内 SHA-256 检查点。
 
 Node/TypeScript 最终验证改为重新发现当前 manifest，按 `typecheck`、`lint`、`test`、`build` 串行执行全部已声明脚本并在首败停止；修复后重跑完整集合，没有检查命令返回 unavailable。工作流持久结果新增 `verified`、`unverified`、`failed`、`no_changes` 及脱敏 suite 元数据；stdout/stderr/error、文件内容和 undo checkpoint 不进入 JSONL。修复预算按真实诊断轮计数，三次后 blocked 不可由后续 patch 绕过。宿主显示变更与检查摘要，只把 verified coding turn 交给成功 learned-memory capture；模型的 Goal complete 请求延迟到宿主验证结算，失败、取消或未验证会丢弃待完成请求并停止自动 Goal 续跑。
 
-新增回归覆盖完整 Node 检查顺序、test 通过但 build 失败、本轮创建 package.json、无检查命令、干净/既有脏/中文未跟踪 shell 变化、非 Git 限制、三轮修复上限、Goal 延迟完成、项目规则注入、Memory outcome 和 Session 脱敏兼容。Windows Node 22 下最终 `pnpm test` 为 337 项：336 通过、0 失败、1 项按平台跳过；`pnpm typecheck`、`pnpm build` 及本次文件的 `git diff --check` 通过。全工作区 diff 检查仍只报告用户已有 `.gitignore`、`LICENSE` 的 CRLF 差异，本轮未改动二者。当前执行环境不能启动真实 Windows Terminal GUI，也未使用真实供应商凭据，因此交互式“失败→修复→完整通过” live provider smoke 仍待手工验收。工作区原有 sandbox/permissions 和其他未跟踪改动均保留，未提交、未推送、未发布。
+新增回归覆盖完整 Node 检查顺序、test 通过但 build 失败、本轮创建 package.json、无检查命令、干净/既有脏/中文未跟踪 shell 变化、非 Git 限制、三轮修复上限、Goal 延迟完成、项目规则注入、Memory outcome 和 Session 脱敏兼容。测试文件并发度固定为 4，避免 18 核 Windows 环境下后台 Memory 定时任务因资源竞争随机超时；该文件单独复验 14/14 通过，随后 Windows Node 22 下最终 `pnpm test` 为 337 项：336 通过、0 失败、1 项按平台跳过。`pnpm typecheck`、`pnpm build` 及暂存差异的 `git diff --check` 通过。全工作区 diff 检查仍只报告用户已有 `.gitignore`、`LICENSE` 的 CRLF 差异，本轮未改动二者。Release workflow #27（run `36581040881`）成功完成，`v0.2.24` tag 和 GitHub Release 均指向 `bd582af`。当前执行环境不能启动真实 Windows Terminal GUI，也未使用真实供应商凭据，因此交互式“失败→修复→完整通过” live provider smoke 仍待手工验收。既有 `.gitignore`、`LICENSE` 换行差异和无关未跟踪内容继续保留在工作区，未纳入提交。
 
 ## 最新执行：Sandbox 有效策略与原生元数据保护
 
