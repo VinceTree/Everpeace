@@ -32,9 +32,9 @@ import {
 import type { BashOutputPreview, BashResult } from "../../tools/bash.js";
 import { previewApplyPatch, runApplyPatch, type ApplyPatchOperation, type ApplyPatchResult } from "../../tools/apply-patch.js";
 import { CodingWorkflowRuntime, formatWorkflowSummary } from "../../workflow/runtime.js";
-import type { WorkflowState } from "../../workflow/types.js";
+import type { WorkflowState, WorkflowTaskSource } from "../../workflow/types.js";
 import { verificationPrompt } from "../../workflow/verifier.js";
-import { discoverVerificationCommands, runVerificationSuite, selectVerificationCommands } from "../../workflow/verifier.js";
+import { discoverVerificationCommands, selectVerificationCommands } from "../../workflow/verifier.js";
 import { formatWorkspaceInspection, inspectWorkspace } from "../../tools/workspace.js";
 import { selectAgentOutputPreview } from "../rendering/command-output-preview.js";
 import { parseTuiInput, TUI_HELP } from "../commands/slash-commands.js";
@@ -337,6 +337,8 @@ export function EverpeaceApp({
   const [agentPhase, setAgentPhase] = useState<LoopPhase>();
   const [turnStartedAt, setTurnStartedAt] = useState<number>();
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [reasoningStartedAt, setReasoningStartedAt] = useState<number>();
+  const [reasoningElapsedSeconds, setReasoningElapsedSeconds] = useState(0);
   const [queuedGuidanceCount, setQueuedGuidanceCount] = useState(0);
   const [liveAssistant, setLiveAssistant] = useState("");
   const [liveToolStatus, setLiveToolStatus] = useState<string>();
@@ -352,7 +354,7 @@ export function EverpeaceApp({
   const commandInput = useRef<((input: string) => void) | undefined>(undefined);
   const queuedGuidance = useRef<QueuedGuidance[]>([]);
   const resumeGoalPending = useRef(false);
-  const runChatRef = useRef<((text: string, timelineRecorded?: boolean, mode?: AgentMode) => Promise<void>) | undefined>(undefined);
+  const runChatRef = useRef<((text: string, timelineRecorded?: boolean, mode?: AgentMode, taskSource?: WorkflowTaskSource) => Promise<void>) | undefined>(undefined);
   useEffect(() => {
     let active = true;
     void dependencies.inputHistory?.load().then((entries) => { if (active) setInputHistory((current) => [...entries, ...current].slice(-1000)); }).catch(() => undefined);
@@ -387,6 +389,16 @@ export function EverpeaceApp({
     const timer = setInterval(update, 1000);
     return () => clearInterval(timer);
   }, [turnStartedAt]);
+  useEffect(() => {
+    if (reasoningStartedAt === undefined) {
+      setReasoningElapsedSeconds(0);
+      return;
+    }
+    const update = () => setReasoningElapsedSeconds(Math.max(0, Math.floor((Date.now() - reasoningStartedAt) / 1000)));
+    update();
+    const timer = setInterval(update, 1000);
+    return () => clearInterval(timer);
+  }, [reasoningStartedAt]);
 
   const clearQueuedGuidance = useCallback(() => {
     queuedGuidance.current = [];
@@ -736,6 +748,17 @@ export function EverpeaceApp({
           await ensureWorkflow().observeShellExecution();
         }
       },
+      async runBackgroundBash(command: string, signal?: AbortSignal, timeoutMs?: number) {
+        if (ensureWorkflow().state.phase === "blocked") {
+          return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "The coding workflow reached its repair limit" };
+        }
+        const policy = permissions.current;
+        try {
+          return await dependencies.runBash(command, policy, signal, undefined, timeoutMs);
+        } finally {
+          await ensureWorkflow().observeShellExecution();
+        }
+      },
       writeAssistant(text) {
         setLiveAssistant("");
         append("assistant", text);
@@ -801,6 +824,13 @@ export function EverpeaceApp({
               if (event.type === "sampling_started") {
                 setLiveAssistant("");
                 setLiveToolStatus(undefined);
+                setReasoningStartedAt(undefined);
+              } else if (event.type === "reasoning_started") {
+                setLiveToolStatus("Thinking");
+                setReasoningStartedAt(Date.now());
+              } else if (event.type === "reasoning_finished") {
+                setLiveToolStatus(undefined);
+                setReasoningStartedAt(undefined);
               } else if (event.type === "retrying") {
                 setLiveAssistant("");
                 setLiveToolStatus(`Retrying model request (attempt ${event.attempt}${event.category ? ` · ${event.category.replace(/_/g, " ")}` : ""})`);
@@ -1165,7 +1195,7 @@ export function EverpeaceApp({
         ensureWorkflow(loaded.workflow, restoredWorkspace);
         sessionTitlePending.current = loaded.summary.title_pending;
         nextId.current = restoredTimeline.length;
-        resumeGoalPending.current = loaded.goal?.status === "active";
+        resumeGoalPending.current = loaded.goal?.status === "active" && loaded.workflow?.phase !== "blocked";
         onReplayOutput(() => {
           setTimeline(restoredTimeline);
           setResumedInputHistory(loaded.timeline.flatMap((entry) => {
@@ -1650,7 +1680,7 @@ export function EverpeaceApp({
   }, [activeModel, agent, appendTransient, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad]);
 
   const runChat = useCallback(
-    async (text: string, timelineRecorded = false, mode: AgentMode = agentMode) => {
+    async (text: string, timelineRecorded = false, mode: AgentMode = agentMode, taskSource: WorkflowTaskSource = "user") => {
       await permissionsReady.current;
       if (abortController.current || directController.current) return;
       if (!agent || !activeModel) {
@@ -1715,7 +1745,8 @@ export function EverpeaceApp({
         let workflowStarted = false;
         while (true) {
           if (nextMode === "default" && !workflowStarted) {
-            await ensureWorkflow().beginTurn({ mode: "default" });
+            if (taskSource === "session_resume") await ensureWorkflow().resumeTurn();
+            else await ensureWorkflow().beginTurn({ mode: "default", source: taskSource });
             workflowStarted = true;
           } else if (nextMode === "default" && ensureWorkflow().state.phase === "diagnose") {
             const repair = await ensureWorkflow().startRepairTurn();
@@ -1755,6 +1786,10 @@ export function EverpeaceApp({
             break;
           }
           if (nextMode === "plan") break;
+          if (agent.waitForBackgroundJobs) {
+            setLiveToolStatus("Waiting for background commands before final verification");
+            await agent.waitForBackgroundJobs(controller.signal);
+          }
           const workflowResult = await ensureWorkflow().finishTurn(executeVerification, controller.signal);
           if (workflowResult.prompt && ensureWorkflow().state.phase === "diagnose") {
             await agent.finishMemoryTurn?.("failed");
@@ -1798,6 +1833,7 @@ export function EverpeaceApp({
           }
           nextText = "Continue working toward the active session goal. Call get_goal, make concrete progress, verify the result, and update the goal when complete or genuinely blocked.";
           nextMode = "default";
+          taskSource = "goal_continuation";
           workflowStarted = false;
           setLiveAssistant("");
           setLiveToolStatus("Continuing active goal");
@@ -1825,6 +1861,7 @@ export function EverpeaceApp({
         setBusyLabel(undefined);
         setAgentPhase(undefined);
         setTurnStartedAt(undefined);
+        setReasoningStartedAt(undefined);
         setLiveAssistant("");
         setLiveToolStatus(undefined);
         if (controller.signal.aborted && queuedGuidance.current.length === 0) {
@@ -1855,10 +1892,12 @@ export function EverpeaceApp({
     };
   }, [runChat]);
 
+  useEffect(() => () => agent?.dispose?.(), [agent]);
+
   useEffect(() => {
     if (!resumeGoalPending.current || activeGoal?.status !== "active" || !agent) return;
     resumeGoalPending.current = false;
-    queueMicrotask(() => void runChatRef.current?.("Continue working toward the restored active session goal. Call get_goal first and proceed until the objective is verified complete.", true, "default"));
+    queueMicrotask(() => void runChatRef.current?.("Continue working toward the restored active session goal. Call get_goal first and proceed until the objective is verified complete.", true, "default", "session_resume"));
   }, [activeGoal, agent, sessionEpoch]);
 
   const runDirectBash = useCallback(
@@ -1905,20 +1944,55 @@ export function EverpeaceApp({
 
   const runManualVerification = useCallback(async (requested: string) => {
     await permissionsReady.current;
-    const operation = startCommandLoad("/verify · Workspace checks", "Discovering verification commands");
-    const commands = await discoverVerificationCommands(workspacePath);
-    if (!isCurrentCommandOperation(operation)) return;
-    const selected = requested.trim()
-      ? [{ id: "manual", label: "Manual verification", command: requested.trim(), tier: "full" as const, timeoutMs: 120_000 }]
-      : selectVerificationCommands(commands, "full");
-    if (selected.length === 0) {
-      replaceCommandView(infoView("/verify · No checks discovered", "No conventional verification command was found. Use /verify <command> to run an explicit check."));
+    if (abortController.current || directController.current) {
+      openInfo("/verify · Busy", "Wait for the active task or command to finish.", "error");
       return;
     }
-    replaceCommandView(infoView("/verify · Running", selected.map((command) => command.command).join("\n")));
-    const result = await runVerificationSuite(selected, (value, signal, timeoutMs) => executeVerification(value, signal, timeoutMs, true));
-    if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/verify · Result", JSON.stringify(result, null, 2), result.status === "passed" ? "default" : "error"));
-  }, [executeVerification, isCurrentCommandOperation, replaceCommandView, startCommandLoad, workspacePath]);
+    const controller = new AbortController();
+    directController.current = controller;
+    const cancel = () => {
+      controller.abort();
+      if (directController.current === controller) directController.current = undefined;
+      returnToChat();
+    };
+    const operation = startCommandLoad("/verify · Workspace checks", "Discovering verification commands", true, true, cancel);
+    try {
+      const commands = await discoverVerificationCommands(workspacePath);
+      controller.signal.throwIfAborted();
+      if (!isCurrentCommandOperation(operation)) return;
+      const supplemental = requested.trim().length > 0;
+      const selected = supplemental
+        ? [{ id: "manual", label: "Manual verification", command: requested.trim(), tier: "full" as const, timeoutMs: 120_000 }]
+        : selectVerificationCommands(commands, "full");
+      if (selected.length === 0) {
+        replaceCommandView(infoView("/verify · No checks discovered", "No conventional verification command was found. Use /verify <command> to run an explicit supplemental check."));
+        return;
+      }
+      replaceCommandView({ kind: "loading", title: "/verify · Running", label: selected.map((command) => command.command).join(" · "), cancellable: true, onCancel: cancel });
+      const verificationPermissionRevision = permissionPolicyRevision(permissions.current);
+      const result = await ensureWorkflow().runManualVerification(
+        selected,
+        async (value, signal, timeoutMs) => {
+          if (permissionPolicyRevision(permissions.current) !== verificationPermissionRevision) {
+            return { stdout: "", stderr: "", exitCode: null, signal: null, error: "Permission policy changed during manual verification" };
+          }
+          const executed = await executeVerification(value, signal, timeoutMs, true);
+          return permissionPolicyRevision(permissions.current) === verificationPermissionRevision
+            ? executed
+            : { ...executed, exitCode: null, error: "Permission policy changed during manual verification" };
+        },
+        { supplemental, signal: controller.signal },
+      );
+      if (isCurrentCommandOperation(operation)) {
+        const note = supplemental ? "\n\nThis explicit command is supplemental evidence and does not replace the complete project suite." : "";
+        replaceCommandView(infoView("/verify · Result", `${JSON.stringify(result, null, 2)}${note}`, result.status === "passed" ? "default" : "error"));
+      }
+    } catch (error) {
+      if (!controller.signal.aborted && isCurrentCommandOperation(operation)) replaceCommandView(infoView("/verify · Failed", error instanceof Error ? error.message : String(error), "error"));
+    } finally {
+      if (directController.current === controller) directController.current = undefined;
+    }
+  }, [executeVerification, ensureWorkflow, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad, workspacePath]);
 
   const undoWorkflow = useCallback(async () => {
     if (abortController.current || directController.current) {
@@ -2123,7 +2197,7 @@ export function EverpeaceApp({
         return;
       }
     },
-    { isActive: view.kind === "chat" || confirmation !== undefined },
+    { isActive: view.kind === "chat" || confirmation !== undefined || (view.kind === "loading" && directController.current !== undefined) },
   );
 
   useEffect(
@@ -2159,6 +2233,10 @@ export function EverpeaceApp({
       if (redrawTimer !== undefined) clearTimeout(redrawTimer);
     };
   }, [onReplayOutput, stdout]);
+
+  const displayedToolStatus = liveToolStatus === "Thinking"
+    ? `Thinking · ${formatElapsed(reasoningElapsedSeconds)}`
+    : liveToolStatus;
 
   if (view.kind !== "chat") {
     return (
@@ -2327,7 +2405,7 @@ export function EverpeaceApp({
           />
           {turnStartedAt !== undefined ? <Text dimColor>Waiting for approval · {formatElapsed(elapsedSeconds)}</Text> : null}
           {liveAssistant ? <Box marginLeft={2}><RichOutput text={liveAssistant} /></Box> : null}
-          {liveToolStatus ? <Text color={TUI_COLORS.secondary}>• {liveToolStatus}</Text> : null}
+          {displayedToolStatus ? <Text color={TUI_COLORS.secondary}>• {displayedToolStatus}</Text> : null}
           <Prompt
             key={`prompt-${inputKey}`}
             activeModelName={activeModel?.model_name}
@@ -2352,7 +2430,7 @@ export function EverpeaceApp({
           {activeCommand?.source === "model" ? (
             <>
               {liveAssistant ? <Box marginLeft={2}><RichOutput text={liveAssistant} /></Box> : null}
-              {liveToolStatus ? <Text color={TUI_COLORS.secondary}>• {liveToolStatus}</Text> : null}
+              {displayedToolStatus ? <Text color={TUI_COLORS.secondary}>• {displayedToolStatus}</Text> : null}
               {queuedGuidanceCount > 0 ? <Text dimColor>{queuedGuidanceCount} guidance message{queuedGuidanceCount === 1 ? "" : "s"} pending</Text> : null}
               <Prompt
                 key={`prompt-${inputKey}`}
@@ -2369,9 +2447,9 @@ export function EverpeaceApp({
         </Box>
       ) : busyLabel ? (
         <Box flexDirection="column">
-          <Spinner label={`${agentPhase === "tools" ? "Working" : agentPhase === "sampling" ? `Thinking · ${busyLabel}` : busyLabel}${turnStartedAt === undefined ? "" : ` (${formatElapsed(elapsedSeconds)} • ctrl+c to interrupt)`}`} />
+          <Spinner label={`${agentPhase === "tools" ? "Working" : agentPhase === "sampling" ? `Waiting · ${busyLabel}` : busyLabel}${turnStartedAt === undefined ? "" : ` (${formatElapsed(elapsedSeconds)} • ctrl+c to interrupt)`}`} />
           {liveAssistant ? <Box marginLeft={2}><RichOutput text={liveAssistant} /></Box> : null}
-          {liveToolStatus ? <Text color={TUI_COLORS.secondary}>• {liveToolStatus}</Text> : null}
+          {displayedToolStatus ? <Text color={TUI_COLORS.secondary}>• {displayedToolStatus}</Text> : null}
           {queuedGuidanceCount > 0 ? <Text dimColor>{queuedGuidanceCount} guidance message{queuedGuidanceCount === 1 ? "" : "s"} pending</Text> : null}
           <Prompt
             key={`prompt-${inputKey}`}

@@ -211,7 +211,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 ## DeepSeek provider 与请求契约
 
 - 供应商能力由 `ProviderCapabilities` 明确声明，来源与 SDK 方法是否存在分离。官方 DeepSeek、官方 OpenAI 和未知 compatible endpoint 都使用 Responses，但只有官方 OpenAI 声明原生 compact、加密 reasoning 和 prompt-cache 请求字段。
-- 官方 DeepSeek 保留普通 reasoning item、function call/output 和 SSE 完整响应，主请求默认 `high`、最多 32K 输出；`max` 在 DeepSeek 能力范围内收敛为 `high`。未知 compatible endpoint 不因模型名获得 DeepSeek 能力。
+- 官方 DeepSeek 保留普通 reasoning item、function call/output 和 SSE 完整响应，主请求产品默认 `high` 与 32K 输出；供应商硬上限未知，`max` 原样发送。未知 compatible endpoint 不因模型名获得 DeepSeek 能力。
 - `createProviderRuntime` 是主 Agent、标题、Skill 草稿、Memory 与摘要请求的统一入口。DeepSeek 请求会移除 `include`、prompt-cache、server-store 和并行参数，不依赖服务端 session、加密上下文或 cursor recovery。
 - Session model ref 和模型注册表接受可选 `request_settings`，旧记录继续读取。跨供应商恢复时若 context 含加密 reasoning 或不透明 compaction，拒绝迁移并保留原 Session。
 
@@ -219,7 +219,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 
 - 已知窗口的自动阈值取 `min(80%, window-outputBudget-headroom)`；headroom 为窗口 5%、最多 32K。真实 usage 与请求估算不混写为同一观测；阈值压缩在同一 history revision 上只执行一次。
 - 官方 OpenAI 使用声明的 native compact；DeepSeek/compatible 使用模型摘要，最多 8K 输出，保留最近两个完整用户交互单元。摘要明确区分宿主验证证据与模型自述，取消、失败或持久化失败不会替换原 context。明确 context-limit 每轮只恢复一次。
-- 进入模型 context 的单项工具结果限制为 32 KiB，保留首尾和截断标记；终端保留输出不因此缩小。
+- 进入模型 context 的单项工具结果限制为 32 KiB；超限时返回含首尾、总字节数和进程内续读 ID 的有效 JSON，终端保留输出不因此缩小。
 - Usage 独立累计输入、输出、reasoning、cache hit、cache write 和带缓存统计的输入分母。缺少 write 不抹掉 hit；缺失样本使完整性保持 partial。DeepSeek cache miss 不伪装成 cache write。
 - `/reasoning` 只在任务间改变下一轮快照并随 Session 保存；`/doctor` 默认仅检查本地 Node、shell、sandbox 和配置，只有 `--live` 发出一次有界模型请求。`/status` 展示实际协议、压缩策略、推理档位及独立 usage。
 
@@ -228,3 +228,23 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 - Repair attempt 只在宿主启动诊断轮时递增；同轮 patch 或快速检查失败不重复计数。第三个诊断轮后仍失败会阻止全部工具和 Goal 完成，只有新用户任务能重建工作流。
 - Git tracker 分开仓库根和工作目录，status path 先按仓库根解释、再映射到当前工作区；兄弟目录不进入摘要。最终 suite 前后比较内容 revision，非忽略文件变化使结果过期，重新发现命令并最多补跑两次。
 - 被忽略且未跟踪的构建产物不触发补跑；持续变化、追踪不完整、无检查、取消和环境不可用都保持未验证。退出码 0 只证明该次命令，不单独证明当前文件状态。
+
+## 宿主文件观察、恢复债务与日常工具
+
+- 结构化 update/delete 的写权限来自当前进程维护的文件观察表，而不是模型可选参数或恢复后的聊天文字。模型必须先调用 `read_file`；宿主把全文件 SHA-256 注入 operation，审批 preview 再绑定实际 before hash。Session 恢复清空观察表。create 使用排他写入，不要求模型先证明文件缺失。
+- 多文件 patch 失败时只逆序回滚已经成功写入的项目，并先验证当前内容仍为宿主写入的 post-image。用户或其他进程随后改动的文件列入 rollback conflict，不得覆盖；`rolledBack` 只在所有已写文件确实恢复时为 true。
+- Session 恢复重建进程内 tracker，但不调用新任务初始化。修复次数、blocked phase、changed paths 与 pending verification 保持；新用户任务可获得新预算，同时保留 prior-unverified 元数据。只有覆盖当前 workspace 的新完整验证可以清除这项债务。
+- `/verify` 与自动 suite 使用相同的串行、取消、权限 revision 和 workspace revision 语义。无参数可结算完整 suite；显式单命令永远是 supplemental。无法把结果绑定到 Git 完整快照或当前结构化 checkpoint 时，状态为 unavailable。
+- `read_file` 按行分页并返回全文件 SHA-256；搜索和 glob 直接参数化启动 ripgrep。超大 tool result 使用进程内不透明 ID 续读，Session 仅保存有界 envelope。后台 shell 仍走现有 sandbox/权限，最多两个、默认十分钟、无交互 stdin，也不跨 Session 恢复。
+
+## DeepSeek 请求 attempt 与压缩终态
+
+- DeepSeek `max` 原样映射到 provider；32K 是产品默认输出预算，不冒充未知的供应商硬上限。主编码、摘要、标题、Skill、Memory 与 doctor 各有用途级 reasoning、输出、超时和终态要求，均关闭 SDK 内部自动重试，由宿主预算控制。
+- 发起后失败且没有 usage 的 provider attempt 追加 unknown 样本；后续完整样本只能增加已知用量，不能把 Session 或 benchmark 恢复为 complete。Retry-After 最多接受 60 秒，可被 AbortSignal 中断；stream 连续 60 秒无事件按 incomplete 处理。
+- summary cut 使用完整 assistant/function-call-output 边界，不依赖用户消息数量。最近两个完整单元和未闭合工具链保留；status 非 completed、有正文的半截响应、空摘要或序列化后未缩短均拒绝，原 context 只在持久化成功后替换。
+- Thinking 只由实际 reasoning delta 开始，正文 delta 或响应结束关闭并显示独立 elapsed；没有可靠事件时继续使用通用 Waiting。
+
+## 可复现对比边界
+
+- 测试 CI 与发布 workflow 分开，在 Windows 和 Linux 上运行安装、typecheck、test、build 与 diff check。benchmark 外部进程 adapter 不使用 shell 拼接；dsh 的固定入口为 `--profile headless <job>`，Windows 应传 Node 与已解析的 JS bin，避免 `.cmd` shell 注入。重复运行必须使用 prepare hook 返回的独立 task；内置准备器只写入已确认不存在的目标目录，checkout pinned HEAD 后应用 reviewed seed，证明流程要求同一验收命令 seed 失败且 reference repair 通过。
+- live benchmark 必须在每次 implement/diagnose attempt 前拥有正的 remaining token budget；usage 缺失或不完整立即停止后续任务。当前固定 catalog 不是完成的可复现 fixture：在种子缺陷、参考修复与初始失败/修复通过证据齐全前，不发布模型胜率结论。

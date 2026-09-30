@@ -19,6 +19,7 @@ test("benchmark catalog parses pinned public issue tasks without executing comma
       source,
       tags: ["bug-fix", "tests"],
       maxRepairAttempts: 2,
+      fixture: { seedPatch: "fixtures/fix-parser/seed.patch", referencePatch: "fixtures/fix-parser/reference.patch" },
       verification: { command: "pnpm", args: ["test"], timeoutMs: 120_000 },
     }],
   }));
@@ -27,6 +28,7 @@ test("benchmark catalog parses pinned public issue tasks without executing comma
   assert.equal(tasks[0]?.source.issue, "42");
   assert.equal(tasks[0]?.maxRepairAttempts, 2);
   assert.deepEqual(tasks[0]?.verification?.args, ["test"]);
+  assert.equal(tasks[0]?.fixture?.seedPatch, "fixtures/fix-parser/seed.patch");
 });
 
 test("benchmark catalog rejects unpinned, unsafe, and duplicate tasks", () => {
@@ -54,6 +56,15 @@ test("benchmark catalog rejects unpinned, unsafe, and duplicate tasks", () => {
       verification: { command: "pnpm" },
     },
   ])), /Duplicate benchmark task id/u);
+
+  assert.throws(() => parseBenchmarkTaskCatalog(JSON.stringify([{
+    id: "escaping-fixture",
+    prompt: "Do work",
+    workspacePath: "C:/benchmarks/escape",
+    source,
+    fixture: { seedPatch: "../seed.patch", referencePatch: "reference.patch" },
+    verification: { command: "pnpm" },
+  }])), /normalized relative path/u);
 });
 
 test("DeepSeek Node catalog contains ten pinned tasks", () => {

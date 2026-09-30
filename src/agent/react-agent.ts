@@ -1,4 +1,5 @@
 import { LoopSteeredError, LoopStoppedError, runAgentLoop, type LoopEvent, type LoopPhase, type ToolCall, type LoopStopReason, integerBudget } from "./agent-loop.js";
+import path from "node:path";
 import { PersistenceError, persistState } from "../storage/persistence-error.js";
 import { repairToolContext } from "./repair-context.js";
 import {
@@ -29,6 +30,7 @@ import {
   type SkillTurnContext,
 } from "../skills/catalog.js";
 import { FILE_TOOL_DEFINITIONS, runFileTool } from "../tools/files.js";
+import { BACKGROUND_JOB_TOOL_DEFINITIONS, BackgroundJobManager, parseBackgroundCommand, parseBackgroundJobId, type BackgroundJobSnapshot } from "../tools/background-jobs.js";
 import {
   APPLY_PATCH_TOOL_DEFINITION,
   parseApplyPatchArguments,
@@ -55,10 +57,11 @@ import { GOAL_TOOL_DEFINITIONS, type GoalRuntime } from "../goal/runtime.js";
 import { loadProjectContext } from "./project-context.js";
 import { PLAN_INSTRUCTIONS, PLAN_TOOL_DEFINITIONS, parsePlanRequest, parseSubmittedPlan, type AgentMode, type PlanInteraction, type PlanReviewDecision } from "../plan/runtime.js";
 import type { SessionGoal } from "../storage/session-store.js";
-import { boundModelToolOutput } from "./context-limits.js";
+import { READ_TOOL_OUTPUT_DEFINITION, ToolOutputStore } from "./context-limits.js";
 import {
   defaultModelRequestSettings,
   requestReasoningEffort,
+  requestSettingsForPurpose,
   resolveProviderCapabilities,
   type ModelRequestSettings,
   type ProviderCapabilities,
@@ -106,6 +109,7 @@ export interface ResponseRecoveryAdapter {
 export interface ResponsesRequestOptions {
   signal?: AbortSignal;
   maxRetries?: number;
+  timeout?: number;
   headers?: Record<string, string>;
 }
 
@@ -150,6 +154,7 @@ export interface AgentIO {
   getGoal?(): Promise<SessionGoal | undefined>;
   setGoal?(goal: SessionGoal): Promise<void>;
   runBash(command: string, signal?: AbortSignal): Promise<BashResult>;
+  runBackgroundBash?(command: string, signal?: AbortSignal, timeoutMs?: number): Promise<BashResult>;
   runApplyPatch?(operations: readonly ApplyPatchOperation[], signal?: AbortSignal): Promise<ApplyPatchResult>;
   afterPatchApplied?(operations: readonly ApplyPatchOperation[], result: ApplyPatchResult, signal?: AbortSignal): Promise<WorkflowPatchFollowup | void>;
   writeAssistant(text: string): void;
@@ -178,6 +183,7 @@ export interface ReactAgentOptions {
   maxTurnDurationMs?: number;
   recoveryCacheMaxBytes?: number;
   streamRecoveryBudget?: number;
+  streamIdleTimeoutMs?: number;
   contextRecoveryBudget?: number;
   web?: WebToolExecutor;
   mcp?: McpRuntimeLike;
@@ -314,6 +320,8 @@ export class ReactAgent {
   #learnedPrompt = "";
   #learnedSnapshot: MemorySnapshot | undefined;
   #activeFiles = new Set<string>();
+  /** Host-owned read versions. Deliberately not restored from Session context. */
+  #fileObservations = new Map<string, string | null>();
   #pendingLearnedTurn: LearnedTurn | undefined;
   #turnItems: Array<Record<string, unknown>> | undefined;
   #turnMode: AgentMode = "default";
@@ -338,7 +346,10 @@ export class ReactAgent {
   readonly #maxTurnDurationMs: number | undefined;
   readonly #recoveryCacheMaxBytes: number;
   readonly #streamRecoveryBudget: number;
+  readonly #streamIdleTimeoutMs: number;
   readonly #contextRecoveryBudget: number;
+  readonly #backgroundJobs: BackgroundJobManager;
+  readonly #toolOutputs = new ToolOutputStore();
 
   constructor(options: ReactAgentOptions) {
     this.#onPhase = options.onPhase;
@@ -347,6 +358,8 @@ export class ReactAgent {
     this.#client = options.client;
     this.#model = options.model;
     this.#io = options.io;
+    this.#backgroundJobs = new BackgroundJobManager((command, signal, timeoutMs) =>
+      options.io.runBackgroundBash?.(command, signal, timeoutMs) ?? options.io.runBash(command, signal));
     this.#promptCacheKey = options.promptCacheKey;
     this.#promptCacheOptions = options.promptCacheOptions;
     this.#advancedPromptCacheEnabled = options.promptCacheOptions !== undefined;
@@ -357,6 +370,7 @@ export class ReactAgent {
     this.#maxTurnDurationMs = options.maxTurnDurationMs === undefined ? undefined : integerBudget("maxTurnDurationMs", options.maxTurnDurationMs, options.maxTurnDurationMs, 1);
     this.#recoveryCacheMaxBytes = integerBudget("recoveryCacheMaxBytes", options.recoveryCacheMaxBytes, 8 * 1024 * 1024);
     this.#streamRecoveryBudget = integerBudget("streamRecoveryBudget", options.streamRecoveryBudget, 1);
+    this.#streamIdleTimeoutMs = integerBudget("streamIdleTimeoutMs", options.streamIdleTimeoutMs, 60_000, 1);
     this.#contextRecoveryBudget = integerBudget("contextRecoveryBudget", options.contextRecoveryBudget, 1);
     this.#web = options.web ?? createWebToolExecutor();
     this.#mcp = options.mcp;
@@ -367,7 +381,7 @@ export class ReactAgent {
     this.#goalRuntime = options.goalRuntime;
     this.#history = repairToolContext(options.initialHistory ?? []).map((item) =>
       item.type === "function_call_output" && typeof item.output === "string"
-        ? { ...item, output: boundModelToolOutput(item.output) }
+        ? { ...item, output: this.#toolOutputs.bound(item.output) }
         : item);
     this.#onHistoryAppend = options.onHistoryAppend;
     this.#onContextCompacted = options.onContextCompacted;
@@ -391,6 +405,15 @@ export class ReactAgent {
 
   getRequestSettings(): ModelRequestSettings {
     return { ...this.#requestSettings };
+  }
+
+  waitForBackgroundJobs(signal?: AbortSignal): Promise<BackgroundJobSnapshot[]> {
+    return this.#backgroundJobs.waitAll(signal);
+  }
+
+  dispose(): void {
+    this.#backgroundJobs.dispose();
+    this.#toolOutputs.clear();
   }
 
   async runTurn(userInput: string, signal?: AbortSignal, options: AgentTurnOptions = {}): Promise<AgentTurnResult> {
@@ -459,6 +482,7 @@ export class ReactAgent {
         },
         record: (items) => this.#record(items),
         dispatch: (call, loopSignal) => this.#dispatchTool(call, loopSignal),
+        boundToolOutput: (output) => this.#toolOutputs.bound(output),
         assistant: (text) => {
           assistantTexts.push(text);
           this.#io.writeAssistant(text);
@@ -477,7 +501,7 @@ export class ReactAgent {
           ? {
               toolCapabilities: (call: ToolCall) => {
                 if (!this.#stepToolNames.has(call.name)) return undefined;
-                if (call.name === "read_file" || call.name === "list_directory") {
+                if (FILE_TOOL_DEFINITIONS.some((tool) => tool.name === call.name) || call.name === READ_TOOL_OUTPUT_DEFINITION.name) {
                   return { readOnly: true, idempotent: true, parallelSafe: true, resourceKeys: [] };
                 }
                 if (call.name === READ_SKILL_TOOL_DEFINITION.name) {
@@ -620,6 +644,34 @@ export class ReactAgent {
         return JSON.stringify({ status: "pending_verification", message: "Goal completion will be persisted after the host workflow verifies this coding turn." });
       }
       return JSON.stringify({ goal: await this.#goalRuntime.update(args.status) });
+    } else if (call.name === READ_TOOL_OUTPUT_DEFINITION.name) {
+      return JSON.stringify(this.#toolOutputs.read(call.arguments));
+    } else if (call.name === "poll_background" || call.name === "stop_background") {
+      const jobId = parseBackgroundJobId(call.arguments);
+      if (!jobId) return JSON.stringify({ status: "error", error: "A background job ID is required" });
+      const job = call.name === "stop_background" ? await this.#backgroundJobs.stop(jobId) : this.#backgroundJobs.poll(jobId);
+      return JSON.stringify(job ? { status: "ok", job } : { status: "not_found", error: `Unknown background job: ${jobId}` });
+    } else if (call.name === "start_background") {
+      const command = parseBackgroundCommand(call.arguments);
+      if (!command) return JSON.stringify({ status: "error", error: "A background command is required" });
+      if (bashPermission(policy) === "deny" || commandPermission(command, policy) === "deny") {
+        return JSON.stringify({ status: "denied", error: "The command is denied by the current permission policy." });
+      }
+      const revision = permissionPolicyRevision(policy);
+      const needsApproval = commandPermission(command, policy) === "ask";
+      const accepted = !needsApproval || await this.#confirmTool("start_background", command, () => this.#io.confirmBash(command));
+      signal?.throwIfAborted();
+      const currentPolicy = this.#io.getPermissions?.() ?? defaultPermissions();
+      if (!accepted) return JSON.stringify({ status: "rejected", message: "The user rejected this background command." });
+      if (permissionPolicyRevision(currentPolicy) !== revision || commandPermission(command, currentPolicy) === "deny") {
+        return JSON.stringify({ status: "denied", error: "The permission policy changed while this background command was reviewed." });
+      }
+      try {
+        this.#io.writeTool?.(`Starting background command: ${command}`);
+        return JSON.stringify({ status: "ok", job: this.#backgroundJobs.start(command) });
+      } catch (error) {
+        return JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error) });
+      }
     } else if (call.name === BASH_TOOL_DEFINITION.name && this.#turnMode === "plan") {
       output = JSON.stringify({ status: "denied", error: "Bash is unavailable in Plan mode" });
     } else if (call.name === BASH_TOOL_DEFINITION.name) {
@@ -658,17 +710,44 @@ export class ReactAgent {
       let operations;
       try { operations = parseApplyPatchArguments(call.arguments); }
       catch (error) { output = JSON.stringify({ status: "rejected", error: error instanceof Error ? error.message : String(error) }); return output; }
+      const guardedOperations: ApplyPatchOperation[] = [];
+      for (const operation of operations) {
+        const key = this.#fileObservationKey(operation.path);
+        if (operation.action !== "create") {
+          if (!this.#fileObservations.has(key) || this.#fileObservations.get(key) === null) {
+            return JSON.stringify({ status: "rejected", error: `Cannot ${operation.action} ${operation.path}: the current file version has not been observed. Read the file with read_file, then retry.` });
+          }
+          const observed = this.#fileObservations.get(key)!;
+          if (operation.expectedSha256 && operation.expectedSha256 !== observed) {
+            return JSON.stringify({ status: "rejected", error: `Cannot ${operation.action} ${operation.path}: the supplied version does not match the host observation. Read the file again.` });
+          }
+          guardedOperations.push({ ...operation, expectedSha256: observed });
+        } else {
+          const { expectedSha256: _ignored, ...unguarded } = operation;
+          guardedOperations.push(unguarded);
+        }
+      }
       if (!this.#io.runApplyPatch) {
         output = JSON.stringify({ status: "error", error: "Structured file editing is unavailable" });
       } else if (policy.mode === "read-only") {
         output = JSON.stringify({ status: "denied", error: "The read-only profile does not allow file edits." });
       } else {
-        const preview = await this.#io.previewPatch?.(operations);
+        const preview = await this.#io.previewPatch?.(guardedOperations);
         if (preview?.status === "rejected") {
           output = JSON.stringify(preview);
           return output;
         }
-        const summary = preview?.diff || JSON.stringify(operations);
+        const boundOperations = preview?.status === "ready"
+          ? guardedOperations.map((operation, index) => {
+              const beforeSha256 = preview.files[index]?.beforeSha256;
+              if (operation.action === "create") {
+                const { expectedSha256: _ignored, ...unguarded } = operation;
+                return unguarded;
+              }
+              return { ...operation, ...(beforeSha256 ? { expectedSha256: beforeSha256 } : {}) };
+            })
+          : guardedOperations;
+        const summary = preview?.diff || JSON.stringify(boundOperations);
         const revision = permissionPolicyRevision(policy);
         if (policy.mode === "ask" && !(await this.#confirmTool("apply_patch", summary, () => this.#io.confirmPatch?.(summary) ?? Promise.resolve(false)))) {
           signal?.throwIfAborted();
@@ -680,10 +759,13 @@ export class ReactAgent {
           signal?.throwIfAborted();
           this.#io.onToolProgress?.({ phase: "started", name: call.name });
           this.#io.writeTool?.("Applying workspace patch");
-          const result = await this.#io.runApplyPatch(operations, signal);
+          const result = await this.#io.runApplyPatch(boundOperations, signal);
+          if (result.status === "applied" && preview?.status === "ready") {
+            preview.files.forEach((file) => this.#fileObservations.set(this.#fileObservationKey(file.path), file.afterSha256));
+          }
           let followup: WorkflowPatchFollowup | void;
           try {
-            followup = await this.#io.afterPatchApplied?.(operations, result, signal);
+            followup = await this.#io.afterPatchApplied?.(boundOperations, result, signal);
           } catch (error) {
             if (signal?.aborted || error instanceof PersistenceError) throw error;
             throw new PersistenceError("Workflow follow-up failed", error);
@@ -737,7 +819,19 @@ export class ReactAgent {
     } else if (FILE_TOOL_DEFINITIONS.some((tool) => tool.name === call.name)) {
       this.#io.onToolProgress?.({ phase: "started", name: call.name });
       this.#io.writeTool?.(`File tool: ${call.name}`);
-      output = await this.#runWebTool(() => runFileTool(call.name, call.arguments, this.#workspacePath), signal);
+      try {
+        const result = await runFileTool(call.name, call.arguments, this.#workspacePath, signal);
+        if (call.name === "read_file" && result && typeof result === "object") {
+          const record = result as { path?: unknown; exists?: unknown; sha256?: unknown };
+          if (typeof record.path === "string" && typeof record.exists === "boolean" && (typeof record.sha256 === "string" || record.sha256 === null)) {
+            this.#fileObservations.set(this.#fileObservationKey(record.path), record.sha256);
+          }
+        }
+        output = JSON.stringify({ status: "ok", data: result });
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        output = JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error) });
+      }
       try {
         const parsed = JSON.parse(call.arguments) as { path?: unknown };
         if (typeof parsed.path === "string" && parsed.path) this.#activeFiles.add(parsed.path);
@@ -835,6 +929,11 @@ export class ReactAgent {
     }
   }
 
+  #fileObservationKey(value: string): string {
+    const normalized = path.normalize(value);
+    return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  }
+
   async #requestResponse(
     input: Array<Record<string, unknown>>,
     signal?: AbortSignal,
@@ -855,6 +954,7 @@ export class ReactAgent {
       if (!signal?.aborted && controller.signal.aborted && this.#pendingSteering.length > 0) {
         throw new LoopSteeredError();
       }
+      await this.#recordUnknownUsageAttempt();
       throw error;
     } finally {
       this.#streamRecoveryRemaining = recoveryBudget.remaining;
@@ -874,10 +974,18 @@ export class ReactAgent {
   }
 
   async #maybeAutoCompact(signal?: AbortSignal): Promise<void> {
+    const skillInstructions = this.#skillTurn
+      ? [this.#skillTurn.instructions, this.#skillTurn.explicitInstructions].filter(Boolean).join("\n\n")
+      : "";
     const estimatedTokens = Math.ceil(Buffer.byteLength(JSON.stringify({
+      stableInstructions: `${INSTRUCTIONS}\n${PERMISSION_INSTRUCTIONS}`,
+      permissions: this.#io.getPermissions?.() ?? defaultPermissions(),
+      mode: this.#turnMode,
       history: this.#history,
       tools: this.#stepTools,
       project: this.#projectContext,
+      skills: skillInstructions,
+      mcp: this.#turnMode === "default" ? this.#mcpSnapshot.instructions : "",
       memory: this.#learnedPrompt,
       goal: this.#goalPrompt,
     }), "utf8") / 4);
@@ -957,7 +1065,7 @@ export class ReactAgent {
       const cache = this.#promptCacheRequest(this.#advancedPromptCacheEnabled);
       return await compact(
         { model: this.#model, input, ...cache.params },
-        { maxRetries: 0, ...(signal ? { signal } : {}), ...cache.options },
+        { maxRetries: 0, timeout: requestSettingsForPurpose("summary", this.#requestSettings).timeoutMs, ...(signal ? { signal } : {}), ...cache.options },
       );
     } catch (error) {
       if (signal?.aborted || !this.#advancedPromptCacheEnabled || !isUnsupportedPromptCacheOptionsError(error)) throw error;
@@ -965,7 +1073,7 @@ export class ReactAgent {
       const cache = this.#promptCacheRequest(false);
       return compact(
         { model: this.#model, input, ...cache.params },
-        { maxRetries: 0, ...(signal ? { signal } : {}), ...cache.options },
+        { maxRetries: 0, timeout: requestSettingsForPurpose("summary", this.#requestSettings).timeoutMs, ...(signal ? { signal } : {}), ...cache.options },
       );
     }
   }
@@ -974,12 +1082,24 @@ export class ReactAgent {
     input: Array<Record<string, unknown>>,
     signal?: AbortSignal,
   ): Promise<{ output: Array<Record<string, unknown>>; usage?: unknown }> {
-    const userIndexes = input.flatMap((item, index) =>
-      item.role === "user" || (item.type === "message" && item.role === "user") ? [index] : []);
-    const cut = userIndexes.length > 2 ? userIndexes.at(-2)! : 0;
-    if (cut === 0) {
-      throw new Error("At least three interaction units are required for summary compaction");
+    const unitStarts = [0];
+    let afterToolOutputs = false;
+    for (let index = 0; index < input.length; index += 1) {
+      const item = input[index]!;
+      if (item.type === "function_call_output") {
+        afterToolOutputs = true;
+        continue;
+      }
+      if (afterToolOutputs) {
+        unitStarts.push(index);
+        afterToolOutputs = false;
+      } else if (index > 0 && (item.role === "user" || (item.type === "message" && item.role === "user"))) {
+        unitStarts.push(index);
+      }
     }
+    const starts = [...new Set(unitStarts)].filter((index) => index >= 0 && index < input.length);
+    const cut = starts.length > 2 ? starts.at(-2)! : 0;
+    if (cut === 0) throw new ContextCompactionError("The current context has fewer than three complete interaction units and cannot be shortened safely");
     const prefix = input.slice(0, cut);
     const recent = repairToolContext(input.slice(cut));
     const effort = requestReasoningEffort(this.#providerCapabilities, "off");
@@ -989,18 +1109,23 @@ export class ReactAgent {
       input: prefix,
       max_output_tokens: 8_192,
       ...(effort ? { reasoning: { effort } } : {}),
-    }, { maxRetries: 0, ...(signal ? { signal } : {}) });
+    }, { maxRetries: 0, timeout: requestSettingsForPurpose("summary", this.#requestSettings).timeoutMs, ...(signal ? { signal } : {}) });
+    if (response.status && response.status !== "completed") throw new ModelResponseError(response);
     const summary = response.output_text.trim();
     if (!summary) throw new Error("The summary request returned no text");
+    const output = [
+      {
+        type: "message",
+        role: "developer",
+        content: [{ type: "input_text", text: `Host-maintained conversation summary:\n${summary}` }],
+      },
+      ...recent,
+    ];
+    if (Buffer.byteLength(JSON.stringify(output), "utf8") >= Buffer.byteLength(JSON.stringify(input), "utf8")) {
+      throw new ContextCompactionError("The summary did not reduce the model context");
+    }
     return {
-      output: [
-        {
-          type: "message",
-          role: "developer",
-          content: [{ type: "input_text", text: `Host-maintained conversation summary:\n${summary}` }],
-        },
-        ...recent,
-      ],
+      output,
       ...(response.usage === undefined ? {} : { usage: response.usage }),
     };
   }
@@ -1014,6 +1139,7 @@ export class ReactAgent {
       return await this.#createResponseAttempt(input, signal, this.#advancedPromptCacheEnabled, recoveryBudget);
     } catch (error) {
       if (signal?.aborted || !this.#advancedPromptCacheEnabled || !isUnsupportedPromptCacheOptionsError(error)) throw error;
+      await this.#recordUnknownUsageAttempt();
       this.#advancedPromptCacheEnabled = false;
       return this.#createResponseAttempt(input, signal, false, recoveryBudget);
     }
@@ -1030,18 +1156,21 @@ export class ReactAgent {
           WORKSPACE_STATUS_TOOL_DEFINITION,
           WORKSPACE_DIFF_TOOL_DEFINITION,
           ...FILE_TOOL_DEFINITIONS,
+          READ_TOOL_OUTPUT_DEFINITION,
           ...PLAN_TOOL_DEFINITIONS,
           ...memoryTools,
           ...(this.#skillTurn && this.#skillTurn.skills.length > 0 ? [READ_SKILL_TOOL_DEFINITION] : []),
         ]
       : [
           BASH_TOOL_DEFINITION,
+          ...BACKGROUND_JOB_TOOL_DEFINITIONS,
           APPLY_PATCH_TOOL_DEFINITION,
           WORKSPACE_STATUS_TOOL_DEFINITION,
           WORKSPACE_DIFF_TOOL_DEFINITION,
           WEB_SEARCH_TOOL_DEFINITION,
           WEB_FETCH_TOOL_DEFINITION,
           ...FILE_TOOL_DEFINITIONS,
+          READ_TOOL_OUTPUT_DEFINITION,
           ...this.#mcpSnapshot.tools.map((tool) => ({ ...tool })),
           ...(this.#goalRuntime ? GOAL_TOOL_DEFINITIONS : []),
           ...memoryTools,
@@ -1102,7 +1231,7 @@ export class ReactAgent {
         ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
         ...cache.params,
       };
-    const options = { maxRetries: 0, ...(signal ? { signal } : {}), ...cache.options };
+    const options = { maxRetries: 0, timeout: requestSettingsForPurpose("coding", this.#requestSettings).timeoutMs, ...(signal ? { signal } : {}), ...cache.options };
     this.#onEvent?.({ type: "sampling_started" });
     if (this.#responseTransport === "stream" && this.#client.responses.stream) {
       let eventsSeen = 0;
@@ -1142,6 +1271,7 @@ export class ReactAgent {
       } catch (error) {
         if (signal?.aborted) throw error;
         if (eventsSeen === 0 && isStreamUnsupportedError(error)) {
+          await this.#recordUnknownUsageAttempt();
           this.#responseTransport = "buffered";
           this.#onEvent?.({ type: "sampling_started" });
           return this.#client.responses.create(params, options);
@@ -1150,6 +1280,11 @@ export class ReactAgent {
       }
     }
     return this.#client.responses.create(params, options);
+  }
+
+  async #recordUnknownUsageAttempt(): Promise<void> {
+    if (this.#onUsage) await persistState("Usage persistence failed", () => this.#onUsage!(null));
+    await this.#recordGoalUsage(null);
   }
 
   async #consumeResponseStream(
@@ -1165,8 +1300,19 @@ export class ReactAgent {
     let retainEvents = this.#client.responses.recovery !== undefined;
     let lastEventId: string | undefined;
     let responseId: string | undefined;
+    let reasoningActive = false;
+    const iterator = stream[Symbol.asyncIterator]();
     try {
-      for await (const event of stream) {
+      while (true) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const next = await Promise.race([
+          iterator.next(),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new ResponseStreamIncompleteError({ cause: new Error(`Model stream was idle for ${this.#streamIdleTimeoutMs}ms`) })), this.#streamIdleTimeoutMs);
+          }),
+        ]).finally(() => { if (timer) clearTimeout(timer); });
+        if (next.done) break;
+        const event = next.value;
         onEvent();
         eventsSeen += 1;
         if (retainEvents) {
@@ -1179,7 +1325,16 @@ export class ReactAgent {
           responseId = (event.response as Record<string, unknown>).id as string;
         }
         const type = event.type;
-        if (type === "response.output_text.delta" && typeof event.delta === "string") {
+        if ((type === "response.reasoning_text.delta" || type === "response.reasoning_summary_text.delta") && typeof event.delta === "string") {
+          if (!reasoningActive) {
+            reasoningActive = true;
+            this.#onEvent?.({ type: "reasoning_started" });
+          }
+        } else if (type === "response.output_text.delta" && typeof event.delta === "string") {
+          if (reasoningActive) {
+            reasoningActive = false;
+            this.#onEvent?.({ type: "reasoning_finished" });
+          }
           outputText += event.delta;
           this.#io.writeAssistantDelta?.(event.delta);
         } else if (type === "response.output_item.added" && event.item && typeof event.item === "object") {
@@ -1258,6 +1413,7 @@ export class ReactAgent {
       }
       throw error;
     }
+    if (reasoningActive) this.#onEvent?.({ type: "reasoning_finished" });
     if (!response) {
       const incomplete = new ResponseStreamIncompleteError();
       if (retainEvents) (incomplete as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState }).recoveryState = {

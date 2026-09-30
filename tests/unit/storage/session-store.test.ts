@@ -192,6 +192,7 @@ test("session store round-trips workflow metadata without storing file contents"
     const created = await fixture.store.create({ title: "workflow", titlePending: false, workspacePath: "C:\\repo", model });
     const workflow: WorkflowState = {
       task_id: "task-1",
+      task_source: "session_resume",
       phase: "verify_fast",
       repair_attempts: 0,
       max_repair_attempts: 3,
@@ -201,6 +202,10 @@ test("session store round-trips workflow metadata without storing file contents"
       result_reason: "Workspace changed during final verification",
       tracking_limited: false,
       verification_retries: 2,
+      pending_verification: true,
+      workspace_revision: "workspace-sha",
+      verification_revision: "verification-sha",
+      prior_unverified: { task_id: "task-0", result: "unverified", reason: "No checks" },
       last_verification: {
         command: { id: "node:typecheck", label: "Node typecheck", command: "pnpm run typecheck", tier: "fast", timeoutMs: 60_000 },
         passed: true,

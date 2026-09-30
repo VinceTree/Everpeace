@@ -181,6 +181,7 @@ export class WorkspaceChangeTracker {
   #baseline: WorkspaceStatusSnapshot | undefined;
   #gitRoot: string | undefined;
   #workspaceRoot: string | undefined;
+  readonly #explicitPaths = new Set<string>();
 
   constructor(workspacePath: string) { this.#workspacePath = workspacePath; }
 
@@ -194,6 +195,23 @@ export class WorkspaceChangeTracker {
     return this.#compare(this.#baseline);
   }
 
+  /** Include host-observed edit targets even when Git ignores them. */
+  async trackPaths(paths: readonly string[]): Promise<void> {
+    if (!this.#baseline) await this.begin();
+    if (!this.#baseline || !this.#workspaceRoot) return;
+    const budget = { bytes: 0 };
+    for (const requested of paths) {
+      const target = path.resolve(this.#workspaceRoot, requested);
+      if (!inside(this.#workspaceRoot, target)) continue;
+      const scoped = path.relative(this.#workspaceRoot, target).split(path.sep).join("/");
+      if (!scoped) continue;
+      this.#explicitPaths.add(scoped);
+      const fingerprint = await fingerprintPath(this.#workspaceRoot, scoped, budget);
+      this.#baseline.paths.set(scoped, { status: "explicit", fingerprint: fingerprint.value });
+      if (!fingerprint.complete) this.#baseline.complete = false;
+    }
+  }
+
   async observe(): Promise<WorkspaceChangeObservation> {
     if (!this.#baseline) await this.begin();
     if (!this.#gitRoot || !this.#workspaceRoot) return this.#compare({
@@ -202,7 +220,14 @@ export class WorkspaceChangeTracker {
       paths: new Map(),
       reason: this.#baseline?.reason ?? "Workspace tracking is unavailable",
     });
-    return this.#compare(await captureStatus(this.#workspacePath, this.#gitRoot, this.#workspaceRoot));
+    const current = await captureStatus(this.#workspacePath, this.#gitRoot, this.#workspaceRoot);
+    const budget = { bytes: 0 };
+    for (const scoped of this.#explicitPaths) {
+      const fingerprint = await fingerprintPath(this.#workspaceRoot, scoped, budget);
+      current.paths.set(scoped, { status: "explicit", fingerprint: fingerprint.value });
+      if (!fingerprint.complete) current.complete = false;
+    }
+    return this.#compare(current);
   }
 
   #compare(current: WorkspaceStatusSnapshot): WorkspaceChangeObservation {

@@ -35,6 +35,8 @@ export interface ApplyPatchResult {
   files: ApplyPatchFileResult[];
   diffSummary?: string;
   rolledBack?: boolean;
+  rollbackConflicts?: string[];
+  rollbackErrors?: string[];
   error?: string;
 }
 
@@ -192,6 +194,19 @@ async function atomicWrite(target: string, content: string): Promise<void> {
   try { await fs.rename(temporary, target); } catch (error) { await fs.rm(temporary, { force: true }); throw error; }
 }
 
+async function exclusiveCreate(target: string, content: string): Promise<void> {
+  if (Buffer.byteLength(content, "utf8") > MAX_FILE_BYTES) throw new Error("Patched file exceeds the 512 KiB limit");
+  const handle = await fs.open(target, "wx");
+  try { await handle.writeFile(content, "utf8"); }
+  catch (error) { await handle.close(); await fs.rm(target, { force: true }); throw error; }
+  await handle.close();
+}
+
+async function sameTargetVersion(target: string, expected: { exists: boolean; content: string }): Promise<boolean> {
+  const current = await readTarget(target);
+  return current.exists === expected.exists && (!current.exists || digest(current.content) === digest(expected.content));
+}
+
 interface PreparedPatch {
   operation: ApplyPatchOperation;
   target: string;
@@ -285,10 +300,14 @@ export async function runApplyPatch(
   if ("error" in preparedResult) return { status: "rejected", files: [], error: preparedResult.error };
   const prepared = preparedResult.prepared;
   const files: ApplyPatchFileResult[] = [];
+  const applied: PreparedPatch[] = [];
   try {
     for (const item of prepared) {
+      if (!(await sameTargetVersion(item.target, item.before))) throw new Error(`File changed after the patch was prepared: ${item.operation.path}`);
       if (item.operation.action === "delete") await fs.unlink(item.target);
+      else if (item.operation.action === "create") await exclusiveCreate(item.target, item.after!);
       else await atomicWrite(item.target, item.after!);
+      applied.push(item);
       files.push({ path: item.operation.path, action: item.operation.action, status: "applied" });
     }
     return {
@@ -297,16 +316,27 @@ export async function runApplyPatch(
       diffSummary: prepared.map(({ operation }) => `${operation.action} ${operation.path}`).join("\n"),
     };
   } catch (error) {
-    for (const item of prepared) {
+    const rollbackConflicts: string[] = [];
+    const rollbackErrors: string[] = [];
+    for (const item of [...applied].reverse()) {
       try {
+        const expectedAfter = { exists: item.after !== undefined, content: item.after ?? "" };
+        if (!(await sameTargetVersion(item.target, expectedAfter))) {
+          rollbackConflicts.push(item.operation.path);
+          continue;
+        }
         if (item.before.exists) await atomicWrite(item.target, item.before.content);
         else await fs.rm(item.target, { force: true });
-      } catch { /* preserve the original failure; rollback is best effort */ }
+      } catch (rollbackError) {
+        rollbackErrors.push(`${item.operation.path}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+      }
     }
     return {
       status: "failed",
       files,
-      rolledBack: true,
+      rolledBack: rollbackConflicts.length === 0 && rollbackErrors.length === 0,
+      ...(rollbackConflicts.length > 0 ? { rollbackConflicts } : {}),
+      ...(rollbackErrors.length > 0 ? { rollbackErrors } : {}),
       error: error instanceof Error ? error.message : String(error),
     };
   }

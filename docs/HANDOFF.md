@@ -1,3 +1,15 @@
+## 最新执行：DeepSeek Harness 全面对标可靠性与工具补齐
+
+状态快照：2026-09-30。本轮在 `0.2.25 / 5ff45ba` 之上完成四批实现，交付版本为 `0.2.26`。结构化编辑改为宿主维护读版本：update/delete 必须先由 `read_file` 观察，审批预览的 SHA-256 与权限 revision 会绑定实际写入，create 使用排他创建；批量失败只回滚本轮已写且仍匹配 post-image 的文件，冲突与错误分别报告。工作流把 Git 快照与显式编辑路径取并集，恢复 Session 时保留任务、三轮修复耗尽和验证债务，新 no-change turn 不能抹除旧的 unverified/failed 事实。`/verify` 已接入共享 suite、AbortSignal、权限 revision 与文件 revision，显式命令只作补充证据。
+
+DeepSeek `max` 不再降为 `high`；供应商输出上限未知与产品默认 32K 分离。编码、摘要、标题、Skill、Memory、doctor 请求使用用途预算、超时、禁用 SDK 自动重试和终态检查。失败请求 attempt 记录 unknown usage，后续成功不会恢复完整统计；退避支持 `Retry-After`，SSE 有 60 秒 idle timeout，只有 reasoning delta 才显示带独立耗时的 Thinking。摘要按完整 tool interaction 边界切割，单一用户任务的多轮工具链也能压缩；incomplete、空白及未缩短摘要不会替换 context。
+
+文件工具新增 16 MiB 上限的行号分页、全文件 SHA-256、`search_files`/`glob_files` 参数化 ripgrep；超过 32 KiB 的模型工具结果改为有效 JSON envelope，并可通过进程内 `read_tool_output` 分页读取。模型可启动最多两个非交互后台 sandbox 命令，轮询或停止，默认十分钟；最终验证前等待活动任务，取消/退出终止进程树。`/doctor` 实际探测 Git、ripgrep 与 native sandbox。独立 Windows/Linux test workflow 已加入。
+
+Benchmark 新增生产任务 runner adapter、无 shell 的固定进程 adapter 与固定 dsh headless adapter；live budget 在每个 attempt 前检查，usage 缺失会停止整套 suite。隔离准备器会为每次 repetition 新建 pinned clone、校验 HEAD、应用 seed，并能证明同一断言在 seed 后失败、reference repair 后通过；现有十项 catalog 的十组真实 patch pair 仍未审完，因此真实九十次 API 对比仍未运行。真实 Windows Terminal 和官方 DeepSeek API 同样未验收。
+
+最终本地检查：Windows `pnpm test` 共 376 项，375 通过、1 跳过、0 失败；`pnpm typecheck` 与 `pnpm build` 通过。完整 `git diff --check` 只报告用户原有 `.gitignore`、`LICENSE` CRLF 行尾，排除两者后通过。用户原有 `.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`tests/unit/codex/`、`{}` 均保留，不纳入本轮实现判断。`0.2.26` 推送使用 CI 跳过标记，按用户要求不创建 tag 或 GitHub Release。
+
 ## 最新执行：DeepSeek-first 个人开发 CLI
 
 状态快照：2026-09-30。本轮在 `0.2.24` 基线上实现 DeepSeek 专用能力层，交付版本为 `0.2.25`。`ProviderCapabilities` 与 `ModelRequestSettings` 明确区分官方 DeepSeek、官方 OpenAI 和未知兼容端点；主 Agent、标题、Skill 草稿、Memory 和摘要统一通过 provider runtime。DeepSeek 保留 Responses reasoning/tool item，不发送 OpenAI 加密 reasoning、prompt-cache、server store 或原生 compact 假设；默认 reasoning 为 high，主请求输出上限 32K，登录列表存在 `deepseek-flash` 时优先显示且不改写服务端 ID。

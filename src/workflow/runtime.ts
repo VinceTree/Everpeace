@@ -5,7 +5,7 @@ import { TurnCheckpoint, type UndoResult } from "./checkpoint.js";
 import type { BashResult } from "../tools/bash.js";
 import { discoverVerificationCommands, runVerificationCommand, runVerificationSuite, selectVerificationCommand, selectVerificationCommands, verificationPrompt } from "./verifier.js";
 import { WorkspaceChangeTracker, type WorkspaceChangeObservation } from "./workspace-tracker.js";
-import { createWorkflowState, type VerificationSuiteResult, type WorkflowPatchFollowup, type WorkflowReviewResult, type WorkflowRunResult, type WorkflowState, type VerificationCommand, type WorkflowResultClassification } from "./types.js";
+import { createWorkflowState, type VerificationSuiteResult, type WorkflowPatchFollowup, type WorkflowReviewResult, type WorkflowRunResult, type WorkflowState, type VerificationCommand, type WorkflowResultClassification, type WorkflowTaskSource } from "./types.js";
 
 export interface WorkflowRuntimeOptions {
   workspacePath: string;
@@ -17,7 +17,10 @@ export interface WorkflowRuntimeOptions {
 
 export interface WorkflowTurnOptions {
   mode?: "default" | "plan";
+  source?: WorkflowTaskSource;
 }
+
+type WorkflowStatePatch = { [Key in keyof WorkflowState]?: WorkflowState[Key] | undefined };
 
 const MAX_VERIFICATION_REFRESHES = 2;
 
@@ -59,9 +62,13 @@ export class CodingWorkflowRuntime {
     this.#shellObserved = false;
     this.#trackingLimited = false;
     this.#gitTrackingComplete = false;
+    const prior = this.#state.pending_verification || this.#state.result === "unverified" || this.#state.result === "failed"
+      ? { task_id: this.#state.task_id, result: this.#state.result === "unverified" ? "unverified" as const : "failed" as const, ...(this.#state.result_reason ? { reason: this.#state.result_reason } : {}) }
+      : this.#state.prior_unverified;
     this.#state = {
-      ...createWorkflowState(taskId, this.#now()),
+      ...createWorkflowState(taskId, this.#now(), options.source ?? "user"),
       phase: options.mode === "plan" ? "plan" : "understand",
+      ...(prior ? { prior_unverified: prior } : {}),
     };
     this.#commandsPromise = discoverVerificationCommands(this.#workspacePath);
     await this.#tracker.begin();
@@ -69,10 +76,26 @@ export class CodingWorkflowRuntime {
     return this.state;
   }
 
+  /** Rebuild process-local trackers without clearing persisted verification debt. */
+  async resumeTurn(): Promise<WorkflowState> {
+    this.#checkpoint.clear();
+    this.#patchChanged = false;
+    this.#shellObserved = false;
+    this.#trackingLimited = false;
+    this.#gitTrackingComplete = false;
+    this.#commandsPromise = discoverVerificationCommands(this.#workspacePath);
+    await this.#tracker.begin();
+    await this.#tracker.trackPaths(this.#state.changed_paths);
+    this.#changed = this.#state.pending_verification === true || this.#state.changed_paths.length > 0;
+    await this.#set({ task_source: "session_resume", checkpoint_available: false });
+    return this.state;
+  }
+
   async capturePatch(operations: readonly ApplyPatchOperation[]): Promise<void> {
     if (this.#state.phase === "blocked") throw new Error("The coding workflow is blocked; start a new task before applying more changes");
+    await this.#tracker.trackPaths(operations.map((operation) => operation.path));
     await this.#checkpoint.capture(operations);
-    await this.#set({ phase: "implement", checkpoint_available: this.#checkpoint.available });
+    await this.#set({ phase: "implement", pending_verification: true, checkpoint_available: this.#checkpoint.available });
   }
 
   async afterPatch(
@@ -92,7 +115,7 @@ export class CodingWorkflowRuntime {
     this.#changed = true;
     this.#patchChanged = true;
     await this.#refreshObservedChanges();
-    await this.#set({ phase: "verify_fast", changed_paths: [...paths], checkpoint_available: this.#checkpoint.available });
+    await this.#set({ phase: "verify_fast", pending_verification: true, changed_paths: [...paths], checkpoint_available: this.#checkpoint.available });
     const commands = await (this.#commandsPromise ?? discoverVerificationCommands(this.#workspacePath));
     const command = selectVerificationCommand(commands, "fast");
     if (!command) {
@@ -122,7 +145,12 @@ export class CodingWorkflowRuntime {
       return { state: this.state, changed: this.#changed };
     }
     if (!this.#changed && !this.#trackingLimited) {
-      await this.#set({ phase: "done", result: "no_changes" });
+      if (this.#state.prior_unverified) {
+        const reason = `A prior task (${this.#state.prior_unverified.task_id}) still has ${this.#state.prior_unverified.result} changes`;
+        await this.#set({ phase: "done", result: "unverified", result_reason: reason, pending_verification: true });
+        return { state: this.state, changed: false };
+      }
+      await this.#set({ phase: "done", result: "no_changes", pending_verification: false });
       return { state: this.state, changed: false };
     }
     for (let refreshes = 0; ; refreshes += 1) {
@@ -165,7 +193,7 @@ export class CodingWorkflowRuntime {
         });
         return { state: this.state, ...(verification ? { verification } : {}), verificationSuite: unavailable, changed: true };
       }
-      return this.#finishReview(signal, suite, verification);
+      return this.#finishReview(signal, suite, verification, after.revision);
     }
   }
 
@@ -173,6 +201,7 @@ export class CodingWorkflowRuntime {
     signal: AbortSignal | undefined,
     suite: VerificationSuiteResult,
     verification: WorkflowRunResult["verification"],
+    verificationRevision?: string,
   ): Promise<WorkflowRunResult> {
     signal?.throwIfAborted();
     await this.#set({
@@ -210,7 +239,13 @@ export class CodingWorkflowRuntime {
     const result: WorkflowResultClassification = suite.status === "passed" && !this.#trackingLimited
       ? "verified"
       : "unverified";
-    await this.#set({ phase: "done", result });
+    await this.#set({
+      phase: "done",
+      result,
+      pending_verification: result !== "verified",
+      ...(result === "verified" ? { prior_unverified: undefined, result_reason: undefined } : {}),
+      ...(verificationRevision ? { verification_revision: verificationRevision } : {}),
+    });
     return { state: this.state, ...(verification ? { verification } : {}), verificationSuite: suite, review, changed: true };
   }
 
@@ -219,6 +254,38 @@ export class CodingWorkflowRuntime {
     this.#shellObserved = true;
     await this.#refreshObservedChanges();
     return { state: this.state, changed: this.#changed };
+  }
+
+  async runManualVerification(
+    commands: readonly VerificationCommand[],
+    run: (command: string, signal?: AbortSignal, timeoutMs?: number) => Promise<BashResult>,
+    options: { supplemental: boolean; signal?: AbortSignal },
+  ): Promise<VerificationSuiteResult> {
+    options.signal?.throwIfAborted();
+    await this.#tracker.trackPaths(this.#state.changed_paths);
+    const before = await this.#tracker.observe();
+    const suite = await runVerificationSuite(commands, run, options.signal);
+    options.signal?.throwIfAborted();
+    const after = await this.#tracker.observe();
+    const gitBound = before.available && before.complete && after.available && after.complete;
+    const stale = gitBound && before.revision !== after.revision;
+    let structurallyBound = false;
+    if (!gitBound && this.#checkpoint.available) structurallyBound = (await this.#checkpoint.reviewCurrent()).passed;
+    const settled: VerificationSuiteResult = stale
+      ? { ...suite, status: "unavailable", stale: true, reason: "Workspace contents changed during manual verification" }
+      : !gitBound && !structurallyBound
+        ? { ...suite, status: "unavailable", reason: before.reason ?? after.reason ?? "The verification result could not be bound to a complete workspace snapshot" }
+        : suite;
+    const verification = settled.results.find((result) => !result.passed) ?? settled.results.at(-1);
+    const maySettle = !options.supplemental && this.#state.pending_verification === true && settled.status === "passed" && !stale;
+    await this.#set({
+      ...(maySettle ? { phase: "done" as const, result: "verified" as const, pending_verification: false } : {}),
+      ...(verification ? { last_verification: verification } : {}),
+      last_verification_suite: settled,
+      ...(after.revision ? { workspace_revision: after.revision } : {}),
+      ...(maySettle && after.revision ? { verification_revision: after.revision } : {}),
+    });
+    return settled;
   }
 
   async startRepairTurn(): Promise<WorkflowState> {
@@ -244,14 +311,19 @@ export class CodingWorkflowRuntime {
     const observation = await this.#tracker.observe();
     if (observation.available && observation.complete) {
       this.#gitTrackingComplete = true;
-      this.#changed = observation.changedPaths.length > 0;
+      const retainedDebt = this.#state.pending_verification === true && this.#state.task_source === "session_resume"
+        ? this.#state.changed_paths
+        : [];
+      const changedPaths = [...new Set([...observation.changedPaths, ...retainedDebt])].sort((left, right) => left.localeCompare(right));
+      this.#changed = changedPaths.length > 0;
       this.#trackingLimited = false;
       await this.#set({
-        changed_paths: observation.changedPaths,
+        changed_paths: changedPaths,
         tracking_limited: false,
+        ...(observation.revision ? { workspace_revision: observation.revision } : {}),
         checkpoint_available: this.#checkpoint.available,
       });
-      return observation;
+      return { ...observation, changedPaths };
     }
     this.#gitTrackingComplete = false;
     this.#changed = this.#patchChanged || this.#shellObserved;
@@ -263,13 +335,15 @@ export class CodingWorkflowRuntime {
     return observation;
   }
 
-  async #set(patch: Partial<WorkflowState>): Promise<void> {
-    this.#state = {
+  async #set(patch: WorkflowStatePatch): Promise<void> {
+    const next = {
       ...this.#state,
       ...patch,
       changed_paths: patch.changed_paths ? [...patch.changed_paths] : [...this.#state.changed_paths],
       updated_at: this.#now(),
-    };
+    } as WorkflowState & Record<string, unknown>;
+    for (const [key, value] of Object.entries(patch)) if (value === undefined) delete next[key];
+    this.#state = next;
     await this.#save();
   }
 

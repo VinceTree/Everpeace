@@ -14,7 +14,7 @@ test("official DeepSeek uses summary compaction and a bounded reasoning request"
   assert.equal(capabilities.provider, "deepseek");
   assert.equal(capabilities.compaction, "summary");
   assert.equal(capabilities.encryptedReasoning, false);
-  assert.equal(requestReasoningEffort(capabilities, "max"), "high");
+  assert.equal(requestReasoningEffort(capabilities, "max"), "max");
   assert.deepEqual(defaultModelRequestSettings(capabilities), {
     reasoningEffort: "high",
     maxOutputTokens: 32_768,
@@ -37,7 +37,7 @@ test("DeepSeek request sanitization removes OpenAI-only state and cache fields",
     model: "deepseek-flash",
     input: "hello",
     reasoning: { effort: "high" },
-    max_output_tokens: 32_768,
+    max_output_tokens: 100_000,
   });
 });
 

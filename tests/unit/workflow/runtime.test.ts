@@ -290,3 +290,118 @@ test("starting a new turn clears the previous in-memory checkpoint", async () =>
     assert.equal((await runtime.undo()).status, "empty");
   });
 });
+
+test("workflow verifies an explicitly patched file even when Git ignores it", async () => {
+  await withWorkspace(async (workspace) => {
+    await run("git", ["init"], { cwd: workspace });
+    await fs.writeFile(path.join(workspace, ".gitignore"), "local.config.js\n", "utf8");
+    await fs.writeFile(path.join(workspace, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }), "utf8");
+    await run("git", ["add", ".gitignore", "package.json"], { cwd: workspace });
+    const runtime = new CodingWorkflowRuntime({ workspacePath: workspace });
+    await runtime.beginTurn();
+    const operations: ApplyPatchOperation[] = [{ path: "local.config.js", action: "create", content: "export default true;\n" }];
+    await runtime.capturePatch(operations);
+    const applied = await runApplyPatch(operations, workspace);
+    await runtime.afterPatch(operations, applied, async () => successfulBash());
+    const completed = await runtime.finishTurn(async () => successfulBash());
+    assert.equal(completed.state.result, "verified");
+    assert.equal(completed.changed, true);
+    assert.deepEqual(completed.state.changed_paths, ["local.config.js"]);
+  });
+});
+
+test("resuming a workflow preserves verification debt and repair exhaustion", async () => {
+  await withWorkspace(async (workspace) => {
+    await fs.writeFile(path.join(workspace, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }), "utf8");
+    await fs.writeFile(path.join(workspace, "changed.ts"), "export {};\n", "utf8");
+    const blocked = new CodingWorkflowRuntime({
+      workspacePath: workspace,
+      initialState: {
+        task_id: "blocked-task",
+        task_source: "goal_continuation",
+        phase: "blocked",
+        repair_attempts: 3,
+        max_repair_attempts: 3,
+        changed_paths: ["changed.ts"],
+        checkpoint_available: false,
+        result: "failed",
+        pending_verification: true,
+        updated_at: new Date().toISOString(),
+      },
+    });
+    await blocked.resumeTurn();
+    let checks = 0;
+    const completed = await blocked.finishTurn(async () => { checks += 1; return successfulBash(); });
+    assert.equal(completed.state.phase, "blocked");
+    assert.equal(completed.state.repair_attempts, 3);
+    assert.equal(completed.state.result, "failed");
+    assert.equal(checks, 0);
+
+    await blocked.beginTurn({ source: "user" });
+    assert.deepEqual(blocked.state.prior_unverified, { task_id: "blocked-task", result: "failed" });
+  });
+});
+
+test("a new no-change task cannot erase a prior unverified result", async () => {
+  await withWorkspace(async (workspace) => {
+    await fs.writeFile(path.join(workspace, "package.json"), JSON.stringify({ scripts: { test: "node -e \"process.exit(0)\"" } }), "utf8");
+    const runtime = new CodingWorkflowRuntime({
+      workspacePath: workspace,
+      initialState: {
+        task_id: "old-task",
+        task_source: "user",
+        phase: "done",
+        repair_attempts: 0,
+        max_repair_attempts: 3,
+        result: "unverified",
+        result_reason: "No checks were available",
+        pending_verification: true,
+        changed_paths: ["src/old.ts"],
+        checkpoint_available: false,
+        updated_at: new Date().toISOString(),
+      },
+    });
+    await runtime.beginTurn({ source: "user" });
+    const result = await runtime.finishTurn(async () => ({ stdout: "", stderr: "", exitCode: 0, signal: null }));
+    assert.equal(result.state.result, "unverified");
+    assert.equal(result.state.pending_verification, true);
+    assert.equal(result.state.prior_unverified?.task_id, "old-task");
+  });
+});
+
+test("manual verification stops after cancellation and never runs the next check", async () => {
+  await withWorkspace(async (workspace) => {
+    await run("git", ["init"], { cwd: workspace });
+    const runtime = new CodingWorkflowRuntime({ workspacePath: workspace });
+    await runtime.beginTurn();
+    const controller = new AbortController();
+    const executed: string[] = [];
+    await assert.rejects(runtime.runManualVerification([
+      { id: "one", label: "one", command: "one", tier: "full", timeoutMs: 1_000 },
+      { id: "two", label: "two", command: "two", tier: "full", timeoutMs: 1_000 },
+    ], async (command) => {
+      executed.push(command);
+      controller.abort(new Error("cancelled"));
+      return successfulBash();
+    }, { supplemental: false, signal: controller.signal }), /cancelled/u);
+    assert.deepEqual(executed, ["one"]);
+  });
+});
+
+test("manual verification becomes unavailable when workspace contents change during the command", async () => {
+  await withWorkspace(async (workspace) => {
+    await run("git", ["init"], { cwd: workspace });
+    await fs.writeFile(path.join(workspace, "tracked.ts"), "before\n", "utf8");
+    await run("git", ["add", "tracked.ts"], { cwd: workspace });
+    const runtime = new CodingWorkflowRuntime({ workspacePath: workspace });
+    await runtime.beginTurn();
+    const suite = await runtime.runManualVerification([
+      { id: "manual", label: "manual", command: "manual", tier: "full", timeoutMs: 1_000 },
+    ], async () => {
+      await fs.writeFile(path.join(workspace, "tracked.ts"), "after\n", "utf8");
+      return successfulBash();
+    }, { supplemental: false });
+    assert.equal(suite.status, "unavailable");
+    assert.equal(suite.stale, true);
+  });
+});

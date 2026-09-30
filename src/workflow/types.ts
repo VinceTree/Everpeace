@@ -43,9 +43,17 @@ export interface VerificationSuiteResult {
 }
 
 export type WorkflowResultClassification = "verified" | "unverified" | "failed" | "no_changes";
+export type WorkflowTaskSource = "user" | "goal_continuation" | "session_resume";
+
+export interface PriorUnverifiedWorkflow {
+  task_id: string;
+  result: "unverified" | "failed";
+  reason?: string;
+}
 
 export interface WorkflowState {
   task_id: string;
+  task_source?: WorkflowTaskSource;
   phase: WorkflowPhase;
   repair_attempts: number;
   max_repair_attempts: number;
@@ -55,6 +63,10 @@ export interface WorkflowState {
   result_reason?: string;
   tracking_limited?: boolean;
   verification_retries?: number;
+  pending_verification?: boolean;
+  workspace_revision?: string;
+  verification_revision?: string;
+  prior_unverified?: PriorUnverifiedWorkflow;
   last_verification?: VerificationResult;
   last_verification_suite?: VerificationSuiteResult;
   updated_at: string;
@@ -83,9 +95,11 @@ export interface WorkflowRunResult {
 export function createWorkflowState(
   taskId: string,
   now = new Date().toISOString(),
+  source: WorkflowTaskSource = "user",
 ): WorkflowState {
   return {
     task_id: taskId,
+    task_source: source,
     phase: "understand",
     repair_attempts: 0,
     max_repair_attempts: 3,

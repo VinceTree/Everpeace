@@ -24,7 +24,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function runVerification(spec: BenchmarkVerification, workspacePath: string, signal: AbortSignal): Promise<BenchmarkVerificationResult> {
+export function runBenchmarkVerification(spec: BenchmarkVerification, workspacePath: string, signal: AbortSignal): Promise<BenchmarkVerificationResult> {
   const startedAt = Date.now();
   const timeoutMs = Math.max(1, spec.timeoutMs ?? DEFAULT_VERIFICATION_TIMEOUT_MS);
   return new Promise((resolve) => {
@@ -173,6 +173,7 @@ export async function runBenchmarkTask(
   let status: BenchmarkRunResult["status"] = "passed";
   let failure: string | undefined;
   let usage: import("./types.js").BenchmarkTokenUsage | undefined;
+  let remainingBudget = tokenBudget;
 
   const writeArtifact = options.artifactSink === undefined
     ? undefined
@@ -190,6 +191,11 @@ export async function runBenchmarkTask(
   try {
     const maxRepairAttempts = Math.min(10, Math.max(0, task.maxRepairAttempts ?? 3));
     while (true) {
+      if (options.liveApi === true && (remainingBudget === undefined || remainingBudget <= 0)) {
+        status = "failed";
+        failure = "Benchmark token budget was exhausted before the next model request";
+        break;
+      }
       attempts += 1;
       const phase = attempts === 1 ? "implement" as const : "diagnose" as const;
       options.onTaskPhase?.(phase, attempts);
@@ -203,7 +209,7 @@ export async function runBenchmarkTask(
         onPhase: metrics.onPhase,
         onEvent: metrics.onEvent,
         ...(writeArtifact === undefined ? {} : { writeArtifact }),
-        ...(tokenBudget === undefined ? {} : { tokenBudgetRemaining: tokenBudget }),
+        ...(remainingBudget === undefined ? {} : { tokenBudgetRemaining: remainingBudget }),
       }, controller.signal);
       manualInterventions += result?.manualInterventions ?? 0;
       unsafeActions += result?.unsafeActions ?? 0;
@@ -225,6 +231,8 @@ export async function runBenchmarkTask(
           complete: (previous?.complete ?? true) && result.usage.complete,
         };
         const consumed = usage.inputTokens + usage.outputTokens;
+        const attemptConsumed = result.usage.inputTokens + result.usage.outputTokens;
+        if (remainingBudget !== undefined) remainingBudget -= attemptConsumed;
         if (tokenBudget !== undefined && consumed > tokenBudget) {
           status = "failed";
           failure = `Benchmark token budget exceeded (${consumed}/${tokenBudget})`;
@@ -245,7 +253,7 @@ export async function runBenchmarkTask(
       if (task.verification === undefined) break;
 
       options.onTaskPhase?.("verify", attempts);
-      verification = await runVerification(task.verification, task.workspacePath, controller.signal);
+      verification = await runBenchmarkVerification(task.verification, task.workspacePath, controller.signal);
       verificationAttempts.push(verification);
       if (verification.timedOut) {
         status = "timed_out";
@@ -315,7 +323,7 @@ export async function runBenchmarkSuite(
   options: BenchmarkRunOptions & {
     onResult?(result: BenchmarkRunResult): void;
     repetitions?: number;
-    prepareRun?(task: BenchmarkTask, repetition: number): Promise<void>;
+    prepareRun?(task: BenchmarkTask, repetition: number): Promise<BenchmarkTask | void>;
   } = {},
 ): Promise<BenchmarkSuiteSummary> {
   const repetitions = options.repetitions ?? 1;
@@ -326,16 +334,17 @@ export async function runBenchmarkSuite(
   }
   const results: BenchmarkRunResult[] = [];
   let tokensConsumed = 0;
+  let stopLiveSuite = false;
   for (const task of tasks) {
     for (let repetition = 1; repetition <= repetitions; repetition += 1) {
-      await options.prepareRun?.(task, repetition);
+      const preparedTask = await options.prepareRun?.(task, repetition) ?? task;
       const remaining = options.totalTokenBudget === undefined
         ? undefined
         : options.totalTokenBudget - tokensConsumed;
       if (options.liveApi === true && (remaining === undefined || remaining <= 0)) {
         throw new Error("Live API benchmark token budget was exhausted before the next run");
       }
-      const result = await runBenchmarkTask(task, adapter, {
+      const result = await runBenchmarkTask(preparedTask, adapter, {
         ...options,
         ...(remaining === undefined ? {} : { tokenBudgetRemaining: remaining }),
       });
@@ -343,7 +352,12 @@ export async function runBenchmarkSuite(
       results.push(repeated);
       tokensConsumed += (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
       options.onResult?.(repeated);
+      if (options.liveApi === true && (result.usage === undefined || result.usage.complete !== true)) {
+        stopLiveSuite = true;
+        break;
+      }
     }
+    if (stopLiveSuite) break;
   }
 
   const passed = results.filter((result) => result.status === "passed").length;

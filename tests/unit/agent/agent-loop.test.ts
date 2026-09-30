@@ -74,6 +74,22 @@ test("sampling retry budget is shared across follow-up requests in one turn", as
   assert.equal(samples, 4);
 });
 
+test("sampling retry honors bounded Retry-After guidance", async () => {
+  let attempts = 0;
+  const delays: number[] = [];
+  const f = fixture({
+    retryDelayMs: 10_000,
+    onEvent(event) { if (event.type === "retrying") delays.push(event.delayMs); },
+    async sample() {
+      attempts += 1;
+      if (attempts === 1) throw Object.assign(new Error("rate limited"), { status: 429, headers: { "retry-after": "0.001" } });
+      return { output: [], output_text: "done" };
+    },
+  });
+  await runAgentLoop(f.options);
+  assert.deepEqual(delays, [1]);
+});
+
 test("follow-up step budget stops successful infinite tool loops", async () => {
   let samples = 0;
   const events: string[] = [];

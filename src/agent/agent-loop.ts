@@ -32,6 +32,8 @@ export type SamplingErrorCategory =
 
 export type LoopEvent =
   | { type: "sampling_started" }
+  | { type: "reasoning_started" }
+  | { type: "reasoning_finished" }
   | { type: "response_received"; response: LoopResponse }
   | { type: "response_rejected"; reason: "incomplete" | "invalid_tool_call" }
   | { type: "tool_started"; call: ToolCall }
@@ -105,6 +107,7 @@ export interface AgentLoopOptions {
   };
   toolCapabilities?(call: ToolCall): ToolCapabilities | undefined;
   canRunInParallel?(call: ToolCall): boolean;
+  boundToolOutput?(output: string): string;
 }
 
 export function classifySamplingError(error: unknown): SamplingErrorCategory {
@@ -132,6 +135,25 @@ function retryable(category: SamplingErrorCategory): boolean {
   return category !== "permanent" && category !== "context_limit";
 }
 
+function retryAfterMs(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const headers = (error as { headers?: unknown }).headers;
+  let value: unknown;
+  if (headers && typeof headers === "object" && "get" in headers && typeof (headers as { get?: unknown }).get === "function") {
+    value = (headers as { get(name: string): unknown }).get("retry-after");
+  } else if (headers && typeof headers === "object") {
+    value = (headers as Record<string, unknown>)["retry-after"] ?? (headers as Record<string, unknown>)["Retry-After"];
+  }
+  if (typeof value !== "string" && typeof value !== "number") return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(60_000, Math.round(seconds * 1_000));
+  if (typeof value === "string") {
+    const date = Date.parse(value);
+    if (Number.isFinite(date)) return Math.min(60_000, Math.max(0, date - Date.now()));
+  }
+  return undefined;
+}
+
 async function sample(
   options: AgentLoopOptions,
   budget: { remaining: number; total: number },
@@ -156,7 +178,9 @@ async function sample(
       const category = classifySamplingError(error);
       if (budget.remaining <= 0 || !retryable(category)) throw error;
       budget.remaining -= 1;
-      const delayMs = Math.min(10_000, (options.retryDelayMs ?? 250) * 2 ** attempt);
+      const exponential = (options.retryDelayMs ?? 250) * 2 ** attempt;
+      const jittered = Math.round(exponential * (0.8 + Math.random() * 0.4));
+      const delayMs = retryAfterMs(error) ?? Math.min(10_000, jittered);
       options.onEvent?.({ type: "retrying", attempt: budget.total - budget.remaining, delayMs, category });
       const delayStarted = performance.now();
       await delay(delayMs, undefined, signal ? { signal } : {});
@@ -368,7 +392,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         }
         for (const result of results) {
           if (result.fatal) throw result.fatal;
-          await options.record([{ type: "function_call_output", call_id: result.call.call_id, output: boundModelToolOutput(result.output!) }]);
+          await options.record([{ type: "function_call_output", call_id: result.call.call_id, output: options.boundToolOutput?.(result.output!) ?? boundModelToolOutput(result.output!) }]);
           options.onEvent?.({ type: "tool_finished", call: result.call, output: result.output! });
           options.onEvent?.({ type: "timing_recorded", operation: "tool_execution", durationMs: result.executionMs });
           stopAfterTools ||= result.stop === true;

@@ -66,6 +66,21 @@ function parseTask(value: unknown, index: number): BenchmarkTaskCatalogEntry {
   if (verificationRecord.cwd !== undefined && typeof verificationRecord.cwd !== "string") {
     throw new Error(`tasks[${index}].verification.cwd must be a string`);
   }
+  let fixture: BenchmarkTaskCatalogEntry["fixture"];
+  if (raw.fixture !== undefined) {
+    if (!raw.fixture || typeof raw.fixture !== "object" || Array.isArray(raw.fixture)) {
+      throw new Error(`tasks[${index}].fixture must be an object`);
+    }
+    const fixtureRecord = raw.fixture as Record<string, unknown>;
+    const seedPatch = nonEmpty(fixtureRecord.seedPatch, `tasks[${index}].fixture.seedPatch`);
+    const referencePatch = nonEmpty(fixtureRecord.referencePatch, `tasks[${index}].fixture.referencePatch`);
+    for (const [field, path] of [["seedPatch", seedPatch], ["referencePatch", referencePatch]] as const) {
+      if (path.includes("\\") || path.startsWith("/") || path.split("/").some((part) => part === ".." || part === "")) {
+        throw new Error(`tasks[${index}].fixture.${field} must be a normalized relative path`);
+      }
+    }
+    fixture = { seedPatch, referencePatch };
+  }
   return {
     id,
     prompt,
@@ -74,6 +89,7 @@ function parseTask(value: unknown, index: number): BenchmarkTaskCatalogEntry {
     ...(raw.tags === undefined ? {} : { tags: (raw.tags as string[]).map((tag) => tag.trim()) }),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...(maxRepairAttempts === undefined ? {} : { maxRepairAttempts }),
+    ...(fixture === undefined ? {} : { fixture }),
     verification: {
       command,
       ...(args === undefined ? {} : { args: args as string[] }),

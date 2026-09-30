@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import {
   ReactAgent,
@@ -10,6 +13,7 @@ import type { PermissionPolicy } from "../../../src/permissions/policy.js";
 import { GoalRuntime } from "../../../src/goal/runtime.js";
 import type { SessionGoal } from "../../../src/storage/session-store.js";
 import { resolveProviderCapabilities } from "../../../src/providers/capabilities.js";
+import { previewApplyPatch, runApplyPatch } from "../../../src/tools/apply-patch.js";
 
 function bashResult(stdout: string): BashResult {
   return { stdout, stderr: "", exitCode: 0, signal: null };
@@ -104,6 +108,71 @@ test("agent exposes apply_patch and persists its structured result before contin
   assert.ok(history.some((item) => item.type === "function_call_output" && item.call_id === "patch-1"));
 });
 
+test("host file observations reject blind updates and bind the observed version", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-observation-"));
+  try {
+    await fs.writeFile(path.join(workspace, "file.txt"), "before\n", "utf8");
+    const requests: Array<Record<string, unknown>> = [];
+    const responses = [
+      { id: "blind", output_text: "", output: [{ type: "function_call", name: "apply_patch", call_id: "p1", arguments: JSON.stringify({ operations: [{ path: "file.txt", action: "update", content: "blind\n" }] }) }] },
+      { id: "read", output_text: "", output: [{ type: "function_call", name: "read_file", call_id: "r1", arguments: JSON.stringify({ path: "file.txt" }) }] },
+      { id: "guarded", output_text: "", output: [{ type: "function_call", name: "apply_patch", call_id: "p2", arguments: JSON.stringify({ operations: [{ path: "file.txt", action: "update", content: "after\n" }] }) }] },
+      { id: "done", output_text: "done", output: [] },
+    ];
+    let appliedOperations: readonly import("../../../src/tools/apply-patch.js").ApplyPatchOperation[] = [];
+    const agent = new ReactAgent({
+      workspacePath: workspace,
+      model: "test",
+      client: { responses: { async create(params) { requests.push(params); return responses.shift()!; } } },
+      io: {
+        async confirmBash() { return true; },
+        async runBash() { return bashResult(""); },
+        previewPatch: (operations) => previewApplyPatch(operations, workspace),
+        async runApplyPatch(operations) { appliedOperations = operations; return runApplyPatch(operations, workspace); },
+        writeAssistant() {},
+      },
+    });
+    await agent.runTurn("update file");
+    assert.match(JSON.stringify(requests[1]?.input), /has not been observed/u);
+    assert.match(appliedOperations[0]?.expectedSha256 ?? "", /^[a-f0-9]{64}$/u);
+    assert.equal(await fs.readFile(path.join(workspace, "file.txt"), "utf8"), "after\n");
+  } finally {
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("a file changed during patch approval is never overwritten", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-approval-race-"));
+  try {
+    await fs.writeFile(path.join(workspace, "file.txt"), "before\n", "utf8");
+    const requests: Array<Record<string, unknown>> = [];
+    const responses = [
+      { id: "read", output_text: "", output: [{ type: "function_call", name: "read_file", call_id: "r1", arguments: '{"path":"file.txt"}' }] },
+      { id: "patch", output_text: "", output: [{ type: "function_call", name: "apply_patch", call_id: "p1", arguments: JSON.stringify({ operations: [{ path: "file.txt", action: "update", content: "model\n" }] }) }] },
+      { id: "done", output_text: "done", output: [] },
+    ];
+    const agent = new ReactAgent({
+      workspacePath: workspace,
+      model: "test",
+      client: { responses: { async create(params) { requests.push(params); return responses.shift()!; } } },
+      io: {
+        getPermissions() { return { mode: "ask", web: false, shellNetwork: "deny", commandRules: [] }; },
+        async confirmBash() { return false; },
+        async confirmPatch() { await fs.writeFile(path.join(workspace, "file.txt"), "user edit\n", "utf8"); return true; },
+        async runBash() { return bashResult(""); },
+        previewPatch: (operations) => previewApplyPatch(operations, workspace),
+        runApplyPatch: (operations) => runApplyPatch(operations, workspace),
+        writeAssistant() {},
+      },
+    });
+    await agent.runTurn("update file");
+    assert.equal(await fs.readFile(path.join(workspace, "file.txt"), "utf8"), "user edit\n");
+    assert.match(JSON.stringify(requests[2]?.input), /changed since it was read|changed after the patch was prepared/u);
+  } finally {
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("agent uses the native compaction output as the next context window", async () => {
   const createInputs: Array<Array<Record<string, unknown>>> = [];
   let compactInput: Array<Record<string, unknown>> | undefined;
@@ -155,8 +224,8 @@ test("DeepSeek summary compaction keeps the latest two interaction units", async
     model: "deepseek-flash",
     providerCapabilities: resolveProviderCapabilities("https://api.deepseek.com"),
     initialHistory: [
-      { role: "user", content: "old request" },
-      { type: "message", role: "assistant", content: "old answer" },
+      { role: "user", content: `old request ${"requirement ".repeat(100)}` },
+      { type: "message", role: "assistant", content: `old answer ${"evidence ".repeat(100)}` },
       { role: "user", content: "recent one" },
       { type: "message", role: "assistant", content: "recent answer" },
       { role: "user", content: "recent two" },
@@ -179,6 +248,56 @@ test("DeepSeek summary compaction keeps the latest two interaction units", async
   assert.ok(result.items.some((item) => item.content === "recent one"));
   assert.ok(result.items.some((item) => item.content === "recent two"));
   assert.ok(!result.items.some((item) => item.content === "old request"));
+});
+
+test("DeepSeek summary compaction can shorten one user task with several tool interactions", async () => {
+  const oldOutput = JSON.stringify({ content: "diagnostic ".repeat(400) });
+  const agent = new ReactAgent({
+    model: "deepseek-flash",
+    providerCapabilities: resolveProviderCapabilities("https://api.deepseek.com"),
+    initialHistory: [
+      { role: "user", content: "fix this one task" },
+      { type: "function_call", name: "bash", call_id: "one", arguments: '{"command":"test"}' },
+      { type: "function_call_output", call_id: "one", output: oldOutput },
+      { type: "message", role: "assistant", content: "first diagnosis" },
+      { type: "function_call", name: "read_file", call_id: "two", arguments: '{"path":"src/a.ts"}' },
+      { type: "function_call_output", call_id: "two", output: oldOutput },
+      { type: "message", role: "assistant", content: "second diagnosis" },
+      { type: "function_call", name: "bash", call_id: "three", arguments: '{"command":"test again"}' },
+      { type: "function_call_output", call_id: "three", output: "failed" },
+      { type: "message", role: "assistant", content: "latest diagnosis" },
+    ],
+    client: { responses: { async create() {
+      return { id: "summary", status: "completed", output_text: "The first diagnostic failed.", output: [] };
+    } } },
+    io: { async confirmBash() { return true; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+  const result = await agent.compact();
+  assert.ok(result.items.some((item) => item.content === "second diagnosis"));
+  assert.ok(result.items.some((item) => item.content === "latest diagnosis"));
+  assert.ok(!result.items.some((item) => item.call_id === "one"));
+});
+
+test("summary compaction rejects non-terminal output without replacing persisted context", async () => {
+  let persisted = false;
+  const agent = new ReactAgent({
+    model: "deepseek-flash",
+    providerCapabilities: resolveProviderCapabilities("https://api.deepseek.com"),
+    initialHistory: [
+      { role: "user", content: `old ${"context ".repeat(300)}` },
+      { type: "message", role: "assistant", content: "old answer" },
+      { role: "user", content: "middle" },
+      { type: "message", role: "assistant", content: "middle answer" },
+      { role: "user", content: "latest" },
+    ],
+    client: { responses: { async create() {
+      return { id: "summary", status: "incomplete", output_text: "partial but nonempty", output: [] };
+    } } },
+    io: { async confirmBash() { return true; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+    async onContextCompacted() { persisted = true; },
+  });
+  await assert.rejects(agent.compact(), /incomplete/u);
+  assert.equal(persisted, false);
 });
 
 test("automatic compaction runs at the known context threshold before sampling", async () => {
@@ -850,6 +969,9 @@ test("workspace-write searches the web without per-request confirmation", async 
   const tools = requests[0]?.tools as Array<Record<string, unknown>>;
   assert.deepEqual(tools.map((tool) => tool.name), [
     "bash",
+    "start_background",
+    "poll_background",
+    "stop_background",
     "apply_patch",
     "workspace_status",
     "workspace_diff",
@@ -857,6 +979,9 @@ test("workspace-write searches the web without per-request confirmation", async 
     "web_fetch",
     "read_file",
     "list_directory",
+    "search_files",
+    "glob_files",
+    "read_tool_output",
   ]);
   const history = requests[1]?.input as Array<Record<string, unknown>>;
   const toolOutput = history.find((item) => item.type === "function_call_output");
@@ -1231,6 +1356,7 @@ test("stream requests use the same session cache affinity header", async () => {
 
 test("agent falls back once when advanced prompt cache fields are rejected", async () => {
   const requests: Array<Record<string, unknown>> = [];
+  const usage: unknown[] = [];
   const agent = new ReactAgent({
     model: "gpt-5.6",
     promptCacheKey: "everpeace:v2:session:fallback",
@@ -1242,7 +1368,7 @@ test("agent falls back once when advanced prompt cache fields are rejected", asy
           if (params.prompt_cache_options !== undefined) {
             throw { status: 400, message: "Unknown parameter: prompt_cache_options" };
           }
-          return { id: "response-1", output_text: "done", output: [] };
+          return { id: "response-1", output_text: "done", output: [], usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } };
         },
       },
     },
@@ -1251,6 +1377,7 @@ test("agent falls back once when advanced prompt cache fields are rejected", asy
       async runBash() { return bashResult(""); },
       writeAssistant() {},
     },
+    async onUsage(sample) { usage.push(sample); },
   });
 
   await agent.runTurn("hello");
@@ -1260,6 +1387,7 @@ test("agent falls back once when advanced prompt cache fields are rejected", asy
   assert.equal(requests[1]?.prompt_cache_options, undefined);
   assert.equal(typeof requests[1]?.instructions, "string");
   assert.equal(requests[1]?.prompt_cache_key, "everpeace:v2:session:fallback");
+  assert.deepEqual(usage, [null, { input_tokens: 10, output_tokens: 2, total_tokens: 12 }]);
 });
 
 test("agent reports unavailable usage without failing compatible endpoints", async () => {
@@ -1297,6 +1425,7 @@ test("agent consumes Responses stream deltas and reconstructs tool calls", async
   const assistants: string[] = [];
   const calls: string[] = [];
   const toolProgress: string[] = [];
+  const reasoningEvents: string[] = [];
   let request = 0;
   const agent = new ReactAgent({
     model: "streaming-test",
@@ -1306,6 +1435,7 @@ test("agent consumes Responses stream deltas and reconstructs tool calls", async
         async *stream() {
           request++;
           if (request === 1) {
+            yield { type: "response.reasoning_text.delta", delta: "private reasoning" };
             yield { type: "response.output_text.delta", delta: "I will " };
             yield { type: "response.output_text.delta", delta: "inspect." };
             yield { type: "response.output_item.added", output_index: 0, item: { id: "fc-stream", type: "function_call", name: "bash", arguments: "" } };
@@ -1317,6 +1447,9 @@ test("agent consumes Responses stream deltas and reconstructs tool calls", async
           yield { type: "response.completed", response: { id: `response-${request}`, output: request === 1 ? [{ type: "function_call", name: "bash", call_id: "stream-call", arguments: '{"command":"pwd"}' }] : [], output_text: request === 1 ? "I will inspect." : "Done" } };
         },
       },
+    },
+    onEvent(event) {
+      if (event.type === "reasoning_started" || event.type === "reasoning_finished") reasoningEvents.push(event.type);
     },
     io: {
       async confirmBash() { return true; },
@@ -1330,6 +1463,7 @@ test("agent consumes Responses stream deltas and reconstructs tool calls", async
   assert.deepEqual(deltas, ["I will ", "inspect.", "Done"]);
   assert.deepEqual(assistants, ["I will inspect.", "Done"]);
   assert.deepEqual(calls, ["pwd"]);
+  assert.deepEqual(reasoningEvents, ["reasoning_started", "reasoning_finished"]);
   assert.ok(toolProgress.some((event) => event.includes('streaming:bash:{"command":"pwd"}')));
 });
 
@@ -1424,6 +1558,28 @@ test("agent rejects a clean stream EOF without response.completed", async () => 
   await assert.rejects(agent.runTurn("eof"), /response\.completed/);
   assert.equal(streamCalls, 3);
   assert.deepEqual(retries, [1, 2]);
+});
+
+test("agent stops a stream that emits no events before the idle deadline", async () => {
+  const agent = new ReactAgent({
+    model: "stream-idle-test",
+    samplingRetryBudget: 0,
+    streamIdleTimeoutMs: 5,
+    client: {
+      responses: {
+        async create() { throw new Error("buffered fallback is not allowed"); },
+        stream() {
+          return {
+            [Symbol.asyncIterator]() {
+              return { next: () => new Promise<IteratorResult<Record<string, unknown>>>(() => undefined) };
+            },
+          };
+        },
+      },
+    },
+    io: { async confirmBash() { return true; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+  await assert.rejects(agent.runTurn("wait"), /idle for 5ms/u);
 });
 
 test("agent compacts once and retries after a context-limit response error", async () => {

@@ -340,7 +340,7 @@ test("failed guidance persistence leaves accepted messages pending for recovery"
   assert.deepEqual(history.filter((item) => item.role === "user").map((item) => item.content), ["start", "correction", "retry after storage recovery"]);
 });
 
-test("compaction usage can exhaust a goal before any further model sampling", async () => {
+test("compaction usage and an unknown failed request both stop a bounded goal", async () => {
   for (const recovery of [false, true]) {
     const fixture = await goalFixture();
     let requests = 0, compacts = 0;
@@ -351,8 +351,8 @@ test("compaction usage can exhaust a goal before any further model sampling", as
         create: async () => { requests++; throw Object.assign(new Error("maximum context length exceeded"), { status: 400 }); },
       } },
     });
-    assert.equal((await agent.runTurn("start")).stopReason, "budget_limited");
-    assert.equal(compacts, 1); assert.equal(requests, recovery ? 1 : 0);
+    assert.equal((await agent.runTurn("start")).stopReason, recovery ? "usage_limited" : "budget_limited");
+    assert.equal(compacts, recovery ? 0 : 1); assert.equal(requests, recovery ? 1 : 0);
   }
 });
 

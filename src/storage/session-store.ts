@@ -433,6 +433,7 @@ function isWorkflow(value: unknown): value is WorkflowState {
   if (!isRecord(value)) return false;
   const phases: WorkflowPhase[] = ["understand", "plan", "implement", "verify_fast", "diagnose", "verify_full", "review", "done", "blocked"];
   return typeof value.task_id === "string" && phases.includes(value.phase as WorkflowPhase) &&
+    (value.task_source === undefined || value.task_source === "user" || value.task_source === "goal_continuation" || value.task_source === "session_resume") &&
     typeof value.repair_attempts === "number" && Number.isSafeInteger(value.repair_attempts) && value.repair_attempts >= 0 &&
     typeof value.max_repair_attempts === "number" && Number.isSafeInteger(value.max_repair_attempts) && value.max_repair_attempts >= 0 &&
     Array.isArray(value.changed_paths) && value.changed_paths.every((item) => typeof item === "string") &&
@@ -441,6 +442,12 @@ function isWorkflow(value: unknown): value is WorkflowState {
     (value.result_reason === undefined || typeof value.result_reason === "string") &&
     (value.tracking_limited === undefined || typeof value.tracking_limited === "boolean") &&
     (value.verification_retries === undefined || (typeof value.verification_retries === "number" && Number.isSafeInteger(value.verification_retries) && value.verification_retries >= 0)) &&
+    (value.pending_verification === undefined || typeof value.pending_verification === "boolean") &&
+    (value.workspace_revision === undefined || typeof value.workspace_revision === "string") &&
+    (value.verification_revision === undefined || typeof value.verification_revision === "string") &&
+    (value.prior_unverified === undefined || (isRecord(value.prior_unverified) && typeof value.prior_unverified.task_id === "string" &&
+      (value.prior_unverified.result === "unverified" || value.prior_unverified.result === "failed") &&
+      (value.prior_unverified.reason === undefined || typeof value.prior_unverified.reason === "string"))) &&
     (value.last_verification === undefined || isVerificationResult(value.last_verification)) &&
     (value.last_verification_suite === undefined || isVerificationSuite(value.last_verification_suite));
 }
@@ -464,6 +471,7 @@ function workflowSnapshot(workflow: WorkflowState): WorkflowState {
   return {
     ...workflow,
     changed_paths: [...workflow.changed_paths],
+    ...(workflow.prior_unverified ? { prior_unverified: { ...workflow.prior_unverified } } : {}),
     ...(verification === undefined ? {} : { last_verification: verificationSnapshot(verification) }),
     ...(suite === undefined ? {} : {
       last_verification_suite: {

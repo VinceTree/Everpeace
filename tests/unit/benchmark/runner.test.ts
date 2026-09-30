@@ -215,3 +215,34 @@ test("benchmark artifacts are bounded to safe names and redact common credential
   assert.match(await readFile(join(artifactDirectory, "diagnostic.txt"), "utf8"), /\[REDACTED\]/u);
   assert.ok(await readFile(join(artifactDirectory, "result.json"), "utf8"));
 });
+
+test("live repair attempts receive the remaining budget and stop at exact exhaustion", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "everpeace-budget-"));
+  const budgets: number[] = [];
+  const adapter: BenchmarkHarnessAdapter = {
+    name: "budgeted",
+    async run(_task, context) {
+      budgets.push(context.tokenBudgetRemaining ?? -1);
+      return { usage: { inputTokens: 80, outputTokens: 20, complete: true } };
+    },
+  };
+  const result = await runBenchmarkTask(task({
+    workspacePath,
+    maxRepairAttempts: 3,
+    verification: { command: "node", args: ["-e", "process.exit(1)"] },
+  }), adapter, { liveApi: true, totalTokenBudget: 100 });
+  assert.deepEqual(budgets, [100]);
+  assert.equal(result.status, "failed");
+  assert.match(result.error ?? "", /budget was exhausted/u);
+});
+
+test("a live suite stops after unknown usage without starting the next task", async () => {
+  let calls = 0;
+  const summary = await runBenchmarkSuite([task({ id: "one" }), task({ id: "two" })], {
+    name: "unknown-usage",
+    async run() { calls += 1; return {}; },
+  }, { liveApi: true, totalTokenBudget: 1_000 });
+  assert.equal(calls, 1);
+  assert.equal(summary.total, 1);
+  assert.equal(summary.results[0]?.status, "failed");
+});

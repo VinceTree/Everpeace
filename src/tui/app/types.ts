@@ -25,6 +25,7 @@ import type {
 } from "../../status/model-status.js";
 import type { AgentTurnOptions, AgentTurnResult } from "../../agent/react-agent.js";
 import type { ModelRequestSettings } from "../../providers/capabilities.js";
+import type { BackgroundJobSnapshot } from "../../tools/background-jobs.js";
 
 export interface AgentSession {
   runTurn(userInput: string, signal?: AbortSignal, options?: AgentTurnOptions): Promise<AgentTurnResult>;
@@ -37,6 +38,8 @@ export interface AgentSession {
   finalizePendingGoalCompletion?(allow: boolean): Promise<void>;
   setRequestSettings?(settings: ModelRequestSettings): void;
   getRequestSettings?(): ModelRequestSettings;
+  waitForBackgroundJobs?(signal?: AbortSignal): Promise<BackgroundJobSnapshot[]>;
+  dispose?(): void;
 }
 
 export interface AgentRestoreOptions {

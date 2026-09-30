@@ -13,8 +13,13 @@ test("file tools read and list within the workspace and reject escapes and unsup
     await fs.writeFile(path.join(root, "hello.txt"), "hello");
     await fs.writeFile(path.join(parent, "outside.txt"), "private");
     await fs.writeFile(path.join(root, "binary"), Buffer.from([0, 1]));
-    await fs.writeFile(path.join(root, "large"), "x".repeat(131073));
-    assert.deepEqual(await runFileTool("read_file", '{"path":"hello.txt"}', root), { path: "hello.txt", content: "hello" });
+    await fs.writeFile(path.join(root, "large"), "x".repeat(16 * 1024 * 1024 + 1));
+    const read = await runFileTool("read_file", '{"path":"hello.txt"}', root) as Record<string, unknown>;
+    assert.equal(read.content, "hello");
+    assert.equal(read.exists, true);
+    assert.equal(read.start_line, 1);
+    assert.equal(read.next_line, null);
+    assert.match(String(read.sha256), /^[a-f0-9]{64}$/u);
     const listing = await runFileTool("list_directory", '{"path":"."}', root) as { entries: unknown[] };
     assert.equal(listing.entries.length, 3);
     for (const name of ["../outside.txt", path.join(parent, "outside.txt")]) {
@@ -28,5 +33,33 @@ test("file tools read and list within the workspace and reject escapes and unsup
     await assert.rejects(runFileTool("read_file", '{"path":3}', root), /Invalid/);
   } finally {
     await fs.rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("file tools page large text and search Unicode paths without a shell", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-files-page-"));
+  try {
+    await fs.mkdir(path.join(root, "源码"));
+    await fs.writeFile(path.join(root, "源码", "长文件.ts"), Array.from({ length: 450 }, (_, index) => `line ${index + 1} needle`).join("\n"));
+    await fs.writeFile(path.join(root, "源码", "other.js"), "needle\n");
+    const first = await runFileTool("read_file", JSON.stringify({ path: "源码/长文件.ts", start_line: 201, max_lines: 50 }), root) as Record<string, unknown>;
+    assert.equal(first.start_line, 201);
+    assert.equal(first.end_line, 250);
+    assert.equal(first.next_line, 251);
+    assert.match(String(first.content), /^line 201 needle/u);
+    assert.match(String(first.content), /line 250 needle$/u);
+
+    const search = await runFileTool("search_files", JSON.stringify({ query: "needle", path: "源码", glob: "*.ts", max_results: 3 }), root) as { matches: Array<{ path: string; line: number }>; truncated: boolean };
+    assert.equal(search.matches.length, 3);
+    assert.ok(search.matches.every((match) => match.path.endsWith("源码/长文件.ts")));
+    assert.equal(search.truncated, true);
+
+    const glob = await runFileTool("glob_files", JSON.stringify({ pattern: "*.ts", path: "源码" }), root) as { files: string[] };
+    assert.deepEqual(glob.files, ["源码/长文件.ts"]);
+    const missing = await runFileTool("read_file", JSON.stringify({ path: "源码/missing.ts" }), root) as Record<string, unknown>;
+    assert.equal(missing.exists, false);
+    assert.equal(missing.sha256, null);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
   }
 });

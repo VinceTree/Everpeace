@@ -170,7 +170,8 @@ export class ResponseStreamIncompleteError extends Error {
   readonly retryable = true;
 
   constructor(options?: { cause?: unknown }) {
-    super("Responses stream ended before response.completed", options);
+    const detail = options?.cause instanceof Error ? options.cause.message : undefined;
+    super(detail ? `Responses stream ended before response.completed: ${detail}` : "Responses stream ended before response.completed", options);
     this.name = "ResponseStreamIncompleteError";
   }
 }

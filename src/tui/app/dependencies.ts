@@ -1,5 +1,7 @@
 import { createRequire } from "node:module";
+import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
+import { promisify } from "node:util";
 import {
   ReactAgent,
   type AgentIO,
@@ -41,12 +43,29 @@ import {
 import { GoalRuntime } from "../../goal/runtime.js";
 import { resolveCodexCliPath } from "../../codex/cli.js";
 import { modelErrorGuidance } from "../../agent/response-errors.js";
+import {
+  assertCompletedModelResponse,
+  defaultModelRequestSettings,
+  requestReasoningEffort,
+  requestSettingsForPurpose,
+  resolveProviderCapabilities,
+  type ModelRequestPurpose,
+} from "../../providers/capabilities.js";
 
 const require = createRequire(import.meta.url);
+const execFileAsync = promisify(execFile);
 const packageJson = require("../../../package.json") as { version?: unknown };
 
 function packageVersion(): string {
   return typeof packageJson.version === "string" ? packageJson.version : "0.0.0";
+}
+
+function purposeRequest(model: RegisteredModel, purpose: ModelRequestPurpose): { max_output_tokens: number; reasoning?: { effort: string }; timeoutMs: number } {
+  const capabilities = resolveProviderCapabilities(model.base_url, model.model_name);
+  const coding = defaultModelRequestSettings(capabilities, model.request_settings);
+  const settings = requestSettingsForPurpose(purpose, coding);
+  const effort = requestReasoningEffort(capabilities, settings.reasoningEffort);
+  return { max_output_tokens: settings.maxOutputTokens, ...(effort ? { reasoning: { effort } } : {}), timeoutMs: settings.timeoutMs };
 }
 
 async function requestSkillDraft(
@@ -56,15 +75,19 @@ async function requestSkillDraft(
   signal?: AbortSignal,
 ): Promise<string> {
   const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
+  const request = purposeRequest(model, "skill");
   const response = await runtime.responses.create(
     {
       model: model.model_name,
       instructions,
       input,
       store: false,
+      max_output_tokens: request.max_output_tokens,
+      ...(request.reasoning ? { reasoning: request.reasoning } : {}),
     },
-    signal ? { signal } : undefined,
+    { ...(signal ? { signal } : {}), timeout: request.timeoutMs, maxRetries: 0 },
   );
+  assertCompletedModelResponse(response, "skill");
   const draft = normalizeGeneratedSkillMarkdown(response.output_text);
   validateManagedSkillMarkdown(draft);
   return draft;
@@ -234,6 +257,7 @@ export function createDefaultTuiDependencies(
     },
     async generateSessionTitle(model, firstQuestion, signal) {
       const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
+      const request = purposeRequest(model, "title");
       const response = await runtime.responses.create(
         {
           model: model.model_name,
@@ -243,9 +267,12 @@ export function createDefaultTuiDependencies(
             "without Markdown, quotation marks, or ending punctuation.",
           input: firstQuestion,
           store: false,
+          max_output_tokens: request.max_output_tokens,
+          ...(request.reasoning ? { reasoning: request.reasoning } : {}),
         },
-        signal === undefined ? undefined : { signal },
+        { ...(signal ? { signal } : {}), timeout: request.timeoutMs, maxRetries: 0 },
       );
+      assertCompletedModelResponse(response, "title");
       const title = sanitizeSessionTitle(response.output_text);
       if (!title) throw new Error("The model returned an empty session title");
       return title;
@@ -263,9 +290,31 @@ export function createDefaultTuiDependencies(
       ];
       try {
         await fs.access(resolveCodexCliPath());
-        lines.push("Sandbox executable: ready");
+        lines.push("Sandbox executable: discovered");
       } catch (error) {
         lines.push(`Sandbox executable: unavailable (${error instanceof Error ? error.message : String(error)})`);
+      }
+      for (const executable of ["git", "rg"] as const) {
+        try {
+          await execFileAsync(executable, ["--version"], { timeout: 5_000, windowsHide: true });
+          lines.push(`${executable}: probe passed`);
+        } catch (error) {
+          lines.push(`${executable}: unavailable (${error instanceof Error ? error.message : String(error)})`);
+        }
+      }
+      try {
+        const probe = await runBash(process.platform === "win32" ? "Write-Output everpeace-doctor" : "printf everpeace-doctor", {
+          cwd: process.cwd(),
+          streamOutput: false,
+          timeoutMs: 10_000,
+          sandbox: { policy: sandbox },
+          ...(signal ? { signal } : {}),
+        });
+        lines.push(probe.exitCode === 0 && probe.stdout.includes("everpeace-doctor")
+          ? "Sandbox execution: probe passed"
+          : `Sandbox execution: probe failed (${probe.error ?? (probe.stderr.trim() || `exit ${probe.exitCode}`)})`);
+      } catch (error) {
+        lines.push(`Sandbox execution: probe failed (${error instanceof Error ? error.message : String(error)})`);
       }
       if (!live) {
         lines.push("Model request: not run (use /doctor --live)");
@@ -277,13 +326,16 @@ export function createDefaultTuiDependencies(
       }
       const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
       try {
+        const request = purposeRequest(model, "doctor");
         const response = await runtime.responses.create({
           model: model.model_name,
           instructions: "This is a bounded connectivity check. Reply with OK only.",
           input: "OK",
-          max_output_tokens: 16,
-        }, { maxRetries: 0, ...(signal ? { signal } : {}) });
-        lines.push(`Model request: ${response.output_text.trim() ? "completed" : "completed without text"}`);
+          max_output_tokens: request.max_output_tokens,
+          ...(request.reasoning ? { reasoning: request.reasoning } : {}),
+        }, { maxRetries: 0, timeout: request.timeoutMs, ...(signal ? { signal } : {}) });
+        assertCompletedModelResponse(response, "doctor");
+        lines.push("Model request: completed with text");
       } catch (error) {
         lines.push(`Model request: failed\n${modelErrorGuidance(error)}`);
       }

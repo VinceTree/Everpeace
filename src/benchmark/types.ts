@@ -22,6 +22,14 @@ export interface BenchmarkTask {
   maxRepairAttempts?: number;
   verification?: BenchmarkVerification;
   source?: BenchmarkTaskSource;
+  fixture?: BenchmarkTaskFixture;
+}
+
+export interface BenchmarkTaskFixture {
+  /** Patch applied to the pinned source to introduce the benchmark defect and its acceptance assertion. */
+  seedPatch: string;
+  /** Patch applied after the seed to provide the reviewed reference repair. */
+  referencePatch: string;
 }
 
 export interface BenchmarkTaskSource {

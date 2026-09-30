@@ -5,6 +5,7 @@ import path from "node:path";
 import lockfile from "proper-lockfile";
 import type { ResponsesClientLike } from "../agent/react-agent.js";
 import type { TokenUsageSample } from "../status/model-status.js";
+import { assertCompletedModelResponse } from "../providers/capabilities.js";
 
 export type LearnedScope = "project" | "user";
 export type LearnedKind = "preference" | "convention" | "procedure" | "constraint" | "summary";
@@ -975,7 +976,9 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
         input: JSON.stringify({ scope, candidates: scoped }),
         store: false,
         max_output_tokens: 800,
-      }, { signal });
+        reasoning: { effort: "none" },
+      }, { signal, maxRetries: 0, timeout: 60_000 });
+      assertCompletedModelResponse(response, "memory");
       this.#recordUsage(response.usage);
       const proposed = parseExtractorOutput(response.output_text);
       if (proposed.length === 0) {
@@ -1022,7 +1025,9 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
       }),
       store: false,
       max_output_tokens: 800,
-    }, signal === undefined ? undefined : { signal });
+      reasoning: { effort: "none" },
+    }, { ...(signal ? { signal } : {}), maxRetries: 0, timeout: 60_000 });
+    assertCompletedModelResponse(response, "memory");
     this.#recordUsage(response.usage);
     return parseExtractorOutput(response.output_text).map((entry) => ({
       ...entry,
