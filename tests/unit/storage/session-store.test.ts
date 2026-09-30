@@ -88,6 +88,27 @@ test("session store round-trips timeline, context, title, and model changes", as
   }
 });
 
+test("session model request settings round-trip while legacy model refs stay valid", async () => {
+  const fixture = await createFixture();
+  try {
+    const created = await fixture.store.create({
+      title: "settings",
+      titlePending: false,
+      workspacePath: "C:\\repo",
+      model: {
+        ...model,
+        request_settings: { reasoningEffort: "max", maxOutputTokens: 16_384 },
+      },
+    });
+    assert.deepEqual((await fixture.store.load(created.id)).summary.model.request_settings, {
+      reasoningEffort: "max",
+      maxOutputTokens: 16_384,
+    });
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("session store replaces model context on compaction and counts its usage", async () => {
   const fixture = await createFixture();
   try {
@@ -107,6 +128,8 @@ test("session store replaces model context on compaction and counts its usage", 
       output_tokens: 10,
       context_tokens: null,
       complete: true,
+      cache_usage_complete: false,
+      cache_write_usage_complete: false,
     });
     await fixture.store.appendUsage(created.id, { input_tokens: 12, output_tokens: 2, total_tokens: 14 });
     assert.equal((await fixture.store.load(created.id)).usage.context_tokens, 14);
@@ -132,8 +155,10 @@ test("session store persists prompt cache usage details with legacy compatibilit
       output_tokens: 10,
       context_tokens: 110,
       cached_input_tokens: 80,
+      cache_observed_input_tokens: 100,
       cache_write_input_tokens: 20,
       cache_usage_complete: true,
+      cache_write_usage_complete: true,
       complete: true,
     });
   } finally {
@@ -173,7 +198,9 @@ test("session store round-trips workflow metadata without storing file contents"
       changed_paths: ["src/index.ts"],
       checkpoint_available: true,
       result: "failed",
+      result_reason: "Workspace changed during final verification",
       tracking_limited: false,
+      verification_retries: 2,
       last_verification: {
         command: { id: "node:typecheck", label: "Node typecheck", command: "pnpm run typecheck", tier: "fast", timeoutMs: 60_000 },
         passed: true,
@@ -184,7 +211,9 @@ test("session store round-trips workflow metadata without storing file contents"
         timedOut: false,
       },
       last_verification_suite: {
-        status: "failed",
+        status: "unavailable",
+        stale: true,
+        reason: "Workspace changed during final verification",
         results: [{
           command: { id: "node:typecheck", label: "Node typecheck", command: "pnpm run typecheck", tier: "fast", timeoutMs: 60_000 },
           passed: false,
@@ -330,6 +359,8 @@ test("session store loads usage totals, context resets, and legacy status snapsh
       output_tokens: 50,
       context_tokens: 180,
       complete: true,
+      cache_usage_complete: false,
+      cache_write_usage_complete: false,
     });
     assert.equal(loaded.timeline.at(-1)?.kind, "status");
 
@@ -340,6 +371,8 @@ test("session store loads usage totals, context resets, and legacy status snapsh
       output_tokens: 50,
       context_tokens: 0,
       complete: true,
+      cache_usage_complete: false,
+      cache_write_usage_complete: false,
     });
   } finally {
     await fixture.cleanup();
@@ -361,6 +394,8 @@ test("missing provider usage is persisted as partial without corrupting the sess
       output_tokens: 0,
       context_tokens: null,
       complete: false,
+      cache_usage_complete: false,
+      cache_write_usage_complete: false,
     });
   } finally {
     await fixture.cleanup();

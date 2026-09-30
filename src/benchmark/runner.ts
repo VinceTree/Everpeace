@@ -96,6 +96,14 @@ export interface BenchmarkRunOptions {
   artifactSink?: BenchmarkArtifactSink;
   capabilities?: BenchmarkProviderCapabilities;
   onTaskPhase?(phase: BenchmarkTaskPhase, attempt: number): void;
+  /** Required budget gate when a caller explicitly enables real provider requests. */
+  liveApi?: boolean;
+  totalTokenBudget?: number;
+  tokenBudgetRemaining?: number;
+}
+
+function validTokenBudget(value: number | undefined): value is number {
+  return value !== undefined && Number.isSafeInteger(value) && value > 0;
 }
 
 async function runAdapterAttempt(
@@ -132,6 +140,10 @@ export async function runBenchmarkTask(
   adapter: BenchmarkHarnessAdapter,
   options: BenchmarkRunOptions = {},
 ): Promise<BenchmarkRunResult> {
+  const tokenBudget = options.tokenBudgetRemaining ?? options.totalTokenBudget;
+  if (options.liveApi === true && !validTokenBudget(tokenBudget)) {
+    throw new Error("Live API benchmarks require a positive total token budget");
+  }
   const now = options.now ?? Date.now;
   const startedAtMs = now();
   const startedAt = new Date(startedAtMs).toISOString();
@@ -160,6 +172,7 @@ export async function runBenchmarkTask(
   let attempts = 0;
   let status: BenchmarkRunResult["status"] = "passed";
   let failure: string | undefined;
+  let usage: import("./types.js").BenchmarkTokenUsage | undefined;
 
   const writeArtifact = options.artifactSink === undefined
     ? undefined
@@ -190,11 +203,34 @@ export async function runBenchmarkTask(
         onPhase: metrics.onPhase,
         onEvent: metrics.onEvent,
         ...(writeArtifact === undefined ? {} : { writeArtifact }),
+        ...(tokenBudget === undefined ? {} : { tokenBudgetRemaining: tokenBudget }),
       }, controller.signal);
       manualInterventions += result?.manualInterventions ?? 0;
       unsafeActions += result?.unsafeActions ?? 0;
       if (result?.notes !== undefined) notes = [notes, result.notes].filter(Boolean).join("\n");
       if (result?.capabilities !== undefined) capabilities = result.capabilities;
+      if (options.liveApi === true && (result?.usage === undefined || result.usage.complete !== true)) {
+        status = "failed";
+        failure = "Live API benchmark adapters must report complete token usage";
+        break;
+      }
+      if (result?.usage !== undefined) {
+        const previous = usage;
+        usage = {
+          inputTokens: (previous?.inputTokens ?? 0) + result.usage.inputTokens,
+          outputTokens: (previous?.outputTokens ?? 0) + result.usage.outputTokens,
+          reasoningTokens: (previous?.reasoningTokens ?? 0) + (result.usage.reasoningTokens ?? 0),
+          cachedInputTokens: (previous?.cachedInputTokens ?? 0) + (result.usage.cachedInputTokens ?? 0),
+          cacheObservedInputTokens: (previous?.cacheObservedInputTokens ?? 0) + (result.usage.cacheObservedInputTokens ?? 0),
+          complete: (previous?.complete ?? true) && result.usage.complete,
+        };
+        const consumed = usage.inputTokens + usage.outputTokens;
+        if (tokenBudget !== undefined && consumed > tokenBudget) {
+          status = "failed";
+          failure = `Benchmark token budget exceeded (${consumed}/${tokenBudget})`;
+          break;
+        }
+      }
 
       if (controller.signal.aborted) {
         status = timedOut ? "timed_out" : "error";
@@ -265,6 +301,7 @@ export async function runBenchmarkTask(
     ...(capabilities === undefined ? {} : { capabilities }),
     ...(failure === undefined ? {} : { error: failure }),
     ...(notes === undefined ? {} : { notes }),
+    ...(usage === undefined ? {} : { usage }),
   };
   if (writeArtifact !== undefined) {
     await writeArtifact("result.json", JSON.stringify(runResult, null, 2));
@@ -275,18 +312,44 @@ export async function runBenchmarkTask(
 export async function runBenchmarkSuite(
   tasks: readonly BenchmarkTask[],
   adapter: BenchmarkHarnessAdapter,
-  options: BenchmarkRunOptions & { onResult?(result: BenchmarkRunResult): void } = {},
+  options: BenchmarkRunOptions & {
+    onResult?(result: BenchmarkRunResult): void;
+    repetitions?: number;
+    prepareRun?(task: BenchmarkTask, repetition: number): Promise<void>;
+  } = {},
 ): Promise<BenchmarkSuiteSummary> {
+  const repetitions = options.repetitions ?? 1;
+  if (!Number.isSafeInteger(repetitions) || repetitions < 1) throw new Error("Benchmark repetitions must be a positive integer");
+  if (repetitions > 1 && !options.prepareRun) throw new Error("Repeated benchmarks require prepareRun to restore an isolated workspace");
+  if (options.liveApi === true && !validTokenBudget(options.totalTokenBudget)) {
+    throw new Error("Live API benchmarks require a positive total token budget");
+  }
   const results: BenchmarkRunResult[] = [];
+  let tokensConsumed = 0;
   for (const task of tasks) {
-    const result = await runBenchmarkTask(task, adapter, options);
-    results.push(result);
-    options.onResult?.(result);
+    for (let repetition = 1; repetition <= repetitions; repetition += 1) {
+      await options.prepareRun?.(task, repetition);
+      const remaining = options.totalTokenBudget === undefined
+        ? undefined
+        : options.totalTokenBudget - tokensConsumed;
+      if (options.liveApi === true && (remaining === undefined || remaining <= 0)) {
+        throw new Error("Live API benchmark token budget was exhausted before the next run");
+      }
+      const result = await runBenchmarkTask(task, adapter, {
+        ...options,
+        ...(remaining === undefined ? {} : { tokenBudgetRemaining: remaining }),
+      });
+      const repeated = repetitions === 1 ? result : { ...result, repetition };
+      results.push(repeated);
+      tokensConsumed += (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
+      options.onResult?.(repeated);
+    }
   }
 
   const passed = results.filter((result) => result.status === "passed").length;
   const verified = results.filter((result) => result.verification !== undefined).length;
   const verificationPassed = results.filter((result) => result.verification?.passed === true).length;
+  const usageSamples = results.flatMap((result) => result.usage ? [result.usage] : []);
   return {
     adapter: adapter.name,
     total: results.length,
@@ -306,5 +369,16 @@ export async function runBenchmarkSuite(
     totalManualInterventions: results.reduce((total, result) => total + result.manualInterventions, 0),
     unsafeActions: results.reduce((total, result) => total + result.unsafeActions, 0),
     results,
+    ...(repetitions === 1 ? {} : { repetitions }),
+    ...(usageSamples.length === 0 ? {} : {
+      usage: {
+        inputTokens: usageSamples.reduce((sum, usage) => sum + usage.inputTokens, 0),
+        outputTokens: usageSamples.reduce((sum, usage) => sum + usage.outputTokens, 0),
+        reasoningTokens: usageSamples.reduce((sum, usage) => sum + (usage.reasoningTokens ?? 0), 0),
+        cachedInputTokens: usageSamples.reduce((sum, usage) => sum + (usage.cachedInputTokens ?? 0), 0),
+        cacheObservedInputTokens: usageSamples.reduce((sum, usage) => sum + (usage.cacheObservedInputTokens ?? 0), 0),
+        complete: usageSamples.length === results.length && usageSamples.every((usage) => usage.complete),
+      },
+    }),
   };
 }

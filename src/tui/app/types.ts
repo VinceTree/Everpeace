@@ -24,6 +24,7 @@ import type {
   TokenUsageSample,
 } from "../../status/model-status.js";
 import type { AgentTurnOptions, AgentTurnResult } from "../../agent/react-agent.js";
+import type { ModelRequestSettings } from "../../providers/capabilities.js";
 
 export interface AgentSession {
   runTurn(userInput: string, signal?: AbortSignal, options?: AgentTurnOptions): Promise<AgentTurnResult>;
@@ -34,6 +35,8 @@ export interface AgentSession {
   getMemorySnapshot?(): MemorySnapshot | undefined;
   finishMemoryTurn?(outcome: LearnedTurnOutcome): Promise<void>;
   finalizePendingGoalCompletion?(allow: boolean): Promise<void>;
+  setRequestSettings?(settings: ModelRequestSettings): void;
+  getRequestSettings?(): ModelRequestSettings;
 }
 
 export interface AgentRestoreOptions {
@@ -85,6 +88,12 @@ export interface TuiDependencies {
   generateSessionTitle(
     model: RegisteredModel,
     firstQuestion: string,
+    signal?: AbortSignal,
+  ): Promise<string>;
+  doctor?(
+    model: RegisteredModel | undefined,
+    policy: PermissionPolicy,
+    live: boolean,
     signal?: AbortSignal,
   ): Promise<string>;
   changeWorkspace(workspacePath: string): Promise<string>;

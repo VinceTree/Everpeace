@@ -16,6 +16,7 @@ import {
 } from "../status/model-status.js";
 import type { VerificationSuiteResult, WorkflowPhase, WorkflowState, VerificationResult } from "../workflow/types.js";
 import type { LearnedMemoryPolicy } from "../memory/learned-memory.js";
+import { isModelRequestSettings, type ModelRequestSettings } from "../providers/capabilities.js";
 
 const SESSION_FORMAT_VERSION = 1;
 
@@ -31,6 +32,7 @@ export interface SessionModelRef {
   id: string;
   model_name: string;
   base_url: string;
+  request_settings?: ModelRequestSettings;
 }
 
 export type GoalStatus = "active" | "paused" | "blocked" | "complete" | "budget_limited" | "usage_limited";
@@ -244,6 +246,7 @@ function isModelRef(value: unknown): value is SessionModelRef {
     isNonEmptyString(value.id) &&
     isNonEmptyString(value.model_name) &&
     isNonEmptyString(value.base_url)
+    && (value.request_settings === undefined || isModelRequestSettings(value.request_settings))
   );
 }
 
@@ -422,7 +425,8 @@ function isVerificationSuite(value: unknown): value is VerificationSuiteResult {
     Array.isArray(value.skipped) && value.skipped.every((command) => isRecord(command) &&
       typeof command.id === "string" && typeof command.label === "string" && typeof command.command === "string" &&
       (command.tier === "fast" || command.tier === "full") && typeof command.timeoutMs === "number") &&
-    (value.reason === undefined || typeof value.reason === "string");
+    (value.reason === undefined || typeof value.reason === "string") &&
+    (value.stale === undefined || typeof value.stale === "boolean");
 }
 
 function isWorkflow(value: unknown): value is WorkflowState {
@@ -434,7 +438,9 @@ function isWorkflow(value: unknown): value is WorkflowState {
     Array.isArray(value.changed_paths) && value.changed_paths.every((item) => typeof item === "string") &&
     typeof value.checkpoint_available === "boolean" && typeof value.updated_at === "string" &&
     (value.result === undefined || value.result === "verified" || value.result === "unverified" || value.result === "failed" || value.result === "no_changes") &&
+    (value.result_reason === undefined || typeof value.result_reason === "string") &&
     (value.tracking_limited === undefined || typeof value.tracking_limited === "boolean") &&
+    (value.verification_retries === undefined || (typeof value.verification_retries === "number" && Number.isSafeInteger(value.verification_retries) && value.verification_retries >= 0)) &&
     (value.last_verification === undefined || isVerificationResult(value.last_verification)) &&
     (value.last_verification_suite === undefined || isVerificationSuite(value.last_verification_suite));
 }
@@ -465,6 +471,7 @@ function workflowSnapshot(workflow: WorkflowState): WorkflowState {
         results: suite.results.map(verificationSnapshot),
         skipped: suite.skipped.map((command) => ({ ...command })),
         ...(suite.reason ? { reason: suite.reason } : {}),
+        ...(suite.stale === undefined ? {} : { stale: suite.stale }),
       },
     }),
   };
@@ -552,7 +559,12 @@ function parseSession(contents: string, filePath: string): LoadedSession {
 }
 
 function modelRef(model: SessionModelRef): SessionModelRef {
-  return { id: model.id, model_name: model.model_name, base_url: model.base_url };
+  return {
+    id: model.id,
+    model_name: model.model_name,
+    base_url: model.base_url,
+    ...(model.request_settings ? { request_settings: { ...model.request_settings } } : {}),
+  };
 }
 
 export class SessionStore implements SessionStoreLike {

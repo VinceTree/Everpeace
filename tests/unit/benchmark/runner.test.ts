@@ -113,6 +113,57 @@ test("unsafe actions fail the run and suite aggregates reliability metrics", asy
   assert.equal(summary.unsafeActions, 2);
 });
 
+test("live repeated benchmarks require a token budget and isolated preparation", async () => {
+  const adapter: BenchmarkHarnessAdapter = { name: "live", async run() {} };
+  await assert.rejects(
+    runBenchmarkSuite([task()], adapter, { liveApi: true }),
+    /total token budget/u,
+  );
+  await assert.rejects(
+    runBenchmarkSuite([task()], adapter, { repetitions: 3, totalTokenBudget: 1_000 }),
+    /prepareRun/u,
+  );
+});
+
+test("benchmark repetitions aggregate token, reasoning, and cache metrics", async () => {
+  const prepared: number[] = [];
+  const budgets: number[] = [];
+  const adapter: BenchmarkHarnessAdapter = {
+    name: "metered",
+    async run(_task, context) {
+      budgets.push(context.tokenBudgetRemaining ?? 0);
+      return {
+        usage: {
+          inputTokens: 100,
+          outputTokens: 20,
+          reasoningTokens: 10,
+          cachedInputTokens: 60,
+          cacheObservedInputTokens: 100,
+          complete: true,
+        },
+      };
+    },
+  };
+  const summary = await runBenchmarkSuite([task()], adapter, {
+    liveApi: true,
+    totalTokenBudget: 1_000,
+    repetitions: 3,
+    async prepareRun(_task, repetition) { prepared.push(repetition); },
+  });
+  assert.equal(summary.total, 3);
+  assert.equal(summary.repetitions, 3);
+  assert.deepEqual(prepared, [1, 2, 3]);
+  assert.deepEqual(budgets, [1_000, 880, 760]);
+  assert.deepEqual(summary.usage, {
+    inputTokens: 300,
+    outputTokens: 60,
+    reasoningTokens: 30,
+    cachedInputTokens: 180,
+    cacheObservedInputTokens: 300,
+    complete: true,
+  });
+});
+
 test("verification failures enter a bounded diagnose loop with prior output", async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), "everpeace-benchmark-"));
   const verificationScript = join(workspacePath, "verify.mjs");

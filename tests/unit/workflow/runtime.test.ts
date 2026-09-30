@@ -174,18 +174,104 @@ test("workflow enters diagnosis after a failed verification and bounds repairs",
     const followup = await runtime.afterPatch(operations, applied, async () => failed);
     assert.equal(runtime.state.phase, "diagnose");
     assert.match(followup.prompt ?? "", /verify again/u);
-    assert.equal(runtime.state.repair_attempts, 1);
+    assert.equal(runtime.state.repair_attempts, 0);
 
-    for (let attempt = 2; attempt <= 4; attempt += 1) {
-      await runtime.startRepairTurn();
+    // More patch/check failures in the same model turn do not consume another
+    // diagnostic round.
+    for (let patch = 1; patch <= 2; patch += 1) {
+      const sameTurn: ApplyPatchOperation[] = [{ path: "file.txt", action: "update", content: `same turn ${patch}\n` }];
+      await runtime.capturePatch(sameTurn);
+      await runtime.afterPatch(sameTurn, await runApplyPatch(sameTurn, workspace), async () => failed);
+    }
+    assert.equal(runtime.state.repair_attempts, 0);
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const repair = await runtime.startRepairTurn();
+      assert.equal(repair.repair_attempts, attempt);
       const retryOperations: ApplyPatchOperation[] = [{ path: "file.txt", action: "update", content: `bad ${attempt}\n` }];
       await runtime.capturePatch(retryOperations);
       const retry = await runApplyPatch(retryOperations, workspace);
       await runtime.afterPatch(retryOperations, retry, async () => failed);
+      const completed = await runtime.finishTurn(async () => failed);
+      assert.equal(completed.state.phase, attempt === 3 ? "blocked" : "diagnose");
     }
     assert.equal(runtime.state.phase, "blocked");
     assert.equal(runtime.state.repair_attempts, 3);
     await assert.rejects(runtime.capturePatch([{ path: "file.txt", action: "update", content: "bypass\n" }]), /blocked/u);
+    await assert.rejects(runtime.observeShellExecution(), /blocked/u);
+  });
+});
+
+test("workflow reruns a passed suite when verification changes tracked contents", async () => {
+  await withWorkspace(async (workspace) => {
+    await run("git", ["init"], { cwd: workspace });
+    await fs.writeFile(path.join(workspace, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }), "utf8");
+    await fs.writeFile(path.join(workspace, "file.ts"), "before\n", "utf8");
+    await run("git", ["add", "package.json", "file.ts"], { cwd: workspace });
+    const runtime = new CodingWorkflowRuntime({ workspacePath: workspace });
+    await runtime.beginTurn();
+    const operations: ApplyPatchOperation[] = [{ path: "file.ts", action: "update", content: "task change\n" }];
+    await runtime.capturePatch(operations);
+    await runtime.afterPatch(operations, await runApplyPatch(operations, workspace), async () => successfulBash());
+    let passes = 0;
+    const completed = await runtime.finishTurn(async () => {
+      passes += 1;
+      await fs.writeFile(path.join(workspace, "file.ts"), `verification change ${passes}\n`, "utf8");
+      await fs.writeFile(path.join(workspace, "new.ts"), `generated ${passes}\n`, "utf8");
+      return successfulBash();
+    });
+    assert.equal(passes, 3);
+    assert.equal(completed.state.result, "unverified");
+    assert.equal(completed.verificationSuite?.stale, true);
+    assert.match(completed.state.result_reason ?? "", /changed during final verification/u);
+    assert.deepEqual(completed.state.changed_paths, ["file.ts", "new.ts"].sort((left, right) => left.localeCompare(right)));
+  });
+});
+
+test("workflow accepts the fresh rerun after a one-time verification rewrite", async () => {
+  await withWorkspace(async (workspace) => {
+    await run("git", ["init"], { cwd: workspace });
+    await fs.writeFile(path.join(workspace, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }), "utf8");
+    await fs.writeFile(path.join(workspace, "file.ts"), "before\n", "utf8");
+    await run("git", ["add", "package.json", "file.ts"], { cwd: workspace });
+    const runtime = new CodingWorkflowRuntime({ workspacePath: workspace });
+    await runtime.beginTurn();
+    const operations: ApplyPatchOperation[] = [{ path: "file.ts", action: "update", content: "task change\n" }];
+    await runtime.capturePatch(operations);
+    await runtime.afterPatch(operations, await runApplyPatch(operations, workspace), async () => successfulBash());
+    let passes = 0;
+    const completed = await runtime.finishTurn(async () => {
+      passes += 1;
+      if (passes === 1) await fs.writeFile(path.join(workspace, "generated.ts"), "stable generated file\n", "utf8");
+      return successfulBash();
+    });
+    assert.equal(passes, 2);
+    assert.equal(completed.state.result, "verified");
+    assert.deepEqual(completed.state.changed_paths, ["file.ts", "generated.ts"].sort((left, right) => left.localeCompare(right)));
+  });
+});
+
+test("ignored build outputs do not stale a passing verification suite", async () => {
+  await withWorkspace(async (workspace) => {
+    await run("git", ["init"], { cwd: workspace });
+    await fs.writeFile(path.join(workspace, ".gitignore"), "dist/\n", "utf8");
+    await fs.writeFile(path.join(workspace, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }), "utf8");
+    await fs.writeFile(path.join(workspace, "file.ts"), "before\n", "utf8");
+    await run("git", ["add", ".gitignore", "package.json", "file.ts"], { cwd: workspace });
+    const runtime = new CodingWorkflowRuntime({ workspacePath: workspace });
+    await runtime.beginTurn();
+    const operations: ApplyPatchOperation[] = [{ path: "file.ts", action: "update", content: "task change\n" }];
+    await runtime.capturePatch(operations);
+    await runtime.afterPatch(operations, await runApplyPatch(operations, workspace), async () => successfulBash());
+    let passes = 0;
+    const completed = await runtime.finishTurn(async () => {
+      passes += 1;
+      await fs.mkdir(path.join(workspace, "dist"), { recursive: true });
+      await fs.writeFile(path.join(workspace, "dist", "output.js"), `build ${passes}\n`, "utf8");
+      return successfulBash();
+    });
+    assert.equal(passes, 1);
+    assert.equal(completed.state.result, "verified");
   });
 });
 

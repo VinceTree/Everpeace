@@ -7,9 +7,10 @@ export interface StatusBarProps {
   workspacePath: string;
   mode?: "default" | "plan";
   goalStatus?: string;
+  reasoningEffort?: "off" | "low" | "high" | "max";
 }
 
-export function StatusBar({ modelName, workspacePath, mode = "default", goalStatus }: StatusBarProps) {
+export function StatusBar({ modelName, workspacePath, mode = "default", goalStatus, reasoningEffort }: StatusBarProps) {
   const prefix = [mode === "plan" ? "Plan" : undefined, goalStatus ? `Goal: ${goalStatus}` : undefined].filter(Boolean).join(" · ");
   return (
     <Box
@@ -19,7 +20,7 @@ export function StatusBar({ modelName, workspacePath, mode = "default", goalStat
       justifyContent="space-between"
     >
       <Text color={modelName ? "green" : "yellow"} wrap="truncate-end">
-        {[prefix, modelName ?? "No model selected"].filter(Boolean).join(" · ")}
+        {[prefix, modelName ?? "No model selected", modelName && reasoningEffort ? `reasoning ${reasoningEffort}` : undefined].filter(Boolean).join(" · ")}
       </Text>
       <Text dimColor wrap="truncate-middle">
         {workspacePath}

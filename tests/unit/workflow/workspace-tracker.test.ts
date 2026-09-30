@@ -45,3 +45,26 @@ test("workspace tracker reports non-Git workspaces as unavailable", async () => 
     assert.equal((await tracker.observe()).available, false);
   });
 });
+
+test("workspace tracker maps repository paths into a nested workspace and ignores siblings", async () => {
+  await withWorkspace(async (repository) => {
+    await run("git", ["init"], { cwd: repository });
+    const workspace = path.join(repository, "app");
+    const sibling = path.join(repository, "other");
+    await fs.mkdir(workspace);
+    await fs.mkdir(sibling);
+    await fs.writeFile(path.join(workspace, "已有脏文件.ts"), "baseline\n", "utf8");
+    await fs.writeFile(path.join(sibling, "outside.ts"), "baseline\n", "utf8");
+
+    const tracker = new WorkspaceChangeTracker(workspace);
+    await tracker.begin();
+    await fs.writeFile(path.join(workspace, "已有脏文件.ts"), "changed\n", "utf8");
+    await fs.writeFile(path.join(sibling, "outside.ts"), "sibling changed\n", "utf8");
+
+    const observation = await tracker.observe();
+    assert.equal(observation.available, true);
+    assert.equal(observation.complete, true);
+    assert.deepEqual(observation.changedPaths, ["已有脏文件.ts"]);
+    assert.match(observation.revision ?? "", /^[a-f0-9]{64}$/u);
+  });
+});

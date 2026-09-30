@@ -207,3 +207,24 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 - 默认串行保持不变，显式并行只开放内置文件/Skill 读取，默认批次上限 4；MCP 和审批全部串行，远端 metadata 不授予本地并发权限。共享资源键冲突拆分批次，写调用作为屏障。
 - 自动压缩按 step 准备一次；压缩 usage 累计到消耗，替换后的 context 占用标为未知，恢复 Session 也不把压缩消耗当作占用。
 - SSE event log 只为 recovery adapter 保留，默认最多 8 MiB；超限释放恢复缓存且放弃当前响应续接，仍完整消费内容，失败走有界整请求重试。
+
+## DeepSeek provider 与请求契约
+
+- 供应商能力由 `ProviderCapabilities` 明确声明，来源与 SDK 方法是否存在分离。官方 DeepSeek、官方 OpenAI 和未知 compatible endpoint 都使用 Responses，但只有官方 OpenAI 声明原生 compact、加密 reasoning 和 prompt-cache 请求字段。
+- 官方 DeepSeek 保留普通 reasoning item、function call/output 和 SSE 完整响应，主请求默认 `high`、最多 32K 输出；`max` 在 DeepSeek 能力范围内收敛为 `high`。未知 compatible endpoint 不因模型名获得 DeepSeek 能力。
+- `createProviderRuntime` 是主 Agent、标题、Skill 草稿、Memory 与摘要请求的统一入口。DeepSeek 请求会移除 `include`、prompt-cache、server-store 和并行参数，不依赖服务端 session、加密上下文或 cursor recovery。
+- Session model ref 和模型注册表接受可选 `request_settings`，旧记录继续读取。跨供应商恢复时若 context 含加密 reasoning 或不透明 compaction，拒绝迁移并保留原 Session。
+
+## 长上下文、usage 与终端控制
+
+- 已知窗口的自动阈值取 `min(80%, window-outputBudget-headroom)`；headroom 为窗口 5%、最多 32K。真实 usage 与请求估算不混写为同一观测；阈值压缩在同一 history revision 上只执行一次。
+- 官方 OpenAI 使用声明的 native compact；DeepSeek/compatible 使用模型摘要，最多 8K 输出，保留最近两个完整用户交互单元。摘要明确区分宿主验证证据与模型自述，取消、失败或持久化失败不会替换原 context。明确 context-limit 每轮只恢复一次。
+- 进入模型 context 的单项工具结果限制为 32 KiB，保留首尾和截断标记；终端保留输出不因此缩小。
+- Usage 独立累计输入、输出、reasoning、cache hit、cache write 和带缓存统计的输入分母。缺少 write 不抹掉 hit；缺失样本使完整性保持 partial。DeepSeek cache miss 不伪装成 cache write。
+- `/reasoning` 只在任务间改变下一轮快照并随 Session 保存；`/doctor` 默认仅检查本地 Node、shell、sandbox 和配置，只有 `--live` 发出一次有界模型请求。`/status` 展示实际协议、压缩策略、推理档位及独立 usage。
+
+## 最终验证新鲜度与诊断预算
+
+- Repair attempt 只在宿主启动诊断轮时递增；同轮 patch 或快速检查失败不重复计数。第三个诊断轮后仍失败会阻止全部工具和 Goal 完成，只有新用户任务能重建工作流。
+- Git tracker 分开仓库根和工作目录，status path 先按仓库根解释、再映射到当前工作区；兄弟目录不进入摘要。最终 suite 前后比较内容 revision，非忽略文件变化使结果过期，重新发现命令并最多补跑两次。
+- 被忽略且未跟踪的构建产物不触发补跑；持续变化、追踪不完整、无检查、取消和环境不可用都保持未验证。退出码 0 只证明该次命令，不单独证明当前文件状态。

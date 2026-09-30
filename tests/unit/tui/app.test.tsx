@@ -688,6 +688,8 @@ test("/status keeps cumulative usage persistent while its command screen stays t
     output_tokens: 300,
     context_tokens: 1_500,
     complete: true,
+    cache_usage_complete: false,
+    cache_write_usage_complete: false,
   });
   assert.deepEqual(session.timeline.map((entry) => entry.kind), ["user", "assistant"]);
   firstView.unmount();
@@ -715,6 +717,64 @@ test("/status keeps cumulative usage persistent while its command screen stays t
   await waitFor(() => (resumedView.lastFrame() ?? "").includes("Input tokens:"));
   assert.match(resumedView.lastFrame() ?? "", /Input tokens:\s+1,200/);
   resumedView.unmount();
+});
+
+test("/reasoning applies on the next turn and persists with the session model", async () => {
+  const model: RegisteredModel = {
+    id: "reasoning-model",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  let selected: string | undefined;
+  const fixture = createFixture({
+    initial: [model],
+    createAgent: (_model, io) => ({
+      setRequestSettings(settings) { selected = settings.reasoningEffort; },
+      async runTurn(input) { io.writeAssistant(`done: ${input}`); },
+    }),
+  });
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+  await tick();
+  view.stdin.write("/reasoning low");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Reasoning is low"));
+  assert.equal(selected, "low");
+  view.stdin.write("\u001B");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything"));
+  view.stdin.write("implement this");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("done: implement this"));
+  const session = [...fixture.sessionStore.sessions.values()][0];
+  assert.equal(session?.summary.model.request_settings?.reasoningEffort, "low");
+  view.unmount();
+});
+
+test("/doctor is local by default and sends a model check only with --live", async () => {
+  const model: RegisteredModel = { id: "doctor-model", model_name: "deepseek-flash", base_url: "https://api.deepseek.com", api_key: "secret" };
+  const fixture = createFixture({ initial: [model] });
+  const calls: boolean[] = [];
+  fixture.dependencies.doctor = async (_model, _policy, live) => {
+    calls.push(live);
+    return live ? "Model request: completed" : "Model request: not run";
+  };
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+  await tick();
+  view.stdin.write("/doctor");
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Model request: not run"));
+  view.unmount();
+  const liveView = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+  await tick();
+  liveView.stdin.write("/doctor --live");
+  await tick();
+  liveView.stdin.write("\r");
+  await waitFor(() => (liveView.lastFrame() ?? "").includes("Model request: completed"));
+  assert.deepEqual(calls, [false, true]);
+  liveView.unmount();
 });
 
 test("/resume still renders status snapshots saved by earlier versions", async () => {
@@ -1972,7 +2032,10 @@ test("/resume asks for a replacement model and preserves the restored context", 
   await waitFor(() => (view.lastFrame() ?? "").includes("remember this"));
 
   const loaded = await fixture.sessionStore.load(summary.id);
-  assert.deepEqual(loaded.summary.model, toSessionModelForTest(replacement));
+  assert.deepEqual(loaded.summary.model, {
+    ...toSessionModelForTest(replacement),
+    request_settings: { reasoningEffort: "high", maxOutputTokens: 32_768 },
+  });
   assert.deepEqual(loaded.context, [{ role: "user", content: "remember this" }]);
   assert.deepEqual(restoredContexts.at(-1), loaded.context);
   view.unmount();

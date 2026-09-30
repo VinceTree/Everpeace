@@ -1,4 +1,11 @@
 import OpenAI from "openai";
+import type { AgentResponse, ResponseStreamLike } from "../agent/react-agent.js";
+import {
+  defaultModelRequestSettings,
+  resolveProviderCapabilities,
+  type ModelRequestSettings,
+  type ProviderCapabilities,
+} from "./capabilities.js";
 
 export type ProviderName = "deepseek" | "openai";
 
@@ -46,6 +53,69 @@ export function createProviderClient(
   apiKey: string,
 ): OpenAI {
   return new OpenAI({ apiKey, baseURL });
+}
+
+export interface ProviderRuntime {
+  sdk: OpenAI;
+  capabilities: ProviderCapabilities;
+  settings: ModelRequestSettings;
+  responses: {
+    create(params: Record<string, unknown>, options?: Record<string, unknown>): Promise<AgentResponse>;
+    stream(params: Record<string, unknown>, options?: Record<string, unknown>): Promise<ResponseStreamLike>;
+    compact?(params: Record<string, unknown>, options?: Record<string, unknown>): Promise<{ output: Array<Record<string, unknown>>; usage?: unknown }>;
+  };
+}
+
+export function sanitizeProviderRequest(
+  capabilities: ProviderCapabilities,
+  params: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...params };
+  if (!capabilities.encryptedReasoning) delete next.include;
+  if (!capabilities.reasoningEffort) delete next.reasoning;
+  if (!capabilities.promptCacheOptions) {
+    delete next.prompt_cache_key;
+    delete next.prompt_cache_retention;
+  }
+  if (capabilities.provider !== "openai") {
+    delete next.store;
+    delete next.parallel_tool_calls;
+  }
+  if (capabilities.maxOutputTokens !== null && typeof next.max_output_tokens === "number") {
+    next.max_output_tokens = Math.min(next.max_output_tokens, capabilities.maxOutputTokens);
+  }
+  return next;
+}
+
+/** One entry point for main and auxiliary model requests. */
+export function createProviderRuntime(
+  baseURL: string,
+  apiKey: string,
+  settings?: Partial<ModelRequestSettings>,
+  modelName?: string,
+): ProviderRuntime {
+  const capabilities = resolveProviderCapabilities(baseURL, modelName);
+  const sdk = createProviderClient(baseURL, apiKey);
+  const responses: ProviderRuntime["responses"] = {
+    create(params, options) {
+      return sdk.responses.create(sanitizeProviderRequest(capabilities, params) as never, options as never) as unknown as Promise<AgentResponse>;
+    },
+    async stream(params, options) {
+      return await sdk.responses.create(
+        { ...sanitizeProviderRequest(capabilities, params), stream: true } as never,
+        options as never,
+      ) as unknown as ResponseStreamLike;
+    },
+  };
+  if (capabilities.compaction === "native") {
+    responses.compact = (params, options) => sdk.responses.compact(params as never, options as never) as unknown as Promise<{ output: Array<Record<string, unknown>>; usage?: unknown }>;
+  }
+  return {
+    sdk,
+    capabilities,
+    settings: defaultModelRequestSettings(capabilities, settings),
+    responses,
+  };
 }
 
 export function isOfficialOpenAiBaseUrl(value: string): boolean {

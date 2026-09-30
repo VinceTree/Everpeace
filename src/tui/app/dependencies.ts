@@ -8,6 +8,7 @@ import {
 } from "../../agent/react-agent.js";
 import {
   createProviderClient,
+  createProviderRuntime,
   createSessionPromptCacheKey,
   isOfficialOpenAiBaseUrl,
   listOfficialModelIds,
@@ -38,6 +39,8 @@ import {
   LearnedMemoryStore,
 } from "../../memory/learned-memory.js";
 import { GoalRuntime } from "../../goal/runtime.js";
+import { resolveCodexCliPath } from "../../codex/cli.js";
+import { modelErrorGuidance } from "../../agent/response-errors.js";
 
 const require = createRequire(import.meta.url);
 const packageJson = require("../../../package.json") as { version?: unknown };
@@ -52,8 +55,8 @@ async function requestSkillDraft(
   input: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const client = createProviderClient(model.base_url, model.api_key);
-  const response = await client.responses.create(
+  const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
+  const response = await runtime.responses.create(
     {
       model: model.model_name,
       instructions,
@@ -104,32 +107,26 @@ export function createDefaultTuiDependencies(
       return listOfficialModelIds(createProviderClient(baseUrl, apiKey), signal);
     },
     createAgent(model: RegisteredModel, io: AgentIO, restore) {
-      const providerClient = createProviderClient(
+      const providerRuntime = createProviderRuntime(
         model.base_url,
         model.api_key,
+        model.request_settings,
+        model.model_name,
       );
       const client: ResponsesClientLike = {
         responses: {
           create(params, options) {
-            return providerClient.responses.create(
-              params as never,
-              options as never,
-            ) as never;
+            return providerRuntime.responses.create(params, options as never);
           },
           async stream(params, options) {
-            return await providerClient.responses.create(
-              { ...params, stream: true } as never,
-              options as never,
-            ) as unknown as ResponseStreamLike;
-          },
-          compact(params, options) {
-            return providerClient.responses.compact(
-              params as never,
-              options as never,
-            ) as never;
+            return await providerRuntime.responses.stream(params, options as never) as ResponseStreamLike;
           },
         },
       };
+      if (providerRuntime.responses.compact) {
+        client.responses.compact = (params, options) =>
+          providerRuntime.responses.compact!(params, options as never);
+      }
       const learnedMemory = new LearnedMemoryRuntime({
         store: learnedMemoryStore,
         client,
@@ -151,6 +148,8 @@ export function createDefaultTuiDependencies(
         client,
         model: model.model_name,
         io,
+        providerCapabilities: providerRuntime.capabilities,
+        requestSettings: providerRuntime.settings,
         ...(isOfficialOpenAiBaseUrl(model.base_url)
           ? {
               promptCacheKey: () => {
@@ -215,27 +214,27 @@ export function createDefaultTuiDependencies(
       await (activeLearnedMemory?.deleteEntry(scope, workspacePath, id) ?? learnedMemoryStore.deleteEntry(scope, workspacePath, id));
     },
     async rememberMemory(model, workspacePath, text, signal) {
-      const client = createProviderClient(model.base_url, model.api_key);
-      const runtime = new LearnedMemoryRuntime({
+      const providerRuntime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
+      const memoryRuntime = new LearnedMemoryRuntime({
         store: learnedMemoryStore,
         client: {
           responses: {
             create(params, options) {
-              return client.responses.create(params as never, options as never) as never;
+              return providerRuntime.responses.create(params, options as never);
             },
           },
         },
         model: model.model_name,
       });
       try {
-        await runtime.remember(workspacePath, text, signal);
+        await memoryRuntime.remember(workspacePath, text, signal);
       } finally {
-        await runtime.dispose();
+        await memoryRuntime.dispose();
       }
     },
     async generateSessionTitle(model, firstQuestion, signal) {
-      const client = createProviderClient(model.base_url, model.api_key);
-      const response = await client.responses.create(
+      const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
+      const response = await runtime.responses.create(
         {
           model: model.model_name,
           instructions:
@@ -250,6 +249,45 @@ export function createDefaultTuiDependencies(
       const title = sanitizeSessionTitle(response.output_text);
       if (!title) throw new Error("The model returned an empty session title");
       return title;
+    },
+    async doctor(model, policy, live, signal) {
+      const sandbox = createEffectiveSandboxPolicy(policy, process.cwd(), skills.readableRoots());
+      const lines = [
+        `Node: ${process.version}`,
+        `Platform: ${process.platform} ${process.arch}`,
+        `Shell: ${process.platform === "win32" ? "PowerShell" : "Bash"}`,
+        `Workspace: ${process.cwd()}`,
+        `Sandbox backend: ${sandbox.backend}`,
+        `Sandbox profile: ${sandbox.permissionProfile}`,
+        `Shell network: ${sandbox.networkMode}`,
+      ];
+      try {
+        await fs.access(resolveCodexCliPath());
+        lines.push("Sandbox executable: ready");
+      } catch (error) {
+        lines.push(`Sandbox executable: unavailable (${error instanceof Error ? error.message : String(error)})`);
+      }
+      if (!live) {
+        lines.push("Model request: not run (use /doctor --live)");
+        return lines.join("\n");
+      }
+      if (!model) {
+        lines.push("Model request: unavailable (select a model first)");
+        return lines.join("\n");
+      }
+      const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
+      try {
+        const response = await runtime.responses.create({
+          model: model.model_name,
+          instructions: "This is a bounded connectivity check. Reply with OK only.",
+          input: "OK",
+          max_output_tokens: 16,
+        }, { maxRetries: 0, ...(signal ? { signal } : {}) });
+        lines.push(`Model request: ${response.output_text.trim() ? "completed" : "completed without text"}`);
+      } catch (error) {
+        lines.push(`Model request: failed\n${modelErrorGuidance(error)}`);
+      }
+      return lines.join("\n");
     },
     async changeWorkspace(workspacePath) {
       const stats = await fs.stat(workspacePath);

@@ -9,6 +9,7 @@ import type { BashResult } from "../../../src/tools/bash.js";
 import type { PermissionPolicy } from "../../../src/permissions/policy.js";
 import { GoalRuntime } from "../../../src/goal/runtime.js";
 import type { SessionGoal } from "../../../src/storage/session-store.js";
+import { resolveProviderCapabilities } from "../../../src/providers/capabilities.js";
 
 function bashResult(stdout: string): BashResult {
   return { stdout, stderr: "", exitCode: 0, signal: null };
@@ -146,6 +147,38 @@ test("agent uses the native compaction output as the next context window", async
   assert.ok(createInputs[0]?.some((item) => item.type === "compaction"));
   assert.ok(createInputs[0]?.some((item) => item.role === "user" && item.content === "next question"));
   assert.ok(!createInputs[0]?.some((item) => item.content === "old context"));
+});
+
+test("DeepSeek summary compaction keeps the latest two interaction units", async () => {
+  let request: Record<string, unknown> | undefined;
+  const agent = new ReactAgent({
+    model: "deepseek-flash",
+    providerCapabilities: resolveProviderCapabilities("https://api.deepseek.com"),
+    initialHistory: [
+      { role: "user", content: "old request" },
+      { type: "message", role: "assistant", content: "old answer" },
+      { role: "user", content: "recent one" },
+      { type: "message", role: "assistant", content: "recent answer" },
+      { role: "user", content: "recent two" },
+    ],
+    client: { responses: { async create(params) {
+      request = params;
+      return {
+        id: "summary",
+        output_text: "Old requirement and verified evidence.",
+        output: [],
+        usage: { input_tokens: 20, output_tokens: 5, total_tokens: 25 },
+      };
+    } } },
+    io: { async confirmBash() { return true; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+  const result = await agent.compact();
+  assert.equal(request?.max_output_tokens, 8_192);
+  assert.deepEqual(request?.reasoning, { effort: "none" });
+  assert.match(String((result.items[0]?.content as Array<Record<string, unknown>>)?.[0]?.text), /Host-maintained conversation summary/u);
+  assert.ok(result.items.some((item) => item.content === "recent one"));
+  assert.ok(result.items.some((item) => item.content === "recent two"));
+  assert.ok(!result.items.some((item) => item.content === "old request"));
 });
 
 test("automatic compaction runs at the known context threshold before sampling", async () => {
@@ -1127,6 +1160,7 @@ test("agent sends a stable prompt cache key and reports cached usage details", a
     output_tokens: 10,
     total_tokens: 110,
     cached_input_tokens: 80,
+      cache_observed_input_tokens: 100,
     cache_write_input_tokens: 20,
   }]);
 });

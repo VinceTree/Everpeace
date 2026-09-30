@@ -18,8 +18,10 @@ const snapshot = {
   input_tokens: 12_345,
   output_tokens: 2_345,
   cached_input_tokens: 10_000,
+  cache_observed_input_tokens: 12_345,
   cache_write_input_tokens: 2_345,
   cache_usage_complete: true,
+  cache_write_usage_complete: true,
   usage_complete: true,
 };
 

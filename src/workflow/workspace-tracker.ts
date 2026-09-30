@@ -31,6 +31,8 @@ export interface WorkspaceChangeObservation {
   available: boolean;
   complete: boolean;
   changedPaths: string[];
+  /** Opaque digest of the current scoped Git status and file contents. */
+  revision?: string;
   reason?: string;
 }
 
@@ -39,9 +41,9 @@ function inside(root: string, target: string): boolean {
   return relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`));
 }
 
-function runGitStatus(workspacePath: string): Promise<GitResult> {
+function runGit(workspacePath: string, args: readonly string[]): Promise<GitResult> {
   return new Promise((resolve) => {
-    const child = spawn("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=no"], {
+    const child = spawn("git", [...args], {
       cwd: workspacePath,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
@@ -62,6 +64,20 @@ function runGitStatus(workspacePath: string): Promise<GitResult> {
     child.once("error", (error) => resolve({ exitCode: null, stdout: Buffer.concat(stdout), stderr: error.message, truncated }));
     child.once("close", (exitCode) => resolve({ exitCode, stdout: Buffer.concat(stdout), stderr, truncated }));
   });
+}
+
+async function resolveGitRoot(workspacePath: string): Promise<{ root?: string; workspace?: string; reason?: string }> {
+  const result = await runGit(workspacePath, ["rev-parse", "--show-toplevel"]);
+  if (result.exitCode !== 0) return { reason: result.stderr.trim() || "Workspace is not a Git repository" };
+  const reportedRoot = result.stdout.toString("utf8").trim();
+  if (!reportedRoot) return { reason: "Git did not report a repository root" };
+  try {
+    const [root, workspace] = await Promise.all([fs.realpath(reportedRoot), fs.realpath(workspacePath)]);
+    if (!inside(root, workspace)) return { reason: "Workspace is outside the reported Git repository" };
+    return { root, workspace };
+  } catch (error) {
+    return { reason: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function parsePorcelainStatus(value: Buffer): Array<{ path: string; status: string }> {
@@ -108,8 +124,18 @@ async function fingerprintPath(root: string, relativePath: string, budget: { byt
   }
 }
 
-async function captureStatus(workspacePath: string): Promise<WorkspaceStatusSnapshot> {
-  const result = await runGitStatus(workspacePath);
+function revisionOf(paths: ReadonlyMap<string, PathState>): string {
+  const hash = createHash("sha256");
+  for (const [name, state] of [...paths].sort(([left], [right]) => left.localeCompare(right))) {
+    hash.update(name).update("\0").update(state.status).update("\0").update(state.fingerprint).update("\0");
+  }
+  return hash.digest("hex");
+}
+
+async function captureStatus(workspacePath: string, gitRoot: string, workspaceRoot: string): Promise<WorkspaceStatusSnapshot> {
+  // The pathspec keeps sibling directories out of the task snapshot. Porcelain
+  // paths are still repository-root relative, so fingerprints must use gitRoot.
+  const result = await runGit(workspacePath, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=no", "--", "."]);
   if (result.exitCode !== 0) {
     return {
       available: false,
@@ -133,9 +159,13 @@ async function captureStatus(workspacePath: string): Promise<WorkspaceStatusSnap
   const paths = new Map<string, PathState>();
   let complete = true;
   for (const record of records) {
-    const fingerprint = await fingerprintPath(workspacePath, record.path, budget);
+    const target = path.resolve(gitRoot, record.path);
+    if (!inside(workspaceRoot, target)) continue;
+    const scopedPath = path.relative(workspaceRoot, target).split(path.sep).join("/");
+    if (!scopedPath) continue;
+    const fingerprint = await fingerprintPath(gitRoot, record.path, budget);
     complete &&= fingerprint.complete;
-    paths.set(record.path, { status: record.status, fingerprint: fingerprint.value });
+    paths.set(scopedPath, { status: record.status, fingerprint: fingerprint.value });
   }
   return {
     available: true,
@@ -149,17 +179,30 @@ async function captureStatus(workspacePath: string): Promise<WorkspaceStatusSnap
 export class WorkspaceChangeTracker {
   readonly #workspacePath: string;
   #baseline: WorkspaceStatusSnapshot | undefined;
+  #gitRoot: string | undefined;
+  #workspaceRoot: string | undefined;
 
   constructor(workspacePath: string) { this.#workspacePath = workspacePath; }
 
   async begin(): Promise<WorkspaceChangeObservation> {
-    this.#baseline = await captureStatus(this.#workspacePath);
+    const context = await resolveGitRoot(this.#workspacePath);
+    this.#gitRoot = context.root;
+    this.#workspaceRoot = context.workspace;
+    this.#baseline = context.root && context.workspace
+      ? await captureStatus(this.#workspacePath, context.root, context.workspace)
+      : { available: false, complete: false, paths: new Map(), reason: context.reason ?? "Workspace tracking is unavailable" };
     return this.#compare(this.#baseline);
   }
 
   async observe(): Promise<WorkspaceChangeObservation> {
     if (!this.#baseline) await this.begin();
-    return this.#compare(await captureStatus(this.#workspacePath));
+    if (!this.#gitRoot || !this.#workspaceRoot) return this.#compare({
+      available: false,
+      complete: false,
+      paths: new Map(),
+      reason: this.#baseline?.reason ?? "Workspace tracking is unavailable",
+    });
+    return this.#compare(await captureStatus(this.#workspacePath, this.#gitRoot, this.#workspaceRoot));
   }
 
   #compare(current: WorkspaceStatusSnapshot): WorkspaceChangeObservation {
@@ -186,7 +229,12 @@ export class WorkspaceChangeTracker {
       const after = current.paths.get(candidate);
       if (before?.status !== after?.status || before?.fingerprint !== after?.fingerprint) changedPaths.add(candidate);
     }
-    return { available: true, complete: true, changedPaths: [...changedPaths].sort((left, right) => left.localeCompare(right)) };
+    return {
+      available: true,
+      complete: true,
+      changedPaths: [...changedPaths].sort((left, right) => left.localeCompare(right)),
+      revision: revisionOf(current.paths),
+    };
   }
 }
 

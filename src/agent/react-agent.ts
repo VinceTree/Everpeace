@@ -55,6 +55,14 @@ import { GOAL_TOOL_DEFINITIONS, type GoalRuntime } from "../goal/runtime.js";
 import { loadProjectContext } from "./project-context.js";
 import { PLAN_INSTRUCTIONS, PLAN_TOOL_DEFINITIONS, parsePlanRequest, parseSubmittedPlan, type AgentMode, type PlanInteraction, type PlanReviewDecision } from "../plan/runtime.js";
 import type { SessionGoal } from "../storage/session-store.js";
+import { boundModelToolOutput } from "./context-limits.js";
+import {
+  defaultModelRequestSettings,
+  requestReasoningEffort,
+  resolveProviderCapabilities,
+  type ModelRequestSettings,
+  type ProviderCapabilities,
+} from "../providers/capabilities.js";
 
 interface ResponseOutputItem extends Record<string, unknown> {
   type: string;
@@ -130,6 +138,7 @@ export interface ResponsesClientLike {
 export interface AgentIO {
   getSessionId?(): string | undefined;
   getPermissions?(): PermissionPolicy;
+  isToolExecutionBlocked?(): boolean;
   confirmBash(command: string): Promise<boolean>;
   confirmPatch?(summary: string): Promise<boolean>;
   previewPatch?(operations: readonly ApplyPatchOperation[]): Promise<ApplyPatchPreview>;
@@ -179,6 +188,8 @@ export interface ReactAgentOptions {
   goalRuntime?: GoalRuntime;
   initialHistory?: readonly Record<string, unknown>[];
   contextWindow?: number | null;
+  providerCapabilities?: ProviderCapabilities;
+  requestSettings?: ModelRequestSettings;
   initialContextTokens?: number | null;
   onHistoryAppend?(items: readonly Record<string, unknown>[]): Promise<void>;
   onContextCompacted?(
@@ -310,8 +321,12 @@ export class ReactAgent {
   #goalPrompt = "";
   #projectContext = "";
   #pendingGoalCompletion = false;
+  #historyRevision = 0;
+  #lastCompactedRevision = -1;
   #contextWindow: number | null;
   #contextTokens: number | null;
+  readonly #providerCapabilities: ProviderCapabilities;
+  #requestSettings: ModelRequestSettings;
   #compacting = false;
   #responseTransport: "stream" | "buffered";
   #advancedPromptCacheEnabled: boolean;
@@ -350,18 +365,32 @@ export class ReactAgent {
     this.#learnedMemory?.setPolicy?.(options.learnedMemoryPolicy ?? {});
     this.#planInteraction = options.planInteraction;
     this.#goalRuntime = options.goalRuntime;
-    this.#history = repairToolContext(options.initialHistory ?? []);
+    this.#history = repairToolContext(options.initialHistory ?? []).map((item) =>
+      item.type === "function_call_output" && typeof item.output === "string"
+        ? { ...item, output: boundModelToolOutput(item.output) }
+        : item);
     this.#onHistoryAppend = options.onHistoryAppend;
     this.#onContextCompacted = options.onContextCompacted;
     this.#onUsage = options.onUsage;
     this.#contextWindow = options.contextWindow ?? null;
     this.#contextTokens = options.initialContextTokens ?? null;
+    this.#providerCapabilities = options.providerCapabilities ?? resolveProviderCapabilities("https://api.openai.com/v1");
+    this.#requestSettings = options.requestSettings ?? defaultModelRequestSettings(this.#providerCapabilities);
     this.#responseTransport = options.client.responses.stream ? "stream" : "buffered";
   }
 
   async compact(signal?: AbortSignal): Promise<ContextCompactionResult> {
     if (this.#running) throw new Error("Cannot compact while an agent turn is running");
     return this.#compactContext(false, signal);
+  }
+
+  setRequestSettings(settings: ModelRequestSettings): void {
+    if (this.#running) throw new Error("Request settings can only change between turns");
+    this.#requestSettings = { ...settings };
+  }
+
+  getRequestSettings(): ModelRequestSettings {
+    return { ...this.#requestSettings };
   }
 
   async runTurn(userInput: string, signal?: AbortSignal, options: AgentTurnOptions = {}): Promise<AgentTurnResult> {
@@ -417,7 +446,6 @@ export class ReactAgent {
             if (stopped) throw new LoopStoppedError(stopped);
             if (
               contextRecoveryRemaining > 0 &&
-              this.#client.responses.compact !== undefined &&
               isContextLimitError(error)
             ) {
               contextRecoveryRemaining -= 1;
@@ -543,12 +571,19 @@ export class ReactAgent {
     const copies = items.map((item) => ({ ...item }));
     this.#history.push(...copies);
     this.#turnItems?.push(...copies);
+    if (copies.length > 0) this.#historyRevision += 1;
   }
 
   async #dispatchTool(call: ToolCall, signal?: AbortSignal): Promise<string | { output: string; stop?: boolean }> {
     signal?.throwIfAborted();
     if (!this.#stepToolNames.has(call.name)) {
       return JSON.stringify({ status: "denied", error: `Tool is unavailable in the current step: ${call.name}` });
+    }
+    if (this.#io.isToolExecutionBlocked?.()) {
+      return {
+        output: JSON.stringify({ status: "blocked", error: "The coding workflow reached its repair limit. Start a new user task before running more tools." }),
+        stop: true,
+      };
     }
     const policy = this.#io.getPermissions?.() ?? defaultPermissions();
     let output: string;
@@ -839,11 +874,34 @@ export class ReactAgent {
   }
 
   async #maybeAutoCompact(signal?: AbortSignal): Promise<void> {
+    const estimatedTokens = Math.ceil(Buffer.byteLength(JSON.stringify({
+      history: this.#history,
+      tools: this.#stepTools,
+      project: this.#projectContext,
+      memory: this.#learnedPrompt,
+      goal: this.#goalPrompt,
+    }), "utf8") / 4);
+    const measuredTokens = this.#contextWindow !== null && this.#contextWindow >= 10_000
+      ? Math.max(this.#contextTokens ?? 0, estimatedTokens)
+      : this.#contextTokens ?? 0;
+    const headroom = this.#contextWindow === null
+      ? 0
+      : Math.min(Math.floor(this.#contextWindow * 0.05), 32_768);
+    const outputBudget = this.#contextWindow === null
+      ? this.#requestSettings.maxOutputTokens
+      : Math.min(this.#requestSettings.maxOutputTokens, Math.floor(this.#contextWindow * 0.2));
+    const threshold = this.#contextWindow === null
+      ? null
+      : Math.min(
+          Math.floor(this.#contextWindow * 0.8),
+          Math.max(0, this.#contextWindow - outputBudget - headroom),
+        );
     if (
       this.#compacting ||
       this.#contextWindow === null ||
-      this.#contextTokens === null ||
-      this.#contextTokens < Math.floor(this.#contextWindow * 0.8)
+      threshold === null ||
+      this.#lastCompactedRevision === this.#historyRevision ||
+      measuredTokens < threshold
     ) return;
     await this.#compactContext(true, signal);
   }
@@ -854,29 +912,14 @@ export class ReactAgent {
   ): Promise<ContextCompactionResult> {
     if (this.#compacting) throw new Error("Context compaction is already running");
     if (this.#history.length === 0) throw new Error("There is no conversation context to compact");
-    const compact = this.#client.responses.compact;
-    if (!compact) throw new Error("This provider does not support Responses context compaction");
     this.#compacting = true;
     const compactionStarted = performance.now();
     this.#onEvent?.({ type: "compaction_started", automatic });
     try {
       const input = repairToolContext(this.#history);
-      let response;
-      try {
-        const cache = this.#promptCacheRequest(this.#advancedPromptCacheEnabled);
-        response = await compact(
-          { model: this.#model, input, ...cache.params },
-          { maxRetries: 0, ...(signal ? { signal } : {}), ...cache.options },
-        );
-      } catch (error) {
-        if (signal?.aborted || !this.#advancedPromptCacheEnabled || !isUnsupportedPromptCacheOptionsError(error)) throw error;
-        this.#advancedPromptCacheEnabled = false;
-        const cache = this.#promptCacheRequest(false);
-        response = await compact(
-          { model: this.#model, input, ...cache.params },
-          { maxRetries: 0, ...(signal ? { signal } : {}), ...cache.options },
-        );
-      }
+      const response = this.#providerCapabilities.compaction === "native"
+        ? await this.#nativeCompact(input, signal)
+        : await this.#summaryCompact(input, signal);
       if (!Array.isArray(response.output) || !response.output.every((item) => item && typeof item === "object" && !Array.isArray(item))) {
         throw new Error("The compaction response returned an invalid context window");
       }
@@ -885,6 +928,7 @@ export class ReactAgent {
       signal?.throwIfAborted();
       await persistState("Compaction persistence failed", () => this.#onContextCompacted?.(items, automatic, usage));
       this.#history = items;
+      this.#lastCompactedRevision = this.#historyRevision;
       this.#contextTokens = null;
       await this.#recordGoalUsage(usage);
       const result = { items, usage };
@@ -901,6 +945,64 @@ export class ReactAgent {
       this.#onEvent?.({ type: "timing_recorded", operation: "compaction", durationMs: performance.now() - compactionStarted });
       this.#compacting = false;
     }
+  }
+
+  async #nativeCompact(
+    input: Array<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): Promise<{ output: Array<Record<string, unknown>>; usage?: unknown }> {
+    const compact = this.#client.responses.compact;
+    if (!compact) throw new Error("The provider declared native compaction but did not expose it");
+    try {
+      const cache = this.#promptCacheRequest(this.#advancedPromptCacheEnabled);
+      return await compact(
+        { model: this.#model, input, ...cache.params },
+        { maxRetries: 0, ...(signal ? { signal } : {}), ...cache.options },
+      );
+    } catch (error) {
+      if (signal?.aborted || !this.#advancedPromptCacheEnabled || !isUnsupportedPromptCacheOptionsError(error)) throw error;
+      this.#advancedPromptCacheEnabled = false;
+      const cache = this.#promptCacheRequest(false);
+      return compact(
+        { model: this.#model, input, ...cache.params },
+        { maxRetries: 0, ...(signal ? { signal } : {}), ...cache.options },
+      );
+    }
+  }
+
+  async #summaryCompact(
+    input: Array<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): Promise<{ output: Array<Record<string, unknown>>; usage?: unknown }> {
+    const userIndexes = input.flatMap((item, index) =>
+      item.role === "user" || (item.type === "message" && item.role === "user") ? [index] : []);
+    const cut = userIndexes.length > 2 ? userIndexes.at(-2)! : 0;
+    if (cut === 0) {
+      throw new Error("At least three interaction units are required for summary compaction");
+    }
+    const prefix = input.slice(0, cut);
+    const recent = repairToolContext(input.slice(cut));
+    const effort = requestReasoningEffort(this.#providerCapabilities, "off");
+    const response = await this.#client.responses.create({
+      model: this.#model,
+      instructions: "Summarize the supplied conversation for another coding model. Preserve user requirements, project rules, decisions, file changes, verified command evidence, failures, and remaining work. Keep tool calls and results paired. Never upgrade an assistant claim into a verified fact. Return only the summary.",
+      input: prefix,
+      max_output_tokens: 8_192,
+      ...(effort ? { reasoning: { effort } } : {}),
+    }, { maxRetries: 0, ...(signal ? { signal } : {}) });
+    const summary = response.output_text.trim();
+    if (!summary) throw new Error("The summary request returned no text");
+    return {
+      output: [
+        {
+          type: "message",
+          role: "developer",
+          content: [{ type: "input_text", text: `Host-maintained conversation summary:\n${summary}` }],
+        },
+        ...recent,
+      ],
+      ...(response.usage === undefined ? {} : { usage: response.usage }),
+    };
   }
 
   async #createResponse(
@@ -980,15 +1082,24 @@ export class ReactAgent {
           ...input,
         ]
       : input;
+    const reasoningEffort = requestReasoningEffort(
+      this.#providerCapabilities,
+      this.#requestSettings.reasoningEffort,
+    );
     const params = {
         model: this.#model,
         ...(useAdvancedLayout ? {} : { instructions: `${stableInstructions}\n${dynamicInstructions}` }),
         input: requestInput,
         tools: structuredClone(this.#stepTools),
         tool_choice: "auto",
-        parallel_tool_calls: this.#parallelToolCalls,
-        store: false,
-        include: ["reasoning.encrypted_content"],
+        ...(this.#providerCapabilities.provider === "openai"
+          ? { parallel_tool_calls: this.#parallelToolCalls, store: false }
+          : {}),
+        ...(this.#providerCapabilities.encryptedReasoning
+          ? { include: ["reasoning.encrypted_content"] }
+          : {}),
+        max_output_tokens: this.#requestSettings.maxOutputTokens,
+        ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
         ...cache.params,
       };
     const options = { maxRetries: 0, ...(signal ? { signal } : {}), ...cache.options };

@@ -7,6 +7,7 @@ import {
 } from "../../../providers/openai-compatible.js";
 import type { RegisteredModel } from "../../../storage/model-registry.js";
 import type { TuiDependencies } from "../../app/types.js";
+import { providerKind } from "../../../providers/capabilities.js";
 
 type LoginStep = "provider" | "base-url" | "api-key" | "loading" | "model" | "saving";
 
@@ -96,7 +97,10 @@ export function LoginWizard({
         if (availableModels.length === 0) {
           throw new Error("The endpoint returned no models");
         }
-        setModels(availableModels);
+        const ordered = providerKind(baseUrl) === "deepseek" && availableModels.includes("deepseek-flash")
+          ? ["deepseek-flash", ...availableModels.filter((model) => model !== "deepseek-flash")]
+          : availableModels;
+        setModels(ordered);
         setStep("model");
       })
       .catch((caught: unknown) => {

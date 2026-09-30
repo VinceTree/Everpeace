@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { AuthStorage } from "./auth-storage.js";
+import { isModelRequestSettings, type ModelRequestSettings } from "../providers/capabilities.js";
 
 const REGISTRY_VERSION = 1;
 
@@ -13,6 +14,7 @@ export interface StoredModelRegistration {
   auth_ref: string;
   created_at: string;
   updated_at: string;
+  request_settings?: ModelRequestSettings;
 }
 
 export interface RegisteredModel {
@@ -20,6 +22,7 @@ export interface RegisteredModel {
   model_name: string;
   base_url: string;
   api_key: string;
+  request_settings?: ModelRequestSettings;
 }
 
 export interface RegisteredModelStatus extends StoredModelRegistration {
@@ -75,6 +78,7 @@ function isStoredRegistration(value: unknown): value is StoredModelRegistration 
     isString(record.auth_ref) &&
     isString(record.created_at) &&
     isString(record.updated_at)
+    && (record.request_settings === undefined || isModelRequestSettings(record.request_settings))
   );
 }
 
@@ -148,6 +152,7 @@ export class ModelRegistry {
           model_name: model.model_name,
           base_url: model.base_url,
           api_key: apiKey,
+          ...(model.request_settings ? { request_settings: { ...model.request_settings } } : {}),
         });
       }
     }

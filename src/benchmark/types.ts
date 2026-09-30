@@ -88,6 +88,16 @@ export interface BenchmarkHarnessResult {
   unsafeActions?: number;
   notes?: string;
   capabilities?: BenchmarkProviderCapabilities;
+  usage?: BenchmarkTokenUsage;
+}
+
+export interface BenchmarkTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens?: number;
+  cachedInputTokens?: number;
+  cacheObservedInputTokens?: number;
+  complete: boolean;
 }
 
 export interface BenchmarkArtifactSink {
@@ -104,6 +114,7 @@ export interface BenchmarkHarnessContext {
   readonly onPhase: (phase: LoopPhase) => void;
   readonly onEvent: (event: LoopEvent) => void;
   readonly writeArtifact?: (name: string, content: string) => Promise<string | undefined>;
+  readonly tokenBudgetRemaining?: number;
 }
 
 export interface BenchmarkHarnessAdapter {
@@ -140,6 +151,8 @@ export interface BenchmarkRunResult {
   capabilities?: BenchmarkProviderCapabilities;
   error?: string;
   notes?: string;
+  usage?: BenchmarkTokenUsage;
+  repetition?: number;
 }
 
 export interface BenchmarkSuiteSummary {
@@ -161,4 +174,6 @@ export interface BenchmarkSuiteSummary {
   totalManualInterventions: number;
   unsafeActions: number;
   results: readonly BenchmarkRunResult[];
+  repetitions?: number;
+  usage?: BenchmarkTokenUsage;
 }

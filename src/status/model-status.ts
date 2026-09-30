@@ -4,6 +4,8 @@ export interface TokenUsageSample {
   total_tokens: number;
   cached_input_tokens?: number;
   cache_write_input_tokens?: number;
+  cache_observed_input_tokens?: number;
+  reasoning_tokens?: number;
 }
 
 export interface SessionUsage {
@@ -12,7 +14,10 @@ export interface SessionUsage {
   context_tokens: number | null;
   cached_input_tokens?: number;
   cache_write_input_tokens?: number;
+  cache_observed_input_tokens?: number;
+  reasoning_tokens?: number;
   cache_usage_complete?: boolean;
+  cache_write_usage_complete?: boolean;
   complete: boolean;
 }
 
@@ -34,7 +39,13 @@ export interface StatusSnapshot {
   output_tokens: number;
   cached_input_tokens?: number;
   cache_write_input_tokens?: number;
+  cache_observed_input_tokens?: number;
+  reasoning_tokens?: number;
   cache_usage_complete?: boolean;
+  cache_write_usage_complete?: boolean;
+  protocol?: "responses";
+  compaction?: "native" | "summary";
+  reasoning_effort?: "off" | "low" | "high" | "max";
   usage_complete: boolean;
 }
 
@@ -176,34 +187,44 @@ export function applyUsageSample(
       context_tokens: null,
       complete: false,
     };
-    if (current.cache_usage_complete !== undefined) next.cache_usage_complete = false;
+    next.cache_usage_complete = false;
+    next.cache_write_usage_complete = false;
     return next;
   }
 
   const cachedInputTokens = sample.cached_input_tokens;
   const cacheWriteInputTokens = sample.cache_write_input_tokens;
-  const cacheDetailsAvailable =
-    isTokenCount(cachedInputTokens) &&
-    isTokenCount(cacheWriteInputTokens);
+  const cachedAvailable = isTokenCount(cachedInputTokens);
+  const cacheWriteAvailable = isTokenCount(cacheWriteInputTokens);
+  const hadPriorSample = current.input_tokens > 0 || current.output_tokens > 0 || current.context_tokens === null;
 
   const next: SessionUsage = {
     input_tokens: current.input_tokens + sample.input_tokens,
     output_tokens: current.output_tokens + sample.output_tokens,
     context_tokens: sample.total_tokens,
     complete: current.complete,
+    ...(current.reasoning_tokens === undefined && sample.reasoning_tokens === undefined
+      ? {}
+      : { reasoning_tokens: (current.reasoning_tokens ?? 0) + (sample.reasoning_tokens ?? 0) }),
   };
-  if (cacheDetailsAvailable) {
+  if (cachedAvailable) {
     next.cached_input_tokens = (current.cached_input_tokens ?? 0) + cachedInputTokens;
-    next.cache_write_input_tokens = (current.cache_write_input_tokens ?? 0) + cacheWriteInputTokens;
-    next.cache_usage_complete = true;
-  } else if (current.cache_usage_complete !== undefined) {
-    if (current.cached_input_tokens !== undefined) {
-      next.cached_input_tokens = current.cached_input_tokens;
-    }
-    if (current.cache_write_input_tokens !== undefined) {
-      next.cache_write_input_tokens = current.cache_write_input_tokens;
-    }
+    next.cache_observed_input_tokens = (current.cache_observed_input_tokens ?? 0) +
+      (sample.cache_observed_input_tokens ?? sample.input_tokens);
+    next.cache_usage_complete = current.cache_usage_complete === false ||
+      (hadPriorSample && current.cache_usage_complete === undefined) ? false : true;
+  } else {
+    if (current.cached_input_tokens !== undefined) next.cached_input_tokens = current.cached_input_tokens;
+    if (current.cache_observed_input_tokens !== undefined) next.cache_observed_input_tokens = current.cache_observed_input_tokens;
     next.cache_usage_complete = false;
+  }
+  if (cacheWriteAvailable) {
+    next.cache_write_input_tokens = (current.cache_write_input_tokens ?? 0) + cacheWriteInputTokens;
+    next.cache_write_usage_complete = current.cache_write_usage_complete === false ||
+      (hadPriorSample && current.cache_write_usage_complete === undefined) ? false : true;
+  } else {
+    if (current.cache_write_input_tokens !== undefined) next.cache_write_input_tokens = current.cache_write_input_tokens;
+    next.cache_write_usage_complete = false;
   }
   return next;
 }
@@ -225,7 +246,9 @@ export function isTokenUsageSample(value: unknown): value is TokenUsageSample {
   const record = value as unknown as Record<string, unknown>;
   return [record.input_tokens, record.output_tokens, record.total_tokens].every(isTokenCount) &&
     (record.cached_input_tokens === undefined || isTokenCount(record.cached_input_tokens)) &&
-    (record.cache_write_input_tokens === undefined || isTokenCount(record.cache_write_input_tokens));
+    (record.cache_write_input_tokens === undefined || isTokenCount(record.cache_write_input_tokens)) &&
+    (record.cache_observed_input_tokens === undefined || isTokenCount(record.cache_observed_input_tokens)) &&
+    (record.reasoning_tokens === undefined || isTokenCount(record.reasoning_tokens));
 }
 
 export function normalizeTokenUsageSample(value: unknown): TokenUsageSample | null {
@@ -241,10 +264,23 @@ export function normalizeTokenUsageSample(value: unknown): TokenUsageSample | nu
     const inputDetails = details as Record<string, unknown>;
     if (isTokenCount(inputDetails.cached_tokens)) {
       normalized.cached_input_tokens = inputDetails.cached_tokens;
+      normalized.cache_observed_input_tokens = normalized.input_tokens;
     }
     if (isTokenCount(inputDetails.cache_write_tokens)) {
       normalized.cache_write_input_tokens = inputDetails.cache_write_tokens;
     }
+  }
+  const outputDetails = record.output_tokens_details;
+  if (typeof outputDetails === "object" && outputDetails !== null && !Array.isArray(outputDetails)) {
+    const detailsRecord = outputDetails as Record<string, unknown>;
+    if (isTokenCount(detailsRecord.reasoning_tokens)) normalized.reasoning_tokens = detailsRecord.reasoning_tokens;
+  }
+  if (isTokenCount(record.prompt_cache_hit_tokens)) {
+    normalized.cached_input_tokens = record.prompt_cache_hit_tokens;
+    const misses = isTokenCount(record.prompt_cache_miss_tokens) ? record.prompt_cache_miss_tokens : undefined;
+    normalized.cache_observed_input_tokens = misses === undefined
+      ? normalized.input_tokens
+      : record.prompt_cache_hit_tokens + misses;
   }
   if (isTokenCount(record.cached_input_tokens)) {
     normalized.cached_input_tokens = record.cached_input_tokens;
@@ -252,6 +288,8 @@ export function normalizeTokenUsageSample(value: unknown): TokenUsageSample | nu
   if (isTokenCount(record.cache_write_input_tokens)) {
     normalized.cache_write_input_tokens = record.cache_write_input_tokens;
   }
+  if (isTokenCount(record.cache_observed_input_tokens)) normalized.cache_observed_input_tokens = record.cache_observed_input_tokens;
+  if (isTokenCount(record.reasoning_tokens)) normalized.reasoning_tokens = record.reasoning_tokens;
   return normalized;
 }
 
@@ -294,7 +332,13 @@ export function isStatusSnapshot(value: unknown): value is StatusSnapshot {
     tokenCount(record.output_tokens) &&
     optionalTokenCount(record.cached_input_tokens) &&
     optionalTokenCount(record.cache_write_input_tokens) &&
+    optionalTokenCount(record.cache_observed_input_tokens) &&
+    optionalTokenCount(record.reasoning_tokens) &&
     (record.cache_usage_complete === undefined || typeof record.cache_usage_complete === "boolean") &&
+    (record.cache_write_usage_complete === undefined || typeof record.cache_write_usage_complete === "boolean") &&
+    (record.protocol === undefined || record.protocol === "responses") &&
+    (record.compaction === undefined || record.compaction === "native" || record.compaction === "summary") &&
+    (record.reasoning_effort === undefined || record.reasoning_effort === "off" || record.reasoning_effort === "low" || record.reasoning_effort === "high" || record.reasoning_effort === "max") &&
     typeof record.usage_complete === "boolean"
   );
 }

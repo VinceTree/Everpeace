@@ -34,18 +34,18 @@ function totalTokens(value: number, complete: boolean): string {
 }
 
 function cacheTokens(value: number | undefined, complete: boolean | undefined): string {
-  if (complete !== true || value === undefined) return "N/A";
-  return value.toLocaleString("en-US");
+  if (value === undefined) return "N/A";
+  return `${value.toLocaleString("en-US")}${complete === true ? "" : " (partial)"}`;
 }
 
 function cacheHitRate(snapshot: StatusSnapshot): string {
   if (
-    snapshot.cache_usage_complete !== true ||
     snapshot.cached_input_tokens === undefined ||
-    snapshot.input_tokens === 0
+    snapshot.cache_observed_input_tokens === undefined ||
+    snapshot.cache_observed_input_tokens === 0
   ) return "N/A";
-  const rate = Math.round((snapshot.cached_input_tokens / snapshot.input_tokens) * 100);
-  return `${Math.max(0, Math.min(100, rate))}%`;
+  const rate = Math.round((snapshot.cached_input_tokens / snapshot.cache_observed_input_tokens) * 100);
+  return `${Math.max(0, Math.min(100, rate))}%${snapshot.cache_usage_complete === true ? "" : " (partial)"}`;
 }
 
 function contextStatus(snapshot: StatusSnapshot): string {
@@ -79,6 +79,9 @@ function statusFields(snapshot: StatusSnapshot): StatusField[] {
     { label: "Version", value: `v${snapshot.version}` },
     { label: "Model", value: snapshot.model_name ?? "not selected" },
     { label: "Provider", value: snapshot.provider },
+    { label: "Protocol", value: snapshot.protocol ?? "responses" },
+    { label: "Compaction", value: snapshot.compaction ?? "N/A" },
+    { label: "Reasoning", value: snapshot.reasoning_effort ?? "N/A" },
     {
       label: "Base URL",
       value: snapshot.base_url ?? "N/A",
@@ -104,12 +107,16 @@ function statusFields(snapshot: StatusSnapshot): StatusField[] {
       value: totalTokens(snapshot.output_tokens, snapshot.usage_complete),
     },
     {
+      label: "Reasoning tokens",
+      value: snapshot.reasoning_tokens === undefined ? "N/A" : snapshot.reasoning_tokens.toLocaleString("en-US"),
+    },
+    {
       label: "Cached input",
       value: cacheTokens(snapshot.cached_input_tokens, snapshot.cache_usage_complete),
     },
     {
       label: "Cache writes",
-      value: cacheTokens(snapshot.cache_write_input_tokens, snapshot.cache_usage_complete),
+      value: cacheTokens(snapshot.cache_write_input_tokens, snapshot.cache_write_usage_complete),
     },
     { label: "Cache hit rate", value: cacheHitRate(snapshot) },
   ];

@@ -13,6 +13,15 @@ interface ModelFailure {
   incomplete_details?: unknown;
 }
 
+export type ModelErrorCategory =
+  | "authentication"
+  | "balance"
+  | "rate_limit"
+  | "network"
+  | "context_limit"
+  | "unsupported_capability"
+  | "unknown";
+
 const CONTEXT_LIMIT_CODES = new Set([
   "context_length_exceeded",
   "context_window_exceeded",
@@ -128,6 +137,33 @@ export function isStreamUnsupportedError(error: unknown): boolean {
     STREAM_UNSUPPORTED_STATUSES.has(details.status) &&
     /\bstream(?:ing)?\b/.test(details.text) &&
     /not supported|unsupported|not implemented/.test(details.text);
+}
+
+export function classifyModelError(error: unknown): ModelErrorCategory {
+  const details = metadata(error);
+  if (isContextLimitError(error)) return "context_limit";
+  if (details.status === 401 || details.status === 403 || /invalid api key|authentication|unauthorized/.test(details.text)) return "authentication";
+  if (/insufficient[_ -]?balance|insufficient[_ -]?quota|account balance/.test(`${details.code ?? ""} ${details.type ?? ""} ${details.text}`)) return "balance";
+  if (details.status === 429 || details.code === "rate_limit_exceeded" || details.type === "rate_limit_exceeded") return "rate_limit";
+  if (details.status === 400 || details.status === 404 || details.status === 405 || details.status === 422) {
+    if (/unsupported|not supported|unknown parameter|invalid parameter/.test(details.text)) return "unsupported_capability";
+  }
+  if (/connection|network|dns|econn|fetch failed|socket|timeout/.test(`${details.name ?? ""} ${details.code ?? ""} ${details.text}`)) return "network";
+  return "unknown";
+}
+
+export function modelErrorGuidance(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const hint: Record<ModelErrorCategory, string> = {
+    authentication: "Check the API key for this model with /login.",
+    balance: "Check the provider account balance or quota.",
+    rate_limit: "Wait for the provider limit to reset, then retry.",
+    network: "Check network access, proxy settings, and the configured base URL.",
+    context_limit: "Run /compact or start a new session with less context.",
+    unsupported_capability: "The endpoint rejected a requested Responses capability; review its provider configuration.",
+    unknown: "Review the provider response and configuration.",
+  };
+  return `${message}\n\n${hint[classifyModelError(error)]}`;
 }
 
 export class ResponseStreamIncompleteError extends Error {

@@ -1,5 +1,9 @@
 # Coding Task Benchmarking
 
+The DeepSeek comparison catalog defines ten fixed Node task slots at [benchmark/DEEPSEEK_NODE_TASKS.json](benchmark/DEEPSEEK_NODE_TASKS.json). Its pinned source revisions, prompts, and verification commands are immutable inputs. Before a real comparison, the benchmark maintainer must review and supply the deterministic regression seed used by `prepareRun`; every repetition must create a fresh isolated workspace and apply that seed. The catalog itself never executes preparation code, and the repository does not silently reset an existing checkout.
+
+Real-provider runs are opt-in with `liveApi: true` and require a positive `totalTokenBudget`. A three-run comparison must set `repetitions: 3` and provide `prepareRun`; the runner rejects repeated runs without isolation. Adapters report input, output, reasoning, cache-hit, and observed-cache tokens independently. The suite reports verification rate, duration, repair attempts, token usage, effective cache data, and manual intervention. A missing live run is reported as not accepted, never as an improvement over another harness.
+
 Everpeace 的 benchmark 层用于比较不同 harness、模型策略和恢复策略在真实 coding task 上的表现。它不修改 Session JSONL，不启动 TUI，也不改变 Agent 的权限边界。
 
 ## Task format
@@ -82,6 +86,6 @@ suite 按任务顺序运行，每个任务独立记录结果，并汇总完成�
 
 使用 `createProviderCapabilityProfile()` 记录 provider/model、context window、streaming、stream recovery、native compaction、prompt cache 和 parallel tool calls。未知兼容端点默认保持保守的 false/null，不自动路由模型；只有 benchmark 观测数据稳定后再引入自动选择策略。
 
-第一阶段建议从 15-20 个公开 issue 任务开始，固定 commit、准备脚本、prompt、验证命令和模型配置后再比较不同 harness。
+当前首轮比较固定为上述 10 个任务；只有在每项 seed、准备步骤、prompt、验证命令和模型配置都经过复核后才执行真实 provider 对比，后续再扩大任务集。
 
 公开 issue catalog 可用 `parseBenchmarkTaskCatalog()` 从 JSON 读取。解析器只校验 HTTPS 仓库 URL、固定 commit SHA、issue 标识、验证命令和尝试边界，不执行准备脚本、安装命令或验证命令；实际准备由受信任的 benchmark runner/CI 步骤负责。

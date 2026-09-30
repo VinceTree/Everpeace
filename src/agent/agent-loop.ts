@@ -3,6 +3,7 @@
 // Copyright 2025 OpenAI. Licensed under Apache-2.0; see third_party/codex/LICENSE.
 import { setTimeout as delay } from "node:timers/promises";
 import { PersistenceError } from "../storage/persistence-error.js";
+import { boundModelToolOutput } from "./context-limits.js";
 import type { TokenUsageSample } from "../status/model-status.js";
 export interface LoopResponse {
   output: Array<Record<string, unknown>>;
@@ -367,7 +368,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         }
         for (const result of results) {
           if (result.fatal) throw result.fatal;
-          await options.record([{ type: "function_call_output", call_id: result.call.call_id, output: result.output }]);
+          await options.record([{ type: "function_call_output", call_id: result.call.call_id, output: boundModelToolOutput(result.output!) }]);
           options.onEvent?.({ type: "tool_finished", call: result.call, output: result.output! });
           options.onEvent?.({ type: "timing_recorded", operation: "tool_execution", durationMs: result.executionMs });
           stopAfterTools ||= result.stop === true;

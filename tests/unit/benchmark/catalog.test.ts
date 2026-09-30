@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { parseBenchmarkTaskCatalog } from "../../../src/benchmark/catalog.js";
 
@@ -53,4 +54,16 @@ test("benchmark catalog rejects unpinned, unsafe, and duplicate tasks", () => {
       verification: { command: "pnpm" },
     },
   ])), /Duplicate benchmark task id/u);
+});
+
+test("DeepSeek Node catalog contains ten pinned tasks", () => {
+  const catalog = readFileSync(
+    new URL("../../../docs/benchmark/DEEPSEEK_NODE_TASKS.json", import.meta.url),
+    "utf8",
+  );
+  const tasks = parseBenchmarkTaskCatalog(catalog);
+
+  assert.equal(tasks.length, 10);
+  assert.equal(new Set(tasks.map((task) => task.id)).size, 10);
+  assert.ok(tasks.every((task) => task.source.commit.length === 40));
 });

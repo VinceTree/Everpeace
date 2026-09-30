@@ -39,6 +39,7 @@ export interface VerificationSuiteResult {
   results: VerificationResult[];
   skipped: VerificationCommand[];
   reason?: string;
+  stale?: boolean;
 }
 
 export type WorkflowResultClassification = "verified" | "unverified" | "failed" | "no_changes";
@@ -51,7 +52,9 @@ export interface WorkflowState {
   changed_paths: string[];
   checkpoint_available: boolean;
   result?: WorkflowResultClassification;
+  result_reason?: string;
   tracking_limited?: boolean;
+  verification_retries?: number;
   last_verification?: VerificationResult;
   last_verification_suite?: VerificationSuiteResult;
   updated_at: string;
@@ -60,6 +63,7 @@ export interface WorkflowState {
 export interface WorkflowPatchFollowup {
   verification?: VerificationResult;
   prompt?: string;
+  blocked?: boolean;
 }
 
 export interface WorkflowReviewResult {

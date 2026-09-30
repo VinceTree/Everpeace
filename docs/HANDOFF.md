@@ -1,3 +1,17 @@
+## 最新执行：DeepSeek-first 个人开发 CLI
+
+状态快照：2026-09-30。本轮在 `0.2.24` 基线上实现 DeepSeek 专用能力层，交付版本为 `0.2.25`。`ProviderCapabilities` 与 `ModelRequestSettings` 明确区分官方 DeepSeek、官方 OpenAI 和未知兼容端点；主 Agent、标题、Skill 草稿、Memory 和摘要统一通过 provider runtime。DeepSeek 保留 Responses reasoning/tool item，不发送 OpenAI 加密 reasoning、prompt-cache、server store 或原生 compact 假设；默认 reasoning 为 high，主请求输出上限 32K，登录列表存在 `deepseek-flash` 时优先显示且不改写服务端 ID。
+
+修复工作流三个边界：诊断预算只按实际诊断轮计数，三轮耗尽后所有工具与 Goal 完成都停止；Git 子目录将仓库 status 路径正确映射到当前工作区并排除兄弟目录；最终 suite 在执行前后比较内容 revision，变更时重新发现命令并最多完整补跑两次，忽略的未跟踪构建产物不触发过期。现有结构化 undo 和用户脏改动保护保持不变。
+
+DeepSeek/compatible 长 context 改用模型摘要，最多 8K 输出并保留最近两个完整交互单元；阈值按 80%、输出预算和 5%/32K 安全余量共同计算，context-limit 每轮只恢复一次。模型看到的单项工具结果最多 32 KiB，终端输出不缩小。Usage 独立累计 input/output/reasoning/cache hit/cache write 和有效 cache 分母，缺字段不会抹掉其他统计。
+
+TUI 新增 `/reasoning off|low|high|max`、`/doctor [--live]`、Thinking 耗时和 model/reasoning 状态栏；`/status` 显示实际 Responses 协议、native/summary 压缩、推理 token 及 partial cache 命中率。`/doctor` 默认不联网，`--live` 才发送 16-token 上限诊断。认证、余额、限流、网络、context 和不支持能力提供分类提示。含加密/不透明 context 的 Session 不跨供应商静默迁移。
+
+Benchmark runner 新增 live API 显式开关、总 token 预算、隔离 `prepareRun`、重复次数及 token/cache 汇总；十项固定 Node catalog 位于 `docs/benchmark/DEEPSEEK_NODE_TASKS.json`。真实 API benchmark、真实 Windows Terminal 的失败→修复→全通过、Ctrl+C 和 Session 恢复尚未执行，不能宣称优于官方 harness。用户已有 `.gitignore`、`LICENSE` 换行差异和未跟踪目录继续保留。
+
+本轮最终验证在 Windows Node 工具链执行：`pnpm test` 共 356 项，355 通过、1 项按设计跳过、0 失败；`pnpm typecheck` 与 `pnpm build` 通过。排除本轮开始前已有的 `.gitignore`、`LICENSE` CRLF 差异后，`git diff --check -- . ':(exclude).gitignore' ':(exclude)LICENSE'` 通过，新文件尾随空白扫描通过。完整 `git diff --check` 仍只报告这两个用户既有文件的 CRLF 尾随空白；未改写或清理这些改动。`0.2.25` 推送使用 CI 跳过标记，按用户要求不创建 tag 或 GitHub Release。
+
 ## 最新执行：个人开发 Agent 可靠闭环
 
 状态快照：2026-09-29。首批个人开发优化已随 `0.2.24` 提交 `bd582af` 并推送到 `origin/main`：默认提示定位为个人软件开发搭档；每个逻辑 step 安全加载根级 `AGENTS.md` 与 `package.json` scripts。Git 工作区在 turn 开始记录结构化 NUL status 和有界内容指纹，可识别模型 shell 对干净文件、已有脏文件、未跟踪文件、删除及中文路径造成的本轮变化；非 Git shell 和追踪超限失败关闭为未验证，结构化 patch 与 `/undo` 继续使用进程内 SHA-256 检查点。

@@ -70,6 +70,15 @@ import type { LearnedMemoryPolicy, LearnedMemoryStatus, LearnedScope } from "../
 import type { AgentMode, PlanRequest, PlanReviewDecision, SubmittedPlan } from "../../plan/runtime.js";
 import { GoalRuntime, parseGoalCommand } from "../../goal/runtime.js";
 import type { SessionGoal } from "../../storage/session-store.js";
+import { modelErrorGuidance } from "../../agent/response-errors.js";
+import {
+  canReuseOpaqueProviderContext,
+  defaultModelRequestSettings,
+  hasOpaqueProviderContext,
+  isReasoningEffort,
+  resolveProviderCapabilities,
+  type ModelRequestSettings,
+} from "../../providers/capabilities.js";
 
 type View =
   | { kind: "outputs" }
@@ -149,12 +158,23 @@ function infoView(
   return { kind: "info", title, text, tone };
 }
 
-function toSessionModel(model: RegisteredModel): SessionModelRef {
+function toSessionModel(
+  model: RegisteredModel,
+  requestSettings: ModelRequestSettings | undefined = model.request_settings,
+): SessionModelRef {
   return {
     id: model.id,
     model_name: model.model_name,
     base_url: model.base_url,
+    ...(requestSettings ? { request_settings: { ...requestSettings } } : {}),
   };
+}
+
+function settingsForModel(model: RegisteredModel | undefined): ModelRequestSettings {
+  return defaultModelRequestSettings(
+    resolveProviderCapabilities(model?.base_url ?? "", model?.model_name),
+    model?.request_settings,
+  );
 }
 
 function fallbackSessionTitle(firstQuestion: string): string {
@@ -307,6 +327,7 @@ export function EverpeaceApp({
     createEmptySessionUsage(),
   );
   const [activeModel, setActiveModel] = useState(firstActiveModel);
+  const [requestSettings, setRequestSettings] = useState(() => settingsForModel(firstActiveModel));
   const [agentMode, setAgentMode] = useState<AgentMode>("default");
   const [activeGoal, setActiveGoal] = useState<SessionGoal>();
   const [memoryPolicy, setMemoryPolicy] = useState<LearnedMemoryPolicy>({ readExisting: true, captureFuture: true });
@@ -674,6 +695,7 @@ export function EverpeaceApp({
     () => ({
       getSessionId: () => activeSessionId.current,
       getPermissions: () => ({ ...permissions.current }),
+      isToolExecutionBlocked: () => ensureWorkflow().state.phase === "blocked",
       confirmBash: requestBashConfirmation,
       confirmPatch: requestPatchConfirmation,
       confirmWeb: requestWebConfirmation,
@@ -705,6 +727,9 @@ export function EverpeaceApp({
         return ensureWorkflow().afterPatch(operations, result, executeVerification, signal);
       },
       async runBash(command: string, signal?: AbortSignal) {
+        if (ensureWorkflow().state.phase === "blocked") {
+          return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "The coding workflow reached its repair limit" };
+        }
         try {
           return await executeBash(command, signal);
         } finally {
@@ -746,7 +771,7 @@ export function EverpeaceApp({
     () =>
       activeModel === undefined
         ? undefined
-        : dependencies.createAgent(activeModel, agentIo, {
+        : dependencies.createAgent({ ...activeModel, request_settings: requestSettings }, agentIo, {
             initialContext: sessionContext,
             contextWindow,
             initialContextTokens: sessionUsage.context_tokens,
@@ -809,20 +834,26 @@ export function EverpeaceApp({
     agent?.setMemoryPolicy?.(memoryPolicy);
   }, [agent, memoryPolicy]);
 
+  useEffect(() => {
+    agent?.setRequestSettings?.(requestSettings);
+  }, [agent, requestSettings]);
+
   const activateModel = useCallback(
     (model: RegisteredModel, message = `Enabled model ${model.model_name}`) => {
+      const nextSettings = settingsForModel(model);
       clearQueuedGuidance();
       abortController.current?.abort();
       const sessionId = activeSessionId.current;
       if (sessionId !== undefined) {
         void dependencies.sessionStore
-          .selectModel(sessionId, toSessionModel(model), false)
+          .selectModel(sessionId, toSessionModel(model, nextSettings), false)
           .catch((error: unknown) => {
             appendTransient("error", `Session save failed: ${error instanceof Error ? error.message : String(error)}`);
           });
       }
       returnToChat(() => {
         setActiveModel(model);
+        setRequestSettings(nextSettings);
         setSessionContext([]);
         setSessionUsage((current) => resetContextUsage(current, false));
         setSessionEpoch((current) => current + 1);
@@ -1084,14 +1115,27 @@ export function EverpeaceApp({
       const previousWorkspace = workspacePath;
       let changedWorkspace = false;
       try {
+        if (
+          replacementModel &&
+          !canReuseOpaqueProviderContext(loaded.summary.model.base_url, model.base_url) &&
+          hasOpaqueProviderContext(loaded.context)
+        ) {
+          throw new Error("This session contains provider-specific opaque context. Select the original provider or start a new session; the saved session was left unchanged.");
+        }
         const restoredWorkspace = await dependencies.changeWorkspace(
           loaded.summary.workspace_path,
         );
         changedWorkspace = restoredWorkspace !== previousWorkspace;
+        const restoredSettings = defaultModelRequestSettings(
+          resolveProviderCapabilities(model.base_url, model.model_name),
+          replacementModel
+            ? model.request_settings
+            : loaded.summary.model.request_settings ?? model.request_settings,
+        );
         if (replacementModel) {
           await dependencies.sessionStore.selectModel(
             loaded.summary.id,
-            toSessionModel(model),
+            toSessionModel(model, restoredSettings),
             true,
           );
         }
@@ -1139,6 +1183,7 @@ export function EverpeaceApp({
               : { ...loaded.usage },
           );
           setActiveModel(model);
+          setRequestSettings(restoredSettings);
           setAgentMode("default");
           setActiveGoal(loaded.goal);
           setMemoryPolicy(loaded.memoryPolicy ?? { readExisting: true, captureFuture: true });
@@ -1288,7 +1333,7 @@ export function EverpeaceApp({
         title: "New Session",
         titlePending: true,
         workspacePath,
-        model: toSessionModel(activeModel),
+        model: toSessionModel(activeModel, requestSettings),
       });
 
       abortController.current?.abort();
@@ -1323,7 +1368,7 @@ export function EverpeaceApp({
     } finally {
       setBusyLabel(undefined);
     }
-  }, [activeModel, clearQueuedGuidance, dependencies.sessionStore, onReplayOutput, openInfo, workspacePath]);
+  }, [activeModel, clearQueuedGuidance, dependencies.sessionStore, onReplayOutput, openInfo, requestSettings, workspacePath]);
 
   const clearConversation = useCallback(() => {
     clearQueuedGuidance();
@@ -1424,7 +1469,7 @@ export function EverpeaceApp({
     }
     let sessionId = activeSessionId.current;
     if (!sessionId) {
-      const session = await dependencies.sessionStore.create({ title: fallbackSessionTitle(objective), titlePending: false, workspacePath, model: toSessionModel(activeModel) });
+      const session = await dependencies.sessionStore.create({ title: fallbackSessionTitle(objective), titlePending: false, workspacePath, model: toSessionModel(activeModel, requestSettings) });
       sessionId = session.id;
       activeSessionId.current = sessionId;
       sessionTitlePending.current = false;
@@ -1435,7 +1480,7 @@ export function EverpeaceApp({
     returnToChat(() => appendTransient("system", "Goal created; continuing until it is complete, paused, blocked, or limited."));
     setTimeout(() => void runChatRef.current?.(objective, false, "default"), 0);
     setActiveGoal(goal);
-  }, [activeModel, appendTransient, dependencies.sessionStore, openInfo, returnToChat, runtimeForGoal, startTitleGeneration, workspacePath]);
+  }, [activeModel, appendTransient, dependencies.sessionStore, openInfo, requestSettings, returnToChat, runtimeForGoal, startTitleGeneration, workspacePath]);
 
   const handleGoal = useCallback((args: string) => {
     try {
@@ -1459,6 +1504,9 @@ export function EverpeaceApp({
     const metadata = activeModel
       ? resolveModelStatusMetadata(activeModel.base_url, activeModel.model_name)
       : undefined;
+    const capabilities = activeModel
+      ? resolveProviderCapabilities(activeModel.base_url, activeModel.model_name)
+      : undefined;
     enterCommandView({
       kind: "status",
       snapshot: {
@@ -1472,9 +1520,15 @@ export function EverpeaceApp({
         context_tokens: activeModel ? sessionUsage.context_tokens : null,
         input_tokens: sessionUsage.input_tokens,
         output_tokens: sessionUsage.output_tokens,
+        protocol: capabilities?.protocol ?? "responses",
+        ...(capabilities ? { compaction: capabilities.compaction } : {}),
+        reasoning_effort: requestSettings.reasoningEffort,
+        ...(sessionUsage.reasoning_tokens === undefined ? {} : { reasoning_tokens: sessionUsage.reasoning_tokens }),
         ...(sessionUsage.cached_input_tokens === undefined ? {} : { cached_input_tokens: sessionUsage.cached_input_tokens }),
         ...(sessionUsage.cache_write_input_tokens === undefined ? {} : { cache_write_input_tokens: sessionUsage.cache_write_input_tokens }),
+        ...(sessionUsage.cache_observed_input_tokens === undefined ? {} : { cache_observed_input_tokens: sessionUsage.cache_observed_input_tokens }),
         ...(sessionUsage.cache_usage_complete === undefined ? {} : { cache_usage_complete: sessionUsage.cache_usage_complete }),
+        ...(sessionUsage.cache_write_usage_complete === undefined ? {} : { cache_write_usage_complete: sessionUsage.cache_write_usage_complete }),
         usage_complete: sessionUsage.complete,
       },
     });
@@ -1483,8 +1537,70 @@ export function EverpeaceApp({
     dependencies.version,
     enterCommandView,
     sessionUsage,
+    requestSettings,
     workspacePath,
   ]);
+
+  const setReasoning = useCallback((args: string) => {
+    const effort = args.trim().toLowerCase();
+    if (!isReasoningEffort(effort)) {
+      openInfo("/reasoning · Invalid setting", "Use /reasoning off|low|high|max.", "error");
+      return;
+    }
+    if (abortController.current || directController.current) {
+      openInfo("/reasoning · Busy", "Wait for the active task to finish. The setting is captured at the start of a turn.", "error");
+      return;
+    }
+    if (!activeModel || !agent) {
+      openInfo("/reasoning · No model", "Select a model with /login or /model first.", "error");
+      return;
+    }
+    if (!resolveProviderCapabilities(activeModel.base_url, activeModel.model_name).reasoningEffort) {
+      openInfo("/reasoning · Unsupported", "This endpoint and model do not declare a reasoning-effort request capability.", "error");
+      return;
+    }
+    const next = { ...requestSettings, reasoningEffort: effort };
+    agent.setRequestSettings?.(next);
+    setRequestSettings(next);
+    const sessionId = activeSessionId.current;
+    if (sessionId) {
+      void dependencies.sessionStore.selectModel(sessionId, toSessionModel(activeModel, next), true)
+        .catch((error: unknown) => appendTransient("error", `Reasoning setting could not be saved: ${error instanceof Error ? error.message : String(error)}`));
+    }
+    openInfo("/reasoning · Request setting", `Reasoning is ${effort}. The next task will use this setting.`);
+  }, [activeModel, agent, appendTransient, dependencies.sessionStore, openInfo, requestSettings]);
+
+  const runDoctor = useCallback((args: string) => {
+    const normalized = args.trim().toLowerCase();
+    if (normalized && normalized !== "--live") {
+      openInfo("/doctor · Invalid command", "Use /doctor or /doctor --live.", "error");
+      return;
+    }
+    if (!dependencies.doctor) {
+      openInfo("/doctor · Unavailable", "Runtime diagnostics are unavailable in this host.", "error");
+      return;
+    }
+    const controller = new AbortController();
+    const operation = startCommandLoad(
+      "/doctor · Runtime diagnostics",
+      normalized === "--live" ? "Checking runtime and model connectivity" : "Checking local runtime",
+      true,
+      normalized === "--live",
+      () => {
+        controller.abort();
+        returnToChat();
+      },
+    );
+    void dependencies.doctor(activeModel, permissions.current, normalized === "--live", controller.signal)
+      .then((result) => {
+        if (!isCurrentCommandOperation(operation)) return;
+        replaceCommandView(infoView("/doctor · Runtime diagnostics", result));
+      })
+      .catch((error: unknown) => {
+        if (!isCurrentCommandOperation(operation) || controller.signal.aborted) return;
+        replaceCommandView(infoView("/doctor · Diagnostics failed", modelErrorGuidance(error), "error"));
+      });
+  }, [activeModel, dependencies, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad]);
 
   const runCompact = useCallback((args: string) => {
     if (args.trim()) {
@@ -1551,7 +1667,7 @@ export function EverpeaceApp({
             title: fallbackSessionTitle(text),
             titlePending: false,
             workspacePath,
-            model: toSessionModel(activeModel),
+            model: toSessionModel(activeModel, requestSettings),
           });
           activeSessionId.current = session.id;
           sessionTitlePending.current = false;
@@ -1602,7 +1718,13 @@ export function EverpeaceApp({
             await ensureWorkflow().beginTurn({ mode: "default" });
             workflowStarted = true;
           } else if (nextMode === "default" && ensureWorkflow().state.phase === "diagnose") {
-            await ensureWorkflow().startRepairTurn();
+            const repair = await ensureWorkflow().startRepairTurn();
+            if (repair.phase === "blocked") {
+              await agent.finalizePendingGoalCompletion?.(false);
+              await agent.finishMemoryTurn?.("failed");
+              append("system", "Automatic repair stopped after three diagnostic rounds. Start a new task to authorize more changes.");
+              break;
+            }
           }
           const started = Date.now();
           const result = await agent.runTurn(nextText, controller.signal, { mode: nextMode }) ?? {};
@@ -1695,7 +1817,7 @@ export function EverpeaceApp({
           }
           append("system", "Model request cancelled.");
         } else {
-          append("error", `Model request failed: ${error instanceof Error ? error.message : String(error)}`);
+          append("error", `Model request failed: ${modelErrorGuidance(error)}`);
         }
       } finally {
         const ownsController = abortController.current === controller;
@@ -1723,7 +1845,7 @@ export function EverpeaceApp({
         }
       }
     },
-    [activeModel, agent, agentMode, append, appendTransient, clearQueuedGuidance, dependencies.sessionStore, ensureWorkflow, executeVerification, startTitleGeneration, workspacePath],
+    [activeModel, agent, agentMode, append, appendTransient, clearQueuedGuidance, dependencies.sessionStore, ensureWorkflow, executeVerification, requestSettings, startTitleGeneration, workspacePath],
   );
 
   useEffect(() => {
@@ -1852,6 +1974,8 @@ export function EverpeaceApp({
       if (parsed.command === "/verify") void runManualVerification(parsed.args ?? "");
       if (parsed.command === "/undo") void undoWorkflow();
       if (parsed.command === "/compact") runCompact(parsed.args ?? "");
+      if (parsed.command === "/reasoning") setReasoning(parsed.args ?? "");
+      if (parsed.command === "/doctor") runDoctor(parsed.args ?? "");
       if (parsed.command === "/permissions") enterCommandView({ kind: "permissions" });
       if (parsed.command === "/mcp") void showMcp();
       if (parsed.command === "/skills") enterCommandView({ kind: "skills" });
@@ -1913,6 +2037,8 @@ export function EverpeaceApp({
       showMcp,
       showStatus,
       runCompact,
+      setReasoning,
+      runDoctor,
     ],
   );
 
@@ -2243,7 +2369,7 @@ export function EverpeaceApp({
         </Box>
       ) : busyLabel ? (
         <Box flexDirection="column">
-          <Spinner label={`${agentPhase === "tools" ? "Working" : busyLabel}${turnStartedAt === undefined ? "" : ` (${formatElapsed(elapsedSeconds)} • ctrl+c to interrupt)`}`} />
+          <Spinner label={`${agentPhase === "tools" ? "Working" : agentPhase === "sampling" ? `Thinking · ${busyLabel}` : busyLabel}${turnStartedAt === undefined ? "" : ` (${formatElapsed(elapsedSeconds)} • ctrl+c to interrupt)`}`} />
           {liveAssistant ? <Box marginLeft={2}><RichOutput text={liveAssistant} /></Box> : null}
           {liveToolStatus ? <Text color={TUI_COLORS.secondary}>• {liveToolStatus}</Text> : null}
           {queuedGuidanceCount > 0 ? <Text dimColor>{queuedGuidanceCount} guidance message{queuedGuidanceCount === 1 ? "" : "s"} pending</Text> : null}
@@ -2274,6 +2400,7 @@ export function EverpeaceApp({
         modelName={activeModel?.model_name}
         workspacePath={workspacePath}
         mode={agentMode}
+        reasoningEffort={requestSettings.reasoningEffort}
         {...(activeGoal ? { goalStatus: activeGoal.status } : {})}
       />
     </Box>

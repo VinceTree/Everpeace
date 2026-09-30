@@ -5,7 +5,7 @@
 
 [English](./README.md) | **简体中文**
 
-Everpeace 是一个具备较强编程能力、带交互式 TUI 的通用 ReAct agent，支持 DeepSeek、OpenAI 和自定义 OpenAI-compatible API。所选模型可以使用 Codex sandbox 中的 shell、搜索网页、调用已配置的 MCP tool，并加载本机 Codex Skill；你也可以用 `!<command>` 直接运行本地命令。
+Everpeace 是一个 DeepSeek 优先、Windows 优先、带 inline TUI 的个人开发 CLI，同时支持 OpenAI 和自定义 OpenAI-compatible Responses 端点。所选模型可以使用 Codex sandbox 中的 shell、检查并修改工作区、执行项目完整验证、搜索网页、调用已配置的 MCP tool，并加载本机 Codex Skill；你也可以用 `!<command>` 直接运行本地命令。
 
 模型 API Key 不从环境变量读取，也不会写入项目或配置 JSON。Everpeace 使用操作系统凭据库保存 Key，并在本地模型注册表中只保存模型名、base URL 和凭据引用。用户自行配置的 MCP server 可按 Codex MCP 配置通过环境变量名引用 bearer token 或 header；两类凭据边界彼此独立。
 
@@ -39,7 +39,7 @@ pnpm dev
 - OpenAI 官方 API：`https://api.openai.com/v1`
 - 自定义 OpenAI-compatible base URL
 
-API Key 不会显示在终端。验证成功后选择一个服务端返回的原始模型 ID，该模型会被安全保存并立即用于当前会话：
+API Key 不会显示在终端。模型列表加载成功后选择一个服务端返回的原始模型 ID，该模型会被安全保存并立即用于当前会话；如需执行有界的模型生成检查，请使用 `/doctor --live`：
 
 ```text
 /login · 模型登录
@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.2.24) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.25) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -107,7 +107,7 @@ TUI 使用原生 inline 模式，普通滚轮可以浏览已完成的 Everpeace 
 
 Everpeace 还会维护独立的 learned 经验记忆。workflow 验证完成并真实空闲五分钟后，当前模型可在后台提取最多三条带证据候选并整理无冲突经验；持久队列可跨 Agent 重建和进程重启恢复，前台工作会暂停后台请求。只有用户明确表达长期偏好时才写入用户级记忆。记忆位于平台应用状态目录（Windows 为 `%APPDATA%\Everpeace\memory`），不会写入仓库。每个逻辑 Agent step 都会根据当前问题和实际读取文件刷新带 revision 的快照，网络重试复用该快照；主 prompt 只注入不可信短索引，只读 `memory_lookup` 可按 ID 查看脱敏证据。输入在裁剪前脱敏，输出在保存前再次脱敏，无法可靠判断的冲突保留待审；当前用户指令和实际仓库证据始终优先。
 
-`/status` 会打开居中的独立 Codex 风格命令窗口，只显示状态详情和 `Esc` 返回提示。它显示当前模型、根据 `base_url` 识别的供应商、接口地址、工作目录、Session ID、当前 context 占用，以及主 Responses API 循环累计的输入/输出 token、prompt cache 读取量、写入量和命中率。Usage 总量会随 session 持久化并由 `/resume` 恢复，但状态窗口本身不会加入 transcript；恢复后再次执行 `/status` 即可查看累计值。后台标题请求不计入统计。prompt cache 只对官方 OpenAI endpoint 使用按 Session ID 生成的 key；GPT-5.6 及以后型号额外使用隐式缓存与 `30m` TTL，并发送会话亲和性 header。其他兼容端点不会额外发送缓存参数；provider 没有返回缓存详情时显示 `N/A`。已知官方 model ID 使用文档公布的 context 上限，未知型号和自定义兼容端点显示 `N/A`，不会猜测。
+`/status` 会打开居中的独立命令窗口，显示当前模型、实际 Responses 协议、压缩策略、推理档位、接口地址、工作目录、Session ID、context 占用，以及累计输入、输出、推理、缓存命中和缓存写入 token。缓存读取与写入独立统计；命中率只使用供应商确实返回缓存数据的样本，数据不完整时标为 partial。DeepSeek 使用自动前缀缓存，不发送 OpenAI 缓存字段；官方 OpenAI 型号可使用 Session 级缓存 key 和原生压缩。Usage 与请求设置随 Session 持久化，后台标题请求不计入。
 
 输入快捷键与 Codex composer 保持一致：`Enter` 提交，`Shift+Enter`、`Alt+Enter` 或 `Ctrl+J` 换行，`Home`/`End` 与 `Ctrl+A`/`Ctrl+E` 移动到当前行首/行尾，`Ctrl+U`/`Ctrl+K` 删除到当前行首/行尾，`Ctrl+W` 删除前一个词，`Ctrl+Y` 恢复最近删除的内容。方向键、`Ctrl+B/F/P/N` 和 `Alt+B/F` 也可移动光标。
 
@@ -120,7 +120,7 @@ TUI 命令：
 - `/login`：登录并立即启用一个模型。
 - `/model`：切换已注册模型，切换后重置对话上下文。
 - `/models`：查看所有模型和凭据状态。
-- `/status`：查看当前模型、供应商、context window、session token 使用量和 prompt cache 统计。
+- `/status`：查看供应商协议、压缩方式、推理档位、context 占用及独立 token/cache 统计。
 - `/diff`：查看当前工作区的有界 Git 状态和 diff。
 - `/verify [command]`：运行自动发现的工作区检查，或执行显式命令。
 - `/undo`：在文件仍未被用户改动时撤销最新 Agent 回合；不会覆盖用户修改。
@@ -130,7 +130,9 @@ TUI 命令：
 - `/memory`：查看 learned 经验和独立的 Memory 模型用量、全局启用或关闭读取与自动学习、切换当前聊天是否读取或记录 memory、归档或清理条目、使用 `/memory view` 查看最近一次实际注入快照，或使用 `/memory remember <偏好>` 保存长期用户偏好。聊天策略会随 Session 恢复。
 - `/plan`：进入严格只读规划模式，回答结构化策略问题，并在批准计划后执行。执行器会拒绝该 step 未提供的工具，包括编辑和 Goal 写操作。
 - `/goal <目标> [--tokens N]`：创建、查看、暂停、恢复并自动持续执行当前 Session 目标。收到 usage 后达到预算或无法可靠计量时，会停止后续工具、模型请求和自动验证修复，并显示原因；正在进行的单次请求可能超过剩余额度。
-- `/compact`：使用供应商原生的 Responses 压缩接口替换模型 context，同时保留完整可见 transcript 和 Session 历史。模型轮次或直接命令运行时会拒绝执行；已知 context window 达到 80% 后，会在下一次模型请求前自动压缩，明确的 context-limit 响应每轮最多额外触发一次自动恢复压缩。同一步的网络重试不会重复阈值压缩；压缩消耗仍累计，压缩后的 context 占用在下一次模型响应前显示未知。
+- `/compact`：压缩模型 context，同时保留完整可见 transcript。官方 OpenAI 使用原生 Responses 压缩；DeepSeek 和保守的兼容端点使用最多 8K token 的摘要，并保留最近两个完整交互单元及未闭合工具链。自动压缩会预留输出预算与安全余量；确认 context 超限后最多恢复一次，且不会重放工具。
+- `/reasoning off|low|high|max`：设置下一项任务捕获的推理档位，默认 `high`；发送前会受模型能力限制。
+- `/doctor [--live]`：检查 Node、平台、实际 shell、sandbox 后端/profile、网络模式和可执行文件。默认只做本地检查；只有 `--live` 会发送一次有界模型请求。
 - `/outputs`：分页浏览保留输出、已高亮的命令及 unified diff。
 - `/history`：浏览或明确确认后清空全局输入历史，不删除 Session。
 - `/terminal-setup`：预览并可选配置稳定版 Windows Terminal 的 Shift+Enter；确认后先备份设置，再新增全局按键绑定。

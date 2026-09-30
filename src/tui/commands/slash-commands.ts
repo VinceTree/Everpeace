@@ -14,6 +14,8 @@ export const SLASH_COMMANDS = [
   "/plan",
   "/goal",
   "/compact",
+  "/reasoning",
+  "/doctor",
   "/new",
   "/resume",
   "/logout",
@@ -81,6 +83,8 @@ export const TUI_HELP = `Slash commands
   /plan    Enter strict planning mode or plan a request
   /goal    Create, inspect, pause, or resume a session goal
   /compact Compact the model context
+  /reasoning Set off, low, high, or max for the next turn
+  /doctor  Check the local runtime; add --live for one bounded model request
   /new     Create and enter a new session
   /resume  Find, resume, or permanently batch-delete local sessions
   /logout  Remove models and system credentials

@@ -5,7 +5,7 @@ The terminal transcript mirrors Codex's resize-reflow row caps. Source-backed re
 
 **English** | [简体中文](./README.zh-CN.md)
 
-Everpeace is a general-purpose ReAct agent with strong coding abilities and an interactive TUI. It supports DeepSeek, OpenAI, and custom OpenAI-compatible APIs. The selected model can use a Codex-sandboxed shell, search the web, call configured MCP tools, and load local Codex skills. You can also run a local command directly with `!<command>`.
+Everpeace is a DeepSeek-first, Windows-first personal development CLI with an interactive inline TUI. It also supports OpenAI and custom OpenAI-compatible Responses endpoints. The selected model can use a Codex-sandboxed shell, inspect and edit a workspace, run the project's complete verification suite, search the web, call configured MCP tools, and load local Codex skills. You can also run a local command directly with `!<command>`.
 
 Model API keys are never read from environment variables or written to the project or configuration JSON. Everpeace stores them in the operating system credential store. Its local model registry contains only the model name, base URL, and credential reference. Separately, user-configured MCP servers may reference bearer tokens or headers through environment-variable names, following Codex MCP configuration.
 
@@ -39,7 +39,7 @@ After startup, enter `/login`. The TUI login wizard lets you choose a provider, 
 - OpenAI official API: `https://api.openai.com/v1`
 - A custom OpenAI-compatible base URL
 
-The API key is never displayed in the terminal. After validation, select one of the original model IDs returned by the server. Everpeace securely saves it and activates it for the current session:
+The API key is never displayed in the terminal. After the model list loads, select one of the original model IDs returned by the server. Everpeace securely saves it and activates it for the current session; use `/doctor --live` when you want a bounded model-generation check:
 
 ```text
 /login · Model login
@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.2.24) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.2.25) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -107,7 +107,7 @@ The first normal prompt creates a local JSONL session. Everpeace saves the conve
 
 Everpeace also keeps a separate learned-experience memory. After workflow verification and five minutes of real idle time, the current model may extract up to three evidence-linked candidates and consolidate non-conflicting lessons in the background. The persistent queue survives Agent recreation and process restarts; foreground work pauses background requests. Explicit long-term preferences are stored separately at user scope. Memory lives under the platform application-state directory (`%APPDATA%\Everpeace\memory` on Windows), never in the repository. Every logical Agent step refreshes a revisioned snapshot using the current request and files actually read; retries reuse that snapshot. The prompt receives a short untrusted index, while the read-only `memory_lookup` tool can retrieve a selected entry's redacted evidence. Secrets are redacted before truncation and again before storage, conflicts stay pending for review, and current user instructions and repository evidence always take precedence.
 
-`/status` opens a centered, isolated Codex-style command screen showing only status details and `Esc` return guidance. It shows the active model, provider inferred from `base_url`, endpoint, workspace, session ID, current context occupancy, cumulative input/output tokens, and prompt-cache reads, writes, and hit rate reported by the main Responses API loop. Usage totals are persisted with the session and restored by `/resume`, but the status screen itself is never added to the transcript; run `/status` again after restoring to see the recovered totals. Internal title-generation requests are excluded. Prompt caching uses a Session-scoped key only for the official OpenAI endpoint; GPT-5.6 and later models additionally use implicit caching with a `30m` TTL and session-affinity header. Other compatible providers continue without extra cache parameters. When a provider does not return cache details, the cache fields show `N/A`. Known official model IDs use documented context limits, while unknown or custom compatible models show `N/A` instead of a guessed limit.
+`/status` opens a centered, isolated command screen showing the active model, actual Responses protocol, compaction strategy, reasoning level, endpoint, workspace, Session ID, context occupancy, and cumulative input, output, reasoning, cache-hit, and cache-write tokens. Cache reads and writes are tracked independently; a hit rate is calculated only over samples that included cache data and is marked partial when some samples omitted it. DeepSeek uses automatic prefix caching without sending OpenAI cache fields. Official OpenAI models may use a Session-scoped cache key and native compaction. Usage and request settings persist with the Session; title generation is excluded.
 
 Composer shortcuts follow Codex conventions: `Enter` submits; `Shift+Enter`, `Alt+Enter`, or `Ctrl+J` inserts a newline; `Home`/`End` and `Ctrl+A`/`Ctrl+E` move to the current line's start/end; `Ctrl+U`/`Ctrl+K` delete to the current line's start/end; `Ctrl+W` deletes the previous word; and `Ctrl+Y` restores the most recently killed text. Arrow keys, `Ctrl+B/F/P/N`, and `Alt+B/F` also move the cursor.
 
@@ -120,7 +120,7 @@ TUI commands:
 - `/login`: Sign in and activate a model immediately.
 - `/model`: Switch to a registered model and reset the conversation context.
 - `/models`: List all registered models and credential states.
-- `/status`: Show the current model, provider, context window, session token usage, and prompt-cache statistics.
+- `/status`: Show provider protocol, compaction mode, reasoning level, context usage, and independent token/cache statistics.
 - `/diff`: Show the bounded current workspace Git status and diff.
 - `/verify [command]`: Run the discovered workspace check, or an explicit command.
 - `/undo`: Undo the latest Agent turn when its files are unchanged; user edits are never overwritten.
@@ -130,7 +130,9 @@ TUI commands:
 - `/memory`: View learned experience and separate Memory-model usage, globally enable or disable both reading and learning, control reading/capture for the current chat, inspect the last snapshot actually injected with `/memory view`, archive or clear entries, or run `/memory remember <preference>` to save a lasting user preference. Chat policy is restored with its Session.
 - `/plan`: Enter strict read-only planning mode, answer structured strategy questions, and approve a plan before execution. Dispatch rejects tools not offered in that step, including editing and Goal mutations.
 - `/goal <objective> [--tokens N]`: Create, inspect, pause, resume, and automatically continue a persistent session goal. Once returned usage reaches the budget or cannot be measured reliably, further tools, model requests, and automatic verification/repair stop with an explanation. An in-flight request can exceed the remaining budget.
-- `/compact`: Replace the model context with the provider's native compacted context while keeping the full visible transcript and session history. It rejects while a model turn or direct command is active; known context windows compact automatically at 80% usage, and an explicit context-limit response can trigger one additional automatic recovery compaction. Network retries within a step do not repeat threshold compaction. Compaction usage still counts toward consumption; context occupancy remains unknown until the next model response.
+- `/compact`: Compact model context while keeping the full visible transcript. Official OpenAI uses native Responses compaction; DeepSeek and conservative compatible endpoints use an 8K-token summary that retains the latest two complete interaction units and open tool chains. Automatic compaction reserves output and safety headroom, and a confirmed context overflow can recover once without replaying tools.
+- `/reasoning off|low|high|max`: Set the reasoning level captured by the next task. The default is `high`; provider limits are applied before sending the request.
+- `/doctor [--live]`: Inspect Node, platform, actual shell, sandbox backend/profile, network mode, and executable availability. The default is local-only; `--live` sends one bounded connectivity request.
 - `/outputs`: Browse retained command output with paged details, highlighted commands, and unified-diff rendering.
 - `/history`: Browse or explicitly clear global input history (not sessions).
 - `/terminal-setup`: Preview and optionally configure Shift+Enter in stable Windows Terminal; confirmation creates a settings backup before applying a global key binding.

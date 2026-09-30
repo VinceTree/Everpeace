@@ -1,5 +1,15 @@
 # Everpeace Current Plan
 
+## DeepSeek-first personal development CLI
+
+The current implementation keeps the single-Agent inline terminal product and adds an explicit provider contract. Official DeepSeek uses the Responses protocol, plain reasoning/tool items, `high` reasoning by default, a 32K output cap, automatic prefix caching, and host summary compaction. It does not receive OpenAI encrypted-reasoning, prompt-cache, native compact, server-session, or cursor assumptions. Official OpenAI retains its declared native path; unknown compatible endpoints use a conservative summary path. Main turns, titles, Skill drafts, learned memory, and compaction all use the same provider runtime.
+
+Reliability work is complete in code: repair attempts count actual diagnostic turns; the third failed diagnostic blocks every later tool; nested Git workspaces map repository paths into the selected working directory; and final verification compares pre/post content revisions, rediscovers commands, and refreshes a stale suite at most twice. Ignored untracked build output does not stale a result. Session request settings and independent reasoning/cache usage remain backward compatible.
+
+Long-context and terminal work is also implemented: output-aware threshold calculation, two-interaction summary retention, one overflow recovery, 32 KiB model-facing tool results, `/reasoning`, `/doctor`, Thinking duration, provider protocol/compaction/cache status, error guidance, and opaque cross-provider restore refusal. The fixed ten-task Node catalog is in `docs/benchmark/DEEPSEEK_NODE_TASKS.json`; repeated live runs require isolated preparation and a positive total token budget.
+
+Remaining acceptance is external: run the ten tasks three times for `v0.2.24` and `v0.2.25` with the same official DeepSeek model, reasoning setting, and budget; then perform the real Windows Terminal flow for edit → test pass/build fail → repair → all checks pass, Ctrl+C, and Session restore. Until credentials and an interactive Windows Terminal are available, these stay explicitly unverified and no superiority claim is made.
+
 ## 个人开发 Agent 可靠闭环
 
 首批个人开发优化以 Node/TypeScript 单包项目和 Windows 为主：默认 Agent 定位为个人软件开发搭档，每个逻辑 step 安全读取根级 `AGENTS.md` 与 `package.json` scripts；Git 工作区使用结构化 NUL status 和内容指纹把任务开始时的既有脏状态与本轮 shell/patch 变化分开。最终验证重新发现当前 manifest，并串行执行所有已声明的 `typecheck`、`lint`、`test`、`build`，首败停止，修复后重跑完整集合。

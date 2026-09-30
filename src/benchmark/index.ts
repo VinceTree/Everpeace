@@ -17,6 +17,7 @@ export type {
   BenchmarkTask,
   BenchmarkTaskSource,
   BenchmarkTaskPhase,
+  BenchmarkTokenUsage,
   BenchmarkVerification,
   BenchmarkVerificationResult,
   BenchmarkWorkspaceGitSnapshot,
