@@ -170,6 +170,7 @@ export function createDefaultTuiDependencies(
         workspacePath: process.cwd(),
         client,
         model: model.model_name,
+        parallelReadTools: true,
         io,
         providerCapabilities: providerRuntime.capabilities,
         requestSettings: providerRuntime.settings,

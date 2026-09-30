@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import type { BenchmarkWorkspaceGitSnapshot, BenchmarkWorkspaceSnapshot } from "./types.js";
-import { retainOutput } from "../tools/command-record.js";
+import { BoundedOutputBuffer } from "../tools/command-record.js";
 import { stopProcessTree } from "../tools/process-cancel.js";
 
 const MAX_GIT_OUTPUT_BYTES = 2 * 1024 * 1024;
@@ -30,8 +30,8 @@ function runGit(args: readonly string[], cwd: string, signal?: AbortSignal): Pro
       return;
     }
 
-    let stdout = "";
-    let stderr = "";
+    const stdout = new BoundedOutputBuffer(MAX_GIT_OUTPUT_BYTES);
+    const stderr = new BoundedOutputBuffer(MAX_GIT_OUTPUT_BYTES);
     let settled = false;
     const finish = (result: GitCommandResult) => {
       if (settled) return;
@@ -42,19 +42,19 @@ function runGit(args: readonly string[], cwd: string, signal?: AbortSignal): Pro
     const cancel = () => {
       if (child.pid) stopProcessTree(child.pid);
       else child.kill();
-      finish({ exitCode: null, stdout, stderr: `${stderr}\nGit command was cancelled` });
+      finish({ exitCode: null, stdout: stdout.text, stderr: `${stderr.text}\nGit command was cancelled` });
     };
 
     child.stdout?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {
-      stdout = retainOutput(stdout + chunk, MAX_GIT_OUTPUT_BYTES).text;
+      stdout.append(chunk);
     });
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string) => {
-      stderr = retainOutput(stderr + chunk, MAX_GIT_OUTPUT_BYTES).text;
+      stderr.append(chunk);
     });
     child.once("error", reject);
-    child.once("close", (exitCode) => finish({ exitCode, stdout, stderr }));
+    child.once("close", (exitCode) => finish({ exitCode, stdout: stdout.text, stderr: stderr.text }));
     signal?.addEventListener("abort", cancel, { once: true });
     if (signal?.aborted) cancel();
   });
@@ -92,7 +92,9 @@ export async function captureWorkspaceSnapshot(
       runGit(["status", "--porcelain=v1"], workspacePath, options.signal),
       runGit(["diff", "--binary", "--no-ext-diff"], workspacePath, options.signal),
     ]);
-    const diff = retainOutput(diffResult.stdout, MAX_GIT_OUTPUT_BYTES);
+    const diffBuffer = new BoundedOutputBuffer(MAX_GIT_OUTPUT_BYTES);
+    diffBuffer.append(diffResult.stdout);
+    const diff = diffBuffer.result();
     const git: BenchmarkWorkspaceGitSnapshot = {
       root,
       head: headResult.exitCode === 0 ? headResult.stdout.trim() || null : null,

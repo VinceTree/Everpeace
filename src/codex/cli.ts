@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { retainOutput } from "../tools/command-record.js";
+import { BoundedOutputBuffer } from "../tools/command-record.js";
 import { stopProcessTree } from "../tools/process-cancel.js";
 
 const require = createRequire(import.meta.url);
@@ -12,6 +12,7 @@ export interface CodexCliResult {
   cancelled: boolean;
   timedOut?: boolean;
   attempts?: number;
+  truncated?: boolean;
   error?: string;
 }
 
@@ -77,8 +78,8 @@ export function runCodexProcess(
       : undefined;
 
     const runAttempt = () => {
-      let stdout = "";
-      let stderr = "";
+      const stdoutBuffer = new BoundedOutputBuffer(1024 * 1024);
+      const stderrBuffer = new BoundedOutputBuffer(1024 * 1024);
       let settled = false;
       let timedOut = false;
       let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
@@ -89,7 +90,7 @@ export function runCodexProcess(
         settled = true;
         if (timeoutTimer) clearTimeout(timeoutTimer);
         if (cancelTimer) clearTimeout(cancelTimer);
-        resolve({ ...result, attempts: attempts + 1 });
+        resolve({ ...result, attempts: attempts + 1, truncated: result.truncated === true || stdoutBuffer.truncated || stderrBuffer.truncated });
       };
       try {
         const launch = codexCliLaunch(args, options);
@@ -103,7 +104,7 @@ export function runCodexProcess(
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        finish({ stdout, stderr, exitCode: null, cancelled: false, error: message });
+        finish({ stdout: stdoutBuffer.text, stderr: stderrBuffer.text, exitCode: null, cancelled: false, error: message });
         return;
       }
 
@@ -115,8 +116,8 @@ export function runCodexProcess(
           try { child.kill(); } catch { /* process may already be gone */ }
           options.signal?.removeEventListener("abort", cancel);
           finish({
-            stdout: retainOutput(stdout, 1024 * 1024).text,
-            stderr: retainOutput(stderr, 1024 * 1024).text,
+            stdout: stdoutBuffer.text,
+            stderr: stderrBuffer.text,
             exitCode: null,
             cancelled: options.signal?.aborted ?? false,
             ...(timedOut ? { timedOut: true, error: `Codex CLI command timed out after ${timeoutMs ?? 0} ms` } : {}),
@@ -129,18 +130,18 @@ export function runCodexProcess(
       child.stdout?.setEncoding("utf8");
       child.stdout?.on("data", (chunk: string) => {
         options.onStdout?.(chunk);
-        stdout = retainOutput(stdout + chunk, 1024 * 1024).text;
+        stdoutBuffer.append(chunk);
       });
       child.stderr?.setEncoding("utf8");
       child.stderr?.on("data", (chunk: string) => {
         options.onStderr?.(chunk);
-        stderr = retainOutput(stderr + chunk, 1024 * 1024).text;
+        stderrBuffer.append(chunk);
       });
       child.on("error", (error) => {
         options.signal?.removeEventListener("abort", cancel);
         finish({
-          stdout,
-          stderr,
+          stdout: stdoutBuffer.text,
+          stderr: stderrBuffer.text,
           exitCode: null,
           cancelled: options.signal?.aborted ?? false,
           error: error.message,
@@ -149,7 +150,7 @@ export function runCodexProcess(
       child.on("close", (exitCode) => {
         if (settled) return;
         options.signal?.removeEventListener("abort", cancel);
-        const helperError = retryable && exitCode !== 0 && isSandboxHelperSetupError(stderr);
+        const helperError = retryable && exitCode !== 0 && isSandboxHelperSetupError(stderrBuffer.text);
         if (
           retryable
           && !options.signal?.aborted
@@ -165,8 +166,8 @@ export function runCodexProcess(
           return;
         }
         finish({
-          stdout,
-          stderr,
+          stdout: stdoutBuffer.text,
+          stderr: stderrBuffer.text,
           exitCode,
           cancelled: options.signal?.aborted ?? false,
           ...(timedOut ? { timedOut: true, error: `Codex CLI command timed out after ${timeoutMs ?? 0} ms` } : {}),

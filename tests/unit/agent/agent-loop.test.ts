@@ -274,6 +274,33 @@ test("explicitly marked read-only tools run concurrently but persist outputs in 
   );
 });
 
+test("parallel read pool refills when a later call finishes before the first", async () => {
+  let sample = 0;
+  const events: string[] = [];
+  const f = fixture({
+    maxParallelTools: 2,
+    async sample() {
+      sample += 1;
+      return sample === 1
+        ? { output: ["a", "b", "c", "d"].map((id) => ({ ...call(id), name: "read_file" })), output_text: "" }
+        : { output: [], output_text: "done" };
+    },
+    canRunInParallel: () => true,
+    async dispatch(tool) {
+      events.push(`start:${tool.call_id}`);
+      await new Promise((resolve) => setTimeout(resolve, tool.call_id === "a" ? 40 : 2));
+      events.push(`finish:${tool.call_id}`);
+      return tool.call_id;
+    },
+  });
+  await runAgentLoop(f.options);
+  assert.ok(events.indexOf("start:c") < events.indexOf("finish:a"));
+  assert.deepEqual(
+    f.records.filter((item) => item.type === "function_call_output").map((item) => item.call_id),
+    ["a", "b", "c", "d"],
+  );
+});
+
 test("parallel batches stop at unsafe calls and preserve later serial work", async () => {
   const order: string[] = [];
   let sample = 0;

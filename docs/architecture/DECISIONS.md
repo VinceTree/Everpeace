@@ -52,7 +52,7 @@ Provider capability profile 只记录已观察的模型能力和 context window�
 
 响应式恢复继续复用同一原生 compaction 接口：只有明确的 context-limit 错误才触发，每个 `runTurn` 最多一次；压缩成功后才用替换后的 context 重试采样，压缩失败不进入普通采样重试，也不做本地摘要回退。SSE 只有收到 `response.completed` 才算成功；能力拒绝必须发生在首个事件之前才允许切到 buffered 请求，连接中断、异常 EOF 或半截输出只从未持久化的历史有界重试。
 
-Agent Loop 可靠性预算彼此隔离：普通采样重试默认最多两次，provider event-cursor 续接和 context compaction 各使用独立的一次性预算；半截 SSE 永不写入 context 或执行工具，续接失败回退到有界整轮重试。并行工具采用能力标记而非工具名泛化，默认 `parallelToolCalls=false`，显式开启后仅 `read_file`、`list_directory`、`read_skill` 可组成连续批次。批次同时执行但按模型调用顺序持久化，guidance/stop 等待整批结果落盘，副作用工具和审批永不自动并行。批次、续接和 retry 分类事件只供当前 UI/诊断使用，不扩展 Session JSONL schema。
+Agent Loop 可靠性预算彼此隔离：普通采样重试默认最多两次，provider event-cursor 续接和 context compaction 各使用独立的一次性预算；半截 SSE 永不写入 context 或执行工具，续接失败回退到有界整轮重试。供应商请求仍默认 `parallelToolCalls=false`；宿主读取调度与该参数分离，生产中只允许 `read_file`、`list_directory`、`read_skill` 等明确声明安全能力的调用进入最多四项的任务池。调用并发执行但按模型顺序持久化，副作用工具和审批永不自动并行。批次、续接和 retry 分类事件只供当前 UI/诊断使用，不扩展 Session JSONL schema。
 
 Agent Loop 的正常 follow-up sampling step 使用独立预算，默认每个 turn 最多 32 个逻辑 step；同一 step 内的网络重试、stream recovery 和 context compaction 不重复消耗该预算。达到上限时发出 `step_limit_reached` 并返回结构化 `step_limit`；可选的正整数 `maxTurnDurationMs` 到期时返回 `deadline_exceeded`。两类受限停止都禁止额外工具、采样、workflow 修复和 Goal 续跑，不伪造完成，也不新增 Session JSONL 事件。该边界参考 xAI 官方 function-calling 示例中的显式 step count 停止模式；不代表已验证 Grok Build 的内部 runtime。
 
@@ -204,7 +204,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 - 广告工具、准入和能力来自隔离的 step snapshot；Plan 禁止操作不能通过模型返回未提供的工具绕过。实时权限继续在 dispatch 检查。
 - `AgentTurnResult.stopReason` 为预算停止提供独立控制路径，`stopped` 不等同于 `completed`；TUI 不继续 workflow 自动修复或 Goal 自动采样。限额在收到 usage 后生效，不声称能提前预测单次请求消耗。
 - 持久化失败使用 `PersistenceError`，不走网络重试，不降级为模型可继续处理的工具错误。存储事件类型保持兼容。
-- 默认串行保持不变，显式并行只开放内置文件/Skill 读取，默认批次上限 4；MCP 和审批全部串行，远端 metadata 不授予本地并发权限。共享资源键冲突拆分批次，写调用作为屏障。
+- 供应商 `parallel_tool_calls` 仍默认关闭；生产宿主独立启用内置文件/Skill 安全读取的最多四项调度。MCP 和审批全部串行，远端 metadata 不授予本地并发权限；共享资源键冲突和写调用形成屏障。
 - 自动压缩按 step 准备一次；压缩 usage 累计到消耗，替换后的 context 占用标为未知，恢复 Session 也不把压缩消耗当作占用。
 - SSE event log 只为 recovery adapter 保留，默认最多 8 MiB；超限释放恢复缓存且放弃当前响应续接，仍完整消费内容，失败走有界整请求重试。
 
@@ -248,3 +248,13 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 
 - 测试 CI 与发布 workflow 分开，在 Windows 和 Linux 上运行安装、typecheck、test、build 与 diff check。benchmark 外部进程 adapter 不使用 shell 拼接；dsh 的固定入口为 `--profile headless <job>`，Windows 应传 Node 与已解析的 JS bin，避免 `.cmd` shell 注入。重复运行必须使用 prepare hook 返回的独立 task；内置准备器只写入已确认不存在的目标目录，checkout pinned HEAD 后应用 reviewed seed，证明流程要求同一验收命令 seed 失败且 reference repair 通过。
 - live benchmark 必须在每次 implement/diagnose attempt 前拥有正的 remaining token budget；usage 缺失或不完整立即停止后续任务。当前固定 catalog 不是完成的可复现 fixture：在种子缺陷、参考修复与初始失败/修复通过证据齐全前，不发布模型胜率结论。
+
+## 性能计量与生产闭环
+
+- TUI 和 benchmark 共用 `CodingTaskRunner` 作为 coding 生命周期的唯一编排层。runner 负责 Agent turn、后台任务收束、最终验证、诊断轮、Goal 完成和 learned-memory outcome；benchmark adapter 标记 `managesRepairs`，评测器不再叠加第二套自动修复循环。
+- Live 计量使用进程内 `RequestAttemptLedger`，边界是实际 provider attempt，而不是一次 Agent turn。coding、stream recovery、缓存能力降级和 summary 分开记录；reasoning 作为 output 的明细展示，不重复计入预算。任何已经发出但 usage 不可靠的 attempt 永久把当前账本标为 incomplete，后续成功不能清除，也不能继续发起模型请求。
+- `RequestSnapshot` 是实际发送参数、输入估算、输出预留和 request/stable/dynamic 指纹的共同来源。快照在构建时深复制，避免后续输入变化污染测量，同时允许 SDK 在自己的请求对象上做兼容处理；DeepSeek 的固定指令和工具顺序位于历史前，动态权限及项目上下文位于历史后。摘要重放相同固定前缀和工具定义，但以 `tool_choice: none` 禁止工具执行。
+- 宿主只读并发不依赖供应商 `parallel_tool_calls`。生产最多四项，只运行明确声明 read-only、idempotent、parallel-safe 且资源不冲突的调用；任一完成即可补位，尚未有序持久化的结果受数量和 4 MiB 总量约束。写入、shell、MCP、审批和未知能力保持串行。
+- 性能 trace 只保存阶段耗时、次数和状态类元数据，不保存请求正文、文件内容、验证输出或凭据。首个 provider event/text 在 SSE 时来自真实事件；buffered endpoint 的对应时间是完整响应到达时间。
+- 正式 fixture 必须同时具备 pinned source、setup、pristine assertion、reviewed seed/reference patch 和 evaluator-owned acceptance。正式 catalog 缺少任一材料即拒绝运行；suite 单独报告 planned、executed、skipped、stop reason 和统计完整性，预算停止或取消不得缩小成功率分母。
+- 高频输出使用共享增量有界缓冲；TUI assistant delta 以 40ms 合并刷新，完成和取消立即清空。工作区 Git/显式路径合并后以四个 worker 指纹化，同一 snapshot 不重复读取同一路径。Goal 热路径使用成功持久化后的内存投影，Session 恢复时重新初始化。

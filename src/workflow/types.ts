@@ -43,7 +43,7 @@ export interface VerificationSuiteResult {
 }
 
 export type WorkflowResultClassification = "verified" | "unverified" | "failed" | "no_changes";
-export type WorkflowTaskSource = "user" | "goal_continuation" | "session_resume";
+export type WorkflowTaskSource = "user" | "goal_continuation" | "session_resume" | "benchmark";
 
 export interface PriorUnverifiedWorkflow {
   task_id: string;

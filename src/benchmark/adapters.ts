@@ -5,8 +5,9 @@ import type {
   BenchmarkHarnessResult,
   BenchmarkTask,
 } from "./types.js";
-import { retainOutput } from "../tools/command-record.js";
+import { BoundedOutputBuffer } from "../tools/command-record.js";
 import { stopProcessTree } from "../tools/process-cancel.js";
+import type { CodingTaskRunner } from "../workflow/task-runner.js";
 
 const MAX_PROCESS_OUTPUT_BYTES = 1024 * 1024;
 
@@ -17,7 +18,28 @@ export type ProductionBenchmarkTaskRunner = (
 
 /** Wrap the same production task runner used by an application host. */
 export function createEverpeaceBenchmarkAdapter(runTask: ProductionBenchmarkTaskRunner): BenchmarkHarnessAdapter {
-  return { name: "everpeace", run: runTask };
+  return { name: "everpeace", managesRepairs: true, run: runTask };
+}
+
+export type CodingTaskRunnerFactory = (
+  task: BenchmarkTask,
+  context: BenchmarkHarnessContext,
+) => CodingTaskRunner | Promise<CodingTaskRunner>;
+
+/** Execute the same CodingTaskRunner lifecycle used by the interactive host. */
+export function createCodingTaskRunnerBenchmarkAdapter(
+  createRunner: CodingTaskRunnerFactory,
+  result?: (task: BenchmarkTask, context: BenchmarkHarnessContext) => BenchmarkHarnessResult | Promise<BenchmarkHarnessResult>,
+): BenchmarkHarnessAdapter {
+  return {
+    name: "everpeace",
+    managesRepairs: true,
+    async run(task, context) {
+      const runner = await createRunner(task, context);
+      await runner.run({ text: task.prompt, source: "benchmark", signal: context.signal });
+      return result?.(task, context);
+    },
+  };
 }
 
 export interface ProcessHarnessAdapterOptions {
@@ -33,6 +55,7 @@ export interface ProcessHarnessAdapterOptions {
 export function createProcessHarnessAdapter(options: ProcessHarnessAdapterOptions): BenchmarkHarnessAdapter {
   return {
     name: options.name,
+    managesRepairs: true,
     async run(task, context) {
       const args = [...(options.prefixArgs ?? []), ...options.argumentsForTask(task, context)];
       const result = await new Promise<{ stdout: string; stderr: string; exitCode: number | null }>((resolve, reject) => {
@@ -50,8 +73,8 @@ export function createProcessHarnessAdapter(options: ProcessHarnessAdapterOption
           reject(error);
           return;
         }
-        let stdout = "";
-        let stderr = "";
+        const stdout = new BoundedOutputBuffer(MAX_PROCESS_OUTPUT_BYTES);
+        const stderr = new BoundedOutputBuffer(MAX_PROCESS_OUTPUT_BYTES);
         let settled = false;
         const finish = (callback: () => void) => {
           if (settled) return;
@@ -66,10 +89,10 @@ export function createProcessHarnessAdapter(options: ProcessHarnessAdapterOption
         };
         child.stdout?.setEncoding("utf8");
         child.stderr?.setEncoding("utf8");
-        child.stdout?.on("data", (chunk: string) => { stdout = retainOutput(stdout + chunk, MAX_PROCESS_OUTPUT_BYTES).text; });
-        child.stderr?.on("data", (chunk: string) => { stderr = retainOutput(stderr + chunk, MAX_PROCESS_OUTPUT_BYTES).text; });
+        child.stdout?.on("data", (chunk: string) => { stdout.append(chunk); });
+        child.stderr?.on("data", (chunk: string) => { stderr.append(chunk); });
         child.once("error", (error) => finish(() => reject(error)));
-        child.once("close", (exitCode) => finish(() => resolve({ stdout, stderr, exitCode })));
+        child.once("close", (exitCode) => finish(() => resolve({ stdout: stdout.text, stderr: stderr.text, exitCode })));
         context.signal.addEventListener("abort", cancel, { once: true });
         if (context.signal.aborted) cancel();
       });

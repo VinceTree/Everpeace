@@ -1,3 +1,15 @@
+## 最新执行：可验证成功率导向的性能优化
+
+状态快照：2026-09-30。本轮交付展示版本为 `0.3.0`。生产 TUI 与 benchmark 已共用 `CodingTaskRunner`，统一 Agent turn、后台任务收束、最终验证、最多三轮诊断、Goal 完成和 learned-memory outcome；生产 benchmark adapter 每项只运行一次完整生命周期，独立 evaluator 不再叠加修复循环。
+
+新增 provider-attempt 级 `RequestAttemptLedger` 与不可变 `RequestSnapshot`。coding、stream recovery、缓存降级和 summary 分别结算；input+output 扣预算，reasoning 不重复计费，unknown usage 永久保持 incomplete 并停止后续模型请求。DeepSeek 实际请求采用稳定 developer/tools 前缀、历史、动态权限/项目上下文尾部；上下文估算与请求使用同一 payload 和真实 32K 输出预留。摘要复用稳定前缀、禁止工具，并继续遵守取消、不完整、不缩短和落盘失败保留原 context 的边界。
+
+生产已独立开启最多四项宿主审定的只读并发，不依赖 provider `parallel_tool_calls`。任务池在任一调用完成后补位，仍按模型顺序落盘，并限制尚未落盘的完成结果；写入、shell、MCP、审批、资源冲突、取消、steering 和 stop 保持屏障。独立 context 准备并行，Skill/Memory 在同一 turn 的相同 revision 输入上复用；Goal 热路径使用持久化后的内存投影。Git 与显式编辑路径合并后用四个 worker 指纹化；命令输出统一为增量有界缓冲；TUI 流式正文以 40ms 合并渲染并在结束/取消时立即清理。
+
+Benchmark 增加 setup、pristine assertion、evaluator-owned acceptance、reviewed seed/reference proof、`campaign/harness/task/repetition/attempt` 隔离、planned/executed/skipped/stop reason、真实 request ledger 和 first event/text/各阶段耗时元数据。正式 parser 会拒绝缺少 fixture 或独立 acceptance 的候选 catalog。当前十项候选仍缺 reviewed patch pair；固定 dsh launcher 的模型/推理/输出参数、9 次 smoke、90 次正式对比、真实 DeepSeek API 和 Windows Terminal 流程均未执行，因此不能声明性能达到或超过 dsh。连续 patch 快速检查合并也保持关闭，等待固定评测证明成功率不下降。
+
+最终门禁使用 Windows Node 工具链：`pnpm test` 共 391 项，390 通过、1 项按平台跳过、0 失败；`pnpm typecheck` 与 `pnpm build` 通过。排除用户原有 `.gitignore`、`LICENSE` CRLF 差异后的 `git diff --check` 通过，新文件也无尾随空白；完整检查仍只报告这两个既有换行差异。本次提交使用 `[skip ci]` 并推送 `main`，不创建 tag 或更新 GitHub Release。用户已有未跟踪 `.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`tests/unit/codex/`、`{}` 均未修改或清理。
+
 ## 最新执行：DeepSeek Harness 全面对标可靠性与工具补齐
 
 状态快照：2026-09-30。本轮在 `0.2.25 / 5ff45ba` 之上完成四批实现，交付版本为 `0.2.26`。结构化编辑改为宿主维护读版本：update/delete 必须先由 `read_file` 观察，审批预览的 SHA-256 与权限 revision 会绑定实际写入，create 使用排他创建；批量失败只回滚本轮已写且仍匹配 post-image 的文件，冲突与错误分别报告。工作流把 Git 快照与显式编辑路径取并集，恢复 Session 时保留任务、三轮修复耗尽和验证债务，新 no-change turn 不能抹除旧的 unverified/failed 事实。`/verify` 已接入共享 suite、AbortSignal、权限 revision 与文件 revision，显式命令只作补充证据。

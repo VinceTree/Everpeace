@@ -1,91 +1,107 @@
 # Coding Task Benchmarking
 
-The DeepSeek comparison catalog defines ten fixed Node task slots at [benchmark/DEEPSEEK_NODE_TASKS.json](benchmark/DEEPSEEK_NODE_TASKS.json). Its pinned source revisions, prompts, and verification commands are immutable inputs. Before a real comparison, the benchmark maintainer must review and supply the deterministic regression seed used by `prepareRun`; every repetition must create a fresh isolated workspace and apply that seed. The catalog itself never executes preparation code, and the repository does not silently reset an existing checkout.
+Everpeace 的 benchmark 层比较 harness、模型策略和恢复策略在真实 coding task 上的表现。主指标是固定请求预算内，由独立断言确认的任务通过率。该层不改变 Agent 的权限、验证和 Session JSONL 语义，也不会自动 reset 或清理日常工作区。
 
-Real-provider runs are opt-in with `liveApi: true` and require a positive `totalTokenBudget`. A three-run comparison must set `repetitions: 3` and provide `prepareRun`; the runner rejects repeated runs without isolation. Adapters report input, output, reasoning, cache-hit, and observed-cache tokens independently. The suite reports verification rate, duration, repair attempts, token usage, effective cache data, and manual intervention. A missing live run is reported as not accepted, never as an improvement over another harness.
+当前 [十项 Node 候选清单](benchmark/DEEPSEEK_NODE_TASKS.json) 只代表任务槽位。只有 pinned revision 和 prompt 并不构成可复现 fixture；用户工作区内另有未跟踪的源码材料，也不会被自动采纳。`parseReproducibleBenchmarkTaskCatalog()` 要求每项同时具备 reviewed seed/reference patch 与 evaluator-owned acceptance，否则正式 campaign 在发出模型请求前拒绝启动。
 
-Everpeace 的 benchmark 层用于比较不同 harness、模型策略和恢复策略在真实 coding task 上的表现。它不修改 Session JSONL，不启动 TUI，也不改变 Agent 的权限边界。
+## Task and fixture contract
 
-## Task format
-
-每个任务至少包含唯一 `id`、自然语言 `prompt` 和隔离工作区 `workspacePath`。公开 issue 任务必须固定仓库 commit、issue 编号、安装步骤和验证命令；issue 内容视为不可信数据，验证命令由任务维护者审核，不直接执行 issue 中的命令。
+每个任务包含唯一 `id`、自然语言 `prompt`、隔离工作区、固定源码和有界命令。`verification` 可向 harness 提供开发反馈，最终评分优先使用模型无法通过改写项目脚本替代的 `acceptance`。
 
 ```ts
 import type { BenchmarkTask } from "../src/benchmark/index.js";
 
-export const tasks: BenchmarkTask[] = [
-  {
-    id: "fix-parser-regression",
-    prompt: "Fix the parser regression and keep the existing tests passing.",
-    workspacePath: "C:/benchmarks/parser-fixture",
-    tags: ["bug-fix", "tests"],
-    source: {
-      repositoryUrl: "https://github.com/example/project",
-      commit: "0123456789abcdef0123456789abcdef01234567",
-      issue: "42",
-      license: "MIT",
-    },
-    timeoutMs: 15 * 60 * 1000,
-    maxRepairAttempts: 3,
-    verification: {
-      command: "pnpm",
-      args: ["test"],
-      expectedExitCode: 0,
-      timeoutMs: 2 * 60 * 1000,
-    },
+export const task: BenchmarkTask = {
+  id: "fix-parser-regression",
+  prompt: "Fix the parser regression and keep existing behavior passing.",
+  workspacePath: "unused-before-preparation",
+  source: {
+    repositoryUrl: "https://github.com/example/project",
+    commit: "0123456789abcdef0123456789abcdef01234567",
+    issue: "42",
+    license: "MIT",
   },
-];
+  fixture: {
+    setup: { command: "pnpm", args: ["install", "--frozen-lockfile"] },
+    pristineVerification: { command: process.execPath, args: ["reviewed-acceptance.mjs"] },
+    seedPatch: "fix-parser-regression/seed.patch",
+    referencePatch: "fix-parser-regression/reference.patch",
+  },
+  verification: { command: "pnpm", args: ["test"], timeoutMs: 120_000 },
+  acceptance: { command: process.execPath, args: ["reviewed-acceptance.mjs"], timeoutMs: 120_000 },
+  timeoutMs: 15 * 60_000,
+  maxRepairAttempts: 3,
+};
 ```
 
-工作区应由任务准备步骤提前创建并固定到可复现的初始状态。benchmark runner 不会自动 reset、checkout 或删除工作区；正式 benchmark 应使用临时 clone/worktree，日常工作区则由用户自行维护。
+`prepareBenchmarkFixture()` 只克隆到已确认不存在的目标，校验 pinned HEAD，执行有界 setup 和 pristine assertion，再应用 seed。`proveBenchmarkFixture()` 必须证明：
 
-任务开始和结束时会记录 Git root、HEAD、branch、dirty status 和有界 diff hash。快照只读，不改变工作区。
+1. pinned source 的独立断言通过；
+2. seed 应用后，同一 assertion 因预期缺陷失败；
+3. reference repair 应用后，同一 assertion 再次通过。
 
-## Harness adapter
+超时、缺少依赖、命令启动失败和 `exitCode: null` 都是基础设施失败，不算有效 seed。重复运行使用 `createIsolatedBenchmarkPreparer()` 创建 `campaign/harness/task/repetition` 目录，避免 harness 和 repetition 相互覆盖。
 
-外部 harness 通过 `BenchmarkHarnessAdapter` 接入。adapter 必须尊重传入的 `AbortSignal`，并在启动子进程、网络请求或模型调用时继续传递它。每次 Agent turn 的 `onPhase` 和 `onEvent` 应转发到 context，以便收集响应、工具、重试、stream recovery、compaction、steering 和取消指标。adapter 应复用同一个 Agent/session context：第一次调用的 phase 为 `implement`，验证失败后的调用为 `diagnose`，并通过 `previousVerification` 接收上一次有界验证结果。
+## Production and external adapters
 
-runner 还可通过 `onTaskPhase` 观察 `implement`、`diagnose`、`verify` 和 `summarize`，用于诊断和报告，不会写入 Session JSONL。
+TUI 与 benchmark 共用 `CodingTaskRunner`。`createCodingTaskRunnerBenchmarkAdapter()` 每项只调用一次生产 runner；同一个 Agent/Session 内完成工具循环、最多三轮诊断、完整最终验证、Goal 及 Memory 结算。adapter 标记 `managesRepairs`，因此 evaluator 只运行独立 acceptance，不会叠加另一套自动修复循环。
 
 ```ts
-import { runBenchmarkSuite, type BenchmarkHarnessAdapter } from "../src/benchmark/index.js";
+import {
+  createCodingTaskRunnerBenchmarkAdapter,
+  runBenchmarkSuite,
+} from "../src/benchmark/index.js";
 
-const adapter: BenchmarkHarnessAdapter = {
-  name: "everpeace-baseline",
-  async run(task, context) {
-    const agent = createAgent({
-      workspacePath: task.workspacePath,
-      onPhase: context.onPhase,
-      onEvent: context.onEvent,
-    });
-    const prompt = context.phase === "diagnose" && context.previousVerification
-      ? `The verification failed. Diagnose and fix it, then rerun the relevant checks.\n\n${context.previousVerification.stderr || context.previousVerification.stdout}`
-      : task.prompt;
-    await agent.runTurn(prompt, context.signal);
-  },
-};
+const adapter = createCodingTaskRunnerBenchmarkAdapter(async (task, context) => {
+  return createProductionTaskRunner({
+    workspacePath: task.workspacePath,
+    signal: context.signal,
+    onPhase: context.onPhase,
+    onEvent: context.onEvent,
+    requestAttemptLedger: context.requestAttemptLedger,
+  });
+});
 
-const summary = await runBenchmarkSuite(tasks, adapter);
-console.log(JSON.stringify(summary, null, 2));
+const summary = await runBenchmarkSuite(tasks, adapter, {
+  prepareRun,
+  repetitions: 3,
+});
 ```
 
-## Result semantics
+`createProcessHarnessAdapter()` 参数化启动固定外部程序，不使用 shell 拼接。`createDshHeadlessAdapter()` 使用 `dsh --profile headless <job>`；Windows 应传 Node 与已解析的 JS entry，避免 `.cmd` shell。campaign launcher 仍必须固定 dsh 安装提交、模型原始 ID、推理档位、输出上限、sandbox 和工具配置，adapter 不从最终回答猜测 usage。
 
-- `passed`: harness 完成且验证命令退出码符合预期，没有报告 unsafe action。
-- `failed`: 验证失败或 harness 报告了 unsafe action。
-- `timed_out`: 任务或验证命令超过有界时限。
-- `error`: adapter 或验证器发生其他错误。
+## Usage and budget
 
-验证失败默认最多触发 3 次修复尝试，可通过 `maxRepairAttempts` 限制为 0-10。每次尝试都重新执行验证；最终通过时 run 状态恢复为 `passed`，重复失败则保留最后一次验证结果并标记 `failed`。
+真实请求必须显式设置 `liveApi: true` 和正整数 `totalTokenBudget`。生产 adapter 将同一个 `RequestAttemptLedger` 传到真实模型 client，coding、stream recovery、缓存能力降级和 summary request 分别结算：
 
-stdout/stderr 各自保留最多 1 MiB 尾部，避免失败任务污染评测进程。可选的 `createFileBenchmarkArtifactSink()` 会保存 workspace 快照、每次验证结果和 `result.json`，文件名经过限制，常见 API key、token、authorization 和 `sk-` 形式会在写入前脱敏。
+- 预算使用 input + output；reasoning 是 output 的明细，不重复扣减。
+- 每次请求开始前检查剩余预算；恰好耗尽时不能继续。
+- 在途请求可以超过剩余预算，超出量仍如实记录，不能描述为账单硬上限。
+- 已发出但 usage 不可靠的请求把账本永久标为 incomplete；后续成功不能清除，当前任务和整个 campaign 停止继续发请求。
 
-suite 按任务顺序运行，每个任务独立记录结果，并汇总完成率、验证通过率、尝试次数、修复尝试、工具调用数、重试数、人工介入数和 unsafe action 数。
+尚未接入生产 ledger 的外部 adapter 必须返回完整 `BenchmarkTokenUsage`。缺失或 `complete: false` 同样停止后续任务。
 
-## Provider capability profiles
+## Result and artifact semantics
 
-使用 `createProviderCapabilityProfile()` 记录 provider/model、context window、streaming、stream recovery、native compaction、prompt cache 和 parallel tool calls。未知兼容端点默认保持保守的 false/null，不自动路由模型；只有 benchmark 观测数据稳定后再引入自动选择策略。
+- `passed`：harness 完成，独立 acceptance 通过，没有 unsafe action。
+- `failed`：acceptance 失败、预算失败或 harness 报告 unsafe action。
+- `timed_out`：任务或 acceptance 超过有界时间。
+- `error`：adapter、准备器或验证器发生其他错误。
 
-当前首轮比较固定为上述 10 个任务；只有在每项 seed、准备步骤、prompt、验证命令和模型配置都经过复核后才执行真实 provider 对比，后续再扩大任务集。
+suite 单独保存 `planned`、`executed`、`skipped`、`stopReason` 和 `statisticsComplete`。成功率分母固定为 planned runs；预算耗尽、取消和 usage unknown 不会缩小分母。usage completeness 只说明已执行请求的计量是否完整，不能替代 campaign completeness。
 
-公开 issue catalog 可用 `parseBenchmarkTaskCatalog()` 从 JSON 读取。解析器只校验 HTTPS 仓库 URL、固定 commit SHA、issue 标识、验证命令和尝试边界，不执行准备脚本、安装命令或验证命令；实际准备由受信任的 benchmark runner/CI 步骤负责。
+任务开始和结束记录有界 Git workspace snapshot。可选 artifact sink 保存脱敏的 snapshot、每次 acceptance 和结果；路径包含 campaign/harness/task/repetition/attempt，常见 API key、authorization、token 和 `sk-` 形式会在写入前替换。stdout/stderr 使用增量有界缓冲，最多保留 1 MiB。
+
+Performance trace 记录 context preparation、request snapshot、sampling、retry delay、tool wait/execution、compaction 等单调时钟耗时，以及响应、工具、重试和取消数量。SSE 的 first event/text 来自真实流事件；buffered endpoint 只能在完整响应返回时记录。trace 不保存请求正文、文件内容、验证输出或凭据。
+
+## Acceptance sequence
+
+正式对比顺序固定为：
+
+1. 每项 fixture 先独立证明 pristine pass → seed fail → reference repair pass。
+2. 运行 3 项 × 当前版本/优化版本/固定 dsh × 1 次，共 9 次 smoke。
+3. 随机交错 harness 顺序，运行 10 项 × 3 harness × 3 次，共 90 次正式比较。
+
+三组固定模型原始 ID、`high` 推理、32K 产品输出预算、十五分钟任务时限和最多三轮诊断。报告独立通过次数、首次通过、人工介入、双方均成功任务的配对耗时、总 token/成功任务、缓存统计完整性，以及协议、sandbox、工具差异。
+
+当前十项候选材料尚缺 reviewed patch pairs 和完整证明，真实 API smoke、九十次对比及 Windows Terminal 验收均未执行。真实调用需要另行显式授权并给出 campaign 总 token 预算；在此之前不能发布排名、冷缓存结论或相对 dsh 的性能优势声明。

@@ -1,5 +1,6 @@
 import type { LoopEvent, LoopPhase } from "../agent/agent-loop.js";
 import type { BenchmarkMetricsSnapshot } from "./types.js";
+import { PerformanceTrace } from "../performance/trace.js";
 
 const isFailureOutput = (output: string): boolean => {
   try {
@@ -35,12 +36,15 @@ export function createBenchmarkMetricsCollector(now: () => number = Date.now): B
   let toolFailures = 0;
   let toolBatches = 0;
   let firstToolStartDelayMs: number | null = null;
+  let firstModelEventDelayMs: number | null = null;
+  let firstModelTextDelayMs: number | null = null;
   let retries = 0;
   let streamRecoveries = 0;
   let successfulStreamRecoveries = 0;
   let compactions = 0;
   let cancellations = 0;
   let steeringApplications = 0;
+  const trace = new PerformanceTrace();
 
   return {
     onPhase(phase) {
@@ -51,6 +55,10 @@ export function createBenchmarkMetricsCollector(now: () => number = Date.now): B
       switch (event.type) {
         case "sampling_started":
           samplingAttempts += 1;
+          break;
+        case "model_progress":
+          if (event.milestone === "first_event" && firstModelEventDelayMs === null) firstModelEventDelayMs = Math.max(0, now() - startedAt);
+          if (event.milestone === "first_text" && firstModelTextDelayMs === null) firstModelTextDelayMs = Math.max(0, now() - startedAt);
           break;
         case "response_received":
           responses += 1;
@@ -90,6 +98,9 @@ export function createBenchmarkMetricsCollector(now: () => number = Date.now): B
         case "steering_applied":
           steeringApplications += 1;
           break;
+        case "timing_recorded":
+          trace.record(event.operation, event.durationMs);
+          break;
         default:
           break;
       }
@@ -110,12 +121,15 @@ export function createBenchmarkMetricsCollector(now: () => number = Date.now): B
         toolBatches,
         toolResultOrder: [...toolResultOrder],
         firstToolStartDelayMs,
+        firstModelEventDelayMs,
+        firstModelTextDelayMs,
         retries,
         streamRecoveries,
         successfulStreamRecoveries,
         compactions,
         cancellations,
         steeringApplications,
+        timings: trace.snapshot().timings,
       };
     },
   };

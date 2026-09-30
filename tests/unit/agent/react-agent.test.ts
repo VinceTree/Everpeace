@@ -14,6 +14,7 @@ import { GoalRuntime } from "../../../src/goal/runtime.js";
 import type { SessionGoal } from "../../../src/storage/session-store.js";
 import { resolveProviderCapabilities } from "../../../src/providers/capabilities.js";
 import { previewApplyPatch, runApplyPatch } from "../../../src/tools/apply-patch.js";
+import { RequestAttemptLedger } from "../../../src/agent/request-attempt-ledger.js";
 
 function bashResult(stdout: string): BashResult {
   return { stdout, stderr: "", exitCode: 0, signal: null };
@@ -1418,6 +1419,47 @@ test("agent reports unavailable usage without failing compatible endpoints", asy
   await agent.runTurn("hello");
 
   assert.deepEqual(usage, [null]);
+});
+
+test("request attempt ledger stops retries after an emitted request has unknown usage", async () => {
+  const ledger = new RequestAttemptLedger({ tokenBudget: 1_000 });
+  let requests = 0;
+  let retries = 0;
+  const agent = new ReactAgent({
+    model: "deepseek-flash",
+    requestAttemptLedger: ledger,
+    client: { responses: { async create() {
+      requests += 1;
+      throw Object.assign(new Error("upstream failed"), { status: 503 });
+    } } },
+    io: { async confirmBash() { return false; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+    onEvent(event) { if (event.type === "retrying") retries += 1; },
+  });
+  const result = await agent.runTurn("fix it");
+  assert.equal(result.stopReason, "usage_limited");
+  assert.equal(requests, 1);
+  assert.equal(retries, 0);
+  assert.equal(ledger.snapshot().complete, false);
+});
+
+test("DeepSeek request snapshots keep stable instructions before history and dynamic rules at the tail", async () => {
+  const inputs: Array<Array<Record<string, unknown>>> = [];
+  const agent = new ReactAgent({
+    model: "deepseek-flash",
+    providerCapabilities: resolveProviderCapabilities("https://api.deepseek.com", "deepseek-flash"),
+    client: { responses: { async create(params) {
+      inputs.push(params.input as Array<Record<string, unknown>>);
+      return { id: `response-${inputs.length}`, output_text: "done", output: [], usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } };
+    } } },
+    io: { async confirmBash() { return false; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+  });
+  await agent.runTurn("first");
+  await agent.runTurn("second");
+  assert.equal(inputs[0]?.[0]?.role, "developer");
+  assert.equal(inputs[0]?.at(-1)?.role, "developer");
+  assert.match(String(inputs[0]?.at(-1)?.content), /Current permissions/u);
+  assert.ok(inputs[1]?.slice(1, -1).some((item) => item.role === "user" && item.content === "first"));
+  assert.equal(inputs[1]?.at(-1)?.role, "developer");
 });
 
 test("agent consumes Responses stream deltas and reconstructs tool calls", async () => {

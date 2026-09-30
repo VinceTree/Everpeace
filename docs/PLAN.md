@@ -1,5 +1,15 @@
 # Everpeace Current Plan
 
+## Performance baseline and runtime optimization
+
+The performance target is independently verified task success within a fixed request budget. The production TUI and benchmark now share `CodingTaskRunner`, so one Agent owns diagnosis, final verification, Goal settlement, and learned-memory outcome; the evaluator performs only its independent acceptance assertion. A `RequestAttemptLedger` sits at provider-attempt boundaries for coding, recovery, cache fallback, and compaction. Unknown usage is sticky, exact budget exhaustion prevents another request, and campaign output distinguishes planned, executed, skipped, cancelled, budget-exhausted, and usage-unknown runs.
+
+Each model request is built and measured from one immutable `RequestSnapshot`, including the actual output reserve and separate stable/dynamic fingerprints. DeepSeek requests keep stable developer instructions and ordered tools before conversation history, with changing permissions, project rules, Skills, MCP, Memory, and Goal context at the tail. Summary requests reuse the stable prefix and tools, disable tool execution, and retain the original context on cancellation, truncation, non-shrinking output, or persistence failure.
+
+Production enables up to four host-approved read-only tools independently of the provider's `parallel_tool_calls` hint. The completion-driven pool refills when any call completes, bounds completed out-of-order results, and still persists results in model order; writes, shell, MCP, approval, resource conflicts, steering, cancellation, and stop reasons remain barriers. Workspace fingerprints use four workers over the Git/explicit-edit union, command output uses one incremental bounded buffer, streamed UI text is flushed at 40 ms intervals, independent context preparation runs concurrently, and active Goal state uses an in-memory projection instead of reparsing Session JSONL on every stop check.
+
+Benchmark fixtures now support setup, pristine verification, reviewed seed/reference patches, evaluator-owned acceptance, isolated `campaign/harness/task/repetition` workspaces, and proof that pristine passes, seed fails, and reference repair passes. Formal catalog parsing rejects entries without these materials. The current ten task slots still lack reviewed patch pairs, and neither the 9-run smoke nor 90-run comparison has been authorized or executed. The dsh process adapter also still requires the campaign launcher to pin its installation and model settings. Fast-check coalescing remains disabled until the fixed comparison shows no success-rate regression. No performance or superiority claim is made yet.
+
 ## DeepSeek-first personal development CLI
 
 The single-Agent inline terminal product now has host-owned edit observations: update/delete requires a fresh `read_file` version, approval binds the preview hash and permission revision, creation is exclusive, and rollback refuses to overwrite a later user edit. Workflow snapshots combine Git state with explicit edit paths, including ignored files. Session resume preserves repair exhaustion and verification debt; a no-change follow-up cannot erase an earlier unverified result. Automatic verification and `/verify` share cancellation and snapshot semantics; an explicit `/verify <command>` remains supplemental evidence.
@@ -61,7 +71,7 @@ P0 协议基线已完成：`LoopEvent` 报告 incomplete/invalid tool call；响
 - [x] Steering：先补齐 outputs 后追加用户消息，持久化成功才出队，所有重新准备的 step 计入预算。
 - [x] Goal：预算及 usage 不完整触发结构化停止，TUI 不进入 workflow 自动修复或目标续跑，不当作成功完成。
 - [x] `PersistenceError`：context、usage、Goal 和 workflow 存储失败立即停止，不触发模型重试或后续工具。
-- [x] 显式并行默认关闭；开启后 `maxParallelTools` 默认 4，结果有序保存，取消/steering 在批次检查点处理。
+- [x] 供应商并行提示与宿主读取调度分离；生产宿主默认最多并发 4 个审定的只读调用，结果有序保存，取消/steering 在调度检查点处理。
 - [x] 自动压缩移到 step 准备阶段；压缩消耗与压缩后占用分离，后者未知直到新 response usage 到达。
 - [x] 新采样发送 `sampling_started`；SSE 恢复缓存仅在有 adapter 时保留，默认 8 MiB，溢出后退回有界整请求恢复。
 

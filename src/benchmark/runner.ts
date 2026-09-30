@@ -10,11 +10,13 @@ import type {
   BenchmarkTaskPhase,
   BenchmarkVerification,
   BenchmarkVerificationResult,
+  BenchmarkSkippedRun,
 } from "./types.js";
 import { createBenchmarkMetricsCollector } from "./metrics.js";
-import { retainOutput } from "../tools/command-record.js";
+import { BoundedOutputBuffer } from "../tools/command-record.js";
 import { stopProcessTree } from "../tools/process-cancel.js";
 import { captureWorkspaceSnapshot } from "./workspace.js";
+import { RequestAttemptLedger } from "../agent/request-attempt-ledger.js";
 
 const DEFAULT_TASK_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_VERIFICATION_TIMEOUT_MS = 2 * 60 * 1000;
@@ -28,8 +30,8 @@ export function runBenchmarkVerification(spec: BenchmarkVerification, workspaceP
   const startedAt = Date.now();
   const timeoutMs = Math.max(1, spec.timeoutMs ?? DEFAULT_VERIFICATION_TIMEOUT_MS);
   return new Promise((resolve) => {
-    let stdout = "";
-    let stderr = "";
+    const stdout = new BoundedOutputBuffer(MAX_OUTPUT_BYTES);
+    const stderr = new BoundedOutputBuffer(MAX_OUTPUT_BYTES);
     let timedOut = false;
     let settled = false;
     let timer: NodeJS.Timeout | undefined;
@@ -44,8 +46,8 @@ export function runBenchmarkVerification(spec: BenchmarkVerification, workspaceP
         attempted: true,
         passed: !timedOut && error === undefined && exitCode === expectedExitCode,
         exitCode,
-        stdout,
-        stderr,
+        stdout: stdout.text,
+        stderr: stderr.text,
         durationMs: Math.max(0, Date.now() - startedAt),
         timedOut,
         ...(error === undefined ? {} : { error }),
@@ -65,7 +67,7 @@ export function runBenchmarkVerification(spec: BenchmarkVerification, workspaceP
         cwd: spec.cwd ?? workspacePath,
         env: { ...process.env, ...spec.env },
         detached: process.platform !== "win32",
-        shell: process.platform === "win32",
+        shell: false,
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -76,11 +78,11 @@ export function runBenchmarkVerification(spec: BenchmarkVerification, workspaceP
 
     child.stdout?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {
-      stdout = retainOutput(stdout + chunk, MAX_OUTPUT_BYTES).text;
+      stdout.append(chunk);
     });
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string) => {
-      stderr = retainOutput(stderr + chunk, MAX_OUTPUT_BYTES).text;
+      stderr.append(chunk);
     });
     child.once("error", (error) => finish(null, error.message));
     child.once("close", (exitCode) => finish(exitCode));
@@ -100,6 +102,9 @@ export interface BenchmarkRunOptions {
   liveApi?: boolean;
   totalTokenBudget?: number;
   tokenBudgetRemaining?: number;
+  /** Internal artifact namespace used by isolated suite runs. */
+  artifactPrefix?: string;
+  campaignId?: string;
 }
 
 function validTokenBudget(value: number | undefined): value is number {
@@ -174,12 +179,15 @@ export async function runBenchmarkTask(
   let failure: string | undefined;
   let usage: import("./types.js").BenchmarkTokenUsage | undefined;
   let remainingBudget = tokenBudget;
+  const requestAttemptLedger = options.liveApi === true
+    ? new RequestAttemptLedger({ ...(tokenBudget === undefined ? {} : { tokenBudget }) })
+    : undefined;
 
   const writeArtifact = options.artifactSink === undefined
     ? undefined
     : async (name: string, content: string): Promise<string | undefined> => {
       try {
-        const path = await options.artifactSink!.write(name, content);
+        const path = await options.artifactSink!.write(options.artifactPrefix ? `${options.artifactPrefix}-${name}` : name, content);
         if (path !== undefined) artifactPaths.push(path);
         return path;
       } catch (error) {
@@ -199,6 +207,7 @@ export async function runBenchmarkTask(
       attempts += 1;
       const phase = attempts === 1 ? "implement" as const : "diagnose" as const;
       options.onTaskPhase?.(phase, attempts);
+      const ledgerBefore = requestAttemptLedger?.snapshot();
       const result = await runAdapterAttempt(adapter, task, {
         task,
         signal: controller.signal,
@@ -208,36 +217,60 @@ export async function runBenchmarkTask(
         workspaceBefore,
         onPhase: metrics.onPhase,
         onEvent: metrics.onEvent,
-        ...(writeArtifact === undefined ? {} : { writeArtifact }),
+        ...(writeArtifact === undefined ? {} : { writeArtifact: (name: string, content: string) => writeArtifact(`attempt-${attempts}-${name}`, content) }),
         ...(remainingBudget === undefined ? {} : { tokenBudgetRemaining: remainingBudget }),
+        ...(requestAttemptLedger === undefined ? {} : { requestAttemptLedger }),
       }, controller.signal);
       manualInterventions += result?.manualInterventions ?? 0;
       unsafeActions += result?.unsafeActions ?? 0;
       if (result?.notes !== undefined) notes = [notes, result.notes].filter(Boolean).join("\n");
       if (result?.capabilities !== undefined) capabilities = result.capabilities;
-      if (options.liveApi === true && (result?.usage === undefined || result.usage.complete !== true)) {
-        status = "failed";
-        failure = "Live API benchmark adapters must report complete token usage";
-        break;
-      }
-      if (result?.usage !== undefined) {
+      const ledgerAfter = requestAttemptLedger?.snapshot();
+      const ledgerRecordedAttempt = ledgerBefore !== undefined
+        && ledgerAfter !== undefined
+        && ledgerAfter.attempts.length > ledgerBefore.attempts.length;
+      const attemptUsage = ledgerRecordedAttempt && ledgerBefore !== undefined && ledgerAfter !== undefined
+        ? {
+            inputTokens: ledgerAfter.inputTokens - ledgerBefore.inputTokens,
+            outputTokens: ledgerAfter.outputTokens - ledgerBefore.outputTokens,
+            reasoningTokens: ledgerAfter.reasoningTokens - ledgerBefore.reasoningTokens,
+            cachedInputTokens: result?.usage?.cachedInputTokens,
+            cacheObservedInputTokens: result?.usage?.cacheObservedInputTokens,
+            complete: ledgerAfter.complete,
+          }
+        : result?.usage;
+      if (attemptUsage !== undefined) {
         const previous = usage;
         usage = {
-          inputTokens: (previous?.inputTokens ?? 0) + result.usage.inputTokens,
-          outputTokens: (previous?.outputTokens ?? 0) + result.usage.outputTokens,
-          reasoningTokens: (previous?.reasoningTokens ?? 0) + (result.usage.reasoningTokens ?? 0),
-          cachedInputTokens: (previous?.cachedInputTokens ?? 0) + (result.usage.cachedInputTokens ?? 0),
-          cacheObservedInputTokens: (previous?.cacheObservedInputTokens ?? 0) + (result.usage.cacheObservedInputTokens ?? 0),
-          complete: (previous?.complete ?? true) && result.usage.complete,
+          inputTokens: (previous?.inputTokens ?? 0) + attemptUsage.inputTokens,
+          outputTokens: (previous?.outputTokens ?? 0) + attemptUsage.outputTokens,
+          reasoningTokens: (previous?.reasoningTokens ?? 0) + (attemptUsage.reasoningTokens ?? 0),
+          cachedInputTokens: (previous?.cachedInputTokens ?? 0) + (attemptUsage.cachedInputTokens ?? 0),
+          cacheObservedInputTokens: (previous?.cacheObservedInputTokens ?? 0) + (attemptUsage.cacheObservedInputTokens ?? 0),
+          complete: (previous?.complete ?? true) && attemptUsage.complete,
         };
         const consumed = usage.inputTokens + usage.outputTokens;
-        const attemptConsumed = result.usage.inputTokens + result.usage.outputTokens;
+        const attemptConsumed = attemptUsage.inputTokens + attemptUsage.outputTokens;
         if (remainingBudget !== undefined) remainingBudget -= attemptConsumed;
         if (tokenBudget !== undefined && consumed > tokenBudget) {
           status = "failed";
           failure = `Benchmark token budget exceeded (${consumed}/${tokenBudget})`;
           break;
         }
+      }
+      if (options.liveApi === true && (attemptUsage === undefined || attemptUsage.complete !== true)) {
+        const previous = usage;
+        usage = {
+          inputTokens: previous?.inputTokens ?? 0,
+          outputTokens: previous?.outputTokens ?? 0,
+          reasoningTokens: previous?.reasoningTokens ?? 0,
+          cachedInputTokens: previous?.cachedInputTokens ?? 0,
+          cacheObservedInputTokens: previous?.cacheObservedInputTokens ?? 0,
+          complete: false,
+        };
+        status = "failed";
+        failure = "Live API benchmark adapters must report complete token usage";
+        break;
       }
 
       if (controller.signal.aborted) {
@@ -250,10 +283,11 @@ export async function runBenchmarkTask(
         failure = `${unsafeActions} unsafe action(s) were reported by the harness`;
         break;
       }
-      if (task.verification === undefined) break;
+      const verificationSpec = task.acceptance ?? task.verification;
+      if (verificationSpec === undefined) break;
 
       options.onTaskPhase?.("verify", attempts);
-      verification = await runBenchmarkVerification(task.verification, task.workspacePath, controller.signal);
+      verification = await runBenchmarkVerification(verificationSpec, task.workspacePath, controller.signal);
       verificationAttempts.push(verification);
       if (verification.timedOut) {
         status = "timed_out";
@@ -267,6 +301,7 @@ export async function runBenchmarkTask(
       }
       status = "failed";
       failure = verification.error ?? `Verification exited with code ${verification.exitCode ?? "unknown"}`;
+      if (adapter.managesRepairs === true) break;
       if (attempts > maxRepairAttempts) break;
     }
   } catch (error) {
@@ -333,31 +368,58 @@ export async function runBenchmarkSuite(
     throw new Error("Live API benchmarks require a positive total token budget");
   }
   const results: BenchmarkRunResult[] = [];
+  const skipped: BenchmarkSkippedRun[] = [];
+  const planned = tasks.length * repetitions;
   let tokensConsumed = 0;
   let stopLiveSuite = false;
+  let stopReason: string | undefined;
   for (const task of tasks) {
     for (let repetition = 1; repetition <= repetitions; repetition += 1) {
-      const preparedTask = await options.prepareRun?.(task, repetition) ?? task;
+      if (options.signal?.aborted) {
+        stopLiveSuite = true;
+        stopReason = "Campaign was cancelled";
+        break;
+      }
       const remaining = options.totalTokenBudget === undefined
         ? undefined
         : options.totalTokenBudget - tokensConsumed;
       if (options.liveApi === true && (remaining === undefined || remaining <= 0)) {
-        throw new Error("Live API benchmark token budget was exhausted before the next run");
+        stopLiveSuite = true;
+        stopReason = "Campaign token budget was exhausted";
+        break;
       }
+      const preparedTask = await options.prepareRun?.(task, repetition) ?? task;
       const result = await runBenchmarkTask(preparedTask, adapter, {
         ...options,
+        artifactPrefix: `${(options.campaignId ?? "campaign").replace(/[^A-Za-z0-9._-]/gu, "-")}-${adapter.name.replace(/[^A-Za-z0-9._-]/gu, "-")}-${task.id.replace(/[^A-Za-z0-9._-]/gu, "-")}-${repetition}`,
         ...(remaining === undefined ? {} : { tokenBudgetRemaining: remaining }),
       });
       const repeated = repetitions === 1 ? result : { ...result, repetition };
       results.push(repeated);
       tokensConsumed += (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
       options.onResult?.(repeated);
+      if (options.signal?.aborted) {
+        stopLiveSuite = true;
+        stopReason = "Campaign was cancelled";
+        break;
+      }
       if (options.liveApi === true && (result.usage === undefined || result.usage.complete !== true)) {
         stopLiveSuite = true;
+        stopReason = "Campaign stopped because a model request had unknown usage";
         break;
       }
     }
     if (stopLiveSuite) break;
+  }
+
+  if (results.length < planned) {
+    const executed = new Set(results.map((result) => `${result.taskId}:${result.repetition ?? 1}`));
+    const reason = stopReason?.includes("unknown") ? "usage_unknown" as const
+      : options.signal?.aborted ? "cancelled" as const
+        : "budget_exhausted" as const;
+    for (const task of tasks) for (let repetition = 1; repetition <= repetitions; repetition += 1) {
+      if (!executed.has(`${task.id}:${repetition}`)) skipped.push({ taskId: task.id, repetition, reason });
+    }
   }
 
   const passed = results.filter((result) => result.status === "passed").length;
@@ -366,14 +428,19 @@ export async function runBenchmarkSuite(
   const usageSamples = results.flatMap((result) => result.usage ? [result.usage] : []);
   return {
     adapter: adapter.name,
-    total: results.length,
+    planned,
+    executed: results.length,
+    skipped,
+    statisticsComplete: results.length === planned && results.every((result) => result.usage?.complete !== false),
+    ...(stopReason === undefined ? {} : { stopReason }),
+    total: planned,
     passed,
     failed: results.filter((result) => result.status === "failed").length,
     timedOut: results.filter((result) => result.status === "timed_out").length,
     errored: results.filter((result) => result.status === "error").length,
     verified,
     verificationPassed,
-    completionRate: results.length === 0 ? 0 : passed / results.length,
+    completionRate: planned === 0 ? 0 : passed / planned,
     verificationPassRate: verified === 0 ? null : verificationPassed / verified,
     totalDurationMs: results.reduce((total, result) => total + result.durationMs, 0),
     totalAttempts: results.reduce((total, result) => total + result.attempts, 0),

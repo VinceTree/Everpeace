@@ -1,4 +1,6 @@
 import type { LoopEvent, LoopPhase } from "../agent/agent-loop.js";
+import type { RequestAttemptLedger } from "../agent/request-attempt-ledger.js";
+import type { PerformanceTiming } from "../performance/trace.js";
 
 export type BenchmarkRunStatus = "passed" | "failed" | "timed_out" | "error";
 
@@ -21,11 +23,17 @@ export interface BenchmarkTask {
   timeoutMs?: number;
   maxRepairAttempts?: number;
   verification?: BenchmarkVerification;
+  /** Evaluator-owned assertion used for scoring when it differs from harness-visible checks. */
+  acceptance?: BenchmarkVerification;
   source?: BenchmarkTaskSource;
   fixture?: BenchmarkTaskFixture;
 }
 
 export interface BenchmarkTaskFixture {
+  /** Optional deterministic dependency/bootstrap command run before any patch is applied. */
+  setup?: BenchmarkVerification;
+  /** Optional independent assertion proving the pinned source starts healthy. */
+  pristineVerification?: BenchmarkVerification;
   /** Patch applied to the pinned source to introduce the benchmark defect and its acceptance assertion. */
   seedPatch: string;
   /** Patch applied after the seed to provide the reviewed reference repair. */
@@ -83,12 +91,15 @@ export interface BenchmarkMetricsSnapshot {
   toolBatches: number;
   toolResultOrder: readonly string[];
   firstToolStartDelayMs: number | null;
+  firstModelEventDelayMs: number | null;
+  firstModelTextDelayMs: number | null;
   retries: number;
   streamRecoveries: number;
   successfulStreamRecoveries: number;
   compactions: number;
   cancellations: number;
   steeringApplications: number;
+  timings: Readonly<Record<string, PerformanceTiming>>;
 }
 
 export interface BenchmarkHarnessResult {
@@ -123,10 +134,14 @@ export interface BenchmarkHarnessContext {
   readonly onEvent: (event: LoopEvent) => void;
   readonly writeArtifact?: (name: string, content: string) => Promise<string | undefined>;
   readonly tokenBudgetRemaining?: number;
+  /** Shared request-boundary accounting for adapters using the production model client. */
+  readonly requestAttemptLedger?: RequestAttemptLedger;
 }
 
 export interface BenchmarkHarnessAdapter {
   readonly name: string;
+  /** True when one adapter invocation already owns the complete diagnosis/repair lifecycle. */
+  readonly managesRepairs?: boolean;
   run(task: BenchmarkTask, context: BenchmarkHarnessContext): Promise<BenchmarkHarnessResult | void>;
 }
 
@@ -165,6 +180,11 @@ export interface BenchmarkRunResult {
 
 export interface BenchmarkSuiteSummary {
   adapter: string;
+  planned: number;
+  executed: number;
+  skipped: readonly BenchmarkSkippedRun[];
+  statisticsComplete: boolean;
+  stopReason?: string;
   total: number;
   passed: number;
   failed: number;
@@ -184,4 +204,10 @@ export interface BenchmarkSuiteSummary {
   results: readonly BenchmarkRunResult[];
   repetitions?: number;
   usage?: BenchmarkTokenUsage;
+}
+
+export interface BenchmarkSkippedRun {
+  taskId: string;
+  repetition: number;
+  reason: "budget_exhausted" | "usage_unknown" | "cancelled";
 }

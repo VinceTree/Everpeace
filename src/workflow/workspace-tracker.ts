@@ -7,6 +7,7 @@ const MAX_STATUS_BYTES = 2 * 1024 * 1024;
 const MAX_TRACKED_PATHS = 10_000;
 const MAX_FINGERPRINT_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_FINGERPRINT_TOTAL_BYTES = 64 * 1024 * 1024;
+const FINGERPRINT_WORKERS = 4;
 
 interface GitResult {
   exitCode: number | null;
@@ -124,6 +125,19 @@ async function fingerprintPath(root: string, relativePath: string, budget: { byt
   }
 }
 
+async function mapConcurrent<T, R>(values: readonly T[], workers: number, run: (value: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(workers, values.length) }, async () => {
+    while (true) {
+      const index = next++;
+      if (index >= values.length) return;
+      results[index] = await run(values[index]!);
+    }
+  }));
+  return results;
+}
+
 function revisionOf(paths: ReadonlyMap<string, PathState>): string {
   const hash = createHash("sha256");
   for (const [name, state] of [...paths].sort(([left], [right]) => left.localeCompare(right))) {
@@ -132,7 +146,12 @@ function revisionOf(paths: ReadonlyMap<string, PathState>): string {
   return hash.digest("hex");
 }
 
-async function captureStatus(workspacePath: string, gitRoot: string, workspaceRoot: string): Promise<WorkspaceStatusSnapshot> {
+async function captureStatus(
+  workspacePath: string,
+  gitRoot: string,
+  workspaceRoot: string,
+  explicitPaths: ReadonlySet<string> = new Set(),
+): Promise<WorkspaceStatusSnapshot> {
   // The pathspec keeps sibling directories out of the task snapshot. Porcelain
   // paths are still repository-root relative, so fingerprints must use gitRoot.
   const result = await runGit(workspacePath, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=no", "--", "."]);
@@ -155,17 +174,28 @@ async function captureStatus(workspacePath: string, gitRoot: string, workspaceRo
   if (records.length > MAX_TRACKED_PATHS) {
     return { available: true, complete: false, paths: new Map(), reason: "Git status contains too many changed paths to track safely" };
   }
-  const budget = { bytes: 0 };
-  const paths = new Map<string, PathState>();
-  let complete = true;
+  const candidates = new Map<string, { root: string; path: string; status: string }>();
   for (const record of records) {
     const target = path.resolve(gitRoot, record.path);
     if (!inside(workspaceRoot, target)) continue;
     const scopedPath = path.relative(workspaceRoot, target).split(path.sep).join("/");
-    if (!scopedPath) continue;
-    const fingerprint = await fingerprintPath(gitRoot, record.path, budget);
-    complete &&= fingerprint.complete;
-    paths.set(scopedPath, { status: record.status, fingerprint: fingerprint.value });
+    if (scopedPath) candidates.set(scopedPath, { root: gitRoot, path: record.path, status: record.status });
+  }
+  for (const scopedPath of explicitPaths) {
+    candidates.set(scopedPath, { root: workspaceRoot, path: scopedPath, status: "explicit" });
+  }
+  const ordered = [...candidates].sort(([left], [right]) => left.localeCompare(right));
+  const budget = { bytes: 0 };
+  const fingerprints = await mapConcurrent(ordered, FINGERPRINT_WORKERS, async ([scopedPath, candidate]) => ({
+    scopedPath,
+    status: candidate.status,
+    fingerprint: await fingerprintPath(candidate.root, candidate.path, budget),
+  }));
+  const paths = new Map<string, PathState>();
+  let complete = true;
+  for (const item of fingerprints) {
+    complete &&= item.fingerprint.complete;
+    paths.set(item.scopedPath, { status: item.status, fingerprint: item.fingerprint.value });
   }
   return {
     available: true,
@@ -199,16 +229,22 @@ export class WorkspaceChangeTracker {
   async trackPaths(paths: readonly string[]): Promise<void> {
     if (!this.#baseline) await this.begin();
     if (!this.#baseline || !this.#workspaceRoot) return;
+    const workspaceRoot = this.#workspaceRoot;
+    const requestedPaths = [...new Set(paths)].sort((left, right) => left.localeCompare(right));
     const budget = { bytes: 0 };
-    for (const requested of paths) {
-      const target = path.resolve(this.#workspaceRoot, requested);
-      if (!inside(this.#workspaceRoot, target)) continue;
-      const scoped = path.relative(this.#workspaceRoot, target).split(path.sep).join("/");
-      if (!scoped) continue;
-      this.#explicitPaths.add(scoped);
-      const fingerprint = await fingerprintPath(this.#workspaceRoot, scoped, budget);
-      this.#baseline.paths.set(scoped, { status: "explicit", fingerprint: fingerprint.value });
-      if (!fingerprint.complete) this.#baseline.complete = false;
+    const tracked = await mapConcurrent(requestedPaths, FINGERPRINT_WORKERS, async (requested) => {
+      const target = path.resolve(workspaceRoot, requested);
+      if (!inside(workspaceRoot, target)) return undefined;
+      const scoped = path.relative(workspaceRoot, target).split(path.sep).join("/");
+      if (!scoped) return undefined;
+      const fingerprint = await fingerprintPath(workspaceRoot, scoped, budget);
+      return { scoped, fingerprint };
+    });
+    for (const item of tracked) {
+      if (!item) continue;
+      this.#explicitPaths.add(item.scoped);
+      this.#baseline.paths.set(item.scoped, { status: "explicit", fingerprint: item.fingerprint.value });
+      if (!item.fingerprint.complete) this.#baseline.complete = false;
     }
   }
 
@@ -220,13 +256,7 @@ export class WorkspaceChangeTracker {
       paths: new Map(),
       reason: this.#baseline?.reason ?? "Workspace tracking is unavailable",
     });
-    const current = await captureStatus(this.#workspacePath, this.#gitRoot, this.#workspaceRoot);
-    const budget = { bytes: 0 };
-    for (const scoped of this.#explicitPaths) {
-      const fingerprint = await fingerprintPath(this.#workspaceRoot, scoped, budget);
-      current.paths.set(scoped, { status: "explicit", fingerprint: fingerprint.value });
-      if (!fingerprint.complete) current.complete = false;
-    }
+    const current = await captureStatus(this.#workspacePath, this.#gitRoot, this.#workspaceRoot, this.#explicitPaths);
     return this.#compare(current);
   }
 
@@ -268,4 +298,5 @@ export const workspaceTrackerLimits = {
   maxTrackedPaths: MAX_TRACKED_PATHS,
   maxFingerprintFileBytes: MAX_FINGERPRINT_FILE_BYTES,
   maxFingerprintTotalBytes: MAX_FINGERPRINT_TOTAL_BYTES,
+  fingerprintWorkers: FINGERPRINT_WORKERS,
 } as const;

@@ -4,7 +4,7 @@ import {
   type BashOutputPreview,
 } from "./bash-output-preview.js";
 import { stopProcessTree } from "./process-cancel.js";
-import { retainOutput } from "./command-record.js";
+import { BoundedOutputBuffer } from "./command-record.js";
 import { codexCliLaunch, runCodexProcess } from "../codex/cli.js";
 import {
   materializeSandboxControlPaths,
@@ -177,17 +177,8 @@ async function runSandboxBash(
       options.onOutput?.(previewOutput.snapshot());
     }, 80);
   };
-  let stdout = "";
-  let stderr = "";
-  let truncated = false;
   const append = (kind: "stdout" | "stderr", chunk: string) => {
     previewOutput?.push(chunk);
-    if (kind === "stdout") stdout += chunk;
-    else stderr += chunk;
-    const retained = retainOutput(kind === "stdout" ? stdout : stderr, 1024 * 1024);
-    if (kind === "stdout") stdout = retained.text;
-    else stderr = retained.text;
-    truncated ||= retained.truncated;
     preview();
     if (streamOutput) (kind === "stdout" ? process.stdout : process.stderr).write(chunk);
   };
@@ -204,14 +195,12 @@ async function runSandboxBash(
     },
   );
   if (previewTimer) clearTimeout(previewTimer);
-  const out = retainOutput(stdout);
-  const err = retainOutput(stderr);
   return {
-    stdout: out.text,
-    stderr: err.text,
+    stdout: result.stdout,
+    stderr: result.stderr,
     exitCode: result.exitCode,
     signal: null,
-    truncated: truncated || out.truncated || err.truncated,
+    truncated: result.truncated === true,
     cancelled: result.cancelled,
     ...(result.timedOut ? { timedOut: true } : {}),
     ...(result.error ? { error: result.error } : {}),
@@ -250,10 +239,9 @@ export function runBash(
 
   return new Promise((resolve) => {
     if (options.signal?.aborted) { resolve({ stdout: "", stderr: "", exitCode: null, signal: null, cancelled: true }); return; }
-    let stdout = "";
-    let stderr = "";
+    const stdout = new BoundedOutputBuffer(1024 * 1024);
+    const stderr = new BoundedOutputBuffer(1024 * 1024);
     let settled = false;
-    let truncated = false;
     let timedOut = false;
     let previewTimer: ReturnType<typeof setTimeout> | undefined;
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
@@ -293,7 +281,7 @@ export function runBash(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (streamOutput) process.stderr.write(`Failed to start ${options.sandbox ? "Codex sandbox" : "Bash"}: ${message}\n`);
-      finish({ stdout, stderr, exitCode: null, signal: null, error: message });
+      finish({ stdout: stdout.text, stderr: stderr.text, exitCode: null, signal: null, error: message });
       return;
     }
 
@@ -305,8 +293,8 @@ export function runBash(
         try { child.kill(); } catch { /* the process may already be gone */ }
         options.signal?.removeEventListener("abort", cancel);
         finish({
-          stdout: retainOutput(stdout).text,
-          stderr: retainOutput(stderr).text,
+          stdout: stdout.text,
+          stderr: stderr.text,
           exitCode: null,
           signal: null,
           cancelled: options.signal?.aborted ?? false,
@@ -330,10 +318,7 @@ export function runBash(
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (chunk: string) => {
         previewOutput?.push(chunk);
-        stdout += chunk;
-        const retained = retainOutput(stdout, 1024 * 1024);
-        stdout = retained.text;
-        truncated ||= retained.truncated;
+        stdout.append(chunk);
         preview();
         if (streamOutput) process.stdout.write(chunk);
       });
@@ -343,10 +328,7 @@ export function runBash(
       child.stderr.setEncoding("utf8");
       child.stderr.on("data", (chunk: string) => {
         previewOutput?.push(chunk);
-        stderr += chunk;
-        const retained = retainOutput(stderr, 1024 * 1024);
-        stderr = retained.text;
-        truncated ||= retained.truncated;
+        stderr.append(chunk);
         preview();
         if (streamOutput) process.stderr.write(chunk);
       });
@@ -356,19 +338,17 @@ export function runBash(
       options.signal?.removeEventListener("abort", cancel);
       const message = error.message;
       if (streamOutput) process.stderr.write(`Failed to start ${options.sandbox ? "Codex sandbox" : "Bash"}: ${message}\n`);
-      finish({ stdout, stderr, exitCode: null, signal: null, error: message });
+      finish({ stdout: stdout.text, stderr: stderr.text, exitCode: null, signal: null, error: message });
     });
 
     child.on("close", (exitCode, signal) => {
       options.signal?.removeEventListener("abort", cancel);
-      const out = retainOutput(stdout);
-      const err = retainOutput(stderr);
       finish({
-        stdout: out.text,
-        stderr: err.text,
+        stdout: stdout.text,
+        stderr: stderr.text,
         exitCode,
         signal,
-        truncated: truncated || out.truncated || err.truncated,
+        truncated: stdout.truncated || stderr.truncated,
         cancelled: options.signal?.aborted ?? false,
         ...(timedOut ? { timedOut: true, error: `Bash command timed out after ${effectiveTimeoutMs ?? 0} ms` } : {}),
       });

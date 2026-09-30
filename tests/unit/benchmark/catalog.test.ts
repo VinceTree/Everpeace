@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { parseBenchmarkTaskCatalog } from "../../../src/benchmark/catalog.js";
+import { parseBenchmarkTaskCatalog, parseReproducibleBenchmarkTaskCatalog } from "../../../src/benchmark/catalog.js";
 
 const source = {
   repositoryUrl: "https://github.com/example/project",
@@ -19,7 +19,12 @@ test("benchmark catalog parses pinned public issue tasks without executing comma
       source,
       tags: ["bug-fix", "tests"],
       maxRepairAttempts: 2,
-      fixture: { seedPatch: "fixtures/fix-parser/seed.patch", referencePatch: "fixtures/fix-parser/reference.patch" },
+      fixture: {
+        seedPatch: "fixtures/fix-parser/seed.patch",
+        referencePatch: "fixtures/fix-parser/reference.patch",
+        setup: { command: "pnpm", args: ["install", "--frozen-lockfile"] },
+        pristineVerification: { command: "pnpm", args: ["test"] },
+      },
       verification: { command: "pnpm", args: ["test"], timeoutMs: 120_000 },
     }],
   }));
@@ -29,6 +34,17 @@ test("benchmark catalog parses pinned public issue tasks without executing comma
   assert.equal(tasks[0]?.maxRepairAttempts, 2);
   assert.deepEqual(tasks[0]?.verification?.args, ["test"]);
   assert.equal(tasks[0]?.fixture?.seedPatch, "fixtures/fix-parser/seed.patch");
+  assert.deepEqual(tasks[0]?.fixture?.setup?.args, ["install", "--frozen-lockfile"]);
+});
+
+test("formal benchmark catalogs reject task lists without reviewed fixtures", () => {
+  assert.throws(() => parseReproducibleBenchmarkTaskCatalog(JSON.stringify({ tasks: [{
+    id: "missing-fixture",
+    prompt: "fix it",
+    workspacePath: "run",
+    source: { repositoryUrl: "https://example.com/repo.git", commit: "abcdef1", issue: "issue" },
+    verification: { command: "npm", args: ["test"] },
+  }] })), /missing fixture or independent acceptance material/u);
 });
 
 test("benchmark catalog rejects unpinned, unsafe, and duplicate tasks", () => {

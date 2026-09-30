@@ -433,7 +433,7 @@ function isWorkflow(value: unknown): value is WorkflowState {
   if (!isRecord(value)) return false;
   const phases: WorkflowPhase[] = ["understand", "plan", "implement", "verify_fast", "diagnose", "verify_full", "review", "done", "blocked"];
   return typeof value.task_id === "string" && phases.includes(value.phase as WorkflowPhase) &&
-    (value.task_source === undefined || value.task_source === "user" || value.task_source === "goal_continuation" || value.task_source === "session_resume") &&
+    (value.task_source === undefined || value.task_source === "user" || value.task_source === "goal_continuation" || value.task_source === "session_resume" || value.task_source === "benchmark") &&
     typeof value.repair_attempts === "number" && Number.isSafeInteger(value.repair_attempts) && value.repair_attempts >= 0 &&
     typeof value.max_repair_attempts === "number" && Number.isSafeInteger(value.max_repair_attempts) && value.max_repair_attempts >= 0 &&
     Array.isArray(value.changed_paths) && value.changed_paths.every((item) => typeof item === "string") &&

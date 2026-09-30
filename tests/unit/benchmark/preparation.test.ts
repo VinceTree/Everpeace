@@ -61,7 +61,12 @@ async function fixture(): Promise<{ root: string; fixtureRoot: string; task: Ben
       prompt: "repair value",
       workspacePath: "unused",
       source: { repositoryUrl: source, commit: stdout.trim(), issue: "fixture" },
-      fixture: { seedPatch: "seed.patch", referencePatch: "reference.patch" },
+      fixture: {
+        seedPatch: "seed.patch",
+        referencePatch: "reference.patch",
+        setup: { command: process.execPath, args: ["-e", "process.exit(0)"] },
+        pristineVerification: { command: process.execPath, args: ["-e", "import('./value.mjs').then(({default:value}) => process.exit(value === 'good' ? 0 : 1))"] },
+      },
       verification: { command: process.execPath, args: ["verify.mjs"] },
     },
   };
@@ -76,6 +81,17 @@ test("fixture proof uses a fresh pinned clone and proves fail then pass", async 
   assert.equal(proof.seeded.passed, false);
   assert.equal(proof.repaired.passed, true);
   assert.equal((await readFile(join(value.root, "proof", "value.mjs"), "utf8")).trim(), "export default 'good';");
+});
+
+test("fixture proof rejects verification infrastructure failures as invalid seeds", async () => {
+  const value = await fixture();
+  await assert.rejects(proveBenchmarkFixture({
+    ...value.task,
+    verification: { command: "definitely-missing-everpeace-verifier" },
+  }, {
+    destination: join(value.root, "invalid-proof"),
+    fixtureRoot: value.fixtureRoot,
+  }), /verification infrastructure was unavailable/u);
 });
 
 test("suite runs the task returned by an isolated prepare hook", async () => {

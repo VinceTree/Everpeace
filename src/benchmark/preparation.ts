@@ -4,6 +4,7 @@ import { dirname, relative, resolve } from "node:path";
 import type { BenchmarkTask, BenchmarkVerificationResult } from "./types.js";
 import { runBenchmarkVerification } from "./runner.js";
 import { stopProcessTree } from "../tools/process-cancel.js";
+import { BoundedOutputBuffer } from "../tools/command-record.js";
 
 interface CommandResult {
   exitCode: number | null;
@@ -12,13 +13,6 @@ interface CommandResult {
 }
 
 const MAX_COMMAND_OUTPUT = 256 * 1024;
-
-function appendBounded(current: string, chunk: string): string {
-  const combined = current + chunk;
-  return Buffer.byteLength(combined) <= MAX_COMMAND_OUTPUT
-    ? combined
-    : Buffer.from(combined).subarray(-MAX_COMMAND_OUTPUT).toString("utf8");
-}
 
 function run(command: string, args: readonly string[], cwd: string | undefined, signal?: AbortSignal): Promise<CommandResult> {
   return new Promise((resolveResult, reject) => {
@@ -35,8 +29,8 @@ function run(command: string, args: readonly string[], cwd: string | undefined, 
       reject(error);
       return;
     }
-    let stdout = "";
-    let stderr = "";
+    const stdout = new BoundedOutputBuffer(MAX_COMMAND_OUTPUT);
+    const stderr = new BoundedOutputBuffer(MAX_COMMAND_OUTPUT);
     let settled = false;
     const finish = (callback: () => void) => {
       if (settled) return;
@@ -51,10 +45,10 @@ function run(command: string, args: readonly string[], cwd: string | undefined, 
     };
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => { stdout = appendBounded(stdout, chunk); });
-    child.stderr?.on("data", (chunk: string) => { stderr = appendBounded(stderr, chunk); });
+    child.stdout?.on("data", (chunk: string) => { stdout.append(chunk); });
+    child.stderr?.on("data", (chunk: string) => { stderr.append(chunk); });
     child.once("error", (error) => finish(() => reject(error)));
-    child.once("close", (exitCode) => finish(() => resolveResult({ exitCode, stdout, stderr })));
+    child.once("close", (exitCode) => finish(() => resolveResult({ exitCode, stdout: stdout.text, stderr: stderr.text })));
     signal?.addEventListener("abort", cancel, { once: true });
     if (signal?.aborted) cancel();
   });
@@ -117,6 +111,19 @@ export async function prepareBenchmarkFixture(
     if (!head.startsWith(task.source.commit.toLowerCase())) {
       throw new Error(`Pinned source mismatch for ${task.id}: expected ${task.source.commit}, received ${head}`);
     }
+    const preparationSignal = options.signal ?? new AbortController().signal;
+    if (task.fixture.setup) {
+      const setup = await runBenchmarkVerification(task.fixture.setup, destination, preparationSignal);
+      if (!setup.passed) {
+        throw new Error(`Benchmark ${task.id} setup failed${setup.error ? `: ${setup.error}` : ` with exit ${setup.exitCode ?? "unknown"}`}`);
+      }
+    }
+    if (task.fixture.pristineVerification) {
+      const pristine = await runBenchmarkVerification(task.fixture.pristineVerification, destination, preparationSignal);
+      if (!pristine.passed) {
+        throw new Error(`Benchmark ${task.id} pinned source did not pass its pristine assertion${pristine.error ? `: ${pristine.error}` : ""}`);
+      }
+    }
     await applyPatch(fixturePath(options.fixtureRoot, task.fixture.seedPatch), destination, options.signal);
   } catch (error) {
     // The destination was proven absent above and belongs exclusively to this preparation attempt.
@@ -146,18 +153,22 @@ export async function proveBenchmarkFixture(
   task: BenchmarkTask,
   options: PrepareBenchmarkFixtureOptions,
 ): Promise<BenchmarkFixtureProof> {
-  if (!task.verification) throw new Error(`Benchmark ${task.id} does not declare verification`);
+  const verification = task.acceptance ?? task.verification;
+  if (!verification) throw new Error(`Benchmark ${task.id} does not declare verification`);
   const prepared = await prepareBenchmarkFixture(task, options);
   const controller = new AbortController();
   const abort = () => controller.abort(options.signal?.reason);
   options.signal?.addEventListener("abort", abort, { once: true });
   if (options.signal?.aborted) abort();
   try {
-    const seeded = await runBenchmarkVerification(task.verification, prepared.workspacePath, controller.signal);
+    const seeded = await runBenchmarkVerification(verification, prepared.workspacePath, controller.signal);
+    if (seeded.timedOut || seeded.error || seeded.exitCode === null) {
+      throw new Error(`Benchmark ${task.id} seed proof failed because verification infrastructure was unavailable: ${seeded.error ?? "no exit code"}`);
+    }
     if (seeded.passed) throw new Error(`Benchmark ${task.id} seed did not fail its acceptance assertion`);
     await applyBenchmarkReferenceRepair(prepared, options.fixtureRoot, controller.signal);
-    const repaired = await runBenchmarkVerification(task.verification, prepared.workspacePath, controller.signal);
-    if (!repaired.passed) throw new Error(`Benchmark ${task.id} reference repair did not pass its acceptance assertion`);
+    const repaired = await runBenchmarkVerification(verification, prepared.workspacePath, controller.signal);
+    if (!repaired.passed) throw new Error(`Benchmark ${task.id} reference repair did not pass its acceptance assertion${repaired.error ? `: ${repaired.error}` : ""}`);
     return { seeded, repaired };
   } finally {
     options.signal?.removeEventListener("abort", abort);
@@ -168,14 +179,19 @@ export async function proveBenchmarkFixture(
 export interface IsolatedPreparerOptions {
   fixtureRoot: string;
   runsRoot: string;
+  campaignId?: string;
+  harnessName?: string;
   signal?: AbortSignal;
 }
 
 /** Build a suite hook which gives every repetition a fresh pinned workspace. */
 export function createIsolatedBenchmarkPreparer(options: IsolatedPreparerOptions) {
+  const safe = (value: string): string => value.replace(/[^A-Za-z0-9._-]/gu, "-");
   return (task: BenchmarkTask, repetition: number): Promise<BenchmarkTask> => prepareBenchmarkFixture(task, {
     fixtureRoot: options.fixtureRoot,
-    destination: resolve(options.runsRoot, `${task.id}-${repetition}`),
+    destination: options.campaignId && options.harnessName
+      ? resolve(options.runsRoot, safe(options.campaignId), safe(options.harnessName), safe(task.id), String(repetition))
+      : resolve(options.runsRoot, `${task.id}-${repetition}`),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
 }

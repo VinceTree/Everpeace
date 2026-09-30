@@ -7,6 +7,10 @@ test("benchmark metrics collect loop reliability signals without changing loop e
   const collector = createBenchmarkMetricsCollector(() => clock);
   collector.onPhase("sampling");
   collector.onEvent({ type: "sampling_started" });
+  clock = 105;
+  collector.onEvent({ type: "model_progress", milestone: "first_event" });
+  clock = 108;
+  collector.onEvent({ type: "model_progress", milestone: "first_text" });
   collector.onEvent({ type: "response_received", response: { output: [], output_text: "" } });
   collector.onEvent({ type: "response_rejected", reason: "incomplete" });
   collector.onEvent({ type: "response_rejected", reason: "invalid_tool_call" });
@@ -22,6 +26,7 @@ test("benchmark metrics collect loop reliability signals without changing loop e
   collector.onEvent({ type: "stream_recovery_finished", success: true });
   collector.onEvent({ type: "compaction_completed", automatic: true, usage: null });
   collector.onEvent({ type: "steering_applied", count: 1 });
+  collector.onEvent({ type: "timing_recorded", operation: "tool_execution", durationMs: 12 });
   collector.onPhase("cancelled");
   clock = 175;
 
@@ -39,13 +44,16 @@ test("benchmark metrics collect loop reliability signals without changing loop e
     toolFailures: 1,
     toolBatches: 1,
     toolResultOrder: ["a"],
-    firstToolStartDelayMs: 0,
+    firstToolStartDelayMs: 8,
+    firstModelEventDelayMs: 5,
+    firstModelTextDelayMs: 8,
     retries: 1,
     streamRecoveries: 1,
     successfulStreamRecoveries: 1,
     compactions: 1,
     cancellations: 1,
     steeringApplications: 1,
+    timings: { tool_execution: { count: 1, totalMs: 12, maxMs: 12 } },
   });
 
 });

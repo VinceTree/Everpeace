@@ -63,6 +63,17 @@ test("verification failure is reported separately from harness errors", async ()
   assert.equal(result.verification?.passed, false);
 });
 
+test("evaluator-owned acceptance takes precedence over harness-visible verification", async () => {
+  const adapter: BenchmarkHarnessAdapter = { name: "fixture-harness", async run() {} };
+  const result = await runBenchmarkTask(task({
+    verification: { command: "node", args: ["-e", "process.exit(0)"] },
+    acceptance: { command: "node", args: ["-e", "process.exit(7)"] },
+    maxRepairAttempts: 0,
+  }), adapter);
+  assert.equal(result.status, "failed");
+  assert.equal(result.verification?.exitCode, 7);
+});
+
 test("verification timeout terminates the process tree", async () => {
   const adapter: BenchmarkHarnessAdapter = {
     name: "fixture-harness",
@@ -211,8 +222,9 @@ test("benchmark artifacts are bounded to safe names and redact common credential
   }, { artifactSink: sink });
 
   assert.equal(result.status, "passed");
-  assert.ok(result.artifacts?.some((path) => path.endsWith("diagnostic.txt")));
-  assert.match(await readFile(join(artifactDirectory, "diagnostic.txt"), "utf8"), /\[REDACTED\]/u);
+  const diagnostic = result.artifacts?.find((path) => path.endsWith("diagnostic.txt"));
+  assert.ok(diagnostic);
+  assert.match(await readFile(diagnostic, "utf8"), /\[REDACTED\]/u);
   assert.ok(await readFile(join(artifactDirectory, "result.json"), "utf8"));
 });
 
@@ -243,6 +255,78 @@ test("a live suite stops after unknown usage without starting the next task", as
     async run() { calls += 1; return {}; },
   }, { liveApi: true, totalTokenBudget: 1_000 });
   assert.equal(calls, 1);
-  assert.equal(summary.total, 1);
+  assert.equal(summary.total, 2);
+  assert.equal(summary.executed, 1);
+  assert.equal(summary.statisticsComplete, false);
+  assert.deepEqual(summary.skipped, [{ taskId: "two", repetition: 1, reason: "usage_unknown" }]);
   assert.equal(summary.results[0]?.status, "failed");
+});
+
+test("live adapters can account at the actual request boundary", async () => {
+  const summary = await runBenchmarkSuite([task({ id: "one" }), task({ id: "two" })], {
+    name: "request-ledger",
+    async run(_task, context) {
+      const request = context.requestAttemptLedger?.begin("coding");
+      assert.notEqual(request, undefined);
+      context.requestAttemptLedger?.settle(request!, "completed", {
+        input_tokens: 120,
+        output_tokens: 30,
+        reasoning_tokens: 20,
+        total_tokens: 150,
+      });
+      return { usage: { inputTokens: 999, outputTokens: 999, complete: true } };
+    },
+  }, { liveApi: true, totalTokenBudget: 150 });
+
+  assert.equal(summary.executed, 1);
+  assert.deepEqual(summary.usage, {
+    inputTokens: 120,
+    outputTokens: 30,
+    reasoningTokens: 20,
+    cachedInputTokens: 0,
+    cacheObservedInputTokens: 0,
+    complete: true,
+  });
+  assert.deepEqual(summary.skipped, [{ taskId: "two", repetition: 1, reason: "budget_exhausted" }]);
+});
+
+test("cancelled campaigns skip preparation and all planned runs", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let prepared = 0;
+  const summary = await runBenchmarkSuite([task()], { name: "cancelled", async run() {} }, {
+    signal: controller.signal,
+    async prepareRun() { prepared += 1; },
+  });
+  assert.equal(prepared, 0);
+  assert.equal(summary.executed, 0);
+  assert.equal(summary.stopReason, "Campaign was cancelled");
+  assert.deepEqual(summary.skipped, [{ taskId: "fixture", repetition: 1, reason: "cancelled" }]);
+});
+
+test("unknown usage stays incomplete after an earlier metered repair attempt", async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "everpeace-sticky-usage-"));
+  let attempts = 0;
+  const result = await runBenchmarkTask(task({
+    workspacePath,
+    maxRepairAttempts: 2,
+    verification: { command: "node", args: ["-e", "process.exit(1)"] },
+  }), {
+    name: "sticky-usage",
+    async run() {
+      attempts += 1;
+      return attempts === 1
+        ? { usage: { inputTokens: 80, outputTokens: 20, complete: true } }
+        : {};
+    },
+  }, { liveApi: true, totalTokenBudget: 1_000 });
+  assert.equal(attempts, 2);
+  assert.deepEqual(result.usage, {
+    inputTokens: 80,
+    outputTokens: 20,
+    reasoningTokens: 0,
+    cachedInputTokens: 0,
+    cacheObservedInputTokens: 0,
+    complete: false,
+  });
 });

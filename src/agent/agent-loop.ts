@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { PersistenceError } from "../storage/persistence-error.js";
 import { boundModelToolOutput } from "./context-limits.js";
 import type { TokenUsageSample } from "../status/model-status.js";
+const MAX_PENDING_PARALLEL_TOOL_BYTES = 4 * 1024 * 1024;
 export interface LoopResponse {
   output: Array<Record<string, unknown>>;
   output_text: string;
@@ -34,6 +35,7 @@ export type LoopEvent =
   | { type: "sampling_started" }
   | { type: "reasoning_started" }
   | { type: "reasoning_finished" }
+  | { type: "model_progress"; milestone: "first_event" | "first_text" }
   | { type: "response_received"; response: LoopResponse }
   | { type: "response_rejected"; reason: "incomplete" | "invalid_tool_call" }
   | { type: "tool_started"; call: ToolCall }
@@ -47,7 +49,7 @@ export type LoopEvent =
   | { type: "step_limit_reached"; maxSteps: number }
   | { type: "compaction_started"; automatic: boolean }
   | { type: "compaction_completed"; automatic: boolean; usage: TokenUsageSample | null }
-  | { type: "timing_recorded"; operation: "sampling" | "retry_delay" | "tool_wait" | "tool_execution" | "compaction"; durationMs: number };
+  | { type: "timing_recorded"; operation: "prepare_context" | "request_snapshot" | "sampling" | "retry_delay" | "tool_wait" | "tool_execution" | "compaction" | "persistence"; durationMs: number };
 
 export class LoopSteeredError extends Error {
   constructor() {
@@ -358,13 +360,20 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         if (!parallel[index]) {
           results.push(await execute(segment[0]!));
         } else {
-          const inFlight = new Map<number, Promise<ToolRun>>();
+          const inFlight = new Map<number, Promise<{ index: number; result: ToolRun }>>();
+          const completed = new Map<number, ToolRun>();
           const activeKeys = new Set<string>();
           let launched = 0;
           let committed = 0;
+          let completedBytes = 0;
           while (committed < segment.length) {
             let gateStop: LoopStopReason | undefined;
-            while (launched < segment.length && inFlight.size < maxParallelTools && launched - committed < maxParallelTools) {
+            while (
+              launched < segment.length
+              && inFlight.size < maxParallelTools
+              && completed.size < maxParallelTools
+              && completedBytes < MAX_PENDING_PARALLEL_TOOL_BYTES
+            ) {
               gateStop = await options.checkStop?.();
               if (externalSignal?.aborted || deadlineController.signal.aborted || options.hasPendingSteering?.() || gateStop) break;
               const absolute = start + launched;
@@ -372,22 +381,26 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
               if (keys.some((key) => activeKeys.has(key))) break;
               keys.forEach((key) => activeKeys.add(key));
               const localIndex = launched++;
-              const pending = execute(segment[localIndex]!).finally(() => {
-                keys.forEach((key) => activeKeys.delete(key));
-              });
+              const pending = execute(segment[localIndex]!)
+                .then((result) => ({ index: localIndex, result }))
+                .finally(() => { keys.forEach((key) => activeKeys.delete(key)); });
               inFlight.set(localIndex, pending);
             }
-            const pending = inFlight.get(committed);
-            if (!pending) break;
+            const ready = completed.get(committed);
+            if (ready) {
+              completed.delete(committed);
+              completedBytes -= Buffer.byteLength(ready.output ?? "");
+              results.push(ready);
+              committed += 1;
+              continue;
+            }
+            if (inFlight.size === 0) break;
             const waitStarted = performance.now();
-            results.push(await pending);
+            const settled = await Promise.race(inFlight.values());
             options.onEvent?.({ type: "timing_recorded", operation: "tool_wait", durationMs: performance.now() - waitStarted });
-            inFlight.delete(committed);
-            committed += 1;
-          }
-          if (inFlight.size > 0) {
-            const tail = await Promise.all([...inFlight.entries()].sort(([a], [b]) => a - b).map(([, pending]) => pending));
-            results.push(...tail);
+            inFlight.delete(settled.index);
+            completed.set(settled.index, settled.result);
+            completedBytes += Buffer.byteLength(settled.result.output ?? "");
           }
         }
         for (const result of results) {

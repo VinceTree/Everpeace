@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { retainOutput } from "../../../src/tools/command-record.js";
+import { BoundedOutputBuffer, retainOutput } from "../../../src/tools/command-record.js";
 
 test("output retention bounds lines and bytes while preserving UTF-8 and the tail", () => {
   const lines = retainOutput(Array.from({ length: 10001 }, (_, i) => String(i)).join("\n"));
@@ -12,4 +12,11 @@ test("output retention bounds lines and bytes while preserving UTF-8 and the tai
   assert.ok(Buffer.byteLength(bytes.text) <= 2 * 1024 * 1024);
   assert.ok(!bytes.text.includes("\ufffd"));
   assert.deepEqual(retainOutput("hello"), { text: "hello", truncated: false });
+});
+
+test("incremental output retention matches one-shot retention across UTF-8 chunks", () => {
+  const chunks = Array.from({ length: 12_000 }, (_, index) => `${index}:中文\n`);
+  const incremental = new BoundedOutputBuffer(64 * 1024);
+  chunks.forEach((chunk) => incremental.append(chunk));
+  assert.deepEqual(incremental.result(), retainOutput(chunks.join(""), 64 * 1024));
 });

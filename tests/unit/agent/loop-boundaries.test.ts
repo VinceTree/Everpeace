@@ -79,16 +79,20 @@ test("parallel reads use a sliding bounded window without waiting for the whole 
     canRunInParallel: () => true,
     dispatch: async (tool) => {
       started.push(tool.call_id);
-      if (tool.call_id === "a") await new Promise<void>((resolve) => gates.set("a", resolve));
+      if (tool.call_id === "a" || tool.call_id === "b") {
+        await new Promise<void>((resolve) => gates.set(tool.call_id, resolve));
+      }
       return tool.call_id;
     },
   }));
   for (let attempt = 0; attempt < 20 && started.length < 2; attempt += 1) await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(started, ["a", "b"]);
   assert.equal(started.includes("c"), false);
+  gates.get("b")?.();
+  for (let attempt = 0; attempt < 20 && !started.includes("c"); attempt += 1) await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(started, ["a", "b", "c"]);
   gates.get("a")?.();
   await turn;
-  assert.deepEqual(started, ["a", "b", "c"]);
 });
 
 test("Plan rejects unadvertised side-effect tools in buffered and SSE responses", async () => {

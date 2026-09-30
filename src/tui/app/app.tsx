@@ -31,9 +31,9 @@ import {
 } from "../../status/model-status.js";
 import type { BashOutputPreview, BashResult } from "../../tools/bash.js";
 import { previewApplyPatch, runApplyPatch, type ApplyPatchOperation, type ApplyPatchResult } from "../../tools/apply-patch.js";
-import { CodingWorkflowRuntime, formatWorkflowSummary } from "../../workflow/runtime.js";
+import { CodingWorkflowRuntime } from "../../workflow/runtime.js";
+import { CodingTaskRunner } from "../../workflow/task-runner.js";
 import type { WorkflowState, WorkflowTaskSource } from "../../workflow/types.js";
-import { verificationPrompt } from "../../workflow/verifier.js";
 import { discoverVerificationCommands, selectVerificationCommands } from "../../workflow/verifier.js";
 import { formatWorkspaceInspection, inspectWorkspace } from "../../tools/workspace.js";
 import { selectAgentOutputPreview } from "../rendering/command-output-preview.js";
@@ -330,6 +330,7 @@ export function EverpeaceApp({
   const [requestSettings, setRequestSettings] = useState(() => settingsForModel(firstActiveModel));
   const [agentMode, setAgentMode] = useState<AgentMode>("default");
   const [activeGoal, setActiveGoal] = useState<SessionGoal>();
+  const activeGoalProjection = useRef<SessionGoal | undefined>(undefined);
   const [memoryPolicy, setMemoryPolicy] = useState<LearnedMemoryPolicy>({ readExisting: true, captureFuture: true });
   const [workspacePath, setWorkspacePath] = useState(dependencies.workspacePath);
   const [view, setView] = useState<View>(() => initialView(initialModels.available));
@@ -341,6 +342,30 @@ export function EverpeaceApp({
   const [reasoningElapsedSeconds, setReasoningElapsedSeconds] = useState(0);
   const [queuedGuidanceCount, setQueuedGuidanceCount] = useState(0);
   const [liveAssistant, setLiveAssistant] = useState("");
+  const pendingAssistantDelta = useRef("");
+  const assistantDeltaTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const flushAssistantDelta = useCallback(() => {
+    if (assistantDeltaTimer.current) clearTimeout(assistantDeltaTimer.current);
+    assistantDeltaTimer.current = undefined;
+    const delta = pendingAssistantDelta.current;
+    pendingAssistantDelta.current = "";
+    if (delta) setLiveAssistant((current) => current + delta);
+  }, []);
+  const clearLiveAssistant = useCallback(() => {
+    if (assistantDeltaTimer.current) clearTimeout(assistantDeltaTimer.current);
+    assistantDeltaTimer.current = undefined;
+    pendingAssistantDelta.current = "";
+    setLiveAssistant("");
+  }, []);
+  const queueAssistantDelta = useCallback((text: string) => {
+    pendingAssistantDelta.current += text;
+    assistantDeltaTimer.current ??= setTimeout(flushAssistantDelta, 40);
+  }, [flushAssistantDelta]);
+  useEffect(() => () => {
+    if (assistantDeltaTimer.current) clearTimeout(assistantDeltaTimer.current);
+    assistantDeltaTimer.current = undefined;
+    pendingAssistantDelta.current = "";
+  }, []);
   const [liveToolStatus, setLiveToolStatus] = useState<string>();
   const [terminalBusy, setTerminalBusy] = useState(false);
   const [terminalOutput, setTerminalOutput] = useState<string>();
@@ -353,6 +378,7 @@ export function EverpeaceApp({
   const directController = useRef<AbortController | undefined>(undefined);
   const commandInput = useRef<((input: string) => void) | undefined>(undefined);
   const queuedGuidance = useRef<QueuedGuidance[]>([]);
+  useEffect(() => { activeGoalProjection.current = activeGoal; }, [activeGoal]);
   const resumeGoalPending = useRef(false);
   const runChatRef = useRef<((text: string, timelineRecorded?: boolean, mode?: AgentMode, taskSource?: WorkflowTaskSource) => Promise<void>) | undefined>(undefined);
   useEffect(() => {
@@ -403,9 +429,9 @@ export function EverpeaceApp({
   const clearQueuedGuidance = useCallback(() => {
     queuedGuidance.current = [];
     setQueuedGuidanceCount(0);
-    setLiveAssistant("");
+    clearLiveAssistant();
     setLiveToolStatus(undefined);
-  }, []);
+  }, [clearLiveAssistant]);
 
   const ensureWorkflow = useCallback((initialState?: WorkflowState, workflowWorkspace = workspacePath): CodingWorkflowRuntime => {
     const runtimeOptions = {
@@ -716,13 +742,13 @@ export function EverpeaceApp({
       requestPlanInput,
       reviewPlan,
       async getGoal() {
-        const sessionId = activeSessionId.current;
-        return sessionId ? (await dependencies.sessionStore.load(sessionId)).goal : undefined;
+        return activeSessionId.current ? activeGoalProjection.current : undefined;
       },
       async setGoal(goal) {
         const sessionId = activeSessionId.current;
         if (!sessionId) throw new Error("Goals require an active session");
         await dependencies.sessionStore.setGoal(sessionId, goal);
+        activeGoalProjection.current = goal;
         setActiveGoal(goal);
       },
       async previewPatch(operations: readonly ApplyPatchOperation[]) {
@@ -760,11 +786,11 @@ export function EverpeaceApp({
         }
       },
       writeAssistant(text) {
-        setLiveAssistant("");
+        clearLiveAssistant();
         append("assistant", text);
       },
       writeAssistantDelta(text) {
-        setLiveAssistant((current) => current + text);
+        queueAssistantDelta(text);
       },
       writeTool(text) {
         setLiveToolStatus(text);
@@ -784,7 +810,7 @@ export function EverpeaceApp({
         }
       },
     }),
-    [append, dependencies.sessionStore, ensureWorkflow, executeBash, executeVerification, requestBashConfirmation, requestGoalConfirmation, requestMcpConfirmation, requestPatchConfirmation, requestPlanInput, requestWebConfirmation, reviewPlan, workspacePath],
+    [append, clearLiveAssistant, dependencies.sessionStore, ensureWorkflow, executeBash, executeVerification, queueAssistantDelta, requestBashConfirmation, requestGoalConfirmation, requestMcpConfirmation, requestPatchConfirmation, requestPlanInput, requestWebConfirmation, reviewPlan, workspacePath],
   );
 
   const contextWindow = activeModel
@@ -822,7 +848,7 @@ export function EverpeaceApp({
             },
             onEvent(event) {
               if (event.type === "sampling_started") {
-                setLiveAssistant("");
+                clearLiveAssistant();
                 setLiveToolStatus(undefined);
                 setReasoningStartedAt(undefined);
               } else if (event.type === "reasoning_started") {
@@ -832,7 +858,7 @@ export function EverpeaceApp({
                 setLiveToolStatus(undefined);
                 setReasoningStartedAt(undefined);
               } else if (event.type === "retrying") {
-                setLiveAssistant("");
+                clearLiveAssistant();
                 setLiveToolStatus(`Retrying model request (attempt ${event.attempt}${event.category ? ` · ${event.category.replace(/_/g, " ")}` : ""})`);
               } else if (event.type === "stream_recovery_started") {
                 setLiveToolStatus("Resuming interrupted model stream");
@@ -840,7 +866,7 @@ export function EverpeaceApp({
                 setLiveToolStatus(event.success === false ? "Stream resume failed; retrying request" : "Model stream resumed");
               } else if (event.type === "steering_applied") {
                 setQueuedGuidanceCount((current) => Math.max(0, current - event.count));
-                setLiveAssistant("");
+                clearLiveAssistant();
                 setLiveToolStatus("Guidance applied; continuing with the updated task");
               } else if (event.type === "tool_started") {
                 setLiveToolStatus(`Preparing ${event.call.name}`);
@@ -857,7 +883,7 @@ export function EverpeaceApp({
               }
             },
           }),
-    [activeModel, agentIo, contextWindow, dependencies, sessionContext, sessionEpoch],
+    [activeModel, agentIo, clearLiveAssistant, contextWindow, dependencies, requestSettings, sessionContext, sessionEpoch],
   );
 
   useEffect(() => {
@@ -1215,6 +1241,7 @@ export function EverpeaceApp({
           setActiveModel(model);
           setRequestSettings(restoredSettings);
           setAgentMode("default");
+          activeGoalProjection.current = loaded.goal;
           setActiveGoal(loaded.goal);
           setMemoryPolicy(loaded.memoryPolicy ?? { readExisting: true, captureFuture: true });
           setWorkspacePath(restoredWorkspace);
@@ -1381,6 +1408,7 @@ export function EverpeaceApp({
         setSessionContext([]);
         setSessionUsage(createEmptySessionUsage());
         setAgentMode("default");
+        activeGoalProjection.current = undefined;
         setActiveGoal(undefined);
         setMemoryPolicy({ readExisting: true, captureFuture: true });
         setResumedInputHistory(undefined);
@@ -1413,6 +1441,7 @@ export function EverpeaceApp({
     setSessionUsage(createEmptySessionUsage());
     resumeGoalPending.current = false;
     setAgentMode("default");
+    activeGoalProjection.current = undefined;
     setActiveGoal(undefined);
     setMemoryPolicy({ readExisting: true, captureFuture: true });
     const banner: TimelineEntry = {
@@ -1459,9 +1488,12 @@ export function EverpeaceApp({
   }, [clearConversation, dependencies.sessionStore, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad]);
 
   const runtimeForGoal = useCallback((sessionId: string) => new GoalRuntime({
-    getGoal: async () => (await dependencies.sessionStore.load(sessionId)).goal,
+    getGoal: async () => activeSessionId.current === sessionId
+      ? activeGoalProjection.current
+      : (await dependencies.sessionStore.load(sessionId)).goal,
     setGoal: async (goal) => {
       await dependencies.sessionStore.setGoal(sessionId, goal);
+      if (activeSessionId.current === sessionId) activeGoalProjection.current = goal;
       setActiveGoal(goal);
     },
   }), [dependencies.sessionStore]);
@@ -1469,6 +1501,7 @@ export function EverpeaceApp({
   const showGoalStatus = useCallback(async () => {
     const sessionId = activeSessionId.current;
     const goal = sessionId ? (await dependencies.sessionStore.load(sessionId)).goal : undefined;
+    activeGoalProjection.current = goal;
     setActiveGoal(goal);
     enterCommandView({ kind: "goal-status", ...(goal ? { goal } : {}) });
   }, [dependencies.sessionStore, enterCommandView]);
@@ -1477,6 +1510,7 @@ export function EverpeaceApp({
     const sessionId = activeSessionId.current;
     if (!sessionId) { void showGoalStatus(); return; }
     void runtimeForGoal(sessionId).update("paused").then((goal) => {
+      activeGoalProjection.current = goal;
       setActiveGoal(goal);
       returnToChat(() => appendTransient("system", "Goal paused."));
     }).catch((error: unknown) => openInfo("/goal · Could not pause", error instanceof Error ? error.message : String(error), "error"));
@@ -1486,6 +1520,7 @@ export function EverpeaceApp({
     const sessionId = activeSessionId.current;
     if (!sessionId) { void showGoalStatus(); return; }
     void runtimeForGoal(sessionId).resume().then((goal) => {
+      activeGoalProjection.current = goal;
       setActiveGoal(goal);
       returnToChat(() => appendTransient("system", "Goal resumed."));
       setTimeout(() => void runChatRef.current?.("Continue working toward the active session goal. Call get_goal first, then proceed until the objective is verified complete.", true, "default"), 0);
@@ -1509,6 +1544,7 @@ export function EverpeaceApp({
     setAgentMode("default");
     returnToChat(() => appendTransient("system", "Goal created; continuing until it is complete, paused, blocked, or limited."));
     setTimeout(() => void runChatRef.current?.(objective, false, "default"), 0);
+    activeGoalProjection.current = goal;
     setActiveGoal(goal);
   }, [activeModel, appendTransient, dependencies.sessionStore, openInfo, requestSettings, returnToChat, runtimeForGoal, startTitleGeneration, workspacePath]);
 
@@ -1736,107 +1772,41 @@ export function EverpeaceApp({
       setAgentPhase("sampling");
       setTurnStartedAt(Date.now());
       setBusyLabel(`Waiting for ${waitingTarget}`);
-      setLiveAssistant("");
+      clearLiveAssistant();
       setLiveToolStatus(undefined);
       let approvedPlan = false;
       try {
-        let nextText = text;
-        let nextMode = mode;
-        let workflowStarted = false;
-        while (true) {
-          if (nextMode === "default" && !workflowStarted) {
-            if (taskSource === "session_resume") await ensureWorkflow().resumeTurn();
-            else await ensureWorkflow().beginTurn({ mode: "default", source: taskSource });
-            workflowStarted = true;
-          } else if (nextMode === "default" && ensureWorkflow().state.phase === "diagnose") {
-            const repair = await ensureWorkflow().startRepairTurn();
-            if (repair.phase === "blocked") {
-              await agent.finalizePendingGoalCompletion?.(false);
-              await agent.finishMemoryTurn?.("failed");
-              append("system", "Automatic repair stopped after three diagnostic rounds. Start a new task to authorize more changes.");
-              break;
-            }
-          }
-          const started = Date.now();
-          const result = await agent.runTurn(nextText, controller.signal, { mode: nextMode }) ?? {};
-          if (result.stopReason) {
-            await agent.finalizePendingGoalCompletion?.(false);
-            await agent.finishMemoryTurn?.("stopped");
-            setLiveAssistant("");
-            const sessionId = activeSessionId.current;
-            if (sessionId) setActiveGoal((await dependencies.sessionStore.load(sessionId)).goal);
-            const stoppedMessage = result.stopReason === "budget_limited"
-              ? "Goal token budget reached. Work stopped before further tools or model requests."
-              : result.stopReason === "usage_limited"
-                ? "Goal usage could not be measured reliably. Work stopped before further tools or model requests."
-                : result.stopReason === "step_limit"
-                  ? "Agent step limit reached. Work stopped without reporting completion."
-                  : "Agent turn deadline reached. Work stopped without reporting completion.";
-            append("system", stoppedMessage);
-            break;
-          }
-          if (result.planDecision === "approve") {
-            approvedPlan = true;
-            setAgentMode("default");
-            break;
-          }
-          if (result.planDecision === "cancel") {
-            setAgentMode("default");
-            appendTransient("system", "Plan mode cancelled.");
-            break;
-          }
-          if (nextMode === "plan") break;
-          if (agent.waitForBackgroundJobs) {
-            setLiveToolStatus("Waiting for background commands before final verification");
-            await agent.waitForBackgroundJobs(controller.signal);
-          }
-          const workflowResult = await ensureWorkflow().finishTurn(executeVerification, controller.signal);
-          if (workflowResult.prompt && ensureWorkflow().state.phase === "diagnose") {
-            await agent.finishMemoryTurn?.("failed");
-            nextText = workflowResult.prompt;
-            nextMode = "default";
-            setLiveAssistant("");
-            setLiveToolStatus("Diagnosing workflow review");
-            continue;
-          }
-          if (workflowResult.verification && !workflowResult.verification.passed && ensureWorkflow().state.phase === "diagnose") {
-            await agent.finishMemoryTurn?.("failed");
-            nextText = verificationPrompt(workflowResult.verification);
-            nextMode = "default";
-            setLiveAssistant("");
-            setLiveToolStatus(`Diagnosing ${workflowResult.verification.command.label}`);
-            continue;
-          }
-          const workflowOutcome = workflowResult.state.result;
-          await agent.finalizePendingGoalCompletion?.(workflowOutcome === "verified" || workflowOutcome === "no_changes");
-          await agent.finishMemoryTurn?.(
-            workflowOutcome === "verified" ? "verified"
-              : workflowOutcome === "failed" ? "failed"
-                : "unverified",
-          );
-          const workflowSummary = formatWorkflowSummary(workflowResult);
-          if (workflowSummary) append("system", workflowSummary);
-          const sessionId = activeSessionId.current;
-          if (!sessionId) break;
-          let goal = (await dependencies.sessionStore.load(sessionId)).goal;
-          if (goal) {
-            await dependencies.sessionStore.updateGoal(sessionId, { time_used_seconds: goal.time_used_seconds + (Date.now() - started) / 1000 });
-            goal = (await dependencies.sessionStore.load(sessionId)).goal;
-            setActiveGoal(goal);
-          }
-          if (goal?.status !== "active") break;
-          if (workflowResult.state.phase === "blocked" || workflowOutcome === "unverified") {
-            append("system", workflowResult.state.phase === "blocked"
-              ? "Automatic repair stopped after the workflow repair limit. The active goal was not marked complete."
-              : "Automatic goal continuation stopped because the coding changes could not be fully verified.");
-            break;
-          }
-          nextText = "Continue working toward the active session goal. Call get_goal, make concrete progress, verify the result, and update the goal when complete or genuinely blocked.";
-          nextMode = "default";
-          taskSource = "goal_continuation";
-          workflowStarted = false;
-          setLiveAssistant("");
-          setLiveToolStatus("Continuing active goal");
+        const runner = new CodingTaskRunner({
+          agent,
+          workflow: ensureWorkflow(),
+          host: {
+            executeVerification,
+            getGoal: async () => activeGoalProjection.current,
+            async addGoalTime(seconds) {
+              const sessionId = activeSessionId.current;
+              const current = activeGoalProjection.current;
+              if (!sessionId || !current) return current;
+              const goal = { ...current, time_used_seconds: current.time_used_seconds + seconds, updated_at: new Date().toISOString() };
+              await dependencies.sessionStore.setGoal(sessionId, goal);
+              activeGoalProjection.current = goal;
+              return goal;
+            },
+            onGoal(goal) {
+              activeGoalProjection.current = goal;
+              setActiveGoal(goal);
+            },
+            onSystemMessage(message) { append("system", message); },
+            onStatus(status) { setLiveToolStatus(status); },
+            resetAssistant: clearLiveAssistant,
+          },
+        });
+        const result = await runner.run({ text, mode, source: taskSource, signal: controller.signal });
+        if (result.disposition === "plan_approved") {
+          approvedPlan = true;
+          setAgentMode("default");
+        } else if (result.disposition === "plan_cancelled") {
+          setAgentMode("default");
+          appendTransient("system", "Plan mode cancelled.");
         }
       } catch (error) {
         await agent.finalizePendingGoalCompletion?.(false).catch(() => undefined);
@@ -1844,10 +1814,11 @@ export function EverpeaceApp({
         if (controller.signal.aborted) {
           const sessionId = activeSessionId.current;
           if (mode === "default" && sessionId) {
-            const goal = (await dependencies.sessionStore.load(sessionId).catch(() => undefined))?.goal;
+            const goal = activeGoalProjection.current;
             if (goal?.status === "active") {
               const paused = { ...goal, status: "paused" as const, updated_at: new Date().toISOString() };
               await dependencies.sessionStore.setGoal(sessionId, paused).catch(() => undefined);
+              activeGoalProjection.current = paused;
               setActiveGoal(paused);
             }
           }
@@ -1862,7 +1833,7 @@ export function EverpeaceApp({
         setAgentPhase(undefined);
         setTurnStartedAt(undefined);
         setReasoningStartedAt(undefined);
-        setLiveAssistant("");
+        clearLiveAssistant();
         setLiveToolStatus(undefined);
         if (controller.signal.aborted && queuedGuidance.current.length === 0) {
           setQueuedGuidanceCount(0);
@@ -1882,7 +1853,7 @@ export function EverpeaceApp({
         }
       }
     },
-    [activeModel, agent, agentMode, append, appendTransient, clearQueuedGuidance, dependencies.sessionStore, ensureWorkflow, executeVerification, requestSettings, startTitleGeneration, workspacePath],
+    [activeModel, agent, agentMode, append, appendTransient, clearLiveAssistant, clearQueuedGuidance, dependencies.sessionStore, ensureWorkflow, executeVerification, requestSettings, startTitleGeneration, workspacePath],
   );
 
   useEffect(() => {

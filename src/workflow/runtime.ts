@@ -139,7 +139,7 @@ export class CodingWorkflowRuntime {
     signal?: AbortSignal,
   ): Promise<WorkflowRunResult> {
     signal?.throwIfAborted();
-    await this.#refreshObservedChanges();
+    let before = await this.#refreshObservedChanges();
     if (this.#state.phase === "blocked") {
       await this.#set({ phase: "blocked", result: "failed" });
       return { state: this.state, changed: this.#changed };
@@ -157,7 +157,7 @@ export class CodingWorkflowRuntime {
       await this.#set({ phase: "verify_full", verification_retries: refreshes });
       // Re-read the manifest before every pass so checks created or changed by
       // the task (or by a prior verification pass) control the current suite.
-      const before = await this.#refreshObservedChanges();
+      if (refreshes > 0) before = await this.#refreshObservedChanges();
       const commands = await discoverVerificationCommands(this.#workspacePath);
       signal?.throwIfAborted();
       const suite = await runVerificationSuite(selectVerificationCommands(commands, "full"), run, signal);

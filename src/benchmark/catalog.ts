@@ -1,4 +1,4 @@
-import type { BenchmarkTask, BenchmarkTaskSource } from "./types.js";
+import type { BenchmarkTask, BenchmarkTaskSource, BenchmarkVerification } from "./types.js";
 
 export interface BenchmarkTaskCatalogEntry extends BenchmarkTask {
   source: BenchmarkTaskSource;
@@ -29,6 +29,34 @@ function parseSource(value: unknown): BenchmarkTaskSource {
   return { repositoryUrl, commit, issue, ...(license === undefined ? {} : { license }) };
 }
 
+function parseVerification(value: unknown, field: string): BenchmarkVerification {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${field} must be an object`);
+  const record = value as Record<string, unknown>;
+  const command = nonEmpty(record.command, `${field}.command`);
+  const args = record.args;
+  if (args !== undefined && (!Array.isArray(args) || args.some((arg) => typeof arg !== "string"))) {
+    throw new Error(`${field}.args must be an array of strings`);
+  }
+  if (record.expectedExitCode !== undefined && (typeof record.expectedExitCode !== "number" || !Number.isInteger(record.expectedExitCode))) {
+    throw new Error(`${field}.expectedExitCode must be an integer`);
+  }
+  if (record.timeoutMs !== undefined && (typeof record.timeoutMs !== "number" || !Number.isSafeInteger(record.timeoutMs) || record.timeoutMs <= 0)) {
+    throw new Error(`${field}.timeoutMs must be a positive integer`);
+  }
+  if (record.cwd !== undefined && typeof record.cwd !== "string") throw new Error(`${field}.cwd must be a string`);
+  if (record.env !== undefined && (!record.env || typeof record.env !== "object" || Array.isArray(record.env) || Object.values(record.env).some((item) => typeof item !== "string"))) {
+    throw new Error(`${field}.env must contain only string values`);
+  }
+  return {
+    command,
+    ...(args === undefined ? {} : { args: args as string[] }),
+    ...(typeof record.cwd === "string" ? { cwd: record.cwd } : {}),
+    ...(typeof record.expectedExitCode === "number" ? { expectedExitCode: record.expectedExitCode } : {}),
+    ...(typeof record.timeoutMs === "number" ? { timeoutMs: record.timeoutMs } : {}),
+    ...(record.env === undefined ? {} : { env: record.env as Record<string, string> }),
+  };
+}
+
 function parseTask(value: unknown, index: number): BenchmarkTaskCatalogEntry {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Task ${index + 1} must be an object`);
   const raw = value as Record<string, unknown>;
@@ -47,25 +75,9 @@ function parseTask(value: unknown, index: number): BenchmarkTaskCatalogEntry {
   if (maxRepairAttempts === null || (maxRepairAttempts !== undefined && (!Number.isSafeInteger(maxRepairAttempts) || maxRepairAttempts < 0 || maxRepairAttempts > 10))) {
     throw new Error(`tasks[${index}].maxRepairAttempts must be an integer from 0 to 10`);
   }
-  const verification = raw.verification;
-  if (!verification || typeof verification !== "object" || Array.isArray(verification)) throw new Error(`tasks[${index}].verification is required`);
-  const verificationRecord = verification as Record<string, unknown>;
-  const command = nonEmpty(verificationRecord.command, `tasks[${index}].verification.command`);
-  const args = verificationRecord.args === undefined ? undefined : verificationRecord.args;
-  if (args !== undefined && (!Array.isArray(args) || args.some((arg) => typeof arg !== "string"))) {
-    throw new Error(`tasks[${index}].verification.args must be an array of strings`);
-  }
-  const expectedExitCode = verificationRecord.expectedExitCode;
-  if (expectedExitCode !== undefined && (typeof expectedExitCode !== "number" || !Number.isInteger(expectedExitCode))) {
-    throw new Error(`tasks[${index}].verification.expectedExitCode must be an integer`);
-  }
-  const verificationTimeoutMs = verificationRecord.timeoutMs;
-  if (verificationTimeoutMs !== undefined && (typeof verificationTimeoutMs !== "number" || !Number.isSafeInteger(verificationTimeoutMs) || verificationTimeoutMs <= 0)) {
-    throw new Error(`tasks[${index}].verification.timeoutMs must be a positive integer`);
-  }
-  if (verificationRecord.cwd !== undefined && typeof verificationRecord.cwd !== "string") {
-    throw new Error(`tasks[${index}].verification.cwd must be a string`);
-  }
+  if (raw.verification === undefined) throw new Error(`tasks[${index}].verification is required`);
+  const verification = parseVerification(raw.verification, `tasks[${index}].verification`);
+  const acceptance = raw.acceptance === undefined ? undefined : parseVerification(raw.acceptance, `tasks[${index}].acceptance`);
   let fixture: BenchmarkTaskCatalogEntry["fixture"];
   if (raw.fixture !== undefined) {
     if (!raw.fixture || typeof raw.fixture !== "object" || Array.isArray(raw.fixture)) {
@@ -79,7 +91,12 @@ function parseTask(value: unknown, index: number): BenchmarkTaskCatalogEntry {
         throw new Error(`tasks[${index}].fixture.${field} must be a normalized relative path`);
       }
     }
-    fixture = { seedPatch, referencePatch };
+    fixture = {
+      seedPatch,
+      referencePatch,
+      ...(fixtureRecord.setup === undefined ? {} : { setup: parseVerification(fixtureRecord.setup, `tasks[${index}].fixture.setup`) }),
+      ...(fixtureRecord.pristineVerification === undefined ? {} : { pristineVerification: parseVerification(fixtureRecord.pristineVerification, `tasks[${index}].fixture.pristineVerification`) }),
+    };
   }
   return {
     id,
@@ -90,13 +107,8 @@ function parseTask(value: unknown, index: number): BenchmarkTaskCatalogEntry {
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...(maxRepairAttempts === undefined ? {} : { maxRepairAttempts }),
     ...(fixture === undefined ? {} : { fixture }),
-    verification: {
-      command,
-      ...(args === undefined ? {} : { args: args as string[] }),
-      ...(typeof verificationRecord.cwd === "string" ? { cwd: verificationRecord.cwd } : {}),
-      ...(expectedExitCode === undefined ? {} : { expectedExitCode }),
-      ...(verificationTimeoutMs === undefined ? {} : { timeoutMs: verificationTimeoutMs }),
-    },
+    ...(acceptance === undefined ? {} : { acceptance }),
+    verification,
   };
 }
 
@@ -121,4 +133,14 @@ export function parseBenchmarkTaskCatalog(text: string): BenchmarkTaskCatalogEnt
     seen.add(task.id);
     return task;
   });
+}
+
+/** Refuse a formal campaign until every catalog entry has reproducible seed and repair material. */
+export function parseReproducibleBenchmarkTaskCatalog(text: string): BenchmarkTaskCatalogEntry[] {
+  const tasks = parseBenchmarkTaskCatalog(text);
+  const missing = tasks.filter((task) => !task.fixture || !task.acceptance).map((task) => task.id);
+  if (missing.length > 0) {
+    throw new Error(`Benchmark catalog is not reproducible; missing fixture or independent acceptance material for: ${missing.join(", ")}`);
+  }
+  return tasks;
 }
