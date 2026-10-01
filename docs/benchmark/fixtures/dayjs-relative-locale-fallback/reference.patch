@@ -1,0 +1,8 @@
+diff --git a/src/plugin/relativeTime/index.js b/src/plugin/relativeTime/index.js
+--- a/src/plugin/relativeTime/index.js
++++ b/src/plugin/relativeTime/index.js
+@@ -22,3 +22,3 @@
+   proto.fromToBase = (input, withoutSuffix, instance, isFrom, postFormat) => {
+-    const loc = instance.$locale().relativeTime
++    const loc = instance.$locale().relativeTime || relObj
+     const T = o.thresholds || [

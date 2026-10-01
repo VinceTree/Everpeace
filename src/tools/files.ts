@@ -1,14 +1,17 @@
-import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { constants, promises as fs } from "node:fs";
 import path from "node:path";
 import { stopProcessTree } from "./process-cancel.js";
+import { decodeTextFile } from "./file-version.js";
 
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const DEFAULT_READ_LINES = 200;
 const MAX_READ_LINES = 1_000;
 const MAX_SEARCH_RESULTS = 200;
-const MAX_SEARCH_BYTES = 256 * 1024;
+const DEFAULT_SEARCH_RESULTS = 100;
+const MAX_SEARCH_BYTES = 2 * 1024 * 1024;
+const SEARCH_TIMEOUT_MS = 5_000;
 
 export const FILE_TOOL_DEFINITIONS = [
   {
@@ -73,7 +76,76 @@ export const FILE_TOOL_DEFINITIONS = [
     },
     strict: true,
   },
+  {
+    type: "function" as const,
+    name: "read_search_results",
+    description: "Read the next retained page from a prior search_files or glob_files result using its opaque continuation reference.",
+    parameters: {
+      type: "object",
+      properties: {
+        continuation: { type: "string" },
+        max_results: { type: ["integer", "null"], minimum: 1, maximum: MAX_SEARCH_RESULTS },
+      },
+      required: ["continuation"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
 ];
+
+type SearchItem = { path: string; line: number; column: number; text: string } | string;
+type SearchKind = "matches" | "files";
+
+interface RetainedSearch {
+  kind: SearchKind;
+  items: SearchItem[];
+  incomplete: boolean;
+  cursors: Set<string>;
+}
+
+/** In-memory, bounded continuation state. References intentionally do not survive Session restoration. */
+export class FileSearchSession {
+  readonly #cursors = new Map<string, { search: RetainedSearch; offset: number }>();
+  readonly #searches = new Set<RetainedSearch>();
+
+  page(kind: SearchKind, items: SearchItem[], maximum: number, incomplete: boolean): { items: SearchItem[]; continuation: string | null; incomplete: boolean } {
+    const search: RetainedSearch = { kind, items, incomplete, cursors: new Set() };
+    this.#searches.add(search);
+    const first = items.slice(0, maximum);
+    const continuation = this.#cursor(search, first.length);
+    if (continuation === null) this.#searches.delete(search);
+    return { items: first, continuation, incomplete };
+  }
+
+  next(reference: string, maximum: number): { kind: SearchKind; items: SearchItem[]; continuation: string | null; incomplete: boolean } {
+    const cursor = this.#cursors.get(reference);
+    if (!cursor) throw new Error("Search continuation is unknown or expired; run the search again");
+    this.#cursors.delete(reference);
+    cursor.search.cursors.delete(reference);
+    const items = cursor.search.items.slice(cursor.offset, cursor.offset + maximum);
+    const continuation = this.#cursor(cursor.search, cursor.offset + items.length);
+    if (continuation === null) this.#delete(cursor.search);
+    return { kind: cursor.search.kind, items, continuation, incomplete: cursor.search.incomplete };
+  }
+
+  clear(): void {
+    this.#cursors.clear();
+    this.#searches.clear();
+  }
+
+  #cursor(search: RetainedSearch, offset: number): string | null {
+    if (offset >= search.items.length) return null;
+    const reference = randomUUID();
+    search.cursors.add(reference);
+    this.#cursors.set(reference, { search, offset });
+    return reference;
+  }
+
+  #delete(search: RetainedSearch): void {
+    for (const cursor of search.cursors) this.#cursors.delete(cursor);
+    this.#searches.delete(search);
+  }
+}
 
 function inside(root: string, target: string): boolean {
   const relative = path.relative(root, target);
@@ -104,40 +176,86 @@ async function resolveWorkspaceTarget(workspace: string, requestedPath: string, 
   return { root, lexical: target, relative };
 }
 
-function runRipgrep(args: string[], cwd: string, signal?: AbortSignal): Promise<{ stdout: string; exitCode: number | null; truncated: boolean }> {
+function runRipgrep(args: string[], cwd: string, signal?: AbortSignal): Promise<{ lines: string[]; exitCode: number | null; incomplete: boolean }> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(signal.reason ?? new Error("Cancelled")); return; }
     const child = spawn("rg", args, { cwd, windowsHide: true, shell: false, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
-    let stdout = "";
+    const lines: string[] = [];
+    let pending = "";
+    let retainedBytes = 0;
     let stderr = "";
-    let truncated = false;
-    const abort = () => { if (child.pid) stopProcessTree(child.pid); };
+    let incomplete = false;
+    let stoppedByHost = false;
+    let settled = false;
+    const stop = () => { if (child.pid) stopProcessTree(child.pid); else child.kill(); };
+    const abort = () => stop();
     signal?.addEventListener("abort", abort, { once: true });
+    const timer = setTimeout(() => { incomplete = true; stoppedByHost = true; stop(); }, SEARCH_TIMEOUT_MS);
+    timer.unref?.();
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
-      if (stdout.length >= MAX_SEARCH_BYTES) { truncated = true; return; }
-      const retained = chunk.slice(0, MAX_SEARCH_BYTES - stdout.length);
-      stdout += retained;
-      if (retained.length !== chunk.length) truncated = true;
+      if (stoppedByHost) return;
+      pending += chunk;
+      let newline: number;
+      while ((newline = pending.indexOf("\n")) >= 0) {
+        const line = pending.slice(0, newline).replace(/\r$/u, "");
+        pending = pending.slice(newline + 1);
+        const bytes = Buffer.byteLength(line, "utf8") + 1;
+        if (retainedBytes + bytes > MAX_SEARCH_BYTES) {
+          incomplete = true;
+          stoppedByHost = true;
+          stop();
+          return;
+        }
+        retainedBytes += bytes;
+        if (line) lines.push(line);
+      }
     });
     child.stderr.on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-32 * 1024); });
-    child.once("error", (error) => { signal?.removeEventListener("abort", abort); reject(error); });
+    child.once("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      reject(error);
+    });
     child.once("close", (exitCode) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
       if (signal?.aborted) { reject(signal.reason ?? new Error("Cancelled")); return; }
-      if (exitCode !== 0 && exitCode !== 1) { reject(new Error(stderr.trim() || `ripgrep exited with ${exitCode}`)); return; }
-      resolve({ stdout, exitCode, truncated });
+      if (!stoppedByHost && pending) {
+        const bytes = Buffer.byteLength(pending, "utf8");
+        if (retainedBytes + bytes <= MAX_SEARCH_BYTES) lines.push(pending.replace(/\r$/u, ""));
+        else incomplete = true;
+      }
+      if (!stoppedByHost && exitCode !== 0 && exitCode !== 1) { reject(new Error(stderr.trim() || `ripgrep exited with ${exitCode}`)); return; }
+      resolve({ lines, exitCode, incomplete });
     });
   });
 }
 
-export async function runFileTool(name: string, argumentsJson: string, workspace: string, signal?: AbortSignal): Promise<unknown> {
+export async function runFileTool(name: string, argumentsJson: string, workspace: string, signal?: AbortSignal, searches?: FileSearchSession): Promise<unknown> {
   const args: unknown = JSON.parse(argumentsJson);
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     throw new Error("Invalid file tool arguments");
   }
   const record = args as Record<string, unknown>;
+  if (name === "read_search_results") {
+    if (typeof record.continuation !== "string" || !record.continuation) throw new Error("Invalid file tool arguments");
+    if (!searches) throw new Error("Search continuations are unavailable in this host");
+    const maximum = integer(record.max_results, DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS);
+    const page = searches.next(record.continuation, maximum);
+    return {
+      [page.kind]: page.items,
+      continuation: page.continuation,
+      has_more: page.continuation !== null,
+      incomplete: page.incomplete,
+      ...(page.incomplete ? { guidance: "The retained search was incomplete; narrow the query if the retained pages do not contain the needed result." } : {}),
+    };
+  }
   const requestedPath = typeof record.path === "string" && record.path.trim() && !record.path.includes("\0") ? record.path : ".";
   if (!FILE_TOOL_DEFINITIONS.some((tool) => tool.name === name)) throw new Error("Unsupported file tool");
   if ((name === "read_file" || name === "list_directory") && (!("path" in record) || typeof record.path !== "string" || !record.path.trim() || record.path.includes("\0"))) throw new Error("Invalid file tool arguments");
@@ -155,30 +273,46 @@ export async function runFileTool(name: string, argumentsJson: string, workspace
   }
   if (name === "glob_files") {
     if (typeof record.pattern !== "string" || !record.pattern.trim() || record.pattern.includes("\0")) throw new Error("Invalid file tool arguments");
-    const maximum = integer(record.max_results, MAX_SEARCH_RESULTS, MAX_SEARCH_RESULTS);
+    const maximum = integer(record.max_results, DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS);
     const stat = await fs.stat(target);
     if (!stat.isDirectory()) throw new Error("glob_files path must be a directory");
     const result = await runRipgrep(["--files", "--hidden", "--glob", record.pattern, "--", "."], target, signal);
-    const files = result.stdout.split(/\r?\n/u).filter(Boolean).slice(0, maximum).map((value) => path.relative(root, path.resolve(target, value)).split(path.sep).join("/"));
-    return { path: requestedPath, pattern: record.pattern, files, truncated: result.truncated || result.stdout.split(/\r?\n/u).filter(Boolean).length > maximum };
+    const files = result.lines.map((value) => path.relative(root, path.resolve(target, value)).split(path.sep).join("/"));
+    const page = searches?.page("files", files, maximum, result.incomplete);
+    const first = page?.items ?? files.slice(0, maximum);
+    const continuation = page?.continuation ?? null;
+    const unavailableRemainder = searches === undefined && files.length > maximum;
+    return { path: requestedPath, pattern: record.pattern, files: first, continuation, has_more: continuation !== null, incomplete: result.incomplete || unavailableRemainder, truncated: result.incomplete || unavailableRemainder || continuation !== null };
   }
   if (name === "search_files") {
     if (typeof record.query !== "string" || !record.query || record.query.includes("\0")) throw new Error("Invalid file tool arguments");
     if (record.glob !== undefined && record.glob !== null && (typeof record.glob !== "string" || !record.glob || record.glob.includes("\0"))) throw new Error("Invalid file tool arguments");
-    const maximum = integer(record.max_results, 100, MAX_SEARCH_RESULTS);
-    const rgArgs = ["--json", "--hidden", "--line-number", "--column", "--max-count", String(maximum), ...(record.regex === true ? [] : ["--fixed-strings"]), ...(typeof record.glob === "string" ? ["--glob", record.glob] : []), "--", record.query, targetInfo.relative || "."];
+    const maximum = integer(record.max_results, DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS);
+    const rgArgs = ["--json", "--hidden", "--line-number", "--column", ...(record.regex === true ? [] : ["--fixed-strings"]), ...(typeof record.glob === "string" ? ["--glob", record.glob] : []), "--", record.query, targetInfo.relative || "."];
     const result = await runRipgrep(rgArgs, root, signal);
     const matches: Array<{ path: string; line: number; column: number; text: string }> = [];
-    for (const line of result.stdout.split(/\r?\n/u)) {
+    for (const line of result.lines) {
       if (!line) continue;
       try {
         const event = JSON.parse(line) as { type?: string; data?: { path?: { text?: string }; line_number?: number; lines?: { text?: string }; submatches?: Array<{ start?: number }> } };
         if (event.type !== "match" || typeof event.data?.path?.text !== "string" || typeof event.data.line_number !== "number") continue;
         matches.push({ path: event.data.path.text.split(path.sep).join("/"), line: event.data.line_number, column: (event.data.submatches?.[0]?.start ?? 0) + 1, text: (event.data.lines?.text ?? "").replace(/\r?\n$/u, "") });
-        if (matches.length >= maximum) break;
-      } catch { /* an incomplete final JSON record is represented by truncated */ }
+      } catch { /* a malformed final JSON record is represented by incomplete */ }
     }
-    return { query: record.query, path: requestedPath, matches, truncated: result.truncated || matches.length >= maximum };
+    const page = searches?.page("matches", matches, maximum, result.incomplete);
+    const first = page?.items ?? matches.slice(0, maximum);
+    const continuation = page?.continuation ?? null;
+    const unavailableRemainder = searches === undefined && matches.length > maximum;
+    return {
+      query: record.query,
+      path: requestedPath,
+      matches: first,
+      continuation,
+      has_more: continuation !== null,
+      incomplete: result.incomplete || unavailableRemainder,
+      truncated: result.incomplete || unavailableRemainder || continuation !== null,
+      ...(result.incomplete || unavailableRemainder ? { guidance: "Search stopped at its time or retained-byte limit; narrow the query if retained pages are insufficient." } : {}),
+    };
   }
   let stat;
   try { stat = await fs.stat(target); }
@@ -201,9 +335,8 @@ export async function runFileTool(name: string, argumentsJson: string, workspace
       if (!bytesRead) break;
       length += bytesRead;
     }
-    const contentBytes = bytes.subarray(0, length);
-    if (contentBytes.includes(0)) throw new Error("Binary files are not supported");
-    const content = new TextDecoder("utf-8", { fatal: true }).decode(contentBytes);
+    const version = decodeTextFile(bytes.subarray(0, length));
+    const content = version.text;
     const lines = content.split("\n");
     const startLine = integer(record.start_line, 1, Math.max(1, lines.length + 1));
     const maxLines = integer(record.max_lines, DEFAULT_READ_LINES, MAX_READ_LINES);
@@ -212,7 +345,7 @@ export async function runFileTool(name: string, argumentsJson: string, workspace
     return {
       path: requestedPath,
       exists: true,
-      sha256: createHash("sha256").update(content).digest("hex"),
+      sha256: version.sha256,
       content: selected.join("\n"),
       start_line: startLine,
       end_line: endLine,
@@ -224,4 +357,4 @@ export async function runFileTool(name: string, argumentsJson: string, workspace
   }
 }
 
-export const fileToolLimits = { maxFileBytes: MAX_FILE_BYTES, maxReadLines: MAX_READ_LINES, maxSearchResults: MAX_SEARCH_RESULTS } as const;
+export const fileToolLimits = { maxFileBytes: MAX_FILE_BYTES, maxReadLines: MAX_READ_LINES, maxSearchResults: MAX_SEARCH_RESULTS, maxSearchBytes: MAX_SEARCH_BYTES, searchTimeoutMs: SEARCH_TIMEOUT_MS } as const;

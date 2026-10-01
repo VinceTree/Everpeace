@@ -70,3 +70,22 @@ test("patch preview and execution protect control metadata and reject the whole 
     assert.equal((await runApplyPatch([{ path: "normal.txt:stream", action: "create", content: "hidden" }], workspace, { allowProtectedPaths: true })).status, "rejected");
   });
 });
+
+test("apply_patch accepts raw-byte observations and preserves BOM plus CRLF", async () => {
+  await withWorkspace(async (workspace) => {
+    const target = path.join(workspace, "bom.txt");
+    const before = Buffer.from("\ufeffone\r\ntwo\r\n", "utf8");
+    await fs.writeFile(target, before);
+    const expectedSha256 = createHash("sha256").update(before).digest("hex");
+    const updated = await runApplyPatch([{
+      path: "bom.txt",
+      action: "update",
+      expectedSha256,
+      patch: "@@ -1,2 +1,2 @@\n one\n-two\n+changed\n",
+    }], workspace);
+    assert.equal(updated.status, "applied");
+    assert.deepEqual(await fs.readFile(target), Buffer.from("\ufeffone\r\nchanged\r\n", "utf8"));
+    const stale = await runApplyPatch([{ path: "bom.txt", action: "delete", expectedSha256 }], workspace);
+    assert.equal(stale.status, "rejected");
+  });
+});

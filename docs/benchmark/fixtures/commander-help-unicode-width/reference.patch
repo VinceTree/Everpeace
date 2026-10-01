@@ -1,0 +1,8 @@
+diff --git a/lib/help.js b/lib/help.js
+--- a/lib/help.js
++++ b/lib/help.js
+@@ -536,3 +536,3 @@
+   displayWidth(str) {
+-    return str.length;
++    return stripVTControlCharacters(str).length;
+   }

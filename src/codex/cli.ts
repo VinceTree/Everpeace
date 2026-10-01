@@ -52,6 +52,7 @@ export function codexCliLaunch(
 }
 
 export interface CodexProcessCallbacks {
+  onSpawned?(): void;
   onStdout?(chunk: string): void;
   onStderr?(chunk: string): void;
 }
@@ -102,6 +103,7 @@ export function runCodexProcess(
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
         });
+        options.onSpawned?.();
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         finish({ stdout: stdoutBuffer.text, stderr: stderrBuffer.text, exitCode: null, cancelled: false, error: message });

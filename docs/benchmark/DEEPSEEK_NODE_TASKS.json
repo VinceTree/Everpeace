@@ -7,16 +7,20 @@
       "tags": ["node", "bug-fix", "ansi"],
       "source": { "repositoryUrl": "https://github.com/chalk/chalk", "commit": "661317e6f91fe7c90306c2c48ea9354562ee9146", "issue": "everpeace-ds-01", "license": "MIT" },
       "maxRepairAttempts": 3,
-      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 }
+      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 },
+      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-chalk.mjs", "nested-reset", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 },
+      "fixture": { "dependencyLock": "chalk-package-lock.json", "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-chalk.mjs", "nested-reset", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 }, "seedPatch": "chalk-ansi-nested-reset/seed.patch", "referencePatch": "chalk-ansi-nested-reset/reference.patch" }
     },
     {
       "id": "chalk-visible-empty-style",
-      "prompt": "Fix the seeded visible helper regression for empty styled strings and add a regression test without changing public formatting behavior.",
+      "prompt": "Fix the seeded visible helper regression so visible text stays hidden when color support is disabled, without changing other formatting behavior.",
       "workspacePath": ".everpeace-benchmark/chalk-visible-empty-style",
       "tags": ["node", "bug-fix", "tests"],
       "source": { "repositoryUrl": "https://github.com/chalk/chalk", "commit": "661317e6f91fe7c90306c2c48ea9354562ee9146", "issue": "everpeace-ds-02", "license": "MIT" },
       "maxRepairAttempts": 3,
-      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 }
+      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 },
+      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-chalk.mjs", "visible", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 },
+      "fixture": { "dependencyLock": "chalk-package-lock.json", "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-chalk.mjs", "visible", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 }, "seedPatch": "chalk-visible-empty-style/seed.patch", "referencePatch": "chalk-visible-empty-style/reference.patch" }
     },
     {
       "id": "chalk-template-types",
@@ -25,7 +29,9 @@
       "tags": ["typescript", "types", "api"],
       "source": { "repositoryUrl": "https://github.com/chalk/chalk", "commit": "661317e6f91fe7c90306c2c48ea9354562ee9146", "issue": "everpeace-ds-03", "license": "MIT" },
       "maxRepairAttempts": 3,
-      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 }
+      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 },
+      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-chalk.mjs", "types", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 60000 },
+      "fixture": { "dependencyLock": "chalk-package-lock.json", "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-chalk.mjs", "types", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 60000 }, "seedPatch": "chalk-template-types/seed.patch", "referencePatch": "chalk-template-types/reference.patch" }
     },
     {
       "id": "commander-negated-default",
@@ -34,25 +40,31 @@
       "tags": ["node", "cli", "bug-fix"],
       "source": { "repositoryUrl": "https://github.com/tj/commander.js", "commit": "ba6d13ddb4243e5913367734f8c159089ffe7834", "issue": "everpeace-ds-04", "license": "MIT" },
       "maxRepairAttempts": 3,
-      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 }
+      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 },
+      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-commander.mjs", "negated-default", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 },
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-commander.mjs", "negated-default", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 }, "seedPatch": "commander-negated-default/seed.patch", "referencePatch": "commander-negated-default/reference.patch" }
     },
     {
       "id": "commander-async-subcommand-error",
-      "prompt": "Repair the seeded async subcommand error propagation regression. Keep the public parseAsync contract and add a focused test.",
+      "prompt": "Repair the seeded async action completion regression. Keep the public parseAsync contract and add a focused test.",
       "workspacePath": ".everpeace-benchmark/commander-async-subcommand-error",
       "tags": ["node", "cli", "async"],
       "source": { "repositoryUrl": "https://github.com/tj/commander.js", "commit": "ba6d13ddb4243e5913367734f8c159089ffe7834", "issue": "everpeace-ds-05", "license": "MIT" },
       "maxRepairAttempts": 3,
-      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 }
+      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 },
+      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-commander.mjs", "async-action", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 },
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-commander.mjs", "async-action", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 }, "seedPatch": "commander-async-subcommand-error/seed.patch", "referencePatch": "commander-async-subcommand-error/reference.patch" }
     },
     {
       "id": "commander-help-unicode-width",
-      "prompt": "Fix the seeded help alignment regression for wide Unicode option names without changing ASCII layout.",
+      "prompt": "Fix the seeded help alignment regression for ANSI-styled terms without changing plain-text layout.",
       "workspacePath": ".everpeace-benchmark/commander-help-unicode-width",
       "tags": ["node", "cli", "unicode"],
       "source": { "repositoryUrl": "https://github.com/tj/commander.js", "commit": "ba6d13ddb4243e5913367734f8c159089ffe7834", "issue": "everpeace-ds-06", "license": "MIT" },
       "maxRepairAttempts": 3,
-      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 }
+      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 },
+      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-commander.mjs", "styled-width", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 },
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-commander.mjs", "styled-width", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 }, "seedPatch": "commander-help-unicode-width/seed.patch", "referencePatch": "commander-help-unicode-width/reference.patch" }
     },
     {
       "id": "dayjs-timezone-dst-gap",
@@ -61,7 +73,9 @@
       "tags": ["node", "datetime", "timezone"],
       "source": { "repositoryUrl": "https://github.com/iamkun/dayjs", "commit": "436bde0bcded312781cbe45dc2b0ef079a36d8e3", "issue": "everpeace-ds-07", "license": "MIT" },
       "maxRepairAttempts": 3,
-      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 180000 }
+      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 180000 },
+      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "timezone-gap", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 30000 },
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "timezone-gap", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 30000 }, "seedPatch": "dayjs-timezone-dst-gap/seed.patch", "referencePatch": "dayjs-timezone-dst-gap/reference.patch" }
     },
     {
       "id": "dayjs-relative-locale-fallback",
@@ -70,7 +84,9 @@
       "tags": ["node", "datetime", "locale"],
       "source": { "repositoryUrl": "https://github.com/iamkun/dayjs", "commit": "436bde0bcded312781cbe45dc2b0ef079a36d8e3", "issue": "everpeace-ds-08", "license": "MIT" },
       "maxRepairAttempts": 3,
-      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 180000 }
+      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 180000 },
+      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "relative-fallback", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 30000 },
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "relative-fallback", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 30000 }, "seedPatch": "dayjs-relative-locale-fallback/seed.patch", "referencePatch": "dayjs-relative-locale-fallback/reference.patch" }
     },
     {
       "id": "dayjs-negative-duration",
@@ -79,16 +95,20 @@
       "tags": ["node", "datetime", "duration"],
       "source": { "repositoryUrl": "https://github.com/iamkun/dayjs", "commit": "436bde0bcded312781cbe45dc2b0ef079a36d8e3", "issue": "everpeace-ds-09", "license": "MIT" },
       "maxRepairAttempts": 3,
-      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 180000 }
+      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 180000 },
+      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "negative-duration", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 30000 },
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "negative-duration", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 30000 }, "seedPatch": "dayjs-negative-duration/seed.patch", "referencePatch": "dayjs-negative-duration/reference.patch" }
     },
     {
       "id": "dayjs-plugin-immutability",
-      "prompt": "Repair the seeded plugin mutation regression so chained operations remain immutable, with a focused regression test.",
+      "prompt": "Repair the seeded duration clone mutation regression so clone and locale operations remain immutable, with a focused regression test.",
       "workspacePath": ".everpeace-benchmark/dayjs-plugin-immutability",
       "tags": ["node", "datetime", "immutability"],
       "source": { "repositoryUrl": "https://github.com/iamkun/dayjs", "commit": "436bde0bcded312781cbe45dc2b0ef079a36d8e3", "issue": "everpeace-ds-10", "license": "MIT" },
       "maxRepairAttempts": 3,
-      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 180000 }
+      "verification": { "command": "npm", "args": ["test"], "timeoutMs": 180000 },
+      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "duration-clone", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 30000 },
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "duration-clone", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 30000 }, "seedPatch": "dayjs-plugin-immutability/seed.patch", "referencePatch": "dayjs-plugin-immutability/reference.patch" }
     }
   ]
 }

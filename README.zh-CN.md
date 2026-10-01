@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.3.0) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.1) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -107,7 +107,7 @@ TUI 使用原生 inline 模式，普通滚轮可以浏览已完成的 Everpeace 
 
 Everpeace 还会维护独立的 learned 经验记忆。workflow 验证完成并真实空闲五分钟后，当前模型可在后台提取最多三条带证据候选并整理无冲突经验；持久队列可跨 Agent 重建和进程重启恢复，前台工作会暂停后台请求。只有用户明确表达长期偏好时才写入用户级记忆。记忆位于平台应用状态目录（Windows 为 `%APPDATA%\Everpeace\memory`），不会写入仓库。每个逻辑 Agent step 都会根据当前问题和实际读取文件刷新带 revision 的快照，网络重试复用该快照；主 prompt 只注入不可信短索引，只读 `memory_lookup` 可按 ID 查看脱敏证据。输入在裁剪前脱敏，输出在保存前再次脱敏，无法可靠判断的冲突保留待审；当前用户指令和实际仓库证据始终优先。
 
-`/status` 会打开居中的独立命令窗口，显示当前模型、实际 Responses 协议、压缩策略、推理档位、接口地址、工作目录、Session ID、context 占用，以及累计输入、输出、推理、缓存命中和缓存写入 token。缓存读取与写入独立统计；命中率只使用供应商确实返回缓存数据的样本，数据不完整时标为 partial。DeepSeek 使用自动前缀缓存，不发送 OpenAI 缓存字段；官方 OpenAI 型号可使用 Session 级缓存 key 和原生压缩。Usage 与请求设置随 Session 持久化，后台标题请求不计入。
+`/status` 会打开居中的独立命令窗口，显示当前模型、实际 Responses 协议、压缩策略、推理档位、接口地址、工作目录、Session ID、context 占用，以及累计输入、输出、推理、缓存命中和缓存写入 token。主 coding 与辅助模型用量分开显示；辅助请求包括标题、Skill、Memory 与 live doctor。缓存读取与写入独立统计；命中率只使用供应商确实返回缓存数据的样本，数据不完整时标为 partial。DeepSeek 使用自动前缀缓存，不发送 OpenAI 缓存字段；官方 OpenAI 型号可使用 Session 级缓存 key 和原生压缩。主 coding 的 Usage 与请求设置随 Session 持久化。
 
 输入快捷键与 Codex composer 保持一致：`Enter` 提交，`Shift+Enter`、`Alt+Enter` 或 `Ctrl+J` 换行，`Home`/`End` 与 `Ctrl+A`/`Ctrl+E` 移动到当前行首/行尾，`Ctrl+U`/`Ctrl+K` 删除到当前行首/行尾，`Ctrl+W` 删除前一个词，`Ctrl+Y` 恢复最近删除的内容。方向键、`Ctrl+B/F/P/N` 和 `Alt+B/F` 也可移动光标。
 
@@ -132,7 +132,7 @@ TUI 命令：
 - `/goal <目标> [--tokens N]`：创建、查看、暂停、恢复并自动持续执行当前 Session 目标。收到 usage 后达到预算或无法可靠计量时，会停止后续工具、模型请求和自动验证修复，并显示原因；正在进行的单次请求可能超过剩余额度。
 - `/compact`：压缩模型 context，同时保留完整可见 transcript。官方 OpenAI 使用原生 Responses 压缩；DeepSeek 和保守的兼容端点使用最多 8K token 的摘要，并保留最近两个完整交互单元及未闭合工具链。自动压缩会预留输出预算与安全余量；确认 context 超限后最多恢复一次，且不会重放工具。
 - `/reasoning off|low|high|max`：设置下一项任务捕获的推理档位，默认 `high`；官方 DeepSeek 会原样接收 `max`。
-- `/doctor [--live]`：检查 Node、平台、实际 shell、sandbox 后端/profile、网络模式、Git/ripgrep，并实际执行一次 sandbox 探针。默认只做本地检查；只有 `--live` 会发送一次有界模型请求。
+- `/doctor [--live]`：检查 Node、平台、实际 shell、sandbox 后端/profile、网络模式、Git/ripgrep、可选 TypeScript LSP 配置，并实际执行一次 sandbox 探针。默认只做本地检查；只有 `--live` 会发送一次有界模型请求。
 - `/outputs`：分页浏览保留输出、已高亮的命令及 unified diff。
 - `/history`：浏览或明确确认后清空全局输入历史，不删除 Session。
 - `/terminal-setup`：预览并可选配置稳定版 Windows Terminal 的 Shift+Enter；确认后先备份设置，再新增全局按键绑定。
@@ -161,16 +161,18 @@ Skills 从工作区到仓库根的 `.agents/skills`、项目 `.codex/skills`、`
 - 核心循环已适配 Codex 的采样、工具执行、后续采样流程，提供逐工具结果保存、可取消的请求重试、严格的流完成判断和单次 context-limit 恢复。这不是完整 Codex runtime，详见 [源码对应与移植范围](docs/architecture/AGENT_LOOP.md)。
 
 - 权限档位把 sandbox 范围与审批分开：`read-only` 对模型 shell、网页和 MCP 逐项审批，并使用 Codex `:read-only`；`ask` 逐项审批，shell 获批后使用 `:workspace`；`workspace-write` 在 `:workspace` 内免逐条 shell 审批，已开启的公共网页工具也免逐次确认，MCP 仍单独审批；`full-access` 二次明确确认后选择 `:danger-full-access` 并跳过工具审批。
-- 模型可以用 `read_file` 按行分页查看工作区内不超过 16 MiB 的 UTF-8 文件并取得全文件 SHA-256，用参数化 ripgrep 的 `search_files`/`glob_files` 搜索，再用 `list_directory` 列出最多 500 个目录项。拒绝目录外路径和符号链接越界。超大模型工具结果保持有效 JSON，并提供仅当前进程可用的 `read_tool_output` 续读。文件正文会进入模型 context 和 Session 文件，请避免读取机密。
+- 模型可以用 `read_file` 按行分页查看工作区内不超过 16 MiB 的 UTF-8 文件并取得基于原始字节的全文件 SHA-256。参数化 ripgrep 的 `search_files`/`glob_files` 返回有界结果快照的进程内续读引用（默认每页 100 项，最多 200 项）；`list_directory` 列出最多 500 个目录项。拒绝目录外路径和符号链接越界。超大模型工具结果保持有效 JSON，并提供仅当前进程可用的 `read_tool_output` 续读。文件正文会进入模型 context 和 Session 文件，请避免读取机密。
+- 将 `EVERPEACE_TYPESCRIPT_LSP` 指向已存在的本地 language server 后，会暴露只读 `code_navigation`，支持 definition、references、implementation 和 hover；可选参数用 `EVERPEACE_TYPESCRIPT_LSP_ARGS` 的 JSON 字符串数组提供。程序不会静默安装 server；请求串行且有界，并拒绝 server 发起的 edit 或 command。
 - 用户权限保存于平台配置目录，重启后仍会恢复；`/permissions` 也可把项目策略写入 `.everpeace/permissions.json`。项目策略只允许收紧用户策略、关闭模型 shell 网络或公共网页，不能提升权限。shell 网络开关由原生后端执行，不改变 web 或 MCP 权限。切换权限不丢失 context，恢复 JSONL 不会恢复完全访问授权。
 - 模型 shell 通过固定的 `@openai/codex@0.155.1` 原生 OS sandbox 启动，运行时无法启动则失败关闭。Windows 模型命令使用 PowerShell，因为 Git Bash/MSYS 无法在 restricted token 内初始化；macOS/Linux 使用 Bash。模型 shell 默认 120 秒超时，超时会以结构化结果返回；直接 `!` 不进入模型 sandbox，生命周期仍由用户控制。详见 [对标与安全限制](docs/architecture/PERMISSIONS.md)。
 - 每次模型 shell 启动前都会捕获不可变的有效策略，显式遵守后端 managed requirements，并过滤继承的凭据及启动注入变量。workspace/ask 模式使用原生子 profile：`.git`、`.codex`、`.agents` 和由宿主预先创建的 `.everpeace` 控制目录保持只读，模型也不能读取 Everpeace 的全局状态目录。命令输出不能触发 payload 自动重放；full-access 与直接 `!` 保留各自已说明的权限。对比依据与后续路线见 [Sandbox 对比与优化计划](docs/architecture/SANDBOX.md)。
 - 模型编辑尽量使用限定在工作区内的 `apply_patch` 工具：update/delete 必须匹配宿主通过 `read_file` 记录的版本，preview hash 与权限 revision 绑定实际写入，create 使用排他创建，回滚不会覆盖用户随后写入的内容。预览与执行默认保护 `.git`、`.codex`、`.agents`、`.everpeace`，明确选择 full-access 后才能通过编辑器修改；始终拒绝 Windows ADS。持久化的模型 Bash 规则会检查每个顶层命令段；含糊的命令替换和嵌套解释器必须审批，明确 deny 继续失败关闭。审批等待期间权限变化会使该审批失效。直接 `!` 不受影响。
-- 普通 coding 回合使用单 Agent 的个人开发工作流。每个逻辑 step 都会重新读取工作区根级 `AGENTS.md` 和 `package.json` 中声明的 scripts，作为低于当前用户与开发者指令的项目背景。patch 成功后先做快速检查；Node/TypeScript 最终验证会重新读取 manifest，并按 `typecheck → lint → test → build` 顺序运行所有已声明脚本，首个失败后停止。没有发现检查命令时会标记为未验证，而不是通过。
+- 普通 coding 回合使用单 Agent 的个人开发工作流。每个逻辑 step 都会重新读取工作区根目录到已访问目标目录的 `AGENTS.md` chain，以及 `package.json` 中声明的 scripts，作为低于当前用户与开发者指令的项目背景。新发现或已变化的嵌套规则会把结构化编辑推迟到下一次模型边界，当前规则在 context 压缩后仍然生效。patch 成功后先做快速检查；Node/TypeScript 最终验证会重新读取 manifest，并按 `typecheck → lint → test → build` 顺序运行所有已声明脚本，首个失败后停止。没有发现检查命令时会标记为未验证，而不是通过。
 - 宿主最多并发执行四个明确安全的只读工具，并仍按模型顺序保存结果。该调度与供应商的 parallel-tool 提示相互独立；写入、shell、MCP、审批、取消和资源冲突仍是串行屏障。模型请求由同一份含真实输出预留的快照生成和测量，命令输出使用增量有界缓冲，流式正文按 40ms 合并刷新，以减少长任务中的宿主开销。
 - Git 状态使用 NUL 分隔的结构化结果解析，并把变更文件指纹与任务开始时的既有脏状态比较，因此模型 shell 对已有脏文件的再次修改、未跟踪文件和中文路径也会进入同一验证闭环。追踪超限、非 Git 项目的 shell 改动、审批拒绝或修复次数耗尽时都不能报告为已验证。`workspace_status`、`workspace_diff` 仍为只读工具；`/undo` 继续只覆盖未被再次修改的结构化编辑。
 - 模型回复结束与工作流验证完成采用不同状态。宿主会显示观察到的路径和完整检查结果，只有真正验证通过的 coding 回合才能进入成功经验提炼；活动 Goal 的完成请求会等宿主接受最终验证后才落盘。Session JSONL 只保存兼容的结果元数据，不保存检查输出、错误正文、文件内容或撤销检查点。
-- 模型最多可在相同 sandbox 和权限策略中运行两个非交互后台命令，并可查询或停止；默认上限十分钟，最终验证前必须收束，取消任务或销毁 Agent 时终止进程树。后台任务只存在当前进程，不随 Session 恢复。
+- 模型最多可在相同 sandbox 和权限策略中运行两个非交互后台命令，提供有界的运行中预览，并可查询或停止；默认上限十分钟，由当前 coding task 持有。取消、权限收紧、预算停止、异常、最终验证或销毁 Agent 都会终止并等待进程树。后台任务只存在当前进程，不随 Session 恢复。
+- 维护者可使用 `pnpm benchmark:campaign -- --config <campaign.json> --prove-fixtures|--live` 离线证明十项固定 Node fixture，或执行带完整记录的内部对比；详见 [benchmark 文档](docs/BENCHMARKING.md)。固定 dsh adapter 会核对完整源码 revision，并通过专用 profile 在上游请求边界计量。Live 模式需要另行授权、已注册模型，以及每任务和 campaign 数值 token 预算，不会自动发起真实请求。
 - 普通聊天中，`read-only` 和 `ask` 会在每个网页请求前审批；`workspace-write` 与 `full-access` 跳过该确认。Plan 模式把已开启的公共网页访问视为只读调研并跳过逐次确认，关闭网页工具时仍会拒绝请求。搜索词会先发送给 Bing，失败时回退到 DuckDuckGo；打开搜索结果时会向对应网站发送请求。
 - 网页读取只允许公共 HTTP/HTTPS 地址，会逐次检查重定向、阻止本机和内网地址，并限制超时与响应大小；返回内容始终作为不可信数据处理。
 - 搜索可用性和结果质量取决于外部搜索服务及当前网络。联网失败会作为工具结果返回模型，由模型说明限制或尝试其他来源。

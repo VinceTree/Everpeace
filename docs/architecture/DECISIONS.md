@@ -4,7 +4,7 @@
 
 普通 coding turn 使用进程内状态机协调理解、实现、验证、诊断和完成阶段，不替换 Responses/ReAct 工具循环，也不自动提交 Git。`apply_patch` 成功后立即选择有界快速检查，回合结束选择完整检查；命令只从工作区 manifest/锁文件和常见项目标志中发现，不执行任意脚本发现逻辑。验证 stdout/stderr 有界保留，失败作为结构化结果返回模型，修复次数超过三次后进入 `blocked`。
 
-首批个人开发语义以 Node/TypeScript 单包项目为目标。每个逻辑 step 读取根级 `AGENTS.md` 和 `package.json` scripts；该内容属于低优先级项目背景，不能提升权限或覆盖当前用户/开发者指令，网络重试复用同一 step 快照。最终检查不再选择单条命令，而是重新发现当前 manifest，按 `typecheck`、`lint`、`test`、`build` 串行首败停止；不存在检查时返回 `unavailable`，不能等价为成功。
+个人开发语义以 Node/TypeScript 单包项目为目标。每个逻辑 step 读取工作区根到已访问目标目录的 `AGENTS.md` chain 和 `package.json` scripts；该内容属于低优先级项目背景，不能提升权限或覆盖当前用户/开发者指令，网络重试复用同一 step 快照。最终检查不再选择单条命令，而是重新发现当前 manifest，按 `typecheck`、`lint`、`test`、`build` 串行首败停止；不存在检查时返回 `unavailable`，不能等价为成功。
 
 工作区跟踪以任务开始时的 Git dirty state 为基线，解析 `git status --porcelain=v1 -z --untracked-files=all` 并为候选路径计算有界内容指纹。最终 changed paths 是当前状态相对该基线的差值，因此已有脏文件被模型再次修改、未跟踪文件、删除、空格及非 ASCII 路径都可识别；超出路径/字节限制时失败关闭为 tracking limited。非 Git 项目的结构化 patch 继续用进程内 SHA-256 checkpoint 校验，非 Git shell 修改只可标为未验证。`/undo` 不扩展到 shell 修改。
 
@@ -247,7 +247,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 ## 可复现对比边界
 
 - 测试 CI 与发布 workflow 分开，在 Windows 和 Linux 上运行安装、typecheck、test、build 与 diff check。benchmark 外部进程 adapter 不使用 shell 拼接；dsh 的固定入口为 `--profile headless <job>`，Windows 应传 Node 与已解析的 JS bin，避免 `.cmd` shell 注入。重复运行必须使用 prepare hook 返回的独立 task；内置准备器只写入已确认不存在的目标目录，checkout pinned HEAD 后应用 reviewed seed，证明流程要求同一验收命令 seed 失败且 reference repair 通过。
-- live benchmark 必须在每次 implement/diagnose attempt 前拥有正的 remaining token budget；usage 缺失或不完整立即停止后续任务。当前固定 catalog 不是完成的可复现 fixture：在种子缺陷、参考修复与初始失败/修复通过证据齐全前，不发布模型胜率结论。
+- live benchmark 必须在每次 implement/diagnose attempt 前拥有正的 remaining token budget；usage 缺失或不完整立即停止后续任务。固定 catalog 的十项 fixture 已具备种子缺陷、参考修复与 pristine/seed/reference 离线证据。固定 dsh adapter 必须核对完整上游 commit，直接启动 checkout 内的 JS entry，并使用内容锁定的专用 profile 在 `llm/stream` 边界校验 coding 请求配置、按 attempt 计量和执行预算准入；不能从 headless 最终文本推测 usage。真实 API 评测未完成前仍不发布模型胜率结论。
 
 ## 性能计量与生产闭环
 
@@ -255,6 +255,18 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 - Live 计量使用进程内 `RequestAttemptLedger`，边界是实际 provider attempt，而不是一次 Agent turn。coding、stream recovery、缓存能力降级和 summary 分开记录；reasoning 作为 output 的明细展示，不重复计入预算。任何已经发出但 usage 不可靠的 attempt 永久把当前账本标为 incomplete，后续成功不能清除，也不能继续发起模型请求。
 - `RequestSnapshot` 是实际发送参数、输入估算、输出预留和 request/stable/dynamic 指纹的共同来源。快照在构建时深复制，避免后续输入变化污染测量，同时允许 SDK 在自己的请求对象上做兼容处理；DeepSeek 的固定指令和工具顺序位于历史前，动态权限及项目上下文位于历史后。摘要重放相同固定前缀和工具定义，但以 `tool_choice: none` 禁止工具执行。
 - 宿主只读并发不依赖供应商 `parallel_tool_calls`。生产最多四项，只运行明确声明 read-only、idempotent、parallel-safe 且资源不冲突的调用；任一完成即可补位，尚未有序持久化的结果受数量和 4 MiB 总量约束。写入、shell、MCP、审批和未知能力保持串行。
-- 性能 trace 只保存阶段耗时、次数和状态类元数据，不保存请求正文、文件内容、验证输出或凭据。首个 provider event/text 在 SSE 时来自真实事件；buffered endpoint 的对应时间是完整响应到达时间。
+- 性能 trace 只保存阶段耗时、次数和状态类元数据，不保存请求正文、文件内容、验证输出或凭据。记录 sandbox 子进程 spawn 前耗时与 assistant render callback 耗时；它们分别是启动边界和宿主交付成本，不冒充命令总耗时或终端实际绘制完成时间。首个 provider event/text 在 SSE 时来自真实事件；buffered endpoint 的对应时间是完整响应到达时间。
 - 正式 fixture 必须同时具备 pinned source、setup、pristine assertion、reviewed seed/reference patch 和 evaluator-owned acceptance。正式 catalog 缺少任一材料即拒绝运行；suite 单独报告 planned、executed、skipped、stop reason 和统计完整性，预算停止或取消不得缩小成功率分母。
 - 高频输出使用共享增量有界缓冲；TUI assistant delta 以 40ms 合并刷新，完成和取消立即清空。工作区 Git/显式路径合并后以四个 worker 指纹化，同一 snapshot 不重复读取同一路径。Goal 热路径使用成功持久化后的内存投影，Session 恢复时重新初始化。
+
+## Coding capability 加固边界
+
+- coding task 是后台进程的所有者。`start_background` 在创建时绑定 task signal；取消、权限收紧、预算停止、异常和 Agent dispose 都必须终止并等待进程树。cleanup 未完成时，runner 不得结算成功或开始下一项 benchmark。运行中输出只保留有界 preview，完成记录按数量和总字节淘汰，Session 恢复不伪造进程。
+- `CodingTaskRunner` 是最终结算的唯一入口。验证完成后、Goal/Memory 写入前必须重查取消；异常路径统一拒绝待完成 Goal、停止后台作业并以 failed/stopped 结算学习。benchmark 必须返回 runner 的真实终态、workflow outcome、诊断轮和首次 suite，独立 acceptance 不能把 stopped/预算失败改写成整体成功。
+- provider request 通过 `RequestExecutor` 在实际 attempt 边界准入和结算。已发送但没有可靠 usage 的 attempt 使对应 task/campaign 永久 incomplete；被预算或 incomplete ledger 拒绝的 attempt 记录为 rejected，但不伪造 provider 消耗。coding 与 auxiliary 累计分开显示。每个 stream attempt 拥有独立 AbortController，iterator 和 transport 关闭前不得启动 retry。
+- 文件版本的规范表示是原始字节 SHA-256。`read_file`、patch preview、执行、审批绑定和 rollback 使用同一摘要；文本编辑解码 UTF-8 后保留 BOM 和原有 LF/CRLF。模型读取到的正文规范化仅用于展示，不能成为并发保护的 hash 来源。
+- 项目规则是 workspace root 到目标目录的 `AGENTS.md` chain。宿主保存 scope、content hash、诊断和 target revision；新 scope 或更新未到达模型时拒绝结构化 edit 并要求下一 sampling boundary。规则 revision 通过现有 context channel 持久化，但请求只采用当前 workspace snapshot，历史快照不能在 compaction 后重新取得权威。
+- 搜索 continuation 引用进程内有界 snapshot，而不是重复运行可能变化的查询。默认每页 100、最大 200，单次 retained data 最多 2 MiB/5 秒；`has_more` 只表示已有下一页，`incomplete` 要求缩小查询。
+- TypeScript semantic navigation 是显式配置的只读能力。未配置 LSP 时不广告工具，也不自动安装；同一 workspace 串行查询当前磁盘文本，使用 1-based UTF-16 坐标，30 秒/100 locations 上限。所有 server edit/command request 均拒绝，navigation 结果不授予 edit observation。
+- benchmark campaign 先持久化带 seed 的完整计划，再发出 live request。fixture 必须有 pinned source、setup、pristine assertion、reviewed seed/reference 和 evaluator-owned acceptance；评分在隔离材料上执行。外部 harness 必须在 LLM boundary 提供结构化 usage 与配置确认，不能从最终文本推断。真实请求仍需要独立显式授权和数值预算。
+- 不创建远程 tag/Release 的版本交付使用 Release workflow 专用 `[skip publish]` 提交标记；Test workflow 不读取该标记，仍在 `main` push 上执行 Windows/Linux 门禁。tag push 始终允许 Release workflow 运行。

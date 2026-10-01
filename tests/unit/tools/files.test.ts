@@ -3,7 +3,8 @@ import { test } from "node:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { runFileTool } from "../../../src/tools/files.js";
+import { createHash } from "node:crypto";
+import { FileSearchSession, runFileTool } from "../../../src/tools/files.js";
 
 test("file tools read and list within the workspace and reject escapes and unsupported content", async () => {
   const parent = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-files-"));
@@ -59,6 +60,60 @@ test("file tools page large text and search Unicode paths without a shell", asyn
     const missing = await runFileTool("read_file", JSON.stringify({ path: "源码/missing.ts" }), root) as Record<string, unknown>;
     assert.equal(missing.exists, false);
     assert.equal(missing.sha256, null);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("read_file versions UTF-8 BOM files from their original bytes", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-files-bom-"));
+  try {
+    const bytes = Buffer.from("\ufefffirst\r\nsecond\r\n", "utf8");
+    await fs.writeFile(path.join(root, "bom.txt"), bytes);
+    const read = await runFileTool("read_file", JSON.stringify({ path: "bom.txt" }), root) as Record<string, unknown>;
+    assert.equal(read.content, "first\r\nsecond\r\n");
+    assert.equal(read.sha256, createHash("sha256").update(bytes).digest("hex"));
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("search continuations traverse more than 200 retained Unicode results", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-files-search-pages-"));
+  try {
+    await fs.mkdir(path.join(root, "源码"));
+    await fs.writeFile(path.join(root, "源码", "many.ts"), Array.from({ length: 450 }, (_, index) => `const value${index} = "needle";`).join("\n"));
+    const searches = new FileSearchSession();
+    const first = await runFileTool(
+      "search_files",
+      JSON.stringify({ query: "needle", path: "源码", max_results: 200 }),
+      root,
+      undefined,
+      searches,
+    ) as { matches: Array<{ path: string }>; continuation: string | null; incomplete: boolean };
+    assert.equal(first.matches.length, 200);
+    assert.ok(first.matches.every((match) => match.path.endsWith("源码/many.ts")));
+    assert.equal(first.incomplete, false);
+    assert.ok(first.continuation);
+
+    const second = await runFileTool(
+      "read_search_results",
+      JSON.stringify({ continuation: first.continuation, max_results: 200 }),
+      root,
+      undefined,
+      searches,
+    ) as { matches: unknown[]; continuation: string | null };
+    assert.equal(second.matches.length, 200);
+    assert.ok(second.continuation);
+    const third = await runFileTool(
+      "read_search_results",
+      JSON.stringify({ continuation: second.continuation, max_results: 200 }),
+      root,
+      undefined,
+      searches,
+    ) as { matches: unknown[]; continuation: string | null };
+    assert.equal(third.matches.length, 50);
+    assert.equal(third.continuation, null);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

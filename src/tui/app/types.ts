@@ -39,7 +39,9 @@ export interface AgentSession {
   setRequestSettings?(settings: ModelRequestSettings): void;
   getRequestSettings?(): ModelRequestSettings;
   waitForBackgroundJobs?(signal?: AbortSignal): Promise<BackgroundJobSnapshot[]>;
-  dispose?(): void;
+  beginTask?(): void;
+  cancelBackgroundJobs?(reason?: unknown): Promise<BackgroundJobSnapshot[]>;
+  dispose?(): void | Promise<void>;
 }
 
 export interface AgentRestoreOptions {
@@ -70,6 +72,7 @@ export interface TuiDependencies {
   version: string;
   workspacePath: string;
   sessionStore: SessionStoreLike;
+  getAuxiliaryUsage?(): import("../../status/model-status.js").SessionUsage;
   listModels(baseUrl: string, apiKey: string, signal?: AbortSignal): Promise<string[]>;
   createAgent(
     model: RegisteredModel,

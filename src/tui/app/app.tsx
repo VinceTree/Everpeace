@@ -774,13 +774,13 @@ export function EverpeaceApp({
           await ensureWorkflow().observeShellExecution();
         }
       },
-      async runBackgroundBash(command: string, signal?: AbortSignal, timeoutMs?: number) {
+      async runBackgroundBash(command: string, signal?: AbortSignal, timeoutMs?: number, onOutput?: (output: BashOutputPreview) => void) {
         if (ensureWorkflow().state.phase === "blocked") {
           return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "The coding workflow reached its repair limit" };
         }
         const policy = permissions.current;
         try {
-          return await dependencies.runBash(command, policy, signal, undefined, timeoutMs);
+          return await dependencies.runBash(command, policy, signal, onOutput, timeoutMs);
         } finally {
           await ensureWorkflow().observeShellExecution();
         }
@@ -1567,6 +1567,7 @@ export function EverpeaceApp({
   }, [createGoal, enterCommandView, openInfo, pauseGoal, resumeGoal, returnToChat, showGoalStatus]);
 
   const showStatus = useCallback(() => {
+    const auxiliaryUsage = dependencies.getAuxiliaryUsage?.();
     const metadata = activeModel
       ? resolveModelStatusMetadata(activeModel.base_url, activeModel.model_name)
       : undefined;
@@ -1590,6 +1591,12 @@ export function EverpeaceApp({
         ...(capabilities ? { compaction: capabilities.compaction } : {}),
         reasoning_effort: requestSettings.reasoningEffort,
         ...(sessionUsage.reasoning_tokens === undefined ? {} : { reasoning_tokens: sessionUsage.reasoning_tokens }),
+        ...(auxiliaryUsage === undefined ? {} : {
+          auxiliary_input_tokens: auxiliaryUsage.input_tokens,
+          auxiliary_output_tokens: auxiliaryUsage.output_tokens,
+          ...(auxiliaryUsage.reasoning_tokens === undefined ? {} : { auxiliary_reasoning_tokens: auxiliaryUsage.reasoning_tokens }),
+          auxiliary_usage_complete: auxiliaryUsage.complete,
+        }),
         ...(sessionUsage.cached_input_tokens === undefined ? {} : { cached_input_tokens: sessionUsage.cached_input_tokens }),
         ...(sessionUsage.cache_write_input_tokens === undefined ? {} : { cache_write_input_tokens: sessionUsage.cache_write_input_tokens }),
         ...(sessionUsage.cache_observed_input_tokens === undefined ? {} : { cache_observed_input_tokens: sessionUsage.cache_observed_input_tokens }),
@@ -1600,7 +1607,7 @@ export function EverpeaceApp({
     });
   }, [
     activeModel,
-    dependencies.version,
+    dependencies,
     enterCommandView,
     sessionUsage,
     requestSettings,
@@ -1863,7 +1870,7 @@ export function EverpeaceApp({
     };
   }, [runChat]);
 
-  useEffect(() => () => agent?.dispose?.(), [agent]);
+  useEffect(() => () => { void agent?.dispose?.(); }, [agent]);
 
   useEffect(() => {
     if (!resumeGoalPending.current || activeGoal?.status !== "active" || !agent) return;
@@ -2225,6 +2232,7 @@ export function EverpeaceApp({
             onChange={(policy) => {
               void (async () => {
                 try {
+                  abortController.current?.abort(new Error("Permission policy changed"));
                   await dependencies.savePermissions?.(workspacePath, policy);
                   permissions.current = dependencies.loadPermissions
                     ? await dependencies.loadPermissions(workspacePath)
@@ -2239,6 +2247,7 @@ export function EverpeaceApp({
             onSaveProject={(policy) => {
               void (async () => {
                 try {
+                  abortController.current?.abort(new Error("Permission policy changed"));
                   await dependencies.savePermissions?.(workspacePath, policy, "project");
                   if (dependencies.loadPermissions) permissions.current = await dependencies.loadPermissions(workspacePath);
                 } catch {

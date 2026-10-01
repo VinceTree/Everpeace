@@ -41,6 +41,10 @@ export interface StatusSnapshot {
   cache_write_input_tokens?: number;
   cache_observed_input_tokens?: number;
   reasoning_tokens?: number;
+  auxiliary_input_tokens?: number;
+  auxiliary_output_tokens?: number;
+  auxiliary_reasoning_tokens?: number;
+  auxiliary_usage_complete?: boolean;
   cache_usage_complete?: boolean;
   cache_write_usage_complete?: boolean;
   protocol?: "responses";
@@ -334,6 +338,10 @@ export function isStatusSnapshot(value: unknown): value is StatusSnapshot {
     optionalTokenCount(record.cache_write_input_tokens) &&
     optionalTokenCount(record.cache_observed_input_tokens) &&
     optionalTokenCount(record.reasoning_tokens) &&
+    optionalTokenCount(record.auxiliary_input_tokens) &&
+    optionalTokenCount(record.auxiliary_output_tokens) &&
+    optionalTokenCount(record.auxiliary_reasoning_tokens) &&
+    (record.auxiliary_usage_complete === undefined || typeof record.auxiliary_usage_complete === "boolean") &&
     (record.cache_usage_complete === undefined || typeof record.cache_usage_complete === "boolean") &&
     (record.cache_write_usage_complete === undefined || typeof record.cache_write_usage_complete === "boolean") &&
     (record.protocol === undefined || record.protocol === "responses") &&

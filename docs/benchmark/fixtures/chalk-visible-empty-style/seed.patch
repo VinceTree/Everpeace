@@ -1,0 +1,6 @@
+diff --git a/source/index.js b/source/index.js
+--- a/source/index.js
++++ b/source/index.js
+@@ -80 +80 @@
+-		const builder = createBuilder(this, this[STYLER], true);
++		const builder = createBuilder(this, this[STYLER], false);

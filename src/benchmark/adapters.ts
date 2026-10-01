@@ -18,7 +18,7 @@ export type ProductionBenchmarkTaskRunner = (
 
 /** Wrap the same production task runner used by an application host. */
 export function createEverpeaceBenchmarkAdapter(runTask: ProductionBenchmarkTaskRunner): BenchmarkHarnessAdapter {
-  return { name: "everpeace", managesRepairs: true, run: runTask };
+  return { name: "everpeace", managesRepairs: true, settlesOnCancellation: true, run: runTask };
 }
 
 export type CodingTaskRunnerFactory = (
@@ -34,10 +34,21 @@ export function createCodingTaskRunnerBenchmarkAdapter(
   return {
     name: "everpeace",
     managesRepairs: true,
+    settlesOnCancellation: true,
     async run(task, context) {
       const runner = await createRunner(task, context);
-      await runner.run({ text: task.prompt, source: "benchmark", signal: context.signal });
-      return result?.(task, context);
+      const runResult = await runner.run({ text: task.prompt, source: "benchmark", signal: context.signal });
+      const additional = await result?.(task, context);
+      return {
+        ...additional,
+        terminalOutcome: runResult.disposition,
+        ...(runResult.agentResult.stopReason === undefined ? {} : { stopReason: runResult.agentResult.stopReason }),
+        ...(runResult.workflowResult?.state.result === undefined ? {} : { workflowOutcome: runResult.workflowResult.state.result }),
+        diagnosticRounds: runResult.diagnosticRounds,
+        ...(runResult.firstVerificationSuite === undefined
+          ? {}
+          : { firstVerificationSuiteStatus: runResult.firstVerificationSuite.status }),
+      };
     },
   };
 }
@@ -56,6 +67,7 @@ export function createProcessHarnessAdapter(options: ProcessHarnessAdapterOption
   return {
     name: options.name,
     managesRepairs: true,
+    settlesOnCancellation: true,
     async run(task, context) {
       const args = [...(options.prefixArgs ?? []), ...options.argumentsForTask(task, context)];
       const result = await new Promise<{ stdout: string; stderr: string; exitCode: number | null }>((resolve, reject) => {
@@ -82,17 +94,20 @@ export function createProcessHarnessAdapter(options: ProcessHarnessAdapterOption
           context.signal.removeEventListener("abort", cancel);
           callback();
         };
+        let cancellationError: unknown;
         const cancel = () => {
+          cancellationError = context.signal.reason ?? new Error("Harness process was cancelled");
           if (child.pid) stopProcessTree(child.pid);
           else child.kill();
-          finish(() => reject(context.signal.reason ?? new Error("Harness process was cancelled")));
         };
         child.stdout?.setEncoding("utf8");
         child.stderr?.setEncoding("utf8");
         child.stdout?.on("data", (chunk: string) => { stdout.append(chunk); });
         child.stderr?.on("data", (chunk: string) => { stderr.append(chunk); });
-        child.once("error", (error) => finish(() => reject(error)));
-        child.once("close", (exitCode) => finish(() => resolve({ stdout: stdout.text, stderr: stderr.text, exitCode })));
+        child.once("error", (error) => finish(() => reject(cancellationError ?? error)));
+        child.once("close", (exitCode) => finish(() => cancellationError === undefined
+          ? resolve({ stdout: stdout.text, stderr: stderr.text, exitCode })
+          : reject(cancellationError)));
         context.signal.addEventListener("abort", cancel, { once: true });
         if (context.signal.aborted) cancel();
       });

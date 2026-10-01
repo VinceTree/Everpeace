@@ -49,7 +49,7 @@ export type LoopEvent =
   | { type: "step_limit_reached"; maxSteps: number }
   | { type: "compaction_started"; automatic: boolean }
   | { type: "compaction_completed"; automatic: boolean; usage: TokenUsageSample | null }
-  | { type: "timing_recorded"; operation: "prepare_context" | "request_snapshot" | "sampling" | "retry_delay" | "tool_wait" | "tool_execution" | "compaction" | "persistence"; durationMs: number };
+  | { type: "timing_recorded"; operation: "prepare_context" | "request_snapshot" | "sampling" | "retry_delay" | "tool_wait" | "tool_execution" | "compaction" | "persistence" | "workspace_snapshot" | "verification" | "artifact_persistence" | "sandbox_startup" | "rendering"; durationMs: number };
 
 export class LoopSteeredError extends Error {
   constructor() {
@@ -338,35 +338,64 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
           : index + 1;
         const segment = calls.slice(index, segmentEnd);
         if (parallel[index]) options.onEvent?.({ type: "tool_batch_started", calls: segment });
+        const segmentController = new AbortController();
+        const executionSignal = signal
+          ? AbortSignal.any([signal, segmentController.signal])
+          : segmentController.signal;
         type ToolRun = { call: ToolCall; output?: string; stop?: boolean; fatal?: PersistenceError; executionMs: number };
         const execute = async (call: ToolCall): Promise<ToolRun> => {
           let output: string;
           let stop = false;
           const executionStarted = performance.now();
           try {
-            signal?.throwIfAborted();
+            executionSignal.throwIfAborted();
             options.onEvent?.({ type: "tool_started", call });
-            const dispatched = await options.dispatch(call, signal);
-            output = typeof dispatched === "string" ? dispatched : dispatched.output;
+            const dispatched = await options.dispatch(call, executionSignal);
+            const rawOutput = typeof dispatched === "string" ? dispatched : dispatched.output;
+            output = options.boundToolOutput?.(rawOutput) ?? boundModelToolOutput(rawOutput);
             stop = typeof dispatched === "object" && dispatched.stop === true;
           } catch (error) {
             if (error instanceof PersistenceError) return { call, fatal: error, executionMs: performance.now() - executionStarted };
-            output = JSON.stringify(signal?.aborted ? { status: "cancelled" }
+            output = JSON.stringify(executionSignal.aborted ? { status: "cancelled" }
               : { status: "error", error: error instanceof Error ? error.message : String(error) });
           }
           return { call, output, stop, executionMs: performance.now() - executionStarted };
         };
         const results: ToolRun[] = [];
+        const persistToolResult = async (item: ToolRun): Promise<void> => {
+          if (item.fatal) throw item.fatal;
+          await options.record([{ type: "function_call_output", call_id: item.call.call_id, output: item.output! }]);
+          options.onEvent?.({ type: "tool_finished", call: item.call, output: item.output! });
+          options.onEvent?.({ type: "timing_recorded", operation: "tool_execution", durationMs: item.executionMs });
+          stopAfterTools ||= item.stop === true;
+        };
         if (!parallel[index]) {
           results.push(await execute(segment[0]!));
         } else {
-          const inFlight = new Map<number, Promise<{ index: number; result: ToolRun }>>();
+          const inFlight = new Map<number, Promise<void>>();
           const completed = new Map<number, ToolRun>();
           const activeKeys = new Set<string>();
           let launched = 0;
           let committed = 0;
           let completedBytes = 0;
+          let wake: (() => void) | undefined;
+          const notify = () => { const callback = wake; wake = undefined; callback?.(); };
           while (committed < segment.length) {
+            const ready = completed.get(committed);
+            if (ready) {
+              completed.delete(committed);
+              completedBytes -= Buffer.byteLength(ready.output ?? "");
+              try {
+                await persistToolResult(ready);
+              } catch (error) {
+                segmentController.abort(error);
+                await Promise.allSettled(inFlight.values());
+                throw error;
+              }
+              results.push({ call: ready.call, executionMs: ready.executionMs, ...(ready.stop === undefined ? {} : { stop: ready.stop }) });
+              committed += 1;
+              continue;
+            }
             let gateStop: LoopStopReason | undefined;
             while (
               launched < segment.length
@@ -382,35 +411,26 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
               keys.forEach((key) => activeKeys.add(key));
               const localIndex = launched++;
               const pending = execute(segment[localIndex]!)
-                .then((result) => ({ index: localIndex, result }))
-                .finally(() => { keys.forEach((key) => activeKeys.delete(key)); });
+                .then((result) => {
+                  completed.set(localIndex, result);
+                  completedBytes += Buffer.byteLength(result.output ?? "");
+                })
+                .finally(() => {
+                  inFlight.delete(localIndex);
+                  keys.forEach((key) => activeKeys.delete(key));
+                  notify();
+                });
               inFlight.set(localIndex, pending);
             }
-            const ready = completed.get(committed);
-            if (ready) {
-              completed.delete(committed);
-              completedBytes -= Buffer.byteLength(ready.output ?? "");
-              results.push(ready);
-              committed += 1;
-              continue;
-            }
+            if (completed.has(committed)) continue;
             if (inFlight.size === 0) break;
             const waitStarted = performance.now();
-            const settled = await Promise.race(inFlight.values());
+            await new Promise<void>((resolve) => { wake = resolve; });
             options.onEvent?.({ type: "timing_recorded", operation: "tool_wait", durationMs: performance.now() - waitStarted });
-            inFlight.delete(settled.index);
-            completed.set(settled.index, settled.result);
-            completedBytes += Buffer.byteLength(settled.result.output ?? "");
           }
         }
-        for (const result of results) {
-          if (result.fatal) throw result.fatal;
-          await options.record([{ type: "function_call_output", call_id: result.call.call_id, output: options.boundToolOutput?.(result.output!) ?? boundModelToolOutput(result.output!) }]);
-          options.onEvent?.({ type: "tool_finished", call: result.call, output: result.output! });
-          options.onEvent?.({ type: "timing_recorded", operation: "tool_execution", durationMs: result.executionMs });
-          stopAfterTools ||= result.stop === true;
-        }
-        if (parallel[start]) options.onEvent?.({ type: "tool_batch_finished", calls: segment.slice(0, results.length), outputs: results.map((item) => item.output!) });
+        if (!parallel[index]) for (const result of results) await persistToolResult(result);
+        if (parallel[start]) options.onEvent?.({ type: "tool_batch_finished", calls: segment.slice(0, results.length), outputs: [] });
         index += results.length;
         if (results.length < segment.length) {
           const remaining = calls.slice(index);

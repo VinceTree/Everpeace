@@ -86,7 +86,10 @@ function parseTask(value: unknown, index: number): BenchmarkTaskCatalogEntry {
     const fixtureRecord = raw.fixture as Record<string, unknown>;
     const seedPatch = nonEmpty(fixtureRecord.seedPatch, `tasks[${index}].fixture.seedPatch`);
     const referencePatch = nonEmpty(fixtureRecord.referencePatch, `tasks[${index}].fixture.referencePatch`);
-    for (const [field, path] of [["seedPatch", seedPatch], ["referencePatch", referencePatch]] as const) {
+    const dependencyLock = fixtureRecord.dependencyLock === undefined
+      ? undefined
+      : nonEmpty(fixtureRecord.dependencyLock, `tasks[${index}].fixture.dependencyLock`);
+    for (const [field, path] of [["seedPatch", seedPatch], ["referencePatch", referencePatch], ...(dependencyLock === undefined ? [] : [["dependencyLock", dependencyLock] as const])] as const) {
       if (path.includes("\\") || path.startsWith("/") || path.split("/").some((part) => part === ".." || part === "")) {
         throw new Error(`tasks[${index}].fixture.${field} must be a normalized relative path`);
       }
@@ -94,6 +97,7 @@ function parseTask(value: unknown, index: number): BenchmarkTaskCatalogEntry {
     fixture = {
       seedPatch,
       referencePatch,
+      ...(dependencyLock === undefined ? {} : { dependencyLock }),
       ...(fixtureRecord.setup === undefined ? {} : { setup: parseVerification(fixtureRecord.setup, `tasks[${index}].fixture.setup`) }),
       ...(fixtureRecord.pristineVerification === undefined ? {} : { pristineVerification: parseVerification(fixtureRecord.pristineVerification, `tasks[${index}].fixture.pristineVerification`) }),
     };
@@ -138,9 +142,16 @@ export function parseBenchmarkTaskCatalog(text: string): BenchmarkTaskCatalogEnt
 /** Refuse a formal campaign until every catalog entry has reproducible seed and repair material. */
 export function parseReproducibleBenchmarkTaskCatalog(text: string): BenchmarkTaskCatalogEntry[] {
   const tasks = parseBenchmarkTaskCatalog(text);
-  const missing = tasks.filter((task) => !task.fixture || !task.acceptance).map((task) => task.id);
+  const missing = tasks.filter((task) => !task.fixture?.setup || !task.fixture.pristineVerification || !task.acceptance).map((task) => task.id);
   if (missing.length > 0) {
-    throw new Error(`Benchmark catalog is not reproducible; missing fixture or independent acceptance material for: ${missing.join(", ")}`);
+    throw new Error(`Benchmark catalog is not reproducible; missing fixture setup, pristine proof, or independent acceptance material for: ${missing.join(", ")}`);
+  }
+  const unlockedNpm = tasks.filter((task) => {
+    const setup = task.fixture!.setup!;
+    return /(?:^|[\\/])npm(?:\.cmd)?$/iu.test(setup.command) && !setup.args?.includes("ci");
+  }).map((task) => task.id);
+  if (unlockedNpm.length > 0) {
+    throw new Error(`Benchmark catalog is not reproducible; npm setup must use npm ci for: ${unlockedNpm.join(", ")}`);
   }
   return tasks;
 }

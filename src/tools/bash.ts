@@ -35,6 +35,7 @@ export interface BashOptions {
   /** Stop the child after this many milliseconds. Omit for no timeout. */
   timeoutMs?: number;
   onOutput?(output: BashOutputPreview): void;
+  onProcessStarted?(): void;
   bashPath?: string;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -190,6 +191,7 @@ async function runSandboxBash(
       ...(options.signal ? { signal: options.signal } : {}),
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       ...(options.sandbox?.codexCliPath ? { codexCliPath: options.sandbox.codexCliPath } : {}),
+      ...(options.onProcessStarted ? { onSpawned: options.onProcessStarted } : {}),
       onStdout: (chunk) => append("stdout", chunk),
       onStderr: (chunk) => append("stderr", chunk),
     },

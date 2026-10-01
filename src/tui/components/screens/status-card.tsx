@@ -111,6 +111,14 @@ function statusFields(snapshot: StatusSnapshot): StatusField[] {
       value: snapshot.reasoning_tokens === undefined ? "N/A" : snapshot.reasoning_tokens.toLocaleString("en-US"),
     },
     {
+      label: "Aux input",
+      value: snapshot.auxiliary_input_tokens === undefined ? "N/A" : totalTokens(snapshot.auxiliary_input_tokens, snapshot.auxiliary_usage_complete ?? false),
+    },
+    {
+      label: "Aux output",
+      value: snapshot.auxiliary_output_tokens === undefined ? "N/A" : totalTokens(snapshot.auxiliary_output_tokens, snapshot.auxiliary_usage_complete ?? false),
+    },
+    {
       label: "Cached input",
       value: cacheTokens(snapshot.cached_input_tokens, snapshot.cache_usage_complete),
     },

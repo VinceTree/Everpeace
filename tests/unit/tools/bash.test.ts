@@ -142,15 +142,18 @@ test("sandboxed Bash never replays a payload based on helper-like stderr", { ski
     "console.log('sandbox-ready');",
   ].join("\n"), "utf8");
   try {
+    let processStarts = 0;
     const result = await runBash("ignored", {
       streamOutput: false,
       cwd: directory,
       env: { ...process.env, EVERPEACE_TEST_STATE: statePath },
+      onProcessStarted: () => { processStarts += 1; },
       sandbox: { permissionProfile: ":workspace", codexCliPath: scriptPath },
     });
     assert.equal(result.exitCode, 17);
     assert.equal(result.stdout, "");
     assert.equal(await fs.readFile(statePath, "utf8"), "1");
+    assert.equal(processStarts, 1);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

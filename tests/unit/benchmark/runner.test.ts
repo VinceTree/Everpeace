@@ -131,6 +131,10 @@ test("live repeated benchmarks require a token budget and isolated preparation",
     /total token budget/u,
   );
   await assert.rejects(
+    runBenchmarkSuite([task()], adapter, { liveApi: true, totalTokenBudget: 1_000 }),
+    /per-task token budget/u,
+  );
+  await assert.rejects(
     runBenchmarkSuite([task()], adapter, { repetitions: 3, totalTokenBudget: 1_000 }),
     /prepareRun/u,
   );
@@ -158,13 +162,14 @@ test("benchmark repetitions aggregate token, reasoning, and cache metrics", asyn
   const summary = await runBenchmarkSuite([task()], adapter, {
     liveApi: true,
     totalTokenBudget: 1_000,
+    taskTokenBudget: 900,
     repetitions: 3,
     async prepareRun(_task, repetition) { prepared.push(repetition); },
   });
   assert.equal(summary.total, 3);
   assert.equal(summary.repetitions, 3);
   assert.deepEqual(prepared, [1, 2, 3]);
-  assert.deepEqual(budgets, [1_000, 880, 760]);
+  assert.deepEqual(budgets, [900, 880, 760]);
   assert.deepEqual(summary.usage, {
     inputTokens: 300,
     outputTokens: 60,
@@ -253,7 +258,7 @@ test("a live suite stops after unknown usage without starting the next task", as
   const summary = await runBenchmarkSuite([task({ id: "one" }), task({ id: "two" })], {
     name: "unknown-usage",
     async run() { calls += 1; return {}; },
-  }, { liveApi: true, totalTokenBudget: 1_000 });
+  }, { liveApi: true, totalTokenBudget: 1_000, taskTokenBudget: 1_000 });
   assert.equal(calls, 1);
   assert.equal(summary.total, 2);
   assert.equal(summary.executed, 1);
@@ -276,7 +281,7 @@ test("live adapters can account at the actual request boundary", async () => {
       });
       return { usage: { inputTokens: 999, outputTokens: 999, complete: true } };
     },
-  }, { liveApi: true, totalTokenBudget: 150 });
+  }, { liveApi: true, totalTokenBudget: 150, taskTokenBudget: 150 });
 
   assert.equal(summary.executed, 1);
   assert.deepEqual(summary.usage, {
@@ -319,7 +324,7 @@ test("unknown usage stays incomplete after an earlier metered repair attempt", a
         ? { usage: { inputTokens: 80, outputTokens: 20, complete: true } }
         : {};
     },
-  }, { liveApi: true, totalTokenBudget: 1_000 });
+  }, { liveApi: true, totalTokenBudget: 1_000, taskTokenBudget: 1_000 });
   assert.equal(attempts, 2);
   assert.deepEqual(result.usage, {
     inputTokens: 80,
@@ -329,4 +334,38 @@ test("unknown usage stays incomplete after an earlier metered repair attempt", a
     cacheObservedInputTokens: 0,
     complete: false,
   });
+});
+
+test("a thrown request with unknown usage stops the campaign before another task", async () => {
+  let calls = 0;
+  const summary = await runBenchmarkSuite([task({ id: "one" }), task({ id: "two" })], {
+    name: "thrown-unknown",
+    async run(_task, context) {
+      calls += 1;
+      context.requestAttemptLedger?.begin("coding");
+      throw new Error("transport vanished");
+    },
+  }, { liveApi: true, totalTokenBudget: 1_000, taskTokenBudget: 1_000 });
+
+  assert.equal(calls, 1);
+  assert.equal(summary.results[0]?.usage?.complete, false);
+  assert.deepEqual(summary.skipped, [{ taskId: "two", repetition: 1, reason: "usage_unknown" }]);
+});
+
+test("suite records preparation failures and continues with the remaining run plan", async () => {
+  const executed: string[] = [];
+  const summary = await runBenchmarkSuite([task({ id: "broken" }), task({ id: "ready" })], {
+    name: "preparation",
+    async run(value) { executed.push(value.id); },
+  }, {
+    async prepareRun(value) {
+      if (value.id === "broken") throw new Error("fixture proof failed");
+      return value;
+    },
+  });
+
+  assert.deepEqual(executed, ["ready"]);
+  assert.equal(summary.executed, 2);
+  assert.equal(summary.errored, 1);
+  assert.match(summary.results[0]?.preparationError ?? "", /fixture proof failed/u);
 });

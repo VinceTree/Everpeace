@@ -36,6 +36,27 @@ test("coding task adapter invokes the shared production lifecycle once", async (
   assert.equal(adapter.managesRepairs, true);
 });
 
+test("a stopped production runner cannot become successful through passing acceptance", async () => {
+  const adapter = createCodingTaskRunnerBenchmarkAdapter(async () => ({
+    async run() {
+      return {
+        disposition: "stopped",
+        agentResult: { stopReason: "budget_limited" },
+        diagnosticRounds: 2,
+      };
+    },
+  }) as unknown as CodingTaskRunner);
+  const result = await runBenchmarkTask({
+    ...(await fixture()),
+    acceptance: { command: process.execPath, args: ["-e", "process.exit(0)"] },
+  }, adapter);
+
+  assert.equal(result.verification?.passed, true);
+  assert.equal(result.status, "failed");
+  assert.equal(result.stopReason, "budget_limited");
+  assert.equal(result.diagnosticRounds, 2);
+});
+
 test("process adapter passes task input as an argument without shell interpolation", async () => {
   const result = await runBenchmarkTask(await fixture(), createProcessHarnessAdapter({
     name: "node-fixture",

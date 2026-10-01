@@ -2,7 +2,7 @@
 
 Everpeace 的 benchmark 层比较 harness、模型策略和恢复策略在真实 coding task 上的表现。主指标是固定请求预算内，由独立断言确认的任务通过率。该层不改变 Agent 的权限、验证和 Session JSONL 语义，也不会自动 reset 或清理日常工作区。
 
-当前 [十项 Node 候选清单](benchmark/DEEPSEEK_NODE_TASKS.json) 只代表任务槽位。只有 pinned revision 和 prompt 并不构成可复现 fixture；用户工作区内另有未跟踪的源码材料，也不会被自动采纳。`parseReproducibleBenchmarkTaskCatalog()` 要求每项同时具备 reviewed seed/reference patch 与 evaluator-owned acceptance，否则正式 campaign 在发出模型请求前拒绝启动。
+当前 [十项 Node 清单](benchmark/DEEPSEEK_NODE_TASKS.json) 已包含固定 revision、setup、pristine assertion、reviewed seed/reference patch 与 evaluator-owned acceptance；正式 parser 缺少任一项都会在模型请求前拒绝。十项 Chalk、Commander 和 Day.js fixture 已逐项离线证明 pristine pass → seeded assertion failure → reference pass。Commander 与 Day.js 使用上游 lockfile；Chalk 固定 revision 原本用 `.npmrc` 禁用 lockfile，因此评测材料保存 evaluator-owned `chalk-package-lock.json`，准备器在 setup 前排他复制。三组统一用显式 npmjs registry 执行 `npm ci --ignore-scripts`，避免本机 registry 配置改变依赖来源。
 
 ## Task and fixture contract
 
@@ -44,23 +44,15 @@ export const task: BenchmarkTask = {
 
 ## Production and external adapters
 
-TUI 与 benchmark 共用 `CodingTaskRunner`。`createCodingTaskRunnerBenchmarkAdapter()` 每项只调用一次生产 runner；同一个 Agent/Session 内完成工具循环、最多三轮诊断、完整最终验证、Goal 及 Memory 结算。adapter 标记 `managesRepairs`，因此 evaluator 只运行独立 acceptance，不会叠加另一套自动修复循环。
+TUI 与 benchmark 共用 `CodingTaskRunner`。`createProductionBenchmarkAdapter()` 在无 Ink 环境中构造生产 `ReactAgent`、SessionStore、权限、原生 sandbox、workflow 和 runner；同一个 Agent/Session 内完成工具循环、最多三轮诊断、完整最终验证、Goal 及 Memory 结算。adapter 标记 `managesRepairs`，因此 evaluator 只运行独立 acceptance，不会叠加另一套自动修复循环。
 
 ```ts
 import {
-  createCodingTaskRunnerBenchmarkAdapter,
+  createProductionBenchmarkAdapter,
   runBenchmarkSuite,
 } from "../src/benchmark/index.js";
 
-const adapter = createCodingTaskRunnerBenchmarkAdapter(async (task, context) => {
-  return createProductionTaskRunner({
-    workspacePath: task.workspacePath,
-    signal: context.signal,
-    onPhase: context.onPhase,
-    onEvent: context.onEvent,
-    requestAttemptLedger: context.requestAttemptLedger,
-  });
-});
+const adapter = createProductionBenchmarkAdapter({ model, sessionsRoot });
 
 const summary = await runBenchmarkSuite(tasks, adapter, {
   prepareRun,
@@ -68,7 +60,22 @@ const summary = await runBenchmarkSuite(tasks, adapter, {
 });
 ```
 
-`createProcessHarnessAdapter()` 参数化启动固定外部程序，不使用 shell 拼接。`createDshHeadlessAdapter()` 使用 `dsh --profile headless <job>`；Windows 应传 Node 与已解析的 JS entry，避免 `.cmd` shell。campaign launcher 仍必须固定 dsh 安装提交、模型原始 ID、推理档位、输出上限、sandbox 和工具配置，adapter 不从最终回答猜测 usage。
+`createProcessHarnessAdapter()` 参数化启动固定外部程序，不使用 shell 拼接；通用外部 wrapper 必须在自己的 LLM 边界输出一行 `EVERPEACE_BENCHMARK_RESULT <JSON>`，launcher 不从最终回答猜测 usage。固定 dsh 使用 `createInstrumentedDshAdapter()`：它要求源码 checkout 的完整 HEAD 为 `639ed015397290b3745d163aafe02ffee4aa3f84`，直接通过 Node 启动该 checkout 内的 built `apps/cli/lib/bin.js`，并创建内容锁定的专用 headless profile。profile 在 dsh 的 `llm/stream` waterfall 记录每次 coding、重试、摘要和标题请求，校验模型原始 ID、主编码请求的 `high` reasoning 与 32K 输出上限，在每个 provider 请求前检查剩余预算，并把 cache/unknown usage 交回 campaign。Windows 不经过 `.cmd` 或 shell。
+
+dsh 配置需要 `sourceRoot`、位于该目录内的 `entryPath`、独立 `dshHome` 与专用 `profile`。首次运行只在 profile 不存在时写入 reviewed manifest/patch；已有 profile 内容不一致会失败关闭。运行前需在固定 checkout 中完成官方依赖安装和 build，这一步不会由 campaign 静默执行。profile 禁用 Web tool、使用隔离的 Agents home 和关闭遥测；API key 只在 live 子进程环境中传递，不写入配置、ledger 或 artifact。
+
+## Campaign command
+
+内部入口要求配置文件，并且必须在离线 proof 与 live campaign 中二选一：
+
+```powershell
+pnpm benchmark:campaign -- --config .\campaign.json --prove-fixtures
+pnpm benchmark:campaign -- --config .\campaign.json --live
+```
+
+配置包含 `campaignId`、catalog/fixture/run/artifact/session 目录、已注册的 `modelId`、随机 `seed`、`repetitions`、`taskTokenBudget`、`campaignTokenBudget` 和 harness 列表。可从 [示例配置](benchmark/CAMPAIGN_CONFIG.example.json) 开始。`everpeace` harness 使用生产 factory；`dsh` harness 使用固定源码与内置 instrumentation；其他外部 harness 可继续使用 `instrumented-process`，明确提供 executable、参数模板、固定 revision 和预期模型设置。通用参数模板支持 `${PROMPT}`、`${WORKSPACE}` 和 `${TOKEN_BUDGET}`，以 argv 传递而非 shell 拼接。
+
+live 入口在任何请求前写入 `campaign-plan.json`，随后随机交错 harness 顺序；结果写入 `campaign-result.json`，包含完整 planned、executed、skipped、unknown usage 和 stop reason。每个 skipped 项保留 adapter、task 和 repetition。准备失败作为执行结果保存，不算有效 seed，也不会消费模型预算。
 
 ## Usage and budget
 
@@ -92,7 +99,7 @@ suite 单独保存 `planned`、`executed`、`skipped`、`stopReason` 和 `statis
 
 任务开始和结束记录有界 Git workspace snapshot。可选 artifact sink 保存脱敏的 snapshot、每次 acceptance 和结果；路径包含 campaign/harness/task/repetition/attempt，常见 API key、authorization、token 和 `sk-` 形式会在写入前替换。stdout/stderr 使用增量有界缓冲，最多保留 1 MiB。
 
-Performance trace 记录 context preparation、request snapshot、sampling、retry delay、tool wait/execution、compaction 等单调时钟耗时，以及响应、工具、重试和取消数量。SSE 的 first event/text 来自真实流事件；buffered endpoint 只能在完整响应返回时记录。trace 不保存请求正文、文件内容、验证输出或凭据。
+Performance trace 记录 context preparation、request snapshot、sampling、retry delay、tool wait/execution、sandbox startup、assistant render callback、compaction、workspace snapshot、verification 和 artifact persistence 等单调时钟耗时，以及响应、工具、重试和取消数量。sandbox startup 截止到子进程 spawn，rendering 表示宿主 callback 成本，不冒充终端绘制完成时间。SSE 的 first event/text 来自真实流事件；buffered endpoint 只能在完整响应返回时记录。trace 不保存请求正文、文件内容、验证输出或凭据。
 
 ## Acceptance sequence
 
@@ -104,4 +111,4 @@ Performance trace 记录 context preparation、request snapshot、sampling、ret
 
 三组固定模型原始 ID、`high` 推理、32K 产品输出预算、十五分钟任务时限和最多三轮诊断。报告独立通过次数、首次通过、人工介入、双方均成功任务的配对耗时、总 token/成功任务、缓存统计完整性，以及协议、sandbox、工具差异。
 
-当前十项候选材料尚缺 reviewed patch pairs 和完整证明，真实 API smoke、九十次对比及 Windows Terminal 验收均未执行。真实调用需要另行显式授权并给出 campaign 总 token 预算；在此之前不能发布排名、冷缓存结论或相对 dsh 的性能优势声明。
+十项离线 proof 与固定 dsh instrumentation 代码已完成；固定 checkout 的实际 build/profile 启动、真实 API smoke、九十次对比及 Windows Terminal 验收均未执行。真实调用需要另行显式授权，并同时给出 task 与 campaign token 预算；在此之前不能发布排名、冷缓存结论或相对 dsh 的性能优势声明。

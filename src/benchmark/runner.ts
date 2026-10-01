@@ -101,6 +101,8 @@ export interface BenchmarkRunOptions {
   /** Required budget gate when a caller explicitly enables real provider requests. */
   liveApi?: boolean;
   totalTokenBudget?: number;
+  /** Per-task admission budget. The campaign remainder may reduce this further. */
+  taskTokenBudget?: number;
   tokenBudgetRemaining?: number;
   /** Internal artifact namespace used by isolated suite runs. */
   artifactPrefix?: string;
@@ -127,7 +129,17 @@ async function runAdapterAttempt(
       signal.removeEventListener("abort", rejectOnAbort);
       callback();
     };
-    const rejectOnAbort = () => finish(() => reject(signal.reason ?? new Error("Benchmark task was cancelled")));
+    const rejectOnAbort = () => {
+      const error = signal.reason ?? new Error("Benchmark task was cancelled");
+      if (adapter.settlesOnCancellation) {
+        void runPromise.then(
+          () => finish(() => reject(error)),
+          () => finish(() => reject(error)),
+        );
+      } else {
+        finish(() => reject(error));
+      }
+    };
     signal.addEventListener("abort", rejectOnAbort, { once: true });
     if (signal.aborted) {
       rejectOnAbort();
@@ -171,7 +183,9 @@ export async function runBenchmarkTask(
   let verification: BenchmarkVerificationResult | undefined;
   const verificationAttempts: BenchmarkVerificationResult[] = [];
   const artifactPaths: string[] = [];
+  const workspaceBeforeStarted = now();
   const workspaceBefore = await captureWorkspaceSnapshot(task.workspacePath, { now, signal: controller.signal });
+  metrics.onEvent({ type: "timing_recorded", operation: "workspace_snapshot", durationMs: Math.max(0, now() - workspaceBeforeStarted) });
   let workspaceAfter = workspaceBefore;
   let capabilities = options.capabilities;
   let attempts = 0;
@@ -179,6 +193,12 @@ export async function runBenchmarkTask(
   let failure: string | undefined;
   let usage: import("./types.js").BenchmarkTokenUsage | undefined;
   let remainingBudget = tokenBudget;
+  let terminalOutcome: BenchmarkHarnessResult["terminalOutcome"];
+  let stopReason: string | undefined;
+  let workflowOutcome: BenchmarkHarnessResult["workflowOutcome"];
+  let diagnosticRounds: number | undefined;
+  let firstVerificationSuiteStatus: BenchmarkHarnessResult["firstVerificationSuiteStatus"];
+  let harnessPermitsSuccess = true;
   const requestAttemptLedger = options.liveApi === true
     ? new RequestAttemptLedger({ ...(tokenBudget === undefined ? {} : { tokenBudget }) })
     : undefined;
@@ -208,28 +228,40 @@ export async function runBenchmarkTask(
       const phase = attempts === 1 ? "implement" as const : "diagnose" as const;
       options.onTaskPhase?.(phase, attempts);
       const ledgerBefore = requestAttemptLedger?.snapshot();
-      const result = await runAdapterAttempt(adapter, task, {
-        task,
-        signal: controller.signal,
-        attempt: attempts,
-        phase,
-        ...(verification === undefined ? {} : { previousVerification: verification }),
-        workspaceBefore,
-        onPhase: metrics.onPhase,
-        onEvent: metrics.onEvent,
-        ...(writeArtifact === undefined ? {} : { writeArtifact: (name: string, content: string) => writeArtifact(`attempt-${attempts}-${name}`, content) }),
-        ...(remainingBudget === undefined ? {} : { tokenBudgetRemaining: remainingBudget }),
-        ...(requestAttemptLedger === undefined ? {} : { requestAttemptLedger }),
-      }, controller.signal);
+      let result: BenchmarkHarnessResult | void = undefined;
+      let attemptError: unknown;
+      try {
+        result = await runAdapterAttempt(adapter, task, {
+          task,
+          signal: controller.signal,
+          attempt: attempts,
+          phase,
+          ...(verification === undefined ? {} : { previousVerification: verification }),
+          workspaceBefore,
+          onPhase: metrics.onPhase,
+          onEvent: metrics.onEvent,
+          ...(writeArtifact === undefined ? {} : { writeArtifact: (name: string, content: string) => writeArtifact(`attempt-${attempts}-${name}`, content) }),
+          ...(remainingBudget === undefined ? {} : { tokenBudgetRemaining: remainingBudget }),
+          ...(requestAttemptLedger === undefined ? {} : { requestAttemptLedger }),
+        }, controller.signal);
+      } catch (error) {
+        attemptError = error;
+      }
       manualInterventions += result?.manualInterventions ?? 0;
       unsafeActions += result?.unsafeActions ?? 0;
       if (result?.notes !== undefined) notes = [notes, result.notes].filter(Boolean).join("\n");
       if (result?.capabilities !== undefined) capabilities = result.capabilities;
+      terminalOutcome = result?.terminalOutcome ?? terminalOutcome;
+      stopReason = result?.stopReason ?? stopReason;
+      workflowOutcome = result?.workflowOutcome ?? workflowOutcome;
+      diagnosticRounds = result?.diagnosticRounds ?? diagnosticRounds;
+      firstVerificationSuiteStatus = result?.firstVerificationSuiteStatus ?? firstVerificationSuiteStatus;
       const ledgerAfter = requestAttemptLedger?.snapshot();
       const ledgerRecordedAttempt = ledgerBefore !== undefined
         && ledgerAfter !== undefined
         && ledgerAfter.attempts.length > ledgerBefore.attempts.length;
-      const attemptUsage = ledgerRecordedAttempt && ledgerBefore !== undefined && ledgerAfter !== undefined
+      const ledgerBecameIncomplete = ledgerBefore?.complete === true && ledgerAfter?.complete === false;
+      const attemptUsage = (ledgerRecordedAttempt || ledgerBecameIncomplete) && ledgerBefore !== undefined && ledgerAfter !== undefined
         ? {
             inputTokens: ledgerAfter.inputTokens - ledgerBefore.inputTokens,
             outputTokens: ledgerAfter.outputTokens - ledgerBefore.outputTokens,
@@ -273,6 +305,20 @@ export async function runBenchmarkTask(
         break;
       }
 
+      if (attemptError !== undefined) throw attemptError;
+
+      const terminalStopped = terminalOutcome !== undefined && terminalOutcome !== "completed";
+      const workflowFailed = workflowOutcome === "failed" || workflowOutcome === "unverified";
+      if (terminalStopped || stopReason !== undefined || workflowFailed) {
+        harnessPermitsSuccess = false;
+        status = "failed";
+        failure = stopReason
+          ? `Production task stopped: ${stopReason}`
+          : workflowFailed
+            ? `Production workflow ended ${workflowOutcome}`
+            : `Production task ended ${terminalOutcome}`;
+      }
+
       if (controller.signal.aborted) {
         status = timedOut ? "timed_out" : "error";
         failure = timedOut ? `Benchmark task exceeded ${task.timeoutMs ?? DEFAULT_TASK_TIMEOUT_MS}ms` : "Benchmark task was cancelled";
@@ -288,6 +334,7 @@ export async function runBenchmarkTask(
 
       options.onTaskPhase?.("verify", attempts);
       verification = await runBenchmarkVerification(verificationSpec, task.workspacePath, controller.signal);
+      metrics.onEvent({ type: "timing_recorded", operation: "verification", durationMs: verification.durationMs });
       verificationAttempts.push(verification);
       if (verification.timedOut) {
         status = "timed_out";
@@ -295,8 +342,10 @@ export async function runBenchmarkTask(
         break;
       }
       if (verification.passed) {
-        status = "passed";
-        failure = undefined;
+        if (harnessPermitsSuccess) {
+          status = "passed";
+          failure = undefined;
+        }
         break;
       }
       status = "failed";
@@ -312,17 +361,23 @@ export async function runBenchmarkTask(
     options.signal?.removeEventListener("abort", abortFromParent);
     controller.abort();
     options.onTaskPhase?.("summarize", attempts);
-    workspaceAfter = timedOut || options.signal?.aborted
-      ? workspaceBefore
-      : await captureWorkspaceSnapshot(task.workspacePath, { now });
+    if (timedOut || options.signal?.aborted) {
+      workspaceAfter = workspaceBefore;
+    } else {
+      const workspaceAfterStarted = now();
+      workspaceAfter = await captureWorkspaceSnapshot(task.workspacePath, { now });
+      metrics.onEvent({ type: "timing_recorded", operation: "workspace_snapshot", durationMs: Math.max(0, now() - workspaceAfterStarted) });
+    }
   }
 
   if (writeArtifact !== undefined) {
+    const artifactStarted = now();
     await writeArtifact("workspace-before.json", JSON.stringify(workspaceBefore, null, 2));
     await writeArtifact("workspace-after.json", JSON.stringify(workspaceAfter, null, 2));
     for (const [index, item] of verificationAttempts.entries()) {
       await writeArtifact(`verification-${index + 1}.json`, JSON.stringify(item, null, 2));
     }
+    metrics.onEvent({ type: "timing_recorded", operation: "artifact_persistence", durationMs: Math.max(0, now() - artifactStarted) });
   }
 
   const durationMs = Math.max(0, now() - startedAtMs);
@@ -345,6 +400,11 @@ export async function runBenchmarkTask(
     ...(failure === undefined ? {} : { error: failure }),
     ...(notes === undefined ? {} : { notes }),
     ...(usage === undefined ? {} : { usage }),
+    ...(terminalOutcome === undefined ? {} : { terminalOutcome }),
+    ...(stopReason === undefined ? {} : { stopReason }),
+    ...(workflowOutcome === undefined ? {} : { workflowOutcome }),
+    ...(diagnosticRounds === undefined ? {} : { diagnosticRounds }),
+    ...(firstVerificationSuiteStatus === undefined ? {} : { firstVerificationSuiteStatus }),
   };
   if (writeArtifact !== undefined) {
     await writeArtifact("result.json", JSON.stringify(runResult, null, 2));
@@ -367,6 +427,9 @@ export async function runBenchmarkSuite(
   if (options.liveApi === true && !validTokenBudget(options.totalTokenBudget)) {
     throw new Error("Live API benchmarks require a positive total token budget");
   }
+  if (options.liveApi === true && !validTokenBudget(options.taskTokenBudget)) {
+    throw new Error("Live API benchmark suites require a positive per-task token budget");
+  }
   const results: BenchmarkRunResult[] = [];
   const skipped: BenchmarkSkippedRun[] = [];
   const planned = tasks.length * repetitions;
@@ -388,11 +451,39 @@ export async function runBenchmarkSuite(
         stopReason = "Campaign token budget was exhausted";
         break;
       }
-      const preparedTask = await options.prepareRun?.(task, repetition) ?? task;
+      let preparedTask: BenchmarkTask;
+      try {
+        preparedTask = await options.prepareRun?.(task, repetition) ?? task;
+      } catch (error) {
+        const message = errorMessage(error);
+        const failedAt = options.now?.() ?? Date.now();
+        const failed: BenchmarkRunResult = {
+          taskId: task.id,
+          adapter: adapter.name,
+          status: "error",
+          startedAt: new Date(failedAt).toISOString(),
+          durationMs: 0,
+          attempts: 0,
+          metrics: createBenchmarkMetricsCollector(options.now).snapshot(failedAt),
+          manualInterventions: 0,
+          unsafeActions: 0,
+          error: `Benchmark preparation failed: ${message}`,
+          preparationError: message,
+          ...(repetitions === 1 ? {} : { repetition }),
+        };
+        results.push(failed);
+        options.onResult?.(failed);
+        continue;
+      }
+      const runBudget = remaining === undefined
+        ? options.taskTokenBudget
+        : options.taskTokenBudget === undefined
+          ? remaining
+          : Math.min(remaining, options.taskTokenBudget);
       const result = await runBenchmarkTask(preparedTask, adapter, {
         ...options,
         artifactPrefix: `${(options.campaignId ?? "campaign").replace(/[^A-Za-z0-9._-]/gu, "-")}-${adapter.name.replace(/[^A-Za-z0-9._-]/gu, "-")}-${task.id.replace(/[^A-Za-z0-9._-]/gu, "-")}-${repetition}`,
-        ...(remaining === undefined ? {} : { tokenBudgetRemaining: remaining }),
+        ...(runBudget === undefined ? {} : { tokenBudgetRemaining: runBudget }),
       });
       const repeated = repetitions === 1 ? result : { ...result, repetition };
       results.push(repeated);
@@ -444,7 +535,7 @@ export async function runBenchmarkSuite(
     verificationPassRate: verified === 0 ? null : verificationPassed / verified,
     totalDurationMs: results.reduce((total, result) => total + result.durationMs, 0),
     totalAttempts: results.reduce((total, result) => total + result.attempts, 0),
-    totalRepairAttempts: results.reduce((total, result) => total + Math.max(0, result.attempts - 1), 0),
+    totalRepairAttempts: results.reduce((total, result) => total + (result.diagnosticRounds ?? Math.max(0, result.attempts - 1)), 0),
     totalToolCalls: results.reduce((total, result) => total + result.metrics.toolCalls, 0),
     totalRetries: results.reduce((total, result) => total + result.metrics.retries, 0),
     totalManualInterventions: results.reduce((total, result) => total + result.manualInterventions, 0),

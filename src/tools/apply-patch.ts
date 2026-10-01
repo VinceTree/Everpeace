@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
 import { constants, promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { isProtectedPatchPath } from "./sandbox-policy.js";
+import { decodeTextFile, encodeTextFile, sha256Bytes, type TextFileVersion } from "./file-version.js";
 
 const MAX_OPERATIONS = 20;
 const MAX_PATCH_BYTES = 512 * 1024;
@@ -170,48 +170,45 @@ async function assertSafeTarget(root: string, target: string): Promise<void> {
   }
 }
 
-function digest(content: string): string {
-  return createHash("sha256").update(content).digest("hex");
-}
-
-async function readTarget(target: string): Promise<{ exists: boolean; content: string }> {
+async function readTarget(target: string): Promise<{ exists: false } | ({ exists: true } & TextFileVersion)> {
   try {
     const stat = await fs.lstat(target);
     if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Patch target must be a regular file");
     if (stat.size > MAX_FILE_BYTES) throw new Error("Patch target exceeds the 512 KiB limit");
     const handle = await fs.open(target, constants.O_RDONLY);
-    try { return { exists: true, content: await handle.readFile("utf8") }; } finally { await handle.close(); }
+    try { return { exists: true, ...decodeTextFile(await handle.readFile()) }; } finally { await handle.close(); }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { exists: false, content: "" };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { exists: false };
     throw error;
   }
 }
 
-async function atomicWrite(target: string, content: string): Promise<void> {
-  if (Buffer.byteLength(content, "utf8") > MAX_FILE_BYTES) throw new Error("Patched file exceeds the 512 KiB limit");
+async function atomicWrite(target: string, content: Uint8Array): Promise<void> {
+  if (content.byteLength > MAX_FILE_BYTES) throw new Error("Patched file exceeds the 512 KiB limit");
   const temporary = `${target}.everpeace-${randomUUID()}.tmp`;
-  await fs.writeFile(temporary, content, { encoding: "utf8", flag: "wx" });
+  await fs.writeFile(temporary, content, { flag: "wx" });
   try { await fs.rename(temporary, target); } catch (error) { await fs.rm(temporary, { force: true }); throw error; }
 }
 
-async function exclusiveCreate(target: string, content: string): Promise<void> {
-  if (Buffer.byteLength(content, "utf8") > MAX_FILE_BYTES) throw new Error("Patched file exceeds the 512 KiB limit");
+async function exclusiveCreate(target: string, content: Uint8Array): Promise<void> {
+  if (content.byteLength > MAX_FILE_BYTES) throw new Error("Patched file exceeds the 512 KiB limit");
   const handle = await fs.open(target, "wx");
-  try { await handle.writeFile(content, "utf8"); }
+  try { await handle.writeFile(content); }
   catch (error) { await handle.close(); await fs.rm(target, { force: true }); throw error; }
   await handle.close();
 }
 
-async function sameTargetVersion(target: string, expected: { exists: boolean; content: string }): Promise<boolean> {
+async function sameTargetVersion(target: string, expected: { exists: boolean; bytes?: Uint8Array }): Promise<boolean> {
   const current = await readTarget(target);
-  return current.exists === expected.exists && (!current.exists || digest(current.content) === digest(expected.content));
+  return current.exists === expected.exists && (!current.exists || (expected.bytes !== undefined && current.sha256 === sha256Bytes(expected.bytes)));
 }
 
 interface PreparedPatch {
   operation: ApplyPatchOperation;
   target: string;
-  before: { exists: boolean; content: string };
-  after?: string;
+  before: { exists: false } | ({ exists: true } & TextFileVersion);
+  after?: Buffer;
+  afterText?: string;
 }
 
 async function preparePatch(
@@ -244,17 +241,21 @@ async function preparePatch(
       const before = await readTarget(target);
       if (operation.action === "create" && before.exists) throw new Error(`File already exists: ${operation.path}`);
       if (operation.action !== "create" && !before.exists) throw new Error(`File does not exist: ${operation.path}`);
-      if (operation.expectedSha256 && (!before.exists || digest(before.content) !== operation.expectedSha256)) throw new Error(`File changed since it was read: ${operation.path}`);
+      if (operation.expectedSha256 && (!before.exists || before.sha256 !== operation.expectedSha256)) throw new Error(`File changed since it was read: ${operation.path}`);
       let after: string | undefined;
       if (operation.action === "create") {
         if (operation.content === undefined || operation.patch !== undefined) throw new Error("Create operations require content only");
         after = operation.content;
       } else if (operation.action === "update") {
+        if (!before.exists) throw new Error(`File does not exist: ${operation.path}`);
         if ((operation.content === undefined) === (operation.patch === undefined)) throw new Error("Update operations require exactly one of content or patch");
-        after = operation.patch === undefined ? operation.content : applyUnifiedPatch(before.content, operation.patch);
+        after = operation.patch === undefined ? operation.content : applyUnifiedPatch(before.text, operation.patch);
       }
-      if (after !== undefined && Buffer.byteLength(after, "utf8") > MAX_FILE_BYTES) throw new Error("Patched file exceeds the 512 KiB limit");
-      prepared.push({ operation, target, before, ...(after === undefined ? {} : { after }) });
+      const afterBytes = after === undefined
+        ? undefined
+        : encodeTextFile(after, operation.action === "update" && before.exists ? before : undefined);
+      if (afterBytes !== undefined && afterBytes.byteLength > MAX_FILE_BYTES) throw new Error("Patched file exceeds the 512 KiB limit");
+      prepared.push({ operation, target, before, ...(afterBytes === undefined ? {} : { after: afterBytes, afterText: after! }) });
     }
     return { prepared };
   } catch (error) {
@@ -263,8 +264,8 @@ async function preparePatch(
 }
 
 function diffFor(item: PreparedPatch): string {
-  const oldLines = item.before.content.replace(/\r\n/gu, "\n").split("\n");
-  const newLines = (item.after ?? "").replace(/\r\n/gu, "\n").split("\n");
+  const oldLines = (item.before.exists ? item.before.text : "").replace(/\r\n/gu, "\n").split("\n");
+  const newLines = (item.afterText ?? "").replace(/\r\n/gu, "\n").split("\n");
   const oldHeader = item.before.exists ? `--- a/${item.operation.path}` : "--- /dev/null";
   const newHeader = item.operation.action === "delete" ? "+++ /dev/null" : `+++ b/${item.operation.path}`;
   const removed = item.before.exists ? oldLines.map((line) => `-${line}`) : [];
@@ -284,8 +285,8 @@ export async function previewApplyPatch(
   const files = result.prepared.map((item) => ({
     path: item.operation.path,
     action: item.operation.action,
-    beforeSha256: item.before.exists ? digest(item.before.content) : null,
-    afterSha256: item.after === undefined ? null : digest(item.after),
+    beforeSha256: item.before.exists ? item.before.sha256 : null,
+    afterSha256: item.after === undefined ? null : sha256Bytes(item.after),
     diff: diffFor(item),
   }));
   return { status: "ready", files, diff: files.map((file) => file.diff).join("\n") };
@@ -320,12 +321,12 @@ export async function runApplyPatch(
     const rollbackErrors: string[] = [];
     for (const item of [...applied].reverse()) {
       try {
-        const expectedAfter = { exists: item.after !== undefined, content: item.after ?? "" };
+        const expectedAfter = { exists: item.after !== undefined, ...(item.after === undefined ? {} : { bytes: item.after }) };
         if (!(await sameTargetVersion(item.target, expectedAfter))) {
           rollbackConflicts.push(item.operation.path);
           continue;
         }
-        if (item.before.exists) await atomicWrite(item.target, item.before.content);
+        if (item.before.exists) await atomicWrite(item.target, item.before.bytes);
         else await fs.rm(item.target, { force: true });
       } catch (rollbackError) {
         rollbackErrors.push(`${item.operation.path}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);

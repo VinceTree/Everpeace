@@ -132,7 +132,12 @@ test("steering closes calls before user input and resumes with a new skill snaps
     },
   });
   await agent.runTurn("start");
-  assert.deepEqual(history.map((item) => item.type ?? item.role), ["user", "function_call", "function_call_output", "user"]);
+  const interaction = history.filter((item) => !(
+    item.type === "message"
+    && item.role === "developer"
+    && String(item.content).startsWith("Host-maintained project rule snapshot revision ")
+  ));
+  assert.deepEqual(interaction.map((item) => item.type ?? item.role), ["user", "function_call", "function_call_output", "user"]);
   assert.deepEqual(repairToolContext(history), history);
   assert.deepEqual(skillInputs, ["start", "start\nuse $new-skill"]);
 });

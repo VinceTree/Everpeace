@@ -53,6 +53,15 @@ async function fixture(): Promise<{ root: string; fixtureRoot: string; task: Ben
     "+export default 'good';",
     "",
   ].join("\n"), "utf8");
+  await writeFile(join(fixtureRoot, "external.mjs"), [
+    "import assert from 'node:assert/strict';",
+    "import { pathToFileURL } from 'node:url';",
+    "const workspace = process.argv[2];",
+    "const { default: value } = await import(pathToFileURL(`${workspace}/value.mjs`).href + `?proof=${Date.now()}`);",
+    "assert.equal(value, 'good');",
+    "",
+  ].join("\n"), "utf8");
+  await writeFile(join(fixtureRoot, "package-lock.json"), "{\"lockfileVersion\":3}\n", "utf8");
   return {
     root,
     fixtureRoot,
@@ -62,12 +71,19 @@ async function fixture(): Promise<{ root: string; fixtureRoot: string; task: Ben
       workspacePath: "unused",
       source: { repositoryUrl: source, commit: stdout.trim(), issue: "fixture" },
       fixture: {
+        dependencyLock: "package-lock.json",
         seedPatch: "seed.patch",
         referencePatch: "reference.patch",
         setup: { command: process.execPath, args: ["-e", "process.exit(0)"] },
         pristineVerification: { command: process.execPath, args: ["-e", "import('./value.mjs').then(({default:value}) => process.exit(value === 'good' ? 0 : 1))"] },
       },
       verification: { command: process.execPath, args: ["verify.mjs"] },
+      acceptance: {
+        command: process.execPath,
+        args: ["${FIXTURE_ROOT}/external.mjs", "${WORKSPACE}"],
+        cwd: "${FIXTURE_ROOT}",
+        env: { FIXTURE_WORKSPACE: "${WORKSPACE}" },
+      },
     },
   };
 }
@@ -87,6 +103,7 @@ test("fixture proof rejects verification infrastructure failures as invalid seed
   const value = await fixture();
   await assert.rejects(proveBenchmarkFixture({
     ...value.task,
+    acceptance: { command: "definitely-missing-everpeace-verifier" },
     verification: { command: "definitely-missing-everpeace-verifier" },
   }, {
     destination: join(value.root, "invalid-proof"),
@@ -106,8 +123,13 @@ test("suite runs the task returned by an isolated prepare hook", async () => {
   });
   assert.equal(summary.total, 1);
   assert.equal(observedWorkspace, join(runsRoot, "fixture-1"));
-  assert.equal((await prepareBenchmarkFixture(value.task, {
+  const standalone = await prepareBenchmarkFixture(value.task, {
     destination: join(value.root, "standalone"),
     fixtureRoot: value.fixtureRoot,
-  })).workspacePath, join(value.root, "standalone"));
+  });
+  assert.equal(standalone.workspacePath, join(value.root, "standalone"));
+  assert.deepEqual(standalone.acceptance?.args, [join(value.fixtureRoot, "external.mjs"), join(value.root, "standalone")]);
+  assert.equal(standalone.acceptance?.cwd, value.fixtureRoot);
+  assert.equal(standalone.acceptance?.env?.FIXTURE_WORKSPACE, join(value.root, "standalone"));
+  assert.equal(await readFile(join(value.root, "standalone", "package-lock.json"), "utf8"), "{\"lockfileVersion\":3}\n");
 });

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { lstat, mkdir, readFile, rm } from "node:fs/promises";
+import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import type { BenchmarkTask, BenchmarkVerificationResult } from "./types.js";
 import { runBenchmarkVerification } from "./runner.js";
@@ -74,6 +74,44 @@ function fixturePath(root: string, path: string): string {
   return absolute;
 }
 
+function bindValue(value: string, workspacePath: string, fixtureRoot: string): string {
+  const fixturePrefix = "${FIXTURE_ROOT}/";
+  const workspacePrefix = "${WORKSPACE}/";
+  if (value.startsWith(fixturePrefix)) return resolve(fixtureRoot, value.slice(fixturePrefix.length));
+  if (value.startsWith(workspacePrefix)) return resolve(workspacePath, value.slice(workspacePrefix.length));
+  if (value === "${FIXTURE_ROOT}") return resolve(fixtureRoot);
+  if (value === "${WORKSPACE}") return resolve(workspacePath);
+  return value.replaceAll("${WORKSPACE}", workspacePath).replaceAll("${FIXTURE_ROOT}", resolve(fixtureRoot));
+}
+
+function bindVerification(
+  value: BenchmarkTask["verification"],
+  workspacePath: string,
+  fixtureRoot: string,
+): BenchmarkTask["verification"] {
+  if (!value) return undefined;
+  return {
+    ...value,
+    command: bindValue(value.command, workspacePath, fixtureRoot),
+    ...(value.args === undefined ? {} : { args: value.args.map((item) => bindValue(item, workspacePath, fixtureRoot)) }),
+    ...(value.cwd === undefined ? {} : { cwd: bindValue(value.cwd, workspacePath, fixtureRoot) }),
+    ...(value.env === undefined ? {} : { env: Object.fromEntries(Object.entries(value.env).map(([key, item]) => [key, bindValue(item, workspacePath, fixtureRoot)])) }),
+  };
+}
+
+function bindTask(task: BenchmarkTask, workspacePath: string, fixtureRoot: string): BenchmarkTask {
+  const fixture = task.fixture && {
+    ...task.fixture,
+    ...(task.fixture.setup === undefined ? {} : { setup: bindVerification(task.fixture.setup, workspacePath, fixtureRoot)! }),
+    ...(task.fixture.pristineVerification === undefined ? {} : { pristineVerification: bindVerification(task.fixture.pristineVerification, workspacePath, fixtureRoot)! }),
+  };
+  const prepared: BenchmarkTask = { ...task, workspacePath };
+  if (fixture !== undefined) prepared.fixture = fixture;
+  if (task.verification !== undefined) prepared.verification = bindVerification(task.verification, workspacePath, fixtureRoot)!;
+  if (task.acceptance !== undefined) prepared.acceptance = bindVerification(task.acceptance, workspacePath, fixtureRoot)!;
+  return prepared;
+}
+
 async function checkedGit(args: readonly string[], cwd: string | undefined, signal?: AbortSignal): Promise<string> {
   const result = await run("git", args, cwd, signal);
   if (result.exitCode !== 0) {
@@ -84,8 +122,8 @@ async function checkedGit(args: readonly string[], cwd: string | undefined, sign
 
 async function applyPatch(path: string, workspacePath: string, signal?: AbortSignal): Promise<void> {
   await readFile(path);
-  await checkedGit(["apply", "--check", "--whitespace=error-all", "--", path], workspacePath, signal);
-  await checkedGit(["apply", "--whitespace=error-all", "--", path], workspacePath, signal);
+  await checkedGit(["apply", "--check", "--unidiff-zero", "--whitespace=error-all", "--", path], workspacePath, signal);
+  await checkedGit(["apply", "--unidiff-zero", "--whitespace=error-all", "--", path], workspacePath, signal);
 }
 
 export interface PrepareBenchmarkFixtureOptions {
@@ -105,32 +143,37 @@ export async function prepareBenchmarkFixture(
   await mustNotExist(destination);
   await mkdir(dirname(destination), { recursive: true });
   try {
-    await checkedGit(["clone", "--quiet", "--no-checkout", "--filter=blob:none", "--", task.source.repositoryUrl, destination], undefined, options.signal);
+    await checkedGit(["clone", "--quiet", "--no-checkout", "--filter=blob:none", "-c", "core.autocrlf=false", "--", task.source.repositoryUrl, destination], undefined, options.signal);
     await checkedGit(["checkout", "--quiet", "--detach", task.source.commit], destination, options.signal);
     const head = (await checkedGit(["rev-parse", "HEAD"], destination, options.signal)).trim().toLowerCase();
     if (!head.startsWith(task.source.commit.toLowerCase())) {
       throw new Error(`Pinned source mismatch for ${task.id}: expected ${task.source.commit}, received ${head}`);
     }
+    const preparedTask = bindTask(task, destination, options.fixtureRoot);
     const preparationSignal = options.signal ?? new AbortController().signal;
-    if (task.fixture.setup) {
-      const setup = await runBenchmarkVerification(task.fixture.setup, destination, preparationSignal);
+    if (task.fixture.dependencyLock) {
+      const lockfile = await readFile(fixturePath(options.fixtureRoot, task.fixture.dependencyLock));
+      await writeFile(resolve(destination, "package-lock.json"), lockfile, { flag: "wx" });
+    }
+    if (preparedTask.fixture?.setup) {
+      const setup = await runBenchmarkVerification(preparedTask.fixture.setup, destination, preparationSignal);
       if (!setup.passed) {
         throw new Error(`Benchmark ${task.id} setup failed${setup.error ? `: ${setup.error}` : ` with exit ${setup.exitCode ?? "unknown"}`}`);
       }
     }
-    if (task.fixture.pristineVerification) {
-      const pristine = await runBenchmarkVerification(task.fixture.pristineVerification, destination, preparationSignal);
+    if (preparedTask.fixture?.pristineVerification) {
+      const pristine = await runBenchmarkVerification(preparedTask.fixture.pristineVerification, destination, preparationSignal);
       if (!pristine.passed) {
         throw new Error(`Benchmark ${task.id} pinned source did not pass its pristine assertion${pristine.error ? `: ${pristine.error}` : ""}`);
       }
     }
     await applyPatch(fixturePath(options.fixtureRoot, task.fixture.seedPatch), destination, options.signal);
+    return preparedTask;
   } catch (error) {
     // The destination was proven absent above and belongs exclusively to this preparation attempt.
     await rm(destination, { recursive: true, force: true });
     throw error;
   }
-  return { ...task, workspacePath: destination };
 }
 
 /** Apply the reviewed repair to an already seeded fixture. */
@@ -153,9 +196,9 @@ export async function proveBenchmarkFixture(
   task: BenchmarkTask,
   options: PrepareBenchmarkFixtureOptions,
 ): Promise<BenchmarkFixtureProof> {
-  const verification = task.acceptance ?? task.verification;
-  if (!verification) throw new Error(`Benchmark ${task.id} does not declare verification`);
   const prepared = await prepareBenchmarkFixture(task, options);
+  const verification = prepared.acceptance ?? prepared.verification;
+  if (!verification) throw new Error(`Benchmark ${task.id} does not declare verification`);
   const controller = new AbortController();
   const abort = () => controller.abort(options.signal?.reason);
   options.signal?.addEventListener("abort", abort, { once: true });

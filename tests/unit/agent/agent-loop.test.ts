@@ -301,6 +301,66 @@ test("parallel read pool refills when a later call finishes before the first", a
   );
 });
 
+test("parallel read pool durably records contiguous outputs before the segment finishes", async () => {
+  let sample = 0;
+  let persisted = 0;
+  let persistedBeforeLastStart = -1;
+  const ids = Array.from({ length: 12 }, (_value, index) => String(index));
+  const f = fixture({
+    maxParallelTools: 4,
+    async sample() {
+      sample += 1;
+      return sample === 1
+        ? { output: ids.map((id) => ({ ...call(id), name: "read_file" })), output_text: "" }
+        : { output: [], output_text: "done" };
+    },
+    canRunInParallel: () => true,
+  });
+  f.options.record = async (items) => {
+    f.records.push(...items);
+    persisted += items.filter((item) => item.type === "function_call_output").length;
+  };
+  f.options.dispatch = async (tool) => {
+    if (tool.call_id === ids.at(-1)) persistedBeforeLastStart = persisted;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    return `${tool.call_id}:${"x".repeat(64 * 1024)}`;
+  };
+
+  await runAgentLoop(f.options);
+  assert.ok(persistedBeforeLastStart > 0);
+  assert.deepEqual(
+    f.records.filter((item) => item.type === "function_call_output").map((item) => item.call_id),
+    ids,
+  );
+});
+
+test("parallel persistence failure cancels and awaits unfinished reads", async () => {
+  let sample = 0;
+  let slowCancelled = false;
+  const f = fixture({
+    maxParallelTools: 2,
+    async sample() {
+      sample += 1;
+      return sample === 1
+        ? { output: ["a", "b"].map((id) => ({ ...call(id), name: "read_file" })), output_text: "" }
+        : { output: [], output_text: "done" };
+    },
+    canRunInParallel: () => true,
+  });
+  f.options.record = async (items) => {
+    if (items.some((item) => item.type === "function_call_output")) throw new Error("durable store failed");
+    f.records.push(...items);
+  };
+  f.options.dispatch = async (tool, signal) => {
+    if (tool.call_id === "a") return "ready";
+    await new Promise<void>((resolve) => signal?.addEventListener("abort", () => { slowCancelled = true; resolve(); }, { once: true }));
+    return "cancelled";
+  };
+
+  await assert.rejects(runAgentLoop(f.options), /durable store failed/u);
+  assert.equal(slowCancelled, true);
+});
+
 test("parallel batches stop at unsafe calls and preserve later serial work", async () => {
   const order: string[] = [];
   let sample = 0;

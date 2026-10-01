@@ -18,3 +18,35 @@ test("background jobs are bounded, pollable, and cancellable", async () => {
   assert.equal(jobs.find((job) => job.job_id === first.job_id)?.status, "cancelled");
   assert.equal(jobs.find((job) => job.job_id === second.job_id)?.status, "completed");
 });
+
+test("background jobs inherit task cancellation and expose running output", async () => {
+  const task = new AbortController();
+  let observedSignal: AbortSignal | undefined;
+  const manager = new BackgroundJobManager((_command, signal, _timeout, onOutput) => new Promise((resolve) => {
+    observedSignal = signal;
+    onOutput({ headLines: ["building"], tailLines: [], omittedLines: 0 });
+    signal.addEventListener("abort", () => resolve({ stdout: "", stderr: "", exitCode: null, signal: null, cancelled: true }), { once: true });
+  }));
+  const job = manager.start("build", task.signal);
+  assert.deepEqual(manager.poll(job.job_id)?.preview?.headLines, ["building"]);
+  task.abort(new Error("cancelled by user"));
+  const jobs = await manager.waitAll();
+  assert.equal(observedSignal?.aborted, true);
+  assert.equal(jobs[0]?.status, "cancelled");
+});
+
+test("disposing background jobs waits for aborted workers to settle", async () => {
+  let settled = false;
+  const manager = new BackgroundJobManager((_command, signal) => new Promise((resolve) => {
+    signal.addEventListener("abort", () => {
+      setTimeout(() => {
+        settled = true;
+        resolve({ stdout: "", stderr: "", exitCode: null, signal: null, cancelled: true });
+      }, 10);
+    }, { once: true });
+  }));
+  manager.start("writer");
+  const jobs = await manager.dispose();
+  assert.equal(settled, true);
+  assert.equal(jobs[0]?.status, "cancelled");
+});

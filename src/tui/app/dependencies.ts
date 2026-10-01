@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
+import path from "node:path";
 import { promisify } from "node:util";
 import {
   ReactAgent,
@@ -43,6 +44,10 @@ import {
 import { GoalRuntime } from "../../goal/runtime.js";
 import { resolveCodexCliPath } from "../../codex/cli.js";
 import { modelErrorGuidance } from "../../agent/response-errors.js";
+import { RequestAttemptLedger } from "../../agent/request-attempt-ledger.js";
+import { RequestExecutor } from "../../agent/request-executor.js";
+import { createCodeNavigationFromEnvironment } from "../../tools/code-navigation.js";
+import { applyUsageSample, createEmptySessionUsage, type TokenUsageSample } from "../../status/model-status.js";
 import {
   assertCompletedModelResponse,
   defaultModelRequestSettings,
@@ -72,11 +77,12 @@ async function requestSkillDraft(
   model: RegisteredModel,
   instructions: string,
   input: string,
+  execute: <T extends { usage?: unknown; status?: unknown }>(run: () => Promise<T>) => Promise<T>,
   signal?: AbortSignal,
 ): Promise<string> {
   const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
   const request = purposeRequest(model, "skill");
-  const response = await runtime.responses.create(
+  const response = await execute(() => runtime.responses.create(
     {
       model: model.model_name,
       instructions,
@@ -86,7 +92,7 @@ async function requestSkillDraft(
       ...(request.reasoning ? { reasoning: request.reasoning } : {}),
     },
     { ...(signal ? { signal } : {}), timeout: request.timeoutMs, maxRetries: 0 },
-  );
+  ));
   assertCompletedModelResponse(response, "skill");
   const draft = normalizeGeneratedSkillMarkdown(response.output_text);
   validateManagedSkillMarkdown(draft);
@@ -118,13 +124,42 @@ export function createDefaultTuiDependencies(
   const skillManager = new SkillManager({ workspacePath: process.cwd(), catalog: skills });
   const mcp = new McpRuntime({ workspacePath: process.cwd(), version });
   const learnedMemoryStore = new LearnedMemoryStore();
+  let auxiliaryUsage = createEmptySessionUsage();
+  const auxiliaryLedger = new RequestAttemptLedger();
+  const auxiliaryExecutor = new RequestExecutor(auxiliaryLedger);
+  let recordedAuxiliaryAttempts = 0;
+  let recordedUnknownAuxiliaryUsage = false;
   let activeLearnedMemory: LearnedMemoryRuntime | undefined;
+  const runAuxiliary = async <T extends { usage?: unknown; status?: unknown }>(
+    purpose: "title" | "skill" | "memory" | "doctor",
+    run: () => Promise<T>,
+  ): Promise<T> => {
+    try {
+      return await auxiliaryExecutor.execute(purpose, run);
+    } finally {
+      const snapshot = auxiliaryLedger.snapshot();
+      const attempts = snapshot.attempts.slice(recordedAuxiliaryAttempts);
+      recordedAuxiliaryAttempts = snapshot.attempts.length;
+      for (const attempt of attempts) {
+        if (attempt.status === "rejected") continue;
+        if (attempt.usage === null) {
+          if (!recordedUnknownAuxiliaryUsage) {
+            auxiliaryUsage = applyUsageSample(auxiliaryUsage, null);
+            recordedUnknownAuxiliaryUsage = true;
+          }
+        } else {
+          auxiliaryUsage = applyUsageSample(auxiliaryUsage, attempt.usage as TokenUsageSample);
+        }
+      }
+    }
+  };
   return {
     registry,
     version,
     workspacePath: process.cwd(),
     sessionStore,
     inputHistory: new InputHistory(),
+    getAuxiliaryUsage: () => ({ ...auxiliaryUsage }),
     skillManager,
     async listModels(baseUrl, apiKey, signal) {
       return listOfficialModelIds(createProviderClient(baseUrl, apiKey), signal);
@@ -152,7 +187,13 @@ export function createDefaultTuiDependencies(
       }
       const learnedMemory = new LearnedMemoryRuntime({
         store: learnedMemoryStore,
-        client,
+        client: {
+          responses: {
+            create(params, options) {
+              return runAuxiliary("memory", () => providerRuntime.responses.create(params, options as never));
+            },
+          },
+        },
         model: model.model_name,
         idleDelayMs: 5 * 60 * 1000,
         minTranscriptChars: 200,
@@ -166,6 +207,9 @@ export function createDefaultTuiDependencies(
       const planInteraction = io.requestPlanInput && io.reviewPlan
         ? { requestInput: io.requestPlanInput, reviewPlan: io.reviewPlan }
         : undefined;
+      let codeNavigation;
+      try { codeNavigation = createCodeNavigationFromEnvironment(process.cwd()); }
+      catch { codeNavigation = undefined; }
       return new ReactAgent({
         workspacePath: process.cwd(),
         client,
@@ -174,6 +218,8 @@ export function createDefaultTuiDependencies(
         io,
         providerCapabilities: providerRuntime.capabilities,
         requestSettings: providerRuntime.settings,
+        requestAttemptLedger: new RequestAttemptLedger(),
+        ...(codeNavigation ? { codeNavigation } : {}),
         ...(isOfficialOpenAiBaseUrl(model.base_url)
           ? {
               promptCacheKey: () => {
@@ -244,7 +290,7 @@ export function createDefaultTuiDependencies(
         client: {
           responses: {
             create(params, options) {
-              return providerRuntime.responses.create(params, options as never);
+              return runAuxiliary("memory", () => providerRuntime.responses.create(params, options as never));
             },
           },
         },
@@ -259,7 +305,7 @@ export function createDefaultTuiDependencies(
     async generateSessionTitle(model, firstQuestion, signal) {
       const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
       const request = purposeRequest(model, "title");
-      const response = await runtime.responses.create(
+      const response = await runAuxiliary("title", () => runtime.responses.create(
         {
           model: model.model_name,
           instructions:
@@ -272,7 +318,7 @@ export function createDefaultTuiDependencies(
           ...(request.reasoning ? { reasoning: request.reasoning } : {}),
         },
         { ...(signal ? { signal } : {}), timeout: request.timeoutMs, maxRetries: 0 },
-      );
+      ));
       assertCompletedModelResponse(response, "title");
       const title = sanitizeSessionTitle(response.output_text);
       if (!title) throw new Error("The model returned an empty session title");
@@ -304,6 +350,19 @@ export function createDefaultTuiDependencies(
         }
       }
       try {
+        const navigation = createCodeNavigationFromEnvironment(process.cwd());
+        if (!navigation) {
+          lines.push("TypeScript navigation: unavailable (set EVERPEACE_TYPESCRIPT_LSP)");
+        } else {
+          const command = process.env.EVERPEACE_TYPESCRIPT_LSP!.trim();
+          if (path.isAbsolute(command)) await fs.access(command);
+          else await execFileAsync(process.platform === "win32" ? "where.exe" : "which", [command], { timeout: 5_000, windowsHide: true });
+          lines.push(`TypeScript navigation: executable discovered (${navigation.describe()}); semantic requests not yet probed`);
+        }
+      } catch (error) {
+        lines.push(`TypeScript navigation: unavailable (${error instanceof Error ? error.message : String(error)})`);
+      }
+      try {
         const probe = await runBash(process.platform === "win32" ? "Write-Output everpeace-doctor" : "printf everpeace-doctor", {
           cwd: process.cwd(),
           streamOutput: false,
@@ -328,13 +387,13 @@ export function createDefaultTuiDependencies(
       const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
       try {
         const request = purposeRequest(model, "doctor");
-        const response = await runtime.responses.create({
+        const response = await runAuxiliary("doctor", () => runtime.responses.create({
           model: model.model_name,
           instructions: "This is a bounded connectivity check. Reply with OK only.",
           input: "OK",
           max_output_tokens: request.max_output_tokens,
           ...(request.reasoning ? { reasoning: request.reasoning } : {}),
-        }, { maxRetries: 0, timeout: request.timeoutMs, ...(signal ? { signal } : {}) });
+        }, { maxRetries: 0, timeout: request.timeoutMs, ...(signal ? { signal } : {}) }));
         assertCompletedModelResponse(response, "doctor");
         lines.push("Model request: completed with text");
       } catch (error) {
@@ -382,6 +441,7 @@ export function createDefaultTuiDependencies(
         model,
         "Create one concise Codex SKILL.md for the requested workflow. Return only the complete SKILL.md, without a Markdown code fence or commentary. It must begin with YAML frontmatter containing a lowercase hyphenated name (maximum 64 characters) and a discriminating description that states what the skill does and when it applies. The body should contain only task-specific workflow, non-obvious constraints, and useful decision criteria. Do not create or refer to extra files, scripts, assets, or placeholders.",
         description,
+        (run) => runAuxiliary("skill", run),
         signal,
       );
     },
@@ -390,6 +450,7 @@ export function createDefaultTuiDependencies(
         model,
         "Validate and improve the supplied Codex SKILL.md. Correct invalid frontmatter, vague routing, generic advice, contradictions, and unnecessary verbosity while preserving the intended workflow. Return only the complete revised SKILL.md, without a Markdown code fence or commentary. Keep it self-contained and do not add references to files, scripts, or assets.",
         skillMarkdown,
+        (run) => runAuxiliary("skill", run),
         signal,
       );
     },

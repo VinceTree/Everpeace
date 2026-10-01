@@ -30,6 +30,8 @@ export interface BenchmarkTask {
 }
 
 export interface BenchmarkTaskFixture {
+  /** Optional evaluator-owned package-lock copied into a source that intentionally ships without one. */
+  dependencyLock?: string;
   /** Optional deterministic dependency/bootstrap command run before any patch is applied. */
   setup?: BenchmarkVerification;
   /** Optional independent assertion proving the pinned source starts healthy. */
@@ -108,6 +110,11 @@ export interface BenchmarkHarnessResult {
   notes?: string;
   capabilities?: BenchmarkProviderCapabilities;
   usage?: BenchmarkTokenUsage;
+  terminalOutcome?: "completed" | "stopped" | "plan_approved" | "plan_cancelled";
+  stopReason?: string;
+  workflowOutcome?: "verified" | "unverified" | "failed" | "no_changes";
+  diagnosticRounds?: number;
+  firstVerificationSuiteStatus?: "passed" | "failed" | "unavailable";
 }
 
 export interface BenchmarkTokenUsage {
@@ -142,6 +149,8 @@ export interface BenchmarkHarnessAdapter {
   readonly name: string;
   /** True when one adapter invocation already owns the complete diagnosis/repair lifecycle. */
   readonly managesRepairs?: boolean;
+  /** The adapter does not settle until task-owned processes and writers have stopped. */
+  readonly settlesOnCancellation?: boolean;
   run(task: BenchmarkTask, context: BenchmarkHarnessContext): Promise<BenchmarkHarnessResult | void>;
 }
 
@@ -176,6 +185,12 @@ export interface BenchmarkRunResult {
   notes?: string;
   usage?: BenchmarkTokenUsage;
   repetition?: number;
+  terminalOutcome?: BenchmarkHarnessResult["terminalOutcome"];
+  stopReason?: string;
+  workflowOutcome?: BenchmarkHarnessResult["workflowOutcome"];
+  diagnosticRounds?: number;
+  firstVerificationSuiteStatus?: BenchmarkHarnessResult["firstVerificationSuiteStatus"];
+  preparationError?: string;
 }
 
 export interface BenchmarkSuiteSummary {
@@ -207,6 +222,7 @@ export interface BenchmarkSuiteSummary {
 }
 
 export interface BenchmarkSkippedRun {
+  adapter?: string;
   taskId: string;
   repetition: number;
   reason: "budget_exhausted" | "usage_unknown" | "cancelled";

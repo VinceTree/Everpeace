@@ -1,14 +1,16 @@
-## 最新执行：可验证成功率导向的性能优化
+## 最新执行：全面对标后的 coding 能力加固
 
-状态快照：2026-09-30。本轮交付展示版本为 `0.3.0`。生产 TUI 与 benchmark 已共用 `CodingTaskRunner`，统一 Agent turn、后台任务收束、最终验证、最多三轮诊断、Goal 完成和 learned-memory outcome；生产 benchmark adapter 每项只运行一次完整生命周期，独立 evaluator 不再叠加修复循环。
+状态快照：2026-10-01。本轮交付展示版本为 `0.3.1`。交付提交使用 `[skip publish]`，测试 CI 继续运行，Release workflow 跳过，不创建 tag 或 GitHub Release；本轮未运行付费模型请求。
 
-新增 provider-attempt 级 `RequestAttemptLedger` 与不可变 `RequestSnapshot`。coding、stream recovery、缓存降级和 summary 分别结算；input+output 扣预算，reasoning 不重复计费，unknown usage 永久保持 incomplete 并停止后续模型请求。DeepSeek 实际请求采用稳定 developer/tools 前缀、历史、动态权限/项目上下文尾部；上下文估算与请求使用同一 payload 和真实 32K 输出预留。摘要复用稳定前缀、禁止工具，并继续遵守取消、不完整、不缩短和落盘失败保留原 context 的边界。
+正确性边界已收口：后台命令在启动时绑定 coding task，取消、权限收紧、预算停止、异常和退出都会终止并等待进程树；最终验证后、Goal 完成前再次检查取消。`CodingTaskRunner` 统一 TUI 与 benchmark 的清理、三轮诊断、最终验证、Goal 和 Memory 结算，并返回真实 workflow outcome、停止原因、诊断轮数和首次 suite。模型流使用 attempt 级 AbortController，空闲超时会关闭 iterator/transport 后才允许重试。四 worker 只读池在连续结果可落盘时立即保存和释放，同时把全部已完成但未落盘的有界结果计入背压。
 
-生产已独立开启最多四项宿主审定的只读并发，不依赖 provider `parallel_tool_calls`。任务池在任一调用完成后补位，仍按模型顺序落盘，并限制尚未落盘的完成结果；写入、shell、MCP、审批、资源冲突、取消、steering 和 stop 保持屏障。独立 context 准备并行，Skill/Memory 在同一 turn 的相同 revision 输入上复用；Goal 热路径使用持久化后的内存投影。Git 与显式编辑路径合并后用四个 worker 指纹化；命令输出统一为增量有界缓冲；TUI 流式正文以 40ms 合并渲染并在结束/取消时立即清理。
+文件观察统一为原始字节 SHA-256；UTF-8 BOM 与已有 LF/CRLF 在编辑和回滚中保留，真实并发修改继续失败关闭。项目规则升级为根目录到已访问目标目录的 `AGENTS.md` chain，包含内容指纹、scope revision、不可读/超限诊断和 edit-before-refresh 拦截；当前规则每次请求都重新供应，并从压缩输入中过滤历史旧快照。搜索/glob 使用 100 项默认分页、最多 200 项、5 秒和 2 MiB 上限及进程内 opaque continuation。配置 `EVERPEACE_TYPESCRIPT_LSP` 后才暴露只读 `code_navigation`，支持 definition/references/implementation/hover，拒绝 language server 的 edit/command request。
 
-Benchmark 增加 setup、pristine assertion、evaluator-owned acceptance、reviewed seed/reference proof、`campaign/harness/task/repetition/attempt` 隔离、planned/executed/skipped/stop reason、真实 request ledger 和 first event/text/各阶段耗时元数据。正式 parser 会拒绝缺少 fixture 或独立 acceptance 的候选 catalog。当前十项候选仍缺 reviewed patch pair；固定 dsh launcher 的模型/推理/输出参数、9 次 smoke、90 次正式对比、真实 DeepSeek API 和 Windows Terminal 流程均未执行，因此不能声明性能达到或超过 dsh。连续 patch 快速检查合并也保持关闭，等待固定评测证明成功率不下降。
+Provider 请求统一通过 request executor：coding、stream recovery、fallback、summary、title、Skill、Memory 和 doctor 都在 attempt 边界记录终态与 usage；已发出但 usage unknown 的 task/campaign 保持 incomplete，并阻止下一次有界自动请求。`/status` 分开显示主 coding 与辅助 usage。性能 trace 补充 context、request snapshot、sampling、tool、sandbox startup、render callback、workspace snapshot、verification 和 artifact persistence 耗时；不保存请求正文、文件内容、验证输出或凭据。
 
-最终门禁使用 Windows Node 工具链：`pnpm test` 共 391 项，390 通过、1 项按平台跳过、0 失败；`pnpm typecheck` 与 `pnpm build` 通过。排除用户原有 `.gitignore`、`LICENSE` CRLF 差异后的 `git diff --check` 通过，新文件也无尾随空白；完整检查仍只报告这两个既有换行差异。本次提交使用 `[skip ci]` 并推送 `main`，不创建 tag 或更新 GitHub Release。用户已有未跟踪 `.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`tests/unit/codex/`、`{}` 均未修改或清理。
+Benchmark 已有可执行的内部 campaign：`pnpm benchmark:campaign -- --config <file> --prove-fixtures` 只做离线 proof，`--live` 才加载系统凭据并要求 per-task/campaign token budget。生产 adapter 构造真实 Agent、Session、权限、sandbox、workflow 和 `CodingTaskRunner`；通用外部 harness 继续使用受校验的 `EVERPEACE_BENCHMARK_RESULT` JSON。固定 dsh adapter 会核对完整 `639ed015397290b3745d163aafe02ffee4aa3f84` checkout，直接启动其中的 built JS entry，创建内容锁定的专用 headless profile，并在上游 `llm/stream` 边界校验主请求的 model/high/32K、按 attempt 记录 cache/unknown usage 和执行预算准入。随机计划记录 seed，执行目录按 campaign/harness/task/repetition 隔离，独立 acceptance 不受工作区脚本篡改影响。十项 Chalk/Commander/Day.js fixture 均已人工复核并离线证明 pristine pass → seed fail → reference pass；Chalk 固定 revision 原本禁用 lockfile，评测材料另存 evaluator-owned `package-lock.json`，全部 setup 使用固定 npmjs registry 的 `npm ci --ignore-scripts`。
+
+当前待办只剩外部证据与后续能力：在固定 dsh checkout 完成官方依赖安装/build 并实际启动生成的 profile，运行 9 次 smoke 后再运行 90 次正式付费比较，并在真实 Windows Terminal 验收失败→修复→完整通过、Ctrl+C 和 Session 恢复。当前没有相对 dsh 的性能结论。最终 Windows Node 22 门禁：`pnpm test` 共 417 项，416 通过、1 项按平台跳过、0 失败；`pnpm typecheck` 与 `pnpm build` 通过；排除用户原有 `.gitignore`、`LICENSE` CRLF 差异后的 `git diff --check` 通过。完整差异检查仍只报告这两个既有文件的 CRLF 行尾；未改写或清理它们。用户原有未跟踪 `.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`tests/unit/codex/`、`{}` 继续保留。
 
 ## 最新执行：DeepSeek Harness 全面对标可靠性与工具补齐
 

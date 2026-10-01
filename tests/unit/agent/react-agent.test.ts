@@ -74,6 +74,55 @@ test("agent rejects overlapping turns and releases the guard after cancellation"
   await agent.runTurn("next");
 });
 
+test("background commands inherit cancellation while the agent is sampling", async () => {
+  const controller = new AbortController();
+  let requests = 0;
+  let backgroundSignal: AbortSignal | undefined;
+  let samplingStarted!: () => void;
+  const sampling = new Promise<void>((resolve) => { samplingStarted = resolve; });
+  const agent = new ReactAgent({
+    model: "background-cancellation-test",
+    client: {
+      responses: {
+        async create(_params, options) {
+          requests += 1;
+          if (requests === 1) {
+            return {
+              id: "start-background",
+              output_text: "",
+              output: [{
+                type: "function_call",
+                name: "start_background",
+                call_id: "background-1",
+                arguments: JSON.stringify({ command: "long-running" }),
+              }],
+            };
+          }
+          samplingStarted();
+          await new Promise((_resolve, reject) => options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true }));
+          return { id: "unreachable", output_text: "", output: [] };
+        },
+      },
+    },
+    io: {
+      async confirmBash() { return true; },
+      async runBash() { return bashResult(""); },
+      async runBackgroundBash(_command, signal) {
+        backgroundSignal = signal;
+        await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
+        return bashResult("");
+      },
+      writeAssistant() {},
+    },
+  });
+
+  const running = agent.runTurn("start work", controller.signal);
+  await sampling;
+  controller.abort(new Error("cancel task"));
+  await assert.rejects(running, /cancel task/);
+  assert.equal(backgroundSignal?.aborted, true);
+});
+
 test("agent exposes apply_patch and persists its structured result before continuing", async () => {
   const history: Array<Record<string, unknown>> = [];
   let patchCalls = 0;
@@ -416,7 +465,15 @@ test("cancellation closes pending function calls and the next turn remains usabl
     } } },
     io: {
       async confirmBash() { return true; },
-      async runBash(_command, signal) { assert.equal(signal, controller.signal); controller.abort(); return { ...bashResult("partial"), cancelled: true }; },
+      async runBash(_command, signal) {
+        assert.ok(signal);
+        assert.equal(signal.aborted, false);
+        controller.abort(new Error("aborted by test"));
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+        }
+        return { ...bashResult("partial"), cancelled: true };
+      },
       writeAssistant() {},
     },
     async onHistoryAppend(items) { batches.push(items); },
@@ -466,6 +523,7 @@ test("permissions are checked at execution time and changing policy retains agen
 test("agent returns a final answer without running Bash", async () => {
   const requests: Array<Record<string, unknown>> = [];
   const messages: string[] = [];
+  const timings: string[] = [];
   const client: ResponsesClientLike = {
     responses: {
       async create(params) {
@@ -486,13 +544,19 @@ test("agent returns a final answer without running Bash", async () => {
     },
   };
 
-  await new ReactAgent({ client, model: "deepseek-flash", io }).runTurn("hi");
+  await new ReactAgent({
+    client,
+    model: "deepseek-flash",
+    io,
+    onEvent(event) { if (event.type === "timing_recorded") timings.push(event.operation); },
+  }).runTurn("hi");
 
   assert.deepEqual(messages, ["Hello"]);
   assert.equal(requests.length, 1);
   assert.equal(requests[0]?.model, "deepseek-flash");
   assert.equal(requests[0]?.store, false);
   assert.deepEqual(requests[0]?.include, ["reasoning.encrypted_content"]);
+  assert.ok(timings.includes("rendering"));
 });
 
 test("plan mode exposes only read-only and planning tools", async () => {
@@ -697,7 +761,7 @@ test("agent confirms, runs Bash, and returns its output to the model", async () 
   assert.equal(requests[1]?.previous_response_id, undefined);
   const history = requests[1]?.input as Array<Record<string, unknown>>;
   assert.equal(history[0]?.role, "user");
-  assert.equal(history[1]?.type, "function_call");
+  assert.equal(history.some((item) => item.type === "function_call" && item.call_id === "call-1"), true);
   const toolOutput = history.find((item) => item.type === "function_call_output");
   assert.ok(toolOutput);
   assert.match(String(toolOutput.output), /\/repo/);
@@ -982,6 +1046,7 @@ test("workspace-write searches the web without per-request confirmation", async 
     "list_directory",
     "search_files",
     "glob_files",
+      "read_search_results",
     "read_tool_output",
   ]);
   const history = requests[1]?.input as Array<Record<string, unknown>>;
@@ -1091,8 +1156,8 @@ test("agent keeps the final response as context for the next turn", async () => 
   assert.equal(requests[1]?.previous_response_id, undefined);
   const history = requests[1]?.input as Array<Record<string, unknown>>;
   assert.equal(history[0]?.content, "first");
-  assert.equal(history[1]?.role, "assistant");
-  assert.equal(history[2]?.content, "second");
+  assert.equal(history.some((item) => item.role === "assistant"), true);
+  assert.equal(history.at(-1)?.content, "second");
 });
 
 test("agent forwards an AbortSignal to every model request", async () => {
@@ -1167,15 +1232,24 @@ test("agent restores prior context and persists each new context batch", async (
 
   await agent.runTurn("after restart");
 
-  assert.deepEqual(requests[0]?.input, [
+  const isPersistedRuleSnapshot = (item: Record<string, unknown>): boolean =>
+    item.role === "developer"
+    && String(item.content).startsWith("Host-maintained project rule snapshot revision ");
+  const isCurrentRuleContext = (item: Record<string, unknown>): boolean =>
+    item.role === "developer"
+    && String(item.content).includes("Current host-maintained project rule snapshot (");
+  const requestInput = requests[0]?.input as Array<Record<string, unknown>>;
+  assert.deepEqual(requestInput.filter((item) => !isPersistedRuleSnapshot(item) && !isCurrentRuleContext(item)), [
     { role: "user", content: "before restart" },
     { type: "message", role: "assistant", content: "old answer" },
     { role: "user", content: "after restart" },
   ]);
-  assert.deepEqual(persisted, [
+  assert.equal(requestInput.some(isCurrentRuleContext) || String(requests[0]?.instructions).includes("Current host-maintained project rule snapshot ("), true);
+  assert.deepEqual(persisted.filter((items) => !items.every(isPersistedRuleSnapshot)), [
     [{ role: "user", content: "after restart" }],
     [assistantItem],
   ]);
+  assert.equal(persisted.some((items) => items.some(isPersistedRuleSnapshot)), true);
 });
 
 test("agent reports usage for every response in a tool loop", async () => {
@@ -1603,6 +1677,8 @@ test("agent rejects a clean stream EOF without response.completed", async () => 
 });
 
 test("agent stops a stream that emits no events before the idle deadline", async () => {
+  let requestSignal: AbortSignal | undefined;
+  let iteratorClosed = false;
   const agent = new ReactAgent({
     model: "stream-idle-test",
     samplingRetryBudget: 0,
@@ -1610,10 +1686,17 @@ test("agent stops a stream that emits no events before the idle deadline", async
     client: {
       responses: {
         async create() { throw new Error("buffered fallback is not allowed"); },
-        stream() {
+        stream(_params, options) {
+          requestSignal = options?.signal;
           return {
             [Symbol.asyncIterator]() {
-              return { next: () => new Promise<IteratorResult<Record<string, unknown>>>(() => undefined) };
+              return {
+                next: () => new Promise<IteratorResult<Record<string, unknown>>>(() => undefined),
+                async return() {
+                  iteratorClosed = true;
+                  return { done: true, value: undefined };
+                },
+              };
             },
           };
         },
@@ -1622,6 +1705,8 @@ test("agent stops a stream that emits no events before the idle deadline", async
     io: { async confirmBash() { return true; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
   });
   await assert.rejects(agent.runTurn("wait"), /idle for 5ms/u);
+  assert.equal(requestSignal?.aborted, true);
+  assert.equal(iteratorClosed, true);
 });
 
 test("agent compacts once and retries after a context-limit response error", async () => {

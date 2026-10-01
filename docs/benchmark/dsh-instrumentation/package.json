@@ -1,0 +1,10 @@
+{
+  "name": "@everpeace/dsh-benchmark-instrumentation",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.mjs",
+  "peerDependencies": {
+    "@deepseek-ai/dsh": "0.2.0-rc.2"
+  }
+}

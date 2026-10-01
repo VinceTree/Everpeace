@@ -15,10 +15,10 @@
 - Everpeace 是 Node.js 22+、TypeScript、ESM 项目，使用 `pnpm@10.22.0`。
 - CLI/TUI 入口位于 `src/cli/`；界面使用 React + Ink，并保持 inline terminal 模式。
 - Agent 是 Responses API 驱动的 ReAct 循环，支持按权限 profile 审批模型 shell、网页搜索、公共网页读取和 MCP tools，并按需加载 Codex 主机 Skills。
-- 普通 coding turn 定位为个人开发闭环：每个逻辑 step 读取工作区根级 `AGENTS.md` 与 `package.json` scripts；Git 指纹追踪 patch 与模型 shell 的本轮变化；Node/TypeScript 最终验证执行全部 `typecheck`、`lint`、`test`、`build`。只有宿主确认的 `verified` 结果可结算代码 Goal 完成和成功 learned memory，缺少检查或追踪受限必须标为未验证。
+- 普通 coding turn 定位为个人开发闭环：每个逻辑 step 读取工作区根到已访问目标目录的 `AGENTS.md` chain 与 `package.json` scripts；Git 指纹追踪 patch 与模型 shell 的本轮变化；Node/TypeScript 最终验证执行全部 `typecheck`、`lint`、`test`、`build`。只有宿主确认的 `verified` 结果可结算代码 Goal 完成和成功 learned memory，缺少检查或追踪受限必须标为未验证。
 - `/permissions` 管理持久化审批策略：`read-only` 允许工作区读取但对模型 shell/web/MCP 逐条审批，`ask` 对三者逐条审批，默认 `workspace-write` 免逐条 shell 和已开启公共 web 审批但 MCP 仍需审批，`full-access` 经二次确认后免工具审批；用户策略写入平台配置，项目 `.everpeace/permissions.json` 只能收紧模式、web、shell 网络和 command rules，不能提升仓库权限。Plan 模式把已开启的公共 web 请求视为只读调研并免逐次 web 确认，关闭网页工具仍拒绝请求。网页工具和模型 shell 网络可独立禁用；shell 网络关闭只由原生后端执行，选择 full-access 会明确恢复网络权限。模型 shell 通过固定 `@openai/codex` CLI：read-only/full-access 使用内置 profile，ask/workspace-write 使用完整 `:workspace` 子 profile 保护控制目录和应用状态；失败时不得回退宿主直跑。复合命令逐段检查，嵌套解释器或含糊语法需要审批，审批期间权限变化会使旧审批失效。直接 `!` 不进 sandbox。仍不得声称等同于 Codex Auto 或完整 Codex runtime。
 - MCP 从 `codex mcp` 配置加载 stdio/Streamable HTTP tools、resources 和 prompts；`/mcp` 刷新状态。Skills 扫描项目/用户/admin/system 根，显式 `$name` 只作用当前轮，隐式匹配通过 `read_skill` 渐进读取；同名冲突不得进入 catalog 或按名称读取。`/skills` 提供 AI 创建单文件 Skill、手动编辑、公开 HTTPS URL 暂存/预览/确认安装、已安装内容查看及 `$name` 回填；Git 来源先 no-checkout clone 并检查有界 tree，同名镜像清单优先保留规范 `skills/<name>` 目录，100 个候选限制在名称去重后执行，只 sparse checkout 已校验的候选目录。项目目标为仓库根 `.agents/skills`，用户目标为 `$CODEX_HOME/skills`，不得覆盖既有名称。完整支持范围和限制见 `docs/architecture/CODEX_CAPABILITIES.md`。
-- `read_file`、`list_directory` 始终限定当前工作目录。权限不从 JSONL 恢复，切换权限不得重建 Agent 或丢失 context；直接 `!` 仍由用户主动执行。对标与安全限制见 `docs/architecture/PERMISSIONS.md`。
+- `read_file`、`list_directory`、分页 search/glob 与可选只读 TypeScript LSP 始终限定当前工作目录；LSP 只能显式配置且不得执行 server 发起的 edit/command。权限不从 JSONL 恢复，切换权限不得重建 Agent 或丢失 context；直接 `!` 仍由用户主动执行。对标与安全限制见 `docs/architecture/PERMISSIONS.md`。
 - 支持官方供应商和兼容端点；模型名称必须保留供应商返回的官方 model ID。官方 DeepSeek 使用显式 Responses 能力契约、普通 reasoning/tool item、摘要压缩和自动前缀缓存；不发送 OpenAI 加密 reasoning、prompt-cache 或原生 compact 字段。未知兼容端点保持保守能力，不按模型名猜测。
 - API Key 只由 `AuthStorage` 和系统 keyring 管理，不得写入注册表 JSON、session JSONL、日志、测试快照或 UI。
 

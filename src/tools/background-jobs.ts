@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { BashResult } from "./bash.js";
+import type { BashOutputPreview, BashResult } from "./bash.js";
 
 const MAX_RUNNING_JOBS = 2;
 const DEFAULT_JOB_TIMEOUT_MS = 10 * 60_000;
+const MAX_RETAINED_JOBS = 20;
+const MAX_RETAINED_RESULT_BYTES = 4 * 1024 * 1024;
 
 export const BACKGROUND_JOB_TOOL_DEFINITIONS = [
   {
@@ -36,12 +38,14 @@ export interface BackgroundJobSnapshot {
   status: BackgroundJobStatus;
   started_at: string;
   finished_at?: string;
+  preview?: BashOutputPreview;
   result?: BashResult;
 }
 
 interface BackgroundJob extends BackgroundJobSnapshot {
   controller: AbortController;
   promise: Promise<void>;
+  detachParent?: () => void;
 }
 
 function stringArgument(argumentsJson: string, key: "command" | "job_id"): string | undefined {
@@ -62,17 +66,20 @@ export function parseBackgroundJobId(argumentsJson: string): string | undefined 
 
 export class BackgroundJobManager {
   readonly #jobs = new Map<string, BackgroundJob>();
-  readonly #run: (command: string, signal: AbortSignal, timeoutMs: number) => Promise<BashResult>;
+  readonly #run: (command: string, signal: AbortSignal, timeoutMs: number, onOutput: (output: BashOutputPreview) => void) => Promise<BashResult>;
 
-  constructor(run: (command: string, signal: AbortSignal, timeoutMs: number) => Promise<BashResult>) {
+  constructor(run: (command: string, signal: AbortSignal, timeoutMs: number, onOutput: (output: BashOutputPreview) => void) => Promise<BashResult>) {
     this.#run = run;
   }
 
-  start(command: string): BackgroundJobSnapshot {
+  start(command: string, parentSignal?: AbortSignal): BackgroundJobSnapshot {
     if ([...this.#jobs.values()].filter((job) => job.status === "running").length >= MAX_RUNNING_JOBS) {
       throw new Error(`At most ${MAX_RUNNING_JOBS} background jobs may run at once`);
     }
     const controller = new AbortController();
+    const abortFromParent = () => controller.abort(parentSignal?.reason ?? new Error("Task cancelled"));
+    parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+    if (parentSignal?.aborted) abortFromParent();
     const job: BackgroundJob = {
       job_id: randomUUID(),
       command,
@@ -80,8 +87,11 @@ export class BackgroundJobManager {
       started_at: new Date().toISOString(),
       controller,
       promise: Promise.resolve(),
+      ...(parentSignal ? { detachParent: () => parentSignal.removeEventListener("abort", abortFromParent) } : {}),
     };
-    job.promise = this.#run(command, controller.signal, DEFAULT_JOB_TIMEOUT_MS)
+    job.promise = this.#run(command, controller.signal, DEFAULT_JOB_TIMEOUT_MS, (output) => {
+      job.preview = { ...output, headLines: [...output.headLines], tailLines: [...output.tailLines] };
+    })
       .then((result) => {
         job.result = result;
         job.status = result.timedOut ? "timed_out" : result.cancelled ? "cancelled" : result.error || result.exitCode !== 0 ? "failed" : "completed";
@@ -90,7 +100,12 @@ export class BackgroundJobManager {
         job.result = { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: controller.signal.aborted, error: error instanceof Error ? error.message : String(error) };
         job.status = controller.signal.aborted ? "cancelled" : "failed";
       })
-      .finally(() => { job.finished_at = new Date().toISOString(); });
+      .finally(() => {
+        job.finished_at = new Date().toISOString();
+        job.detachParent?.();
+        delete job.detachParent;
+        this.#prune();
+      });
     this.#jobs.set(job.job_id, job);
     return this.#snapshot(job);
   }
@@ -122,8 +137,27 @@ export class BackgroundJobManager {
     return [...this.#jobs.values()].map((job) => this.#snapshot(job));
   }
 
-  dispose(): void {
-    for (const job of this.#jobs.values()) if (job.status === "running") job.controller.abort(new Error("Agent disposed"));
+  async stopAll(reason: unknown = new Error("Background jobs stopped")): Promise<BackgroundJobSnapshot[]> {
+    const running = [...this.#jobs.values()].filter((job) => job.status === "running");
+    for (const job of running) job.controller.abort(reason);
+    await Promise.allSettled(running.map((job) => job.promise));
+    return [...this.#jobs.values()].map((job) => this.#snapshot(job));
+  }
+
+  dispose(): Promise<BackgroundJobSnapshot[]> {
+    return this.stopAll(new Error("Agent disposed"));
+  }
+
+  #prune(): void {
+    const terminal = [...this.#jobs.values()].filter((job) => job.status !== "running");
+    const bytes = (job: BackgroundJob) => Buffer.byteLength(job.result?.stdout ?? "") + Buffer.byteLength(job.result?.stderr ?? "");
+    let retainedBytes = terminal.reduce((sum, job) => sum + bytes(job), 0);
+    while (terminal.length > MAX_RETAINED_JOBS || retainedBytes > MAX_RETAINED_RESULT_BYTES) {
+      const job = terminal.shift();
+      if (!job) break;
+      this.#jobs.delete(job.job_id);
+      retainedBytes -= bytes(job);
+    }
   }
 
   #snapshot(job: BackgroundJob): BackgroundJobSnapshot {
@@ -133,9 +167,15 @@ export class BackgroundJobManager {
       status: job.status,
       started_at: job.started_at,
       ...(job.finished_at ? { finished_at: job.finished_at } : {}),
+      ...(job.preview ? { preview: { ...job.preview, headLines: [...job.preview.headLines], tailLines: [...job.preview.tailLines] } } : {}),
       ...(job.result ? { result: { ...job.result } } : {}),
     };
   }
 }
 
-export const backgroundJobLimits = { maxRunningJobs: MAX_RUNNING_JOBS, defaultTimeoutMs: DEFAULT_JOB_TIMEOUT_MS } as const;
+export const backgroundJobLimits = {
+  maxRunningJobs: MAX_RUNNING_JOBS,
+  defaultTimeoutMs: DEFAULT_JOB_TIMEOUT_MS,
+  maxRetainedJobs: MAX_RETAINED_JOBS,
+  maxRetainedResultBytes: MAX_RETAINED_RESULT_BYTES,
+} as const;

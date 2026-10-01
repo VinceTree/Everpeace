@@ -1,7 +1,7 @@
 import type { TokenUsageSample } from "../status/model-status.js";
 
 export type RequestPurpose = "coding" | "summary" | "title" | "skill" | "memory" | "doctor" | "benchmark";
-export type RequestAttemptStatus = "completed" | "failed" | "cancelled";
+export type RequestAttemptStatus = "completed" | "failed" | "cancelled" | "rejected";
 
 export interface RequestAttemptRecord {
   id: number;
@@ -39,6 +39,17 @@ export class RequestAttemptLedger {
     this.#tokenBudget = options.tokenBudget;
   }
 
+  /** Start a new host task while retaining the configured budget contract. */
+  reset(): void {
+    if (this.#open.size > 0) throw new Error("Cannot reset request accounting while attempts are active");
+    this.#attempts.length = 0;
+    this.#nextId = 1;
+    this.#inputTokens = 0;
+    this.#outputTokens = 0;
+    this.#reasoningTokens = 0;
+    this.#complete = true;
+  }
+
   begin(purpose: RequestPurpose): number {
     if (!this.#complete) throw new Error("Request usage is incomplete; no further model requests may start");
     if (this.remainingTokens !== undefined && this.remainingTokens <= 0) {
@@ -47,6 +58,15 @@ export class RequestAttemptLedger {
     const id = this.#nextId++;
     this.#open.set(id, purpose);
     return id;
+  }
+
+  recordRejected(purpose: RequestPurpose): void {
+    this.#attempts.push({
+      id: this.#nextId++,
+      purpose,
+      status: "rejected",
+      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+    });
   }
 
   settle(id: number, status: RequestAttemptStatus, usage: TokenUsageSample | null): void {

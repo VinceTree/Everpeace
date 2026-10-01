@@ -29,7 +29,8 @@ import {
   type SkillCatalogLike,
   type SkillTurnContext,
 } from "../skills/catalog.js";
-import { FILE_TOOL_DEFINITIONS, runFileTool } from "../tools/files.js";
+import { FILE_TOOL_DEFINITIONS, FileSearchSession, runFileTool } from "../tools/files.js";
+import { CODE_NAVIGATION_TOOL_DEFINITION, parseCodeNavigationArguments, type CodeNavigationRuntimeLike } from "../tools/code-navigation.js";
 import { BACKGROUND_JOB_TOOL_DEFINITIONS, BackgroundJobManager, parseBackgroundCommand, parseBackgroundJobId, type BackgroundJobSnapshot } from "../tools/background-jobs.js";
 import {
   APPLY_PATCH_TOOL_DEFINITION,
@@ -54,12 +55,13 @@ import {
 } from "../tools/web.js";
 import type { LearnedMemoryPolicy, LearnedMemoryRuntimeLike, LearnedTurn, LearnedTurnOutcome, MemorySnapshot } from "../memory/learned-memory.js";
 import { GOAL_TOOL_DEFINITIONS, type GoalRuntime } from "../goal/runtime.js";
-import { loadProjectContext } from "./project-context.js";
+import { loadProjectRuleSnapshot, type ProjectRuleSnapshot } from "./project-context.js";
 import { PLAN_INSTRUCTIONS, PLAN_TOOL_DEFINITIONS, parsePlanRequest, parseSubmittedPlan, type AgentMode, type PlanInteraction, type PlanReviewDecision } from "../plan/runtime.js";
 import type { SessionGoal } from "../storage/session-store.js";
 import { READ_TOOL_OUTPUT_DEFINITION, ToolOutputStore } from "./context-limits.js";
 import { createRequestSnapshot, type RequestSnapshot } from "./request-snapshot.js";
 import { RequestAttemptLedger, type RequestPurpose } from "./request-attempt-ledger.js";
+import { RequestExecutor } from "./request-executor.js";
 import {
   defaultModelRequestSettings,
   requestReasoningEffort,
@@ -75,6 +77,15 @@ interface ResponseOutputItem extends Record<string, unknown> {
   name?: string;
   arguments?: string;
   call_id?: string;
+}
+
+const PROJECT_RULE_MESSAGE_PREFIX = "Host-maintained project rule snapshot revision ";
+
+function isPersistedProjectRuleSnapshot(item: Record<string, unknown>): boolean {
+  return item.type === "message"
+    && item.role === "developer"
+    && typeof item.content === "string"
+    && item.content.startsWith(PROJECT_RULE_MESSAGE_PREFIX);
 }
 
 export interface AgentResponse {
@@ -156,7 +167,7 @@ export interface AgentIO {
   getGoal?(): Promise<SessionGoal | undefined>;
   setGoal?(goal: SessionGoal): Promise<void>;
   runBash(command: string, signal?: AbortSignal): Promise<BashResult>;
-  runBackgroundBash?(command: string, signal?: AbortSignal, timeoutMs?: number): Promise<BashResult>;
+  runBackgroundBash?(command: string, signal?: AbortSignal, timeoutMs?: number, onOutput?: (output: import("../tools/bash.js").BashOutputPreview) => void): Promise<BashResult>;
   runApplyPatch?(operations: readonly ApplyPatchOperation[], signal?: AbortSignal): Promise<ApplyPatchResult>;
   afterPatchApplied?(operations: readonly ApplyPatchOperation[], result: ApplyPatchResult, signal?: AbortSignal): Promise<WorkflowPatchFollowup | void>;
   writeAssistant(text: string): void;
@@ -209,6 +220,7 @@ export interface ReactAgentOptions {
   ): Promise<void>;
   onUsage?(usage: TokenUsageSample | null): Promise<void>;
   requestAttemptLedger?: RequestAttemptLedger;
+  codeNavigation?: CodeNavigationRuntimeLike;
 }
 
 export interface AgentTurnOptions {
@@ -334,7 +346,7 @@ export class ReactAgent {
   #turnMode: AgentMode = "default";
   #turnResult: AgentTurnResult = {};
   #goalPrompt = "";
-  #projectContext = "";
+  #projectRuleSnapshot: ProjectRuleSnapshot | undefined;
   #pendingGoalCompletion = false;
   #historyRevision = 0;
   #lastCompactedRevision = -1;
@@ -358,7 +370,10 @@ export class ReactAgent {
   readonly #contextRecoveryBudget: number;
   readonly #backgroundJobs: BackgroundJobManager;
   readonly #toolOutputs = new ToolOutputStore();
+  readonly #fileSearches = new FileSearchSession();
   readonly #requestAttemptLedger: RequestAttemptLedger | undefined;
+  readonly #requestExecutor: RequestExecutor | undefined;
+  readonly #codeNavigation: CodeNavigationRuntimeLike | undefined;
 
   constructor(options: ReactAgentOptions) {
     this.#onPhase = options.onPhase;
@@ -367,8 +382,8 @@ export class ReactAgent {
     this.#client = options.client;
     this.#model = options.model;
     this.#io = options.io;
-    this.#backgroundJobs = new BackgroundJobManager((command, signal, timeoutMs) =>
-      options.io.runBackgroundBash?.(command, signal, timeoutMs) ?? options.io.runBash(command, signal));
+    this.#backgroundJobs = new BackgroundJobManager((command, signal, timeoutMs, onOutput) =>
+      options.io.runBackgroundBash?.(command, signal, timeoutMs, onOutput) ?? options.io.runBash(command, signal));
     this.#promptCacheKey = options.promptCacheKey;
     this.#promptCacheOptions = options.promptCacheOptions;
     this.#advancedPromptCacheEnabled = options.promptCacheOptions !== undefined;
@@ -397,6 +412,8 @@ export class ReactAgent {
     this.#onContextCompacted = options.onContextCompacted;
     this.#onUsage = options.onUsage;
     this.#requestAttemptLedger = options.requestAttemptLedger;
+    this.#requestExecutor = options.requestAttemptLedger ? new RequestExecutor(options.requestAttemptLedger) : undefined;
+    this.#codeNavigation = options.codeNavigation;
     this.#contextWindow = options.contextWindow ?? null;
     this.#contextTokens = options.initialContextTokens ?? null;
     this.#providerCapabilities = options.providerCapabilities ?? resolveProviderCapabilities("https://api.openai.com/v1");
@@ -422,9 +439,18 @@ export class ReactAgent {
     return this.#backgroundJobs.waitAll(signal);
   }
 
-  dispose(): void {
-    this.#backgroundJobs.dispose();
+  beginTask(): void {
+    this.#requestAttemptLedger?.reset();
+  }
+
+  cancelBackgroundJobs(reason?: unknown): Promise<BackgroundJobSnapshot[]> {
+    return this.#backgroundJobs.stopAll(reason);
+  }
+
+  async dispose(): Promise<void> {
+    await this.#backgroundJobs.dispose();
     this.#toolOutputs.clear();
+    this.#fileSearches.clear();
   }
 
   async runTurn(userInput: string, signal?: AbortSignal, options: AgentTurnOptions = {}): Promise<AgentTurnResult> {
@@ -472,9 +498,9 @@ export class ReactAgent {
               return structuredClone(value);
             })
             : Promise.resolve(this.#skillTurn);
-          const projectPreparation = loadProjectContext(this.#workspacePath);
+          const projectPreparation = loadProjectRuleSnapshot(this.#workspacePath, [".", ...this.#activeFiles]);
           const memoryPreparation = this.#refreshLearnedPrompt(turnInput);
-          const [mcpPrepared, skillTurn, projectContext] = await Promise.all([
+          const [mcpPrepared, skillTurn, projectRules] = await Promise.all([
             mcpPreparation,
             skillsPreparation,
             projectPreparation,
@@ -483,7 +509,14 @@ export class ReactAgent {
           this.#mcpSnapshot = mcpPrepared.snapshot;
           this.#stepMcpToolInfo = mcpPrepared.toolInfo;
           this.#skillTurn = skillTurn;
-          this.#projectContext = projectContext;
+          if (this.#projectRuleSnapshot?.revision !== projectRules.revision) {
+            await this.#record([{
+              type: "message",
+              role: "developer",
+              content: `${PROJECT_RULE_MESSAGE_PREFIX}${projectRules.revision}. This snapshot supersedes all earlier project rule snapshots.\n\n${projectRules.context || "No applicable project rules or package scripts were discovered."}`,
+            }]);
+          }
+          this.#projectRuleSnapshot = projectRules;
           /*
            * Tool and prompt snapshots are assembled only after every independent
            * source has settled, so a model request cannot observe a partial mix.
@@ -519,7 +552,9 @@ export class ReactAgent {
         boundToolOutput: (output) => this.#toolOutputs.bound(output),
         assistant: (text) => {
           assistantTexts.push(text);
-          this.#io.writeAssistant(text);
+          const renderStarted = performance.now();
+          try { this.#io.writeAssistant(text); }
+          finally { this.#onEvent?.({ type: "timing_recorded", operation: "rendering", durationMs: performance.now() - renderStarted }); }
         },
         ...(this.#onPhase ? { onPhase: this.#onPhase } : {}),
         ...(this.#onEvent ? { onEvent: this.#onEvent } : {}),
@@ -537,6 +572,9 @@ export class ReactAgent {
                 if (!this.#stepToolNames.has(call.name)) return undefined;
                 if (FILE_TOOL_DEFINITIONS.some((tool) => tool.name === call.name) || call.name === READ_TOOL_OUTPUT_DEFINITION.name) {
                   return { readOnly: true, idempotent: true, parallelSafe: true, resourceKeys: [] };
+                }
+                if (call.name === CODE_NAVIGATION_TOOL_DEFINITION.name) {
+                  return { readOnly: true, idempotent: true, parallelSafe: false, resourceKeys: ["typescript-lsp"] };
                 }
                 if (call.name === READ_SKILL_TOOL_DEFINITION.name) {
                   return { readOnly: true, idempotent: true, parallelSafe: true, resourceKeys: [] };
@@ -702,7 +740,7 @@ export class ReactAgent {
       }
       try {
         this.#io.writeTool?.(`Starting background command: ${command}`);
-        return JSON.stringify({ status: "ok", job: this.#backgroundJobs.start(command) });
+        return JSON.stringify({ status: "ok", job: this.#backgroundJobs.start(command, signal) });
       } catch (error) {
         return JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error) });
       }
@@ -744,6 +782,18 @@ export class ReactAgent {
       let operations;
       try { operations = parseApplyPatchArguments(call.arguments); }
       catch (error) { output = JSON.stringify({ status: "rejected", error: error instanceof Error ? error.message : String(error) }); return output; }
+      const freshRules = await loadProjectRuleSnapshot(this.#workspacePath, operations.map((operation) => operation.path));
+      const staleScopes = Object.entries(freshRules.targetRevisions).filter(
+        ([scope, revision]) => this.#projectRuleSnapshot?.targetRevisions[scope] !== revision,
+      );
+      if (staleScopes.length > 0) {
+        operations.forEach((operation) => this.#activeFiles.add(operation.path));
+        return JSON.stringify({
+          status: "rules_refresh_required",
+          message: "Applicable project rules were discovered or changed. The host will refresh them before the next model request; review them before retrying the edit.",
+          scopes: staleScopes.map(([scope]) => scope),
+        });
+      }
       const guardedOperations: ApplyPatchOperation[] = [];
       for (const operation of operations) {
         const key = this.#fileObservationKey(operation.path);
@@ -820,6 +870,18 @@ export class ReactAgent {
       this.#io.onToolProgress?.({ phase: "started", name: call.name });
       output = formatWorkspaceInspection(await workspaceDiff(this.#workspacePath, signal), true);
       this.#io.onToolProgress?.({ phase: "finished", name: call.name });
+    } else if (call.name === CODE_NAVIGATION_TOOL_DEFINITION.name && this.#codeNavigation) {
+      this.#io.onToolProgress?.({ phase: "started", name: call.name });
+      this.#io.writeTool?.("Querying TypeScript language server");
+      try {
+        const request = parseCodeNavigationArguments(call.arguments);
+        this.#activeFiles.add(request.path);
+        output = JSON.stringify({ status: "ok", data: await this.#codeNavigation.query(request, signal) });
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        output = JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error) });
+      }
+      this.#io.onToolProgress?.({ phase: "finished", name: call.name });
     } else if (call.name === READ_SKILL_TOOL_DEFINITION.name && this.#skills) {
       this.#io.onToolProgress?.({ phase: "started", name: call.name });
       this.#io.writeTool?.("Reading skill instructions");
@@ -854,7 +916,7 @@ export class ReactAgent {
       this.#io.onToolProgress?.({ phase: "started", name: call.name });
       this.#io.writeTool?.(`File tool: ${call.name}`);
       try {
-        const result = await runFileTool(call.name, call.arguments, this.#workspacePath, signal);
+        const result = await runFileTool(call.name, call.arguments, this.#workspacePath, signal, this.#fileSearches);
         if (call.name === "read_file" && result && typeof result === "object") {
           const record = result as { path?: unknown; exists?: unknown; sha256?: unknown };
           if (typeof record.path === "string" && typeof record.exists === "boolean" && (typeof record.sha256 === "string" || record.sha256 === null)) {
@@ -945,7 +1007,13 @@ export class ReactAgent {
   }
 
   async #persist(items: readonly Record<string, unknown>[]): Promise<void> {
-    if (items.length > 0) await persistState("Context persistence failed", () => this.#onHistoryAppend?.(items));
+    if (items.length === 0) return;
+    const started = performance.now();
+    try {
+      await persistState("Context persistence failed", () => this.#onHistoryAppend?.(items));
+    } finally {
+      this.#onEvent?.({ type: "timing_recorded", operation: "persistence", durationMs: performance.now() - started });
+    }
   }
 
   async #runWebTool(
@@ -1049,7 +1117,10 @@ export class ReactAgent {
     const attempts: Array<TokenUsageSample | null> = [];
     let persistedAttempts = 0;
     try {
-      const input = repairToolContext(this.#history);
+      // Project rules are persisted as revisioned context events, but the current
+      // workspace snapshot is supplied separately on every request. Excluding old
+      // snapshots here prevents compaction from making stale rules authoritative.
+      const input = repairToolContext(this.#history.filter((item) => !isPersistedProjectRuleSnapshot(item)));
       const observeAttempt = (raw: unknown): void => { attempts.push(normalizeTokenUsageSample(raw)); };
       const response = this.#providerCapabilities.compaction === "native"
         ? await this.#nativeCompact(input, signal, observeAttempt)
@@ -1225,6 +1296,7 @@ export class ReactAgent {
           WORKSPACE_STATUS_TOOL_DEFINITION,
           WORKSPACE_DIFF_TOOL_DEFINITION,
           ...FILE_TOOL_DEFINITIONS,
+          ...(this.#codeNavigation ? [CODE_NAVIGATION_TOOL_DEFINITION] : []),
           READ_TOOL_OUTPUT_DEFINITION,
           ...PLAN_TOOL_DEFINITIONS,
           ...memoryTools,
@@ -1239,6 +1311,7 @@ export class ReactAgent {
           WEB_SEARCH_TOOL_DEFINITION,
           WEB_FETCH_TOOL_DEFINITION,
           ...FILE_TOOL_DEFINITIONS,
+          ...(this.#codeNavigation ? [CODE_NAVIGATION_TOOL_DEFINITION] : []),
           READ_TOOL_OUTPUT_DEFINITION,
           ...this.#mcpSnapshot.tools.map((tool) => ({ ...tool })),
           ...(this.#goalRuntime ? GOAL_TOOL_DEFINITIONS : []),
@@ -1259,14 +1332,28 @@ export class ReactAgent {
     this.#onEvent?.({ type: "sampling_started" });
     if (this.#responseTransport === "stream" && this.#client.responses.stream) {
       let eventsSeen = 0;
+      const consumeStreamAttempt = async (
+        open: (attemptOptions: ResponsesRequestOptions) => Promise<ResponseStreamLike> | ResponseStreamLike,
+      ): Promise<AgentResponse> => {
+        const transportController = new AbortController();
+        const attemptSignal = signal
+          ? AbortSignal.any([signal, transportController.signal])
+          : transportController.signal;
+        try {
+          return await this.#consumeResponseStream(
+            await open({ ...options, signal: attemptSignal }),
+            () => { eventsSeen += 1; },
+            () => transportController.abort(new Error("Model stream closed by host")),
+          );
+        } finally {
+          if (!transportController.signal.aborted) transportController.abort(new Error("Model stream settled"));
+        }
+      };
       try {
         try {
           return await this.#runProviderAttempt(
             "coding",
-            async () => this.#consumeResponseStream(
-              await this.#client.responses.stream!(params, options),
-              () => { eventsSeen += 1; },
-            ),
+            () => consumeStreamAttempt((attemptOptions) => this.#client.responses.stream!(params, attemptOptions)),
           );
         } catch (error) {
           const adapter = this.#client.responses.recovery;
@@ -1278,10 +1365,22 @@ export class ReactAgent {
             this.#onEvent?.({ type: "stream_recovery_started" });
             try {
               const result = await this.#runProviderAttempt("coding", async () => {
-                const recovered = await adapter.resume(params, state, options);
-                return isResponseStream(recovered)
-                  ? this.#consumeResponseStream(recovered, () => { eventsSeen += 1; })
-                  : recovered;
+                const recoveryController = new AbortController();
+                const recoverySignal = signal
+                  ? AbortSignal.any([signal, recoveryController.signal])
+                  : recoveryController.signal;
+                try {
+                  const recovered = await adapter.resume(params, state, { ...options, signal: recoverySignal });
+                  return isResponseStream(recovered)
+                    ? this.#consumeResponseStream(
+                        recovered,
+                        () => { eventsSeen += 1; },
+                        () => recoveryController.abort(new Error("Recovered model stream closed by host")),
+                      )
+                    : recovered;
+                } finally {
+                  if (!recoveryController.signal.aborted) recoveryController.abort(new Error("Recovered model request settled"));
+                }
               });
               if (result.status && result.status !== "completed") throw new ModelResponseError(result);
               this.#onEvent?.({ type: "stream_recovery_finished" });
@@ -1309,29 +1408,14 @@ export class ReactAgent {
   }
 
   async #runProviderAttempt<T extends { usage?: unknown }>(purpose: RequestPurpose, run: () => Promise<T>): Promise<T> {
-    let attempt: number | undefined;
-    if (this.#requestAttemptLedger) {
-      try {
-        attempt = this.#requestAttemptLedger.begin(purpose);
-      } catch {
-        const snapshot = this.#requestAttemptLedger.snapshot();
+    if (!this.#requestExecutor) return run();
+    try {
+      return await this.#requestExecutor.execute(purpose, run);
+    } catch (error) {
+      const snapshot = this.#requestAttemptLedger?.snapshot();
+      if (snapshot && (!snapshot.complete || snapshot.remainingTokens !== undefined && snapshot.remainingTokens <= 0)) {
         throw new LoopStoppedError(snapshot.complete ? "budget_limited" : "usage_limited");
       }
-    }
-    try {
-      const result = await run();
-      if (attempt !== undefined) {
-        const usage = normalizeTokenUsageSample(result.usage);
-        const status = (result as { status?: unknown }).status;
-        this.#requestAttemptLedger?.settle(
-          attempt,
-          typeof status === "string" && status !== "completed" ? "failed" : "completed",
-          usage,
-        );
-      }
-      return result;
-    } catch (error) {
-      if (attempt !== undefined) this.#requestAttemptLedger?.settle(attempt, "failed", null);
       throw error;
     }
   }
@@ -1344,7 +1428,10 @@ export class ReactAgent {
     const skillInstructions = this.#skillTurn
       ? [this.#skillTurn.instructions, this.#skillTurn.explicitInstructions].filter(Boolean).join("\n\n")
       : "";
-    const extensionInstructions = [this.#turnMode === "plan" ? PLAN_INSTRUCTIONS : "", this.#projectContext, skillInstructions, this.#turnMode === "default" ? this.#mcpSnapshot.instructions : "", this.#learnedPrompt, this.#goalPrompt]
+    const projectInstructions = this.#projectRuleSnapshot
+      ? `Current host-maintained project rule snapshot (${this.#projectRuleSnapshot.revision}). It supersedes any earlier project rule snapshot:\n${this.#projectRuleSnapshot.context || "No applicable project rules or package scripts were discovered."}`
+      : "";
+    const extensionInstructions = [this.#turnMode === "plan" ? PLAN_INSTRUCTIONS : "", projectInstructions, skillInstructions, this.#turnMode === "default" ? this.#mcpSnapshot.instructions : "", this.#learnedPrompt, this.#goalPrompt]
       .filter(Boolean)
       .join("\n\n");
     const stableInstructions = `${INSTRUCTIONS}\n${PERMISSION_INSTRUCTIONS}`;
@@ -1354,6 +1441,7 @@ export class ReactAgent {
     const cache = this.#promptCacheRequest(advancedPromptCache);
     const useAdvancedLayout = cache.key !== undefined && advancedPromptCache;
     const useMessageLayout = useAdvancedLayout || this.#providerCapabilities.provider === "deepseek";
+    const effectiveInput = input.filter((item) => !isPersistedProjectRuleSnapshot(item));
     const requestInput = useMessageLayout
       ? [
           {
@@ -1363,10 +1451,10 @@ export class ReactAgent {
               ? [{ type: "input_text", text: stableInstructions, prompt_cache_breakpoint: { mode: "explicit" } }]
               : stableInstructions,
           },
-          ...input,
+          ...effectiveInput,
           { type: "message", role: "developer", content: dynamicInstructions },
         ]
-      : input;
+      : effectiveInput;
     const reasoningEffort = requestReasoningEffort(
       this.#providerCapabilities,
       this.#requestSettings.reasoningEffort,
@@ -1411,6 +1499,7 @@ export class ReactAgent {
   async #consumeResponseStream(
     stream: ResponseStreamLike,
     onEvent: () => void,
+    abortRequest: () => void,
   ): Promise<AgentResponse> {
     let response: AgentResponse | undefined;
     let outputText = "";
@@ -1467,7 +1556,9 @@ export class ReactAgent {
             this.#onEvent?.({ type: "reasoning_finished" });
           }
           outputText += event.delta;
-          this.#io.writeAssistantDelta?.(event.delta);
+          const renderStarted = performance.now();
+          try { this.#io.writeAssistantDelta?.(event.delta); }
+          finally { this.#onEvent?.({ type: "timing_recorded", operation: "rendering", durationMs: performance.now() - renderStarted }); }
         } else if (type === "response.output_item.added" && event.item && typeof event.item === "object") {
           const item = event.item as ResponseOutputItem;
           const key = typeof event.output_index === "number"
@@ -1543,6 +1634,11 @@ export class ReactAgent {
         throw incomplete;
       }
       throw error;
+    } finally {
+      abortRequest();
+      if (typeof iterator.return === "function") {
+        try { await iterator.return(); } catch { /* request abort remains authoritative */ }
+      }
     }
     if (reasoningActive) this.#onEvent?.({ type: "reasoning_finished" });
     if (!response) {
