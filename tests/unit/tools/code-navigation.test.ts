@@ -197,12 +197,22 @@ process.stdin.on('data', (chunk) => {
 });
 `, "utf8");
     const policy = createLspSandboxPolicy(root);
+    const slowWriteServer: LanguageServerProcessFactory = (options) => {
+      const processHandle = startTestProcess(options);
+      return {
+        ...processHandle,
+        async write(data) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          await processHandle.write(data);
+        },
+      };
+    };
     const changing = new CodeNavigationRuntime({
       workspacePath: root,
       command: process.execPath,
       args: [hangingServer],
       policy,
-      startProcess: startTestProcess,
+      startProcess: slowWriteServer,
       permissionRevision: () => revision,
     });
     const pending = changing.query({ operation: "hover", path: "sample.ts", line: 1, column: 1 });

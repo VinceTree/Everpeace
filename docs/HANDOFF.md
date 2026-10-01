@@ -62,6 +62,8 @@
 
 额外定向证据：checkout preflight 真实导入当前 production adapter 并在合成 provider boundary 完成一次 high/32K request，未读取 keyring、未发送网络请求；Windows native LSP fixture 实测 write/state denial 与 direct-network limitation，并验证 runtime fail-closed；fragmented/malformed frames、backpressure、noisy stderr、permission revision cancellation 和 cleanup failure 回归均通过。
 
+首次远端 Windows CI 暴露 permission-revision cancellation 与未完成 stdin write 之间的异步拒绝竞态；RPC 现并发观察 write/response，并用 150ms slow-write fixture 固定覆盖该路径。
+
 本轮没有可用的 pinned dsh checkout，因此未执行真实 dsh CLI/profile preflight。没有运行 live API、九次 smoke、九十次正式比较或真实 Windows Terminal 手工验收。
 
 ## 已知限制与下一步

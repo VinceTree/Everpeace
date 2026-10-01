@@ -178,9 +178,13 @@ class JsonRpcProcess {
     };
     signal.addEventListener("abort", aborted, { once: true });
     try {
-      await this.#write({ jsonrpc: "2.0", id, method, params });
-      return await result;
+      const [, value] = await Promise.all([
+        this.#write({ jsonrpc: "2.0", id, method, params }),
+        result,
+      ]);
+      return value;
     } finally {
+      this.#pending.delete(id);
       signal.removeEventListener("abort", aborted);
     }
   }
