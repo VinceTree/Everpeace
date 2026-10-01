@@ -59,13 +59,14 @@
 - `pnpm test`：437 项，435 通过、2 跳过、0 失败/取消；数量包含工作区已有未跟踪测试，不能充当全新 checkout 的固定计数。
 - `pnpm build`：通过。
 - Linux Node 定向执行 `tests/unit/storage/session-store.test.ts`：18 项全部通过；覆盖 Windows workspace path 在非 Windows 主机上的大小写与分隔符归一化。
+- 从 `origin/main` 创建的全新 Windows clone 完成 `typecheck → test → build` 与 `git diff --check`；clean suite 为 434 项、432 通过、2 跳过，并额外连续重复两次完整测试，均为 0 失败。
 - 仓库没有 lint script，因此未运行 lint。
 - 全工作区 `git diff --check` 仍只报告本轮开始前已有的 `.gitignore`、`LICENSE` CRLF 差异；排除这两个文件后的 tracked 差异通过。所有本轮新增源码/测试另行扫描，无行尾空白。
 - README、PLAN、HANDOFF 与 architecture Markdown 共 15 份已扫描，本地链接均可解析。
 
 定向回归覆盖附件的引用/Unicode/范围/长行/缺失/二进制/包含边界/大小上限/持久化，Git staged+unstaged overlap/untracked/nested workspace/特殊文件，Session 匹配/排除/scope/分页/cache invalidation/corrupt/deletion，以及 context 准入/脱敏/不可变/空状态和三个新 UI surface 的键盘流程。
 
-本轮未执行真实 Windows Terminal 手工验收，也未运行 live API 或付费 benchmark。clean-checkout 的 Linux 依赖安装在本地 WSL 因缺少 `make` 未完成；GitHub Ubuntu CI 首次运行据此发现并已修复 Session workspace path 的跨主机归一化问题。自动化测试不替代 resize、原生 scrollback、真实 Esc 重放和终端取消的人工证据。
+本轮未执行真实 Windows Terminal 手工验收，也未运行 live API 或付费 benchmark。clean-checkout 的 Linux 依赖安装在本地 WSL 因缺少 `make` 未完成；GitHub Ubuntu CI 首次运行据此发现并已修复 Session workspace path 的跨主机归一化问题。首次 post-fix GitHub Windows job 仍在 `pnpm test` 返回一次未公开详情的退出码 1，三次 clean Windows 本地运行均未复现，因此通过本交接更新重新触发 CI。自动化测试不替代 resize、原生 scrollback、真实 Esc 重放和终端取消的人工证据。
 
 ## 已知限制与下一步
 
