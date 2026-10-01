@@ -100,6 +100,10 @@ Session 恢复使用 `resumeTurn` 重建进程内追踪，不清除任务身份�
 
 `RequestSnapshot` 从实际请求同时生成内容估算、输出预留与指纹，估算标为 UTF-8 bytes / 4，不能伪装为供应商实测。已知窗口自动阈值取 `min(窗口 × 80%, 窗口 − 输出预算 − 安全余量)`，安全余量为窗口 5%、最多 32K。
 
+`ReactAgent` 只在 coding provider call 通过请求执行器准入、即将实际发送时，从该 `RequestSnapshot` 捕获只读的 “Last submitted coding request”。估算阶段、被拒绝的准入、标题/Skill/Memory/doctor/summary 等辅助请求不会替换它。快照仅存在当前 Agent 内存，深复制后通过可选 `getContextSnapshot()` 暴露；重启、恢复 Session 或替换 Agent 后不从历史重建。
+
+快照记录 model/provider、提交时间、context revision、序列化请求估算、输出预留与指纹，以及项目规则来源、Skills、Memory、MCP、广告工具、文件附件范围、conversation item counts 和 opaque item 的数量/大小。已知可见来源只保存有界、沿用现有 secret redaction 的预览；凭据、transport headers、reasoning 和 encrypted bodies 不进入预览。组件大小是局部近似，不要求加总等于序列化请求估算；所有估算与响应返回的 measured usage 明确分开。
+
 summary 以完整 assistant/tool-result 交互边界切割，保留最近两个单元并修复工具配对，单个用户任务也可压缩。摘要请求复用稳定指令与工具定义，设置 `tool_choice: none`；摘要不能把模型自述升级为验证事实。
 
 incomplete、空白、没有缩短的摘要以及取消、持久化失败都保留原上下文；少于三个可切割单元明确返回不能安全压缩。已发出摘要的用量即使结果被丢弃也结算。context-limit 恢复最多一次，不能重复执行工具。

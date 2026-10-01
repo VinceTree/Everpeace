@@ -1,5 +1,5 @@
 import { Box, Text, useInput, usePaste, useStdout } from "ink";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   filterSlashCommands,
   type SlashCommand,
@@ -24,6 +24,11 @@ import {
   type ComposerState,
 } from "./editor.js";
 import { characterWidth, textWidth } from "../rendering/text-width.js";
+import {
+  activeFileReferenceQuery,
+  parseFileReferences,
+  quotedFileReference,
+} from "../../agent/file-attachments.js";
 
 export interface PromptProps {
   historyNavigationRef?: React.RefObject<{ index: number | undefined; draft: string }>;
@@ -33,7 +38,8 @@ export interface PromptProps {
   activeModelName: string | undefined;
   placeholder?: string;
   disabled?: boolean;
-  onSubmit(value: string): void;
+  getFileSuggestions?(query: string, signal?: AbortSignal): Promise<string[]>;
+  onSubmit(value: string): boolean | void | Promise<boolean | void>;
 }
 
 const MAX_VISIBLE_LINES = 8;
@@ -80,6 +86,22 @@ function SlashCommandMenu({ commands, selectedIndex }: SlashCommandMenuProps) {
             </Text>
           </Box>
         );
+      })}
+    </Box>
+  );
+}
+
+function FileReferenceMenu({ files, selectedIndex }: { files: readonly string[]; selectedIndex: number }) {
+  const firstVisibleIndex = Math.max(0, Math.min(selectedIndex - 7, files.length - 8));
+  return (
+    <Box width="100%" flexDirection="column" backgroundColor="#111827" paddingX={1} overflow="hidden">
+      {files.slice(firstVisibleIndex, firstVisibleIndex + 8).map((file, index) => {
+        const selected = firstVisibleIndex + index === selectedIndex;
+        return <Box key={file} height={1} overflow="hidden">
+          <Text bold={selected} color={selected ? "#D4AF37" : "#D1D5DB"} wrap="truncate-end">
+            {selected ? "› " : "  "}{file}
+          </Text>
+        </Box>;
       })}
     </Box>
   );
@@ -146,6 +168,7 @@ export function Prompt({
   editorRef,
   historyNavigationRef,
   placeholder: placeholderOverride,
+  getFileSuggestions,
 }: PromptProps) {
   const localNavigation = useRef<{ index: number | undefined; draft: string }>({ index: undefined, draft: "" });
   const navigation = historyNavigationRef ?? localNavigation;
@@ -157,6 +180,10 @@ export function Prompt({
   const [dismissedSlashCommandValue, setDismissedSlashCommandValue] = useState<
     string | undefined
   >();
+  const [fileSuggestions, setFileSuggestions] = useState<string[]>([]);
+  const [selectedFileIndex, setSelectedFileIndex] = useState(0);
+  const [dismissedFileValue, setDismissedFileValue] = useState<string>();
+  const [submitting, setSubmitting] = useState(false);
   const placeholder = placeholderOverride ?? (activeModelName
     ? "Ask Everpeace to do anything"
     : "Enter /login to get started");
@@ -168,6 +195,8 @@ export function Prompt({
     if (next.value !== current.value) {
       setSelectedSlashCommandIndex(0);
       setDismissedSlashCommandValue(undefined);
+      setSelectedFileIndex(0);
+      setDismissedFileValue(undefined);
     }
   };
   const matchingSlashCommands = useMemo(
@@ -183,8 +212,57 @@ export function Prompt({
   const selectedSlashCommand = slashCommandMenuVisible
     ? matchingSlashCommands[effectiveSlashCommandIndex]
     : undefined;
+  const activeFileQuery = useMemo(
+    () => activeFileReferenceQuery(state.value, state.cursor),
+    [state.cursor, state.value],
+  );
+  useEffect(() => {
+    if (!getFileSuggestions || !activeFileQuery || slashCommandMenuVisible) {
+      setFileSuggestions([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void getFileSuggestions(activeFileQuery.query, controller.signal)
+        .then((files) => {
+          if (!controller.signal.aborted) setFileSuggestions(files);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setFileSuggestions([]);
+        });
+    }, 100);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [activeFileQuery?.query, getFileSuggestions, slashCommandMenuVisible]);
+  const effectiveFileIndex = Math.min(selectedFileIndex, Math.max(0, fileSuggestions.length - 1));
+  const fileMenuVisible = Boolean(
+    activeFileQuery &&
+    fileSuggestions.length > 0 &&
+    dismissedFileValue !== state.value &&
+    !slashCommandMenuVisible
+  );
+  const selectedFile = fileMenuVisible ? fileSuggestions[effectiveFileIndex] : undefined;
+  const attachmentLabels = useMemo(() => parseFileReferences(state.value), [state.value]);
 
-  usePaste((text) => updateState((current) => insertComposerText(current, text)), { isActive: !disabled });
+  const completeFileReference = (file: string) => {
+    if (!activeFileQuery) return;
+    updateState((current) => {
+      const items = Array.from(current.value);
+      const replacement = Array.from(quotedFileReference(file));
+      items.splice(activeFileQuery.start, current.cursor - activeFileQuery.start, ...replacement);
+      return {
+        ...current,
+        value: items.join(""),
+        cursor: activeFileQuery.start + replacement.length,
+        preferredColumn: null,
+      };
+    });
+    setFileSuggestions([]);
+  };
+
+  usePaste((text) => updateState((current) => insertComposerText(current, text)), { isActive: !disabled && !submitting });
   useInput(
     (input, key) => {
       if (key.eventType === "release") return;
@@ -198,11 +276,28 @@ export function Prompt({
       if (key.return) {
         if (key.shift || key.meta || key.ctrl) {
           updateState((current) => insertComposerText(current, "\n"));
+        } else if (selectedFile) {
+          completeFileReference(selectedFile);
         } else {
           const submittedValue = selectedSlashCommand ?? stateRef.current.value;
-          navigation.current = { index: undefined, draft: "" };
-          updateState(() => createComposerState());
-          onSubmit(submittedValue);
+          const accept = () => {
+            navigation.current = { index: undefined, draft: "" };
+            updateState(() => createComposerState());
+          };
+          try {
+            const result = onSubmit(submittedValue);
+            if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+              setSubmitting(true);
+              void Promise.resolve(result)
+                .then((accepted) => { if (accepted !== false) accept(); })
+                .catch(() => undefined)
+                .finally(() => setSubmitting(false));
+            } else if (result !== false) {
+              accept();
+            }
+          } catch {
+            // The draft remains available for correction when submission fails.
+          }
         }
         return;
       }
@@ -233,6 +328,22 @@ export function Prompt({
       }
       if (slashCommandMenuVisible && key.escape) {
         setDismissedSlashCommandValue(stateRef.current.value);
+        return;
+      }
+      if (fileMenuVisible && (key.upArrow || (key.ctrl && input === "p"))) {
+        setSelectedFileIndex((current) => Math.max(0, current - 1));
+        return;
+      }
+      if (fileMenuVisible && (key.downArrow || (key.ctrl && input === "n"))) {
+        setSelectedFileIndex((current) => Math.min(fileSuggestions.length - 1, current + 1));
+        return;
+      }
+      if (fileMenuVisible && key.tab && selectedFile) {
+        completeFileReference(selectedFile);
+        return;
+      }
+      if (fileMenuVisible && key.escape) {
+        setDismissedFileValue(state.value);
         return;
       }
 
@@ -322,7 +433,7 @@ export function Prompt({
       if (key.tab || key.escape || input === "[I" || input === "[O") return;
       if (input) updateState((current) => insertComposerText(current, input));
     },
-    { isActive: !disabled },
+    { isActive: !disabled && !submitting },
   );
 
   const lines = useMemo(() => composerLines(state), [state]);
@@ -405,6 +516,13 @@ export function Prompt({
           commands={matchingSlashCommands}
           selectedIndex={effectiveSlashCommandIndex}
         />
+      ) : fileMenuVisible ? (
+        <FileReferenceMenu files={fileSuggestions} selectedIndex={effectiveFileIndex} />
+      ) : null}
+      {attachmentLabels.length > 0 ? (
+        <Text dimColor wrap="truncate-end">
+          Attached once: {attachmentLabels.slice(0, 8).map((reference) => `${reference.path}${reference.startLine ? `:${reference.startLine}-${reference.endLine}` : ""}`).join(" · ")}
+        </Text>
       ) : null}
     </Box>
   );

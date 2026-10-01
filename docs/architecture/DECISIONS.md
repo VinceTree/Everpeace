@@ -6,6 +6,16 @@
 
 专题说明当前机制，HANDOFF 保存当前证据与待验收项，[PLAN](../PLAN.md) 维护当前范围；历史交接与计划完整移入 [archive](../archive/README.md)，旧结论不当作当前行为或执行授权。代码和测试推翻文档时先服从证据，再同步修正说明；文档不能替代修改前的定向代码阅读。本文同主题内容须保持一致，不依赖读者自行猜测后面的段落覆盖前文。
 
+## 日常上下文选择与检查面
+
+Composer 文件附件采用显式 `@"path"` / 行范围语法，而不自动检索历史或隐式展开普通 `@` 文本。宿主在提交时通过既有安全文件读取边界获得新鲜摘录，把用户原文和带元数据的摘录作为一条 durable context message 持久化。timeline、输入历史和标题请求保留用户原文；retry、repair 和 Goal continuation 复用已经落盘的 message，不能重复附件。附件路径参与项目规则发现，但附件读取不写入文件观察表，所以不产生修改授权。
+
+人工 `/diff` 与模型的 workspace tools 分开：前者从结构化 Git status 建立 staged/unstaged/untracked 列表，再按选择读取有界详情；后者接口保持兼容。两个界面都只陈述观察到的当前变化，不推断 Agent 所有权。Git 路径以仓库根解析后约束到活动工作区，禁用 external diff/textconv，特殊文件显示摘要。
+
+`/resume` 搜索使用 Session JSONL 的瞬时进程内投影，不增加持久索引或 schema。标题与 user/assistant conversation message 才参与不区分大小写的字面量匹配；tool output、context 和 Memory 排除。当前工作区是默认 scope，切换全部工作区由用户明确操作；命中后仍走原恢复路径，搜索不会改变 Goal、workflow、模型或目录语义。
+
+`/context` 的快照边界是 coding provider call 已获准并即将发送，而不是请求大小预估或 Session 恢复。快照只存当前 Agent 内存并深复制，辅助请求不覆盖；因此首次提交前、重启或 Agent 替换后必须显示 unavailable，不能从历史近似重建。只保留有界脱敏的已知可见来源，reasoning、encrypted body、凭据和 transport header 仅可用非内容计数/大小表达或完全排除；估算不得标为 measured usage。
+
 ## Coding workflow and verification
 
 普通 coding turn 使用进程内状态机协调理解、实现、验证、诊断和完成阶段，不替换 Responses/ReAct 工具循环，也不自动提交 Git。`apply_patch` 成功后执行有界快速检查，回合结束运行完整检查集合；命令只从工作区 manifest/锁文件和常见项目标志中发现，不执行任意脚本发现逻辑。验证 stdout/stderr 有界保留，失败作为结构化结果返回模型；宿主实际启动最多三轮诊断，耗尽后进入 `blocked`，同一轮多次 patch 失败不重复扣减。

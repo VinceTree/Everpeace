@@ -88,6 +88,52 @@ test("session store round-trips timeline, context, title, and model changes", as
   }
 });
 
+test("session search matches titles and conversation text while excluding tool and context data", async () => {
+  const fixture = await createFixture();
+  try {
+    const first = await fixture.store.create({ title: "Build parser", titlePending: false, workspacePath: "C:\\repo", model });
+    await fixture.store.appendTimeline(first.id, { kind: "user", text: "Please add Unicode support" });
+    await fixture.store.appendTimeline(first.id, { kind: "assistant", text: "Added the tokenizer" });
+    await fixture.store.appendTimeline(first.id, { kind: "tool", text: "hidden tool needle" });
+    await fixture.store.appendContext(first.id, [{ role: "user", content: "hidden context needle" }]);
+    const second = await fixture.store.create({ title: "Other task", titlePending: false, workspacePath: "D:\\other", model });
+    await fixture.store.appendTimeline(second.id, { kind: "assistant", text: "Unicode in another workspace" });
+
+    const title = await fixture.store.search({ query: "PARSER", workspacePath: "c:\\repo" });
+    assert.deepEqual(title.matches.map((match) => [match.summary.id, match.match?.kind]), [[first.id, "title"]]);
+    const message = await fixture.store.search({ query: "unicode", workspacePath: "C:\\repo" });
+    assert.deepEqual(message.matches.map((match) => [match.summary.id, match.match?.kind]), [[first.id, "user"]]);
+    assert.match(message.matches[0]?.match?.snippet ?? "", /Unicode/u);
+    assert.deepEqual(message.matches[0]?.preview?.map((item) => item.kind), ["user", "assistant"]);
+    assert.equal((await fixture.store.search({ query: "needle" })).total, 0);
+    assert.equal((await fixture.store.search({ query: "unicode" })).total, 2);
+
+    await fixture.store.appendTimeline(first.id, { kind: "assistant", text: "A newly cached phrase" });
+    assert.equal((await fixture.store.search({ query: "newly cached" })).matches[0]?.summary.id, first.id);
+    await fixture.store.deleteMany([first.id]);
+    assert.equal((await fixture.store.search({ query: "newly cached" })).total, 0);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("session search paginates newest-first and isolates corrupt JSONL files", async () => {
+  const fixture = await createFixture();
+  try {
+    for (let index = 0; index < 3; index += 1) {
+      await fixture.store.create({ title: `match ${index}`, titlePending: false, workspacePath: "C:\\repo", model });
+    }
+    await fs.writeFile(path.join(fixture.directory, "corrupt.jsonl"), "{bad}\n", "utf8");
+    const result = await fixture.store.search({ query: "match", offset: 1, limit: 1 });
+    assert.equal(result.total, 3);
+    assert.equal(result.matches.length, 1);
+    assert.equal(result.matches[0]?.summary.title, "match 1");
+    assert.equal(result.skipped, 1);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("session model request settings round-trip while legacy model refs stay valid", async () => {
   const fixture = await createFixture();
   try {

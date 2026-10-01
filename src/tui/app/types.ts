@@ -26,14 +26,17 @@ import type {
 import type { AgentTurnOptions, AgentTurnResult } from "../../agent/react-agent.js";
 import type { ModelRequestSettings } from "../../providers/capabilities.js";
 import type { BackgroundJobSnapshot } from "../../tools/background-jobs.js";
+import type { FileAttachment } from "../../agent/file-attachments.js";
+import type { ContextInspectionSnapshot } from "../../agent/context-inspection.js";
 
 export interface AgentSession {
   runTurn(userInput: string, signal?: AbortSignal, options?: AgentTurnOptions): Promise<AgentTurnResult>;
   compact?(signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>>; usage: TokenUsageSample | null }>;
-  requestSteering?(text: string): boolean;
+  requestSteering?(text: string, attachments?: readonly FileAttachment[]): boolean;
   setMemoryPolicy?(policy: Partial<LearnedMemoryPolicy>): void;
   getMemoryPolicy?(): LearnedMemoryPolicy | undefined;
   getMemorySnapshot?(): MemorySnapshot | undefined;
+  getContextSnapshot?(): ContextInspectionSnapshot | undefined;
   finishMemoryTurn?(outcome: LearnedTurnOutcome): Promise<void>;
   finalizePendingGoalCompletion?(allow: boolean): Promise<void>;
   setRequestSettings?(settings: ModelRequestSettings): void;

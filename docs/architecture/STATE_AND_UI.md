@@ -15,6 +15,7 @@
 | Learned memory | [LearnedMemoryRuntime/Store](../../src/memory/learned-memory.ts)，独立平台目录 | 原始凭据、未经验证的成功事实 |
 | 权限 | [PermissionPolicy](../../src/permissions/policy.ts)，当前用户策略与项目限制交集 | JSONL 中历史授权、项目自提权 |
 | 文件观察、undo、工具输出续读、后台进程 | 当前进程内工具与 workflow runtime | 恢复后凭历史文本重新获得写权限或假装进程仍活着 |
+| Session 搜索投影、最近 coding 请求快照 | [SessionStore](../../src/storage/session-store.ts)、当前 [ReactAgent](../../src/agent/react-agent.ts) 的进程内缓存 | 持久索引、JSONL schema、重启后猜测请求快照 |
 
 模型 `model_name` 保留服务端原始 ID；应用内部注册 `id` 不等于模型名称。可选 `request_settings` 同时存在于模型注册和 Session 模型引用中，旧记录使用供应商默认设置。切换设置在任务边界应用，不能在同一任务内悄悄改变请求预算。
 
@@ -57,13 +58,17 @@
 | `/new` | 必须已有模型；立即进入标题为 `New Session`、`title_pending: true` 的空 Session |
 | 第一条新 Session 问题 | 先生成可靠回退标题，再异步命名；不能阻塞回答 |
 | `/clear` | 清屏并解除当前 Session，保留模型；下一条普通消息才创建新 Session |
-| `/resume` | 全局按最近活动列出；恢复 timeline、context、模型、工作目录、Goal、workflow 和聊天 Memory 策略，继续原文件 |
+| `/resume [query]` | 默认搜索当前工作区，可明确切换全部工作区；预览后仍通过原恢复路径加载 timeline、context、模型、工作目录、Goal、workflow 和聊天 Memory 策略，继续原文件 |
 | 模型切换 | 保留累计 usage，重置或标记未知的新模型 context 占用 |
 | Session 删除 | 使用选择/确认流程；任务或直接命令运行期间不得删除 |
 
 恢复前先检查工作目录；目录不存在时保持当前会话不变。原模型缺失可选择替代，但含供应商专属加密/不透明 context 时不得跨供应商静默迁移。旧“新 Session”标题只在显示层翻译。
 
 恢复后重新读取项目规则与文件观察；权限读取当前配置，不从 JSONL 复活。`session_resume` 和 Goal 自动续跑必须保留修复计数与未验证债务，不能通过新的 `no_changes` 清除失败。后台命令和进程内 undo 检查点不可恢复。
+
+`SessionStore.search` 流式读取并校验 JSONL，只投影当前标题以及 user/assistant conversation message；tool output、模型 context 和 learned Memory 不参与匹配。匹配采用不区分大小写的字面量比较，每个 Session 只返回一项，按最新活动时间排序，并提供命中片段及最多三条本地对话预览。每页最多 50 项，界面显示八行；输入有 200ms debounce，新的 query/scope/page 会取消旧搜索并忽略迟到结果。
+
+搜索投影只存在进程内，采用 16 MiB LRU 上限；Session 追加和删除使对应条目失效，读取后再次核对文件元数据，避免缓存并发变化。搜索不创建持久索引或 schema migration；损坏 Session 单独跳过，未完成末行沿用现有兼容规则。删除仍使用原确认流程和 Session 写队列，搜索结果不改变恢复语义。
 
 ## Usage、Goal 与 Memory
 
@@ -82,6 +87,9 @@
 - 宿主界面英文；模型正文按其原始语言展示。Markdown、代码、shell 和严格 unified diff 分层高亮，超大或未知内容安全退回纯文本。
 - 等待状态包含 provider、耗时与 Ctrl+C 提示；`/status` 显示模型、供应商、实际协议、压缩/推理设置、context 占用和累计 token/cache，缺失数据明确显示未知或不完整。
 - `/status`、`/outputs`、`/history`、`/terminal-setup`、信息窗口及 picker/wizard 使用独立命令窗口；`/new`、`/clear`、`/exit` 是立即动作。
+- Composer 中 `@` 候选最多显示八项，Esc 只关闭候选；提交文件引用时异步读取，失败保留草稿。摘录只进入该 user context item，不复制进可见历史或标题请求。
+- `/diff` 先显示 staged/unstaged/untracked 文件列表，Enter 惰性加载分页详情；Esc 从详情回列表、再回聊天。`/resume` 搜索和预览保持八行列表与 50 项分页，并提供当前/全部工作区开关。
+- `/context` 展示当前 Agent 在已准入 provider-call 边界捕获的 “Last submitted coding request”。打开和刷新只读取不可变内存快照，不刷新文件、不压缩 context、也不发送模型请求；进程重启、Agent 替换或首次 coding 请求前显示明确空状态。
 - 命令窗口隐藏 banner、历史、composer 与全局状态栏，进入时同步清屏，Esc 从内存原子重放原 Session。窗口本身不得写入 `Static`、timeline 或 context。
 - 只有命令造成的真实变更进入对应状态存储。可取消加载使用操作身份检查，关闭窗口后忽略迟到结果。
 - 所有命令窗口共享居中布局，外框最多 80 列，窄屏有左右安全边距，字段左对齐；resize 后重新居中且不得泄露底层历史。
@@ -104,6 +112,7 @@
 | 修改类型 | 先读与必须考虑的回归 |
 | --- | --- |
 | Session schema、恢复、usage | [Session 测试](../../tests/unit/storage/session-store.test.ts)、[status 测试](../../tests/unit/status/model-status.test.ts)、[App 测试](../../tests/unit/tui/app.test.tsx)；旧缺字段、损坏尾行、串行追加 |
+| Session 搜索与请求检查 | [Session 搜索](../../tests/unit/storage/session-store.test.ts)、[picker](../../tests/unit/tui/session-picker.test.tsx)、[context](../../tests/unit/agent/context-inspection.test.ts)、[surfaces](../../tests/unit/tui/daily-use-surfaces.test.tsx)；scope、分页、缓存失效、迟到结果、空状态与不可变快照 |
 | UI 命令或布局 | [命令目录](../../src/tui/commands/slash-commands.ts)、[command surface 测试](../../tests/unit/tui/command-surface.test.tsx)、[App 测试](../../tests/unit/tui/app.test.tsx)；Esc、resize、迟到结果、历史重放 |
 | Goal/Memory 结算 | [task runner 测试](../../tests/unit/workflow/task-runner.test.ts)、[Goal 测试](../../tests/unit/goal/runtime.test.ts)、[Memory 测试](../../tests/unit/memory/learned-memory.test.ts)；取消和验证债务 |
 | 权限与审批 | [PERMISSIONS](PERMISSIONS.md)、[SANDBOX](SANDBOX.md)；运行时权限 revision、取消、原生启动失败关闭 |

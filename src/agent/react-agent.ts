@@ -63,6 +63,14 @@ import { createRequestSnapshot, type RequestSnapshot } from "./request-snapshot.
 import { RequestAttemptLedger, type RequestPurpose } from "./request-attempt-ledger.js";
 import { RequestExecutor } from "./request-executor.js";
 import {
+  userMessageWithAttachments,
+  type FileAttachment,
+} from "./file-attachments.js";
+import {
+  createContextInspectionSnapshot,
+  type ContextInspectionSnapshot,
+} from "./context-inspection.js";
+import {
   defaultModelRequestSettings,
   requestReasoningEffort,
   requestSettingsForPurpose,
@@ -225,6 +233,7 @@ export interface ReactAgentOptions {
 
 export interface AgentTurnOptions {
   mode?: AgentMode;
+  attachments?: readonly FileAttachment[];
 }
 
 export interface AgentTurnResult {
@@ -325,7 +334,7 @@ export class ReactAgent {
     | ((usage: TokenUsageSample | null) => Promise<void>)
     | undefined;
   #history: Array<Record<string, unknown>>;
-  #pendingSteering: string[] = [];
+  #pendingSteering: Array<{ text: string; attachments: readonly FileAttachment[] }> = [];
   #sampleController: AbortController | undefined;
   #mcpSnapshot: McpSnapshot = { tools: [], instructions: "", servers: [] };
   #stepTools: ReadonlyArray<Record<string, unknown>> = [];
@@ -374,6 +383,7 @@ export class ReactAgent {
   readonly #requestAttemptLedger: RequestAttemptLedger | undefined;
   readonly #requestExecutor: RequestExecutor | undefined;
   readonly #codeNavigation: CodeNavigationRuntimeLike | undefined;
+  #contextInspection: ContextInspectionSnapshot | undefined;
 
   constructor(options: ReactAgentOptions) {
     this.#onPhase = options.onPhase;
@@ -466,6 +476,8 @@ export class ReactAgent {
     this.#preparedSkillInput = undefined;
     this.#learnedPromptKey = undefined;
     this.#streamRecoveryRemaining = this.#streamRecoveryBudget;
+    const attachments = options.attachments?.map((attachment) => ({ ...attachment })) ?? [];
+    attachments.forEach((attachment) => this.#activeFiles.add(attachment.path));
     const assistantTexts: string[] = [];
     let contextRecoveryRemaining = this.#contextRecoveryBudget;
     let persistenceFailed = false;
@@ -476,7 +488,7 @@ export class ReactAgent {
       this.#goalPrompt = goal?.status === "active" ? `Active session goal: ${goal.objective}\nContinue until verified complete. Before completion, audit the objective and call update_goal with complete. Mark blocked only after the same blocker recurs for three consecutive goal turns.` : "";
       this.#history = repairToolContext(this.#history);
       await this.#applyPendingSteering();
-      await this.#record([{ role: "user", content: userInput }]);
+      await this.#record([userMessageWithAttachments(userInput, attachments)]);
       const loopResult = await runAgentLoop({
         prepareStep: async (loopSignal) => {
           const preparationStarted = performance.now();
@@ -634,10 +646,13 @@ export class ReactAgent {
     this.#pendingGoalCompletion = false;
   }
 
-  requestSteering(text: string): boolean {
+  requestSteering(text: string, attachments: readonly FileAttachment[] = []): boolean {
     const value = text.trim();
     if (!value || !this.#running) return false;
-    this.#pendingSteering.push(value);
+    this.#pendingSteering.push({
+      text: value,
+      attachments: attachments.map((attachment) => ({ ...attachment })),
+    });
     this.#sampleController?.abort(new LoopSteeredError());
     return true;
   }
@@ -652,6 +667,12 @@ export class ReactAgent {
 
   getMemorySnapshot(): MemorySnapshot | undefined {
     return this.#learnedSnapshot ? { ...this.#learnedSnapshot, entryIds: [...this.#learnedSnapshot.entryIds] } : undefined;
+  }
+
+  getContextSnapshot(): ContextInspectionSnapshot | undefined {
+    return this.#contextInspection === undefined
+      ? undefined
+      : structuredClone(this.#contextInspection);
   }
 
   async finishMemoryTurn(outcome: LearnedTurnOutcome): Promise<void> {
@@ -1326,7 +1347,7 @@ export class ReactAgent {
     advancedPromptCache: boolean,
     recoveryBudget: { remaining: number },
   ): Promise<AgentResponse> {
-    const { snapshot, cacheOptions } = this.#buildRequestSnapshot(input, advancedPromptCache);
+    const { snapshot, cacheOptions, stableInstructions, dynamicInstructions } = this.#buildRequestSnapshot(input, advancedPromptCache);
     const params = snapshot.request as Record<string, unknown>;
     const options = { maxRetries: 0, timeout: requestSettingsForPurpose("coding", this.#requestSettings).timeoutMs, ...(signal ? { signal } : {}), ...cacheOptions };
     this.#onEvent?.({ type: "sampling_started" });
@@ -1353,7 +1374,10 @@ export class ReactAgent {
         try {
           return await this.#runProviderAttempt(
             "coding",
-            () => consumeStreamAttempt((attemptOptions) => this.#client.responses.stream!(params, attemptOptions)),
+            () => {
+              this.#publishContextInspection(snapshot, stableInstructions, dynamicInstructions);
+              return consumeStreamAttempt((attemptOptions) => this.#client.responses.stream!(params, attemptOptions));
+            },
           );
         } catch (error) {
           const adapter = this.#client.responses.recovery;
@@ -1365,6 +1389,7 @@ export class ReactAgent {
             this.#onEvent?.({ type: "stream_recovery_started" });
             try {
               const result = await this.#runProviderAttempt("coding", async () => {
+                this.#publishContextInspection(snapshot, stableInstructions, dynamicInstructions);
                 const recoveryController = new AbortController();
                 const recoverySignal = signal
                   ? AbortSignal.any([signal, recoveryController.signal])
@@ -1399,12 +1424,18 @@ export class ReactAgent {
           await this.#recordUnknownUsageAttempt();
           this.#responseTransport = "buffered";
           this.#onEvent?.({ type: "sampling_started" });
-          return this.#runProviderAttempt("coding", () => this.#client.responses.create(params, options));
+          return this.#runProviderAttempt("coding", () => {
+            this.#publishContextInspection(snapshot, stableInstructions, dynamicInstructions);
+            return this.#client.responses.create(params, options);
+          });
         }
         throw error;
       }
     }
-    return this.#runProviderAttempt("coding", () => this.#client.responses.create(params, options));
+    return this.#runProviderAttempt("coding", () => {
+      this.#publishContextInspection(snapshot, stableInstructions, dynamicInstructions);
+      return this.#client.responses.create(params, options);
+    });
   }
 
   async #runProviderAttempt<T extends { usage?: unknown }>(purpose: RequestPurpose, run: () => Promise<T>): Promise<T> {
@@ -1423,7 +1454,12 @@ export class ReactAgent {
   #buildRequestSnapshot(
     input: Array<Record<string, unknown>>,
     advancedPromptCache: boolean,
-  ): { snapshot: RequestSnapshot; cacheOptions: ResponsesRequestOptions } {
+  ): {
+    snapshot: RequestSnapshot;
+    cacheOptions: ResponsesRequestOptions;
+    stableInstructions: string;
+    dynamicInstructions: string;
+  } {
     const started = performance.now();
     const skillInstructions = this.#skillTurn
       ? [this.#skillTurn.instructions, this.#skillTurn.explicitInstructions].filter(Boolean).join("\n\n")
@@ -1483,7 +1519,27 @@ export class ReactAgent {
       dynamicContext: dynamicInstructions,
     });
     this.#onEvent?.({ type: "timing_recorded", operation: "request_snapshot", durationMs: performance.now() - started });
-    return { snapshot, cacheOptions: cache.options };
+    return { snapshot, cacheOptions: cache.options, stableInstructions, dynamicInstructions };
+  }
+
+  #publishContextInspection(
+    snapshot: RequestSnapshot,
+    stableInstructions: string,
+    dynamicInstructions: string,
+  ): void {
+    this.#contextInspection = createContextInspectionSnapshot({
+      request: snapshot,
+      model: this.#model,
+      provider: this.#providerCapabilities.provider,
+      stableInstructions,
+      dynamicInstructions,
+      ...(this.#projectRuleSnapshot === undefined ? {} : { projectRules: this.#projectRuleSnapshot }),
+      ...(this.#skillTurn === undefined ? {} : { skills: this.#skillTurn }),
+      ...(this.#learnedSnapshot === undefined ? {} : { memory: this.#learnedSnapshot }),
+      learnedPrompt: this.#learnedPrompt,
+      mcp: this.#mcpSnapshot,
+      tools: this.#stepTools,
+    });
   }
 
   async #recordUnknownUsageAttempt(): Promise<void> {
@@ -1701,10 +1757,11 @@ export class ReactAgent {
     if (this.#pendingSteering.length === 0) return 0;
     const count = this.#pendingSteering.length;
     for (let index = 0; index < count; index++) {
-      const text = this.#pendingSteering[0]!;
-      await this.#record([{ role: "user", content: text }]);
+      const pending = this.#pendingSteering[0]!;
+      pending.attachments.forEach((attachment) => this.#activeFiles.add(attachment.path));
+      await this.#record([userMessageWithAttachments(pending.text, pending.attachments)]);
       this.#pendingSteering.shift();
-      this.#turnInput.push(text);
+      this.#turnInput.push(pending.text);
     }
     return count;
   }

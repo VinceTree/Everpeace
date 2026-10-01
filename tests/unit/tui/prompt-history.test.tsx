@@ -50,3 +50,41 @@ test("bracketed multiline paste and modified Enter never submit accidentally", a
   assert.deepEqual(submissions, ["first\nsecond\nthird"]);
   view.unmount();
 });
+
+test("file completion inserts an explicit quoted reference and reports one-shot attachments", async () => {
+  const submissions: string[] = [];
+  const view = render(<Prompt
+    activeModelName="test"
+    getFileSuggestions={async (query) => query === "src" ? ["src/空 file.ts", "src/other.ts"] : []}
+    onSubmit={(text) => { submissions.push(text); }}
+  />);
+  try {
+    await tick();
+    view.stdin.write("@src");
+    await new Promise((resolve) => setTimeout(resolve, 160));
+    assert.match(view.lastFrame() ?? "", /src\/空 file\.ts/u);
+    view.stdin.write("\r");
+    await tick();
+    assert.deepEqual(submissions, []);
+    assert.match(view.lastFrame() ?? "", /Attached once: src\/空 file\.ts/u);
+    view.stdin.write("\r");
+    await tick();
+    assert.deepEqual(submissions, ['@"src/空 file.ts"']);
+  } finally {
+    view.unmount();
+  }
+});
+
+test("a rejected asynchronous submission preserves the composer draft", async () => {
+  const view = render(<Prompt activeModelName="test" onSubmit={async () => false} />);
+  try {
+    await tick();
+    view.stdin.write('keep @"missing.txt"');
+    await tick();
+    view.stdin.write("\r");
+    await tick();
+    assert.match(view.lastFrame() ?? "", /keep @"missing\.txt"/u);
+  } finally {
+    view.unmount();
+  }
+});

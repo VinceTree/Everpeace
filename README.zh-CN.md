@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.3.2) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.3) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -103,13 +103,15 @@ TUI 自身界面现统一使用英文。任务运行时会显示按供应商识�
 
 TUI 使用原生 inline 模式，普通滚轮可以浏览已完成的 Everpeace 会话；Ctrl + 滚轮改变字号后，会采用 Codex 的 75ms 尾随延迟进行同步、基于源状态的重绘，完整恢复启动信息与会话，并且不会暴露清屏后的中间空帧。
 
-第一次普通提问会创建本地 JSONL session。Everpeace 会保存对话记录和继续聊天所需的模型上下文，同时在后台单独调用当前模型，根据第一次提问生成简短名称。带信息或选择界面的 slash command 会打开独立临时窗口，隐藏 banner、历史、输入框和全局状态栏。命令窗口水平、垂直居中，最大宽度 80 列，并在窄终端自动缩小、保留安全边距。按 `Esc` 后原子重放并返回同一个 session，窗口内容不会加入历史。直接 `!` 命令的输出仍属于可恢复记录。`/new` 会立即创建并进入一个空 session，第一次提问后再替换临时名称。`/resume` 会按名称和最后活动时间列出本机全部 session，恢复原模型、原工作目录及上下文，并继续追加到同一个文件。Windows 下 session 默认保存在 `%APPDATA%\Everpeace\sessions`。
+第一次普通提问会创建本地 JSONL session。Everpeace 会保存对话记录和继续聊天所需的模型上下文，同时在后台单独调用当前模型，根据第一次提问生成简短名称。带信息或选择界面的 slash command 会打开独立临时窗口，隐藏 banner、历史、输入框和全局状态栏。命令窗口水平、垂直居中，最大宽度 80 列，并在窄终端自动缩小、保留安全边距。按 `Esc` 后原子重放并返回同一个 session，窗口内容不会加入历史。直接 `!` 命令的输出仍属于可恢复记录。`/new` 会立即创建并进入一个空 session，第一次提问后再替换临时名称。`/resume [query]` 默认搜索当前工作区的标题及用户/assistant 消息，也可切换到全部工作区；本地预览匹配附近的对话，并恢复原模型、工作目录、Goal 与验证状态。Windows 下 session 默认保存在 `%APPDATA%\Everpeace\sessions`。
 
 Everpeace 还会维护独立的 learned 经验记忆。workflow 验证完成并真实空闲五分钟后，当前模型可在后台提取最多三条带证据候选并整理无冲突经验；持久队列可跨 Agent 重建和进程重启恢复，前台工作会暂停后台请求。只有用户明确表达长期偏好时才写入用户级记忆。记忆位于平台应用状态目录（Windows 为 `%APPDATA%\Everpeace\memory`），不会写入仓库。每个逻辑 Agent step 都会根据当前问题和实际读取文件刷新带 revision 的快照，网络重试复用该快照；主 prompt 只注入不可信短索引，只读 `memory_lookup` 可按 ID 查看脱敏证据。输入在裁剪前脱敏，输出在保存前再次脱敏，无法可靠判断的冲突保留待审；当前用户指令和实际仓库证据始终优先。
 
 `/status` 会打开居中的独立命令窗口，显示当前模型、实际 Responses 协议、压缩策略、推理档位、接口地址、工作目录、Session ID、context 占用，以及累计输入、输出、推理、缓存命中和缓存写入 token。主 coding 与辅助模型用量分开显示；辅助请求包括标题、Skill、Memory 与 live doctor。缓存读取与写入独立统计；命中率只使用供应商确实返回缓存数据的样本，数据不完整时标为 partial。DeepSeek 使用自动前缀缓存，不发送 OpenAI 缓存字段；官方 OpenAI 型号可使用 Session 级缓存 key 和原生压缩。主 coding 的 Usage 与请求设置随 Session 持久化。
 
 输入快捷键与 Codex composer 保持一致：`Enter` 提交，`Shift+Enter`、`Alt+Enter` 或 `Ctrl+J` 换行，`Home`/`End` 与 `Ctrl+A`/`Ctrl+E` 移动到当前行首/行尾，`Ctrl+U`/`Ctrl+K` 删除到当前行首/行尾，`Ctrl+W` 删除前一个词，`Ctrl+Y` 恢复最近删除的内容。方向键、`Ctrl+B/F/P/N` 和 `Alt+B/F` 也可移动光标。
+
+输入 `@` 会打开有界的工作区文件选择器。选择后插入 `@"src/example.ts"` 形式的显式引用，也可追加 `#L10-L40` 指定范围。提交时 Everpeace 重新读取每个引用，把带标签的摘录一次性加入模型 context，同时输入历史和标题生成仍使用原问题；行内代码和 fenced code 内的引用保持字面量。每条消息最多八个摘录，默认 200 行，显式范围最多 1,000 行，单个 32 KiB、合计 64 KiB。无效、缺失、二进制或超限引用会保留草稿并显示错误。附件不会授予后续编辑权限。
 
 在输入区开头输入 `/` 会在下方打开斜杠命令菜单。菜单会随输入进行不区分大小写的前缀筛选，每次最多显示八个命令，并可滚动访问其余匹配项。使用 `↑`/`↓` 或 `Ctrl+P/N` 选择，`Enter` 直接执行选中命令，`Tab` 只补全不执行，`Esc` 关闭菜单但保留输入。
 
@@ -121,7 +123,8 @@ TUI 命令：
 - `/model`：切换已注册模型，切换后重置对话上下文。
 - `/models`：查看所有模型和凭据状态。
 - `/status`：查看供应商协议、压缩方式、推理档位、context 占用及独立 token/cache 统计。
-- `/diff`：查看当前工作区的有界 Git 状态和 diff。
+- `/diff`：按 staged、unstaged、untracked 分组查看文件，并在分页高亮详情中明确显示二进制、符号链接、submodule 和截断状态。
+- `/context`：只读查看最近一次已准入 coding 请求的模型、估算、来源、工具、附件、条目计数及脱敏预览，不触发模型请求。
 - `/verify [command]`：运行自动发现的完整工作区检查集合，并绑定取消与文件 revision；显式命令只记录为补充证据。
 - `/undo`：在文件仍未被用户改动时撤销最新 Agent 回合；不会覆盖用户修改。
 - `/permissions`：选择只读、逐条审批、工作区写入或完全访问模式，分别控制公共网页和模型 shell 联网，并保存用户/项目命令策略。
@@ -137,7 +140,7 @@ TUI 命令：
 - `/history`：浏览或明确确认后清空全局输入历史，不删除 Session。
 - `/terminal-setup`：预览并可选配置稳定版 Windows Terminal 的 Shift+Enter；确认后先备份设置，再新增全局按键绑定。
 - `/new`：立即创建并进入一个新的本地 session。
-- `/resume`：查看、恢复或批量永久删除本机 JSONL session。
+- `/resume [query]`：搜索当前或全部工作区的标题与用户/assistant 消息，本地预览后恢复，也可批量永久删除本机 JSONL session。
 - `/resume` 后上下键浏览该会话保存的用户提问及带来源记录的直接命令，向下越过最新一条回到空输入。召回的斜杠命令在编辑前不打开候选菜单；`/history` 仍显示全局输入历史。
 - `/logout`：多选删除模型与对应系统凭据。
 - `/clear`：结束当前对话并清屏；下一次提问创建新 session，同时保留当前模型。

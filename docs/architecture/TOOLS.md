@@ -7,12 +7,14 @@
 | 能力 | 主要实现 | 回归入口 |
 |---|---|---|
 | 读取、目录、搜索、glob | [files.ts](../../src/tools/files.ts) | [files.test.ts](../../tests/unit/tools/files.test.ts) |
+| Composer 文件引用 | [file-attachments.ts](../../src/agent/file-attachments.ts)、[prompt.tsx](../../src/tui/composer/prompt.tsx) | [file-attachments.test.ts](../../tests/unit/agent/file-attachments.test.ts)、[prompt-history.test.tsx](../../tests/unit/tui/prompt-history.test.tsx) |
 | 文件版本与结构化编辑 | [file-version.ts](../../src/tools/file-version.ts)、[apply-patch.ts](../../src/tools/apply-patch.ts) | [apply-patch.test.ts](../../tests/unit/tools/apply-patch.test.ts)、[ReactAgent tests](../../tests/unit/agent/react-agent.test.ts) |
 | 项目规则链 | [project-context.ts](../../src/agent/project-context.ts) | [project-context.test.ts](../../tests/unit/agent/project-context.test.ts) |
 | 结果截断与续读 | [context-limits.ts](../../src/agent/context-limits.ts) | [context-limits.test.ts](../../tests/unit/agent/context-limits.test.ts) |
 | 模型命令与后台任务 | [bash.ts](../../src/tools/bash.ts)、[background-jobs.ts](../../src/tools/background-jobs.ts) | [bash.test.ts](../../tests/unit/tools/bash.test.ts)、[background-jobs.test.ts](../../tests/unit/tools/background-jobs.test.ts) |
 | TypeScript 导航 | [code-navigation.ts](../../src/tools/code-navigation.ts) | [code-navigation.test.ts](../../tests/unit/tools/code-navigation.test.ts) |
-| Git 状态与 diff | [workspace.ts](../../src/tools/workspace.ts) | [workspace.test.ts](../../tests/unit/tools/workspace.test.ts) |
+| 模型 Git 工具 | [workspace.ts](../../src/tools/workspace.ts) | [workspace.test.ts](../../tests/unit/tools/workspace.test.ts) |
+| 人工变更审阅 | [workspace-review.ts](../../src/tools/workspace-review.ts)、[workspace-diff-surface.tsx](../../src/tui/components/screens/workspace-diff-surface.tsx) | [workspace-review.test.ts](../../tests/unit/tools/workspace-review.test.ts)、[daily-use-surfaces.test.tsx](../../tests/unit/tui/daily-use-surfaces.test.tsx) |
 | 公共网页 | [web.ts](../../src/tools/web.ts) | [web.test.ts](../../tests/unit/tools/web.test.ts) |
 
 `ReactAgent` 负责广告工具、解析参数、观察读取、审批和 dispatch；工具实现不自行决定任务成功。新增工具要同时检查快照广告、Plan/权限、取消、结果持久化与最终变更追踪，不能只添加 schema。
@@ -28,6 +30,14 @@
 `ReactAgent` 在进程内维护 `read_file` 观察记录。update/delete 必须已有本进程观察版本，模型省略 `expectedSha256` 也不能绕过；模型提供的版本若与宿主记录不一致立即拒绝。Session 恢复的历史文本不能重新授权覆盖文件，恢复后必须重新读取。
 
 `decodeTextFile` 从原始字节计算 SHA-256，并分别保存 BOM 和换行风格；编辑编码复用原文件的 UTF-8 BOM 与 LF/CRLF 风格，回滚保存原始字节。混合换行按检测到的风格编码，不应宣称任意混合格式逐字节保持。
+
+## Composer 文件引用
+
+输入区的 `@` 候选用参数数组启动有界、可取消的 `rg --files`，按路径筛选并显示最多八项。只有 Markdown 行内/围栏代码之外完整的 `@"path"` 或 `@"path"#L10-L40` 会扩展；邮箱、包名和普通 `@` 文本保持原样。提交前重新读取所有引用，任一引用失败都会保留原草稿并返回可操作错误。
+
+摘录复用 `read_file` 的工作区包含、真实路径、UTF-8 与二进制保护。未写范围时从第一行读取 200 行；显式范围最多 1,000 行。每条消息最多八个不同的路径/范围，单个摘录最多 32 KiB，总计最多 64 KiB；达到字节限制时拒绝整条提交，不静默丢弃内容。标签记录实际起止行、总行数、完整文件原始字节 SHA-256 和是否省略其他行。
+
+用户原文与带标签摘录作为同一条 durable user context item 先落盘，再进入模型请求；timeline、输入历史和标题生成只使用原文。普通问题和运行中 guidance 采用相同顺序与持久化边界，重试、修复和 Goal 续跑不重复附加摘录。引用路径参与本轮项目规则发现，但附件读取不写入文件观察表，因此不会授予 update/delete 权限；修改前模型仍须调用 `read_file`。Session 恢复可重放已持久化的上下文，但不会恢复写权限。
 
 ## 结构化编辑、审批和撤销
 
@@ -73,6 +83,12 @@ README、HANDOFF 等按任务需要读取；规则链并不意味着自动装入
 大输出返回 `status: truncated`、`output_id`、首尾预览、原始/保留字节数和续读入口，不能直接截断原 JSON。超过保留上限的内容明确 `retention_truncated`，此时也不能宣称续读可取回全部正文。引用内容只在进程内保存，不新增磁盘敏感输出日志。
 
 终端展示与模型上下文限制分离；模型结果压缩不能悄悄缩小已有 `/outputs` 或 scrollback 的保留语义。命令输出实现还需查看 [command-record](../../src/tools/command-record.ts) 和 [bash-output-preview](../../src/tools/bash-output-preview.ts)。
+
+## 人工工作区变更审阅
+
+`/diff` 使用独立只读服务，不改变模型的 `workspace_status` / `workspace_diff` 契约。列表从 `git status --porcelain=v1 -z` 构建，分别保留 staged、unstaged 和 untracked 条目；同一路径同时有两种 tracked 状态时会出现两项。Git 路径先按仓库根解释，再映射到当前活动工作区，仓库子目录之外的路径不进入列表。
+
+详情按选择惰性读取。tracked 文本使用禁用 external diff、text conversion 和 rename detection 的 unified diff；untracked 普通 UTF-8 文件显示有界正文预览。二进制、非法 UTF-8、符号链接、submodule 和非普通文件显示明确摘要。列表最多 2 MiB/10,000 项；详情最多保留前 2 MiB 或 10,000 行，并在界面显示截断。`R` 刷新当前列表或详情，`Esc` 按详情 → 列表 → 聊天返回；异步操作可取消，关闭后的迟到结果被忽略。界面显示持久工作流中的 “Last task result”，不把当前 Git 变化归属给 Agent。
 
 ## 模型 shell 与后台任务
 

@@ -1254,6 +1254,31 @@ test("Tab completes a slash command without executing it", async () => {
   view.unmount();
 });
 
+test("malformed explicit file references keep the App composer draft", async () => {
+  const model: RegisteredModel = {
+    id: "model-1",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+
+  await tick();
+  view.stdin.write('Review @"unterminated');
+  await tick();
+  view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Malformed file reference"));
+  assert.match(view.lastFrame() ?? "", /Review @"unterminated/u);
+  view.unmount();
+});
+
 test("Escape dismisses slash suggestions until editing resumes and Enter executes selection", async () => {
   const model: RegisteredModel = {
     id: "model-1",
@@ -1933,6 +1958,10 @@ test("/resume restores transcript, workspace, context, and continues the same se
   view.stdin.write("/resume");
   await tick();
   view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Scope: This workspace"));
+  await tick();
+  view.stdin.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 250));
   await waitFor(() => (view.lastFrame() ?? "").includes("Old session"));
   await tick();
   view.stdin.write("\r");
@@ -1971,7 +2000,7 @@ test("/resume exposes batch session deletion", async () => {
   view.stdin.write("/resume");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("Resume session"));
+  await waitFor(() => (view.lastFrame() ?? "").includes("Scope: This workspace"));
   assert.match(view.lastFrame() ?? "", /Delete sessions\.\.\./u);
   assert.match(view.lastFrame() ?? "", /First/u);
   assert.match(view.lastFrame() ?? "", /Second/u);
@@ -2023,6 +2052,10 @@ test("/resume asks for a replacement model and preserves the restored context", 
   view.stdin.write("/resume");
   await tick();
   view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Scope: This workspace"));
+  await tick();
+  view.stdin.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 250));
   await waitFor(() => (view.lastFrame() ?? "").includes("Needs replacement"));
   await tick();
   view.stdin.write("\r");
@@ -2074,6 +2107,10 @@ test("/resume keeps the current conversation when the stored workspace is missin
   view.stdin.write("/resume");
   await tick();
   view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Scope: This workspace"));
+  await tick();
+  view.stdin.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 250));
   await waitFor(() => (view.lastFrame() ?? "").includes("Missing workspace"));
   await tick();
   view.stdin.write("\r");

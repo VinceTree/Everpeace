@@ -19,6 +19,7 @@ import type {
 import type {
   LoadedSession,
   SessionModelRef,
+  SessionSearchResult,
   SessionSummary,
 } from "../../storage/session-store.js";
 import {
@@ -35,7 +36,11 @@ import { CodingWorkflowRuntime } from "../../workflow/runtime.js";
 import { CodingTaskRunner } from "../../workflow/task-runner.js";
 import type { WorkflowState, WorkflowTaskSource } from "../../workflow/types.js";
 import { discoverVerificationCommands, selectVerificationCommands } from "../../workflow/verifier.js";
-import { formatWorkspaceInspection, inspectWorkspace } from "../../tools/workspace.js";
+import {
+  listWorkspaceChanges,
+  readWorkspaceChange,
+  type WorkspaceChangeIndex,
+} from "../../tools/workspace-review.js";
 import { selectAgentOutputPreview } from "../rendering/command-output-preview.js";
 import { parseTuiInput, TUI_HELP } from "../commands/slash-commands.js";
 import { ApprovalConfirmation } from "../components/feedback/approval-confirmation.js";
@@ -58,6 +63,8 @@ import { SkillWizard } from "../components/wizards/skill-wizard.js";
 import { MemorySurface } from "../components/screens/memory-surface.js";
 import { PlanQuestionsSurface, PlanReviewSurface } from "../components/screens/plan-surface.js";
 import { GoalConfirmationSurface, GoalStatusSurface } from "../components/screens/goal-surface.js";
+import { WorkspaceDiffSurface } from "../components/screens/workspace-diff-surface.js";
+import { ContextSurface } from "../components/screens/context-surface.js";
 import { HighlightedCommand, RichOutput } from "../rendering/rich-text.js";
 import { TUI_COLORS } from "../rendering/palette.js";
 import { truncateEnd } from "../rendering/text-width.js";
@@ -79,6 +86,12 @@ import {
   resolveProviderCapabilities,
   type ModelRequestSettings,
 } from "../../providers/capabilities.js";
+import {
+  listFileReferenceSuggestions,
+  parseFileReferences,
+  resolveFileAttachments,
+  type FileAttachment,
+} from "../../agent/file-attachments.js";
 
 type View =
   | { kind: "outputs" }
@@ -91,6 +104,8 @@ type View =
   | { kind: "plan-review"; submitted: SubmittedPlan; decide(decision: PlanReviewDecision): void }
   | { kind: "goal-confirm"; objective: string; tokenBudget?: number; confirm(): void; cancel(): void }
   | { kind: "goal-status"; goal?: SessionGoal }
+  | { kind: "workspace-diff"; index: WorkspaceChangeIndex; workflow?: WorkflowState }
+  | { kind: "context" }
   | { kind: "chat" }
   | { kind: "login" }
   | {
@@ -99,7 +114,7 @@ type View =
       models: RegisteredModel[];
       resumeSession?: LoadedSession;
     }
-  | { kind: "session-picker"; sessions: SessionSummary[]; notice?: string }
+  | { kind: "session-picker"; result: SessionSearchResult; initialQuery?: string }
   | { kind: "logout"; models: RegisteredModelStatus[] }
   | {
       kind: "loading";
@@ -127,6 +142,7 @@ interface PendingConfirmation {
 interface QueuedGuidance {
   text: string;
   timelineRecorded: boolean;
+  attachments: readonly FileAttachment[];
 }
 
 // Codex uses a short trailing reflow: the live composer follows the viewport
@@ -378,14 +394,19 @@ export function EverpeaceApp({
   const directController = useRef<AbortController | undefined>(undefined);
   const commandInput = useRef<((input: string) => void) | undefined>(undefined);
   const queuedGuidance = useRef<QueuedGuidance[]>([]);
+  const attachmentController = useRef<AbortController | undefined>(undefined);
   useEffect(() => { activeGoalProjection.current = activeGoal; }, [activeGoal]);
   const resumeGoalPending = useRef(false);
-  const runChatRef = useRef<((text: string, timelineRecorded?: boolean, mode?: AgentMode, taskSource?: WorkflowTaskSource) => Promise<void>) | undefined>(undefined);
+  const runChatRef = useRef<((text: string, timelineRecorded?: boolean, mode?: AgentMode, taskSource?: WorkflowTaskSource, attachments?: readonly FileAttachment[]) => Promise<void>) | undefined>(undefined);
   useEffect(() => {
     let active = true;
     void dependencies.inputHistory?.load().then((entries) => { if (active) setInputHistory((current) => [...entries, ...current].slice(-1000)); }).catch(() => undefined);
     return () => { active = false; directController.current?.abort(); };
   }, [dependencies.inputHistory]);
+  useEffect(() => () => {
+    attachmentController.current?.abort(new Error("Session or workspace changed"));
+    attachmentController.current = undefined;
+  }, [sessionEpoch, workspacePath]);
   useEffect(() => {
     let active = true;
     const load = dependencies.loadPermissions
@@ -432,6 +453,11 @@ export function EverpeaceApp({
     clearLiveAssistant();
     setLiveToolStatus(undefined);
   }, [clearLiveAssistant]);
+
+  const getFileSuggestions = useCallback(
+    (query: string, signal?: AbortSignal) => listFileReferenceSuggestions(workspacePath, query, signal),
+    [workspacePath],
+  );
 
   const ensureWorkflow = useCallback((initialState?: WorkflowState, workflowWorkspace = workspacePath): CodingWorkflowRuntime => {
     const runtimeOptions = {
@@ -1320,29 +1346,45 @@ export function EverpeaceApp({
     ],
   );
 
-  const openResume = useCallback(async () => {
+  const searchSessions = useCallback(async (
+    query: string,
+    allWorkspaces: boolean,
+    offset: number,
+    signal?: AbortSignal,
+  ): Promise<SessionSearchResult> => {
+    if (dependencies.sessionStore.search) {
+      return dependencies.sessionStore.search({
+        query,
+        offset,
+        limit: 50,
+        ...(allWorkspaces ? {} : { workspacePath }),
+        ...(signal ? { signal } : {}),
+      });
+    }
+    const listed = await dependencies.sessionStore.list();
+    const normalized = query.trim().toLocaleLowerCase();
+    const sessions = listed.sessions.filter((session) =>
+      (allWorkspaces || session.workspace_path === workspacePath) &&
+      (!normalized || session.title.toLocaleLowerCase().includes(normalized)));
+    return {
+      matches: sessions.slice(offset, offset + 50).map((summary) => ({ summary })),
+      total: sessions.length,
+      skipped: listed.skipped,
+    };
+  }, [dependencies.sessionStore, workspacePath]);
+
+  const openResume = useCallback(async (initialQuery = "") => {
     const operation = startCommandLoad(
       "/resume · Resume session",
       "Reading sessions",
     );
     try {
-      const result = await dependencies.sessionStore.list();
+      const result = await searchSessions(initialQuery, false, 0);
       if (!isCurrentCommandOperation(operation)) return;
-      const notice = result.skipped > 0
-        ? `Skipped ${result.skipped} damaged session file${result.skipped === 1 ? "" : "s"}.`
-        : undefined;
-      if (result.sessions.length === 0) {
-        replaceCommandView(infoView(
-          "/resume · Resume session",
-          [notice, "No sessions are available to resume."].filter(Boolean).join("\n"),
-          notice ? "error" : "default",
-        ));
-        return;
-      }
       replaceCommandView({
         kind: "session-picker",
-        sessions: result.sessions,
-        ...(notice === undefined ? {} : { notice }),
+        result,
+        ...(initialQuery ? { initialQuery } : {}),
       });
     } catch (error) {
       if (!isCurrentCommandOperation(operation)) return;
@@ -1353,9 +1395,9 @@ export function EverpeaceApp({
       ));
     }
   }, [
-    dependencies.sessionStore,
     isCurrentCommandOperation,
     replaceCommandView,
+    searchSessions,
     startCommandLoad,
   ]);
 
@@ -1456,36 +1498,20 @@ export function EverpeaceApp({
       setTimeline([banner]);
       setTimelineEpoch((current) => current + 1);
       setSessionEpoch((current) => current + 1);
+      setInputKey((current) => current + 1);
     });
   }, [activeModel, clearQueuedGuidance, onReplayOutput]);
 
-  const deleteSessions = useCallback((sessionIds: string[]) => {
+  const deleteSessions = useCallback(async (sessionIds: string[]): Promise<void> => {
     if (abortController.current || directController.current) {
-      openInfo("/resume · Cannot delete", "A model turn or direct command is active. Wait for it to finish before deleting sessions.", "error");
-      return;
+      throw new Error("A model turn or direct command is active. Wait for it to finish before deleting sessions.");
     }
-    const operation = startCommandLoad("/resume · Delete sessions", "Deleting sessions", false, false);
-    void dependencies.sessionStore.deleteMany(sessionIds)
-      .then(async () => {
-        if (!isCurrentCommandOperation(operation)) return;
-        if (activeSessionId.current && sessionIds.includes(activeSessionId.current)) {
-          clearConversation();
-          returnToChat();
-          return;
-        }
-        const result = await dependencies.sessionStore.list();
-        if (!isCurrentCommandOperation(operation)) return;
-        if (result.sessions.length === 0) {
-          replaceCommandView(infoView("/resume · Sessions", "No sessions are available to resume."));
-          return;
-        }
-        replaceCommandView({ kind: "session-picker", sessions: result.sessions, ...(result.skipped > 0 ? { notice: `Skipped ${result.skipped} damaged session${result.skipped === 1 ? "" : "s"}.` } : {}) });
-      })
-      .catch((error: unknown) => {
-        if (!isCurrentCommandOperation(operation)) return;
-        replaceCommandView(infoView("/resume · Delete failed", error instanceof Error ? error.message : String(error), "error"));
-      });
-  }, [clearConversation, dependencies.sessionStore, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad]);
+    await dependencies.sessionStore.deleteMany(sessionIds);
+    if (activeSessionId.current && sessionIds.includes(activeSessionId.current)) {
+      clearConversation();
+      returnToChat();
+    }
+  }, [clearConversation, dependencies.sessionStore, returnToChat]);
 
   const runtimeForGoal = useCallback((sessionId: string) => new GoalRuntime({
     getGoal: async () => activeSessionId.current === sessionId
@@ -1723,7 +1749,13 @@ export function EverpeaceApp({
   }, [activeModel, agent, appendTransient, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad]);
 
   const runChat = useCallback(
-    async (text: string, timelineRecorded = false, mode: AgentMode = agentMode, taskSource: WorkflowTaskSource = "user") => {
+    async (
+      text: string,
+      timelineRecorded = false,
+      mode: AgentMode = agentMode,
+      taskSource: WorkflowTaskSource = "user",
+      attachments: readonly FileAttachment[] = [],
+    ) => {
       await permissionsReady.current;
       if (abortController.current || directController.current) return;
       if (!agent || !activeModel) {
@@ -1807,7 +1839,13 @@ export function EverpeaceApp({
             resetAssistant: clearLiveAssistant,
           },
         });
-        const result = await runner.run({ text, mode, source: taskSource, signal: controller.signal });
+        const result = await runner.run({
+          text,
+          mode,
+          source: taskSource,
+          signal: controller.signal,
+          ...(attachments.length === 0 ? {} : { attachments }),
+        });
         if (result.disposition === "plan_approved") {
           approvedPlan = true;
           setAgentMode("default");
@@ -1855,7 +1893,7 @@ export function EverpeaceApp({
           if (next) {
             // Let React render the completed turn before starting the queued
             // guidance, keeping the transcript and spinner ordering stable.
-            queueMicrotask(() => void runChatRef.current?.(next.text, next.timelineRecorded));
+            queueMicrotask(() => void runChatRef.current?.(next.text, next.timelineRecorded, undefined, undefined, next.attachments));
           }
         }
       }
@@ -1901,23 +1939,38 @@ export function EverpeaceApp({
     [append, executeTerminalCommand],
   );
 
-  const queueGuidance = useCallback((text: string) => {
+  const queueGuidance = useCallback((text: string, attachments: readonly FileAttachment[] = []) => {
     const timelineRecorded = activeSessionId.current !== undefined;
     if (timelineRecorded) append("user", text);
     if (confirmationRef.current) finishConfirmation(false);
-    if (agent?.requestSteering?.(text)) {
+    if (agent?.requestSteering?.(text, attachments)) {
       setQueuedGuidanceCount((current) => current + 1);
       setLiveToolStatus("Guidance received; applying at the next safe checkpoint");
       return;
     }
-    queuedGuidance.current.push({ text, timelineRecorded });
+    queuedGuidance.current.push({ text, timelineRecorded, attachments });
     setQueuedGuidanceCount(queuedGuidance.current.length);
   }, [agent, append, finishConfirmation]);
 
   const showWorkspaceDiff = useCallback(async () => {
     const operation = startCommandLoad("/diff · Workspace changes", "Reading Git diff");
-    const inspection = await inspectWorkspace(workspacePath).catch((error: unknown) => ({ status: "error" as const, workspacePath, error: error instanceof Error ? error.message : String(error) }));
-    if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/diff · Workspace changes", formatWorkspaceInspection(inspection, true), inspection.status === "error" ? "error" : "default"));
+    try {
+      const index = await listWorkspaceChanges(workspacePath);
+      if (isCurrentCommandOperation(operation)) {
+        const workflow = workflowRuntime.current?.state;
+        replaceCommandView({
+          kind: "workspace-diff",
+          index,
+          ...(workflow === undefined ? {} : { workflow }),
+        });
+      }
+    } catch (error) {
+      if (isCurrentCommandOperation(operation)) replaceCommandView(infoView(
+        "/diff · Could not inspect workspace",
+        error instanceof Error ? error.message : String(error),
+        "error",
+      ));
+    }
   }, [isCurrentCommandOperation, replaceCommandView, startCommandLoad, workspacePath]);
 
   const runManualVerification = useCallback(async (requested: string) => {
@@ -1988,80 +2041,109 @@ export function EverpeaceApp({
   }, [appendTransient, ensureWorkflow]);
 
   const handleSubmit = useCallback(
-    (input: string) => {
+    (input: string): boolean | Promise<boolean> => {
       const parsed = parseTuiInput(input);
-      if (parsed.kind === "empty") return;
-      setInputHistory((current) => current.at(-1) === input ? current : [...current, input].slice(-1000));
-      setResumedInputHistory((current) => current === undefined ? undefined : current.at(-1) === input ? current : [...current, input].slice(-1000));
-      void dependencies.inputHistory?.append(input).catch(() => appendTransient("error", "Input history could not be saved"));
-      setInputKey((current) => current + 1);
+      if (parsed.kind === "empty") return false;
+      const submitResolved = (attachments: readonly FileAttachment[]): boolean => {
+        setInputHistory((current) => current.at(-1) === input ? current : [...current, input].slice(-1000));
+        setResumedInputHistory((current) => current === undefined ? undefined : current.at(-1) === input ? current : [...current, input].slice(-1000));
+        void dependencies.inputHistory?.append(input).catch(() => appendTransient("error", "Input history could not be saved"));
 
-      if (parsed.kind === "chat") {
-        if (abortController.current) queueGuidance(parsed.text);
-        else void runChat(parsed.text, false, agentMode);
-        return;
-      }
-      if (parsed.kind === "bash") {
-        if (abortController.current) {
-          appendTransient("system", "A model turn is active. Add guidance as a message or press Ctrl+C first.");
-          return;
+        if (parsed.kind === "chat") {
+          if (abortController.current) queueGuidance(parsed.text, attachments);
+          else void runChat(parsed.text, false, agentMode, "user", attachments);
+          return true;
         }
-        void runDirectBash(parsed.command);
-        return;
-      }
-      if (parsed.kind === "unknown") {
-        openInfo(
-          "Slash command error",
-          `Unknown command: ${parsed.command}. Enter /help to see available commands.`,
-          "error",
-        );
-        return;
-      }
+        if (parsed.kind === "bash") {
+          if (abortController.current) {
+            appendTransient("system", "A model turn is active. Add guidance as a message or press Ctrl+C first.");
+            return true;
+          }
+          void runDirectBash(parsed.command);
+          return true;
+        }
+        if (parsed.kind === "unknown") {
+          openInfo(
+            "Slash command error",
+            `Unknown command: ${parsed.command}. Enter /help to see available commands.`,
+            "error",
+          );
+          return true;
+        }
 
-      if (parsed.command === "/login") enterCommandView({ kind: "login" });
-      if (parsed.command === "/model") void openModelPicker();
-      if (parsed.command === "/models") void showModels();
-      if (parsed.command === "/status") showStatus();
-      if (parsed.command === "/diff") void showWorkspaceDiff();
-      if (parsed.command === "/verify") void runManualVerification(parsed.args ?? "");
-      if (parsed.command === "/undo") void undoWorkflow();
-      if (parsed.command === "/compact") runCompact(parsed.args ?? "");
-      if (parsed.command === "/reasoning") setReasoning(parsed.args ?? "");
-      if (parsed.command === "/doctor") runDoctor(parsed.args ?? "");
-      if (parsed.command === "/permissions") enterCommandView({ kind: "permissions" });
-      if (parsed.command === "/mcp") void showMcp();
-      if (parsed.command === "/skills") enterCommandView({ kind: "skills" });
-      if (parsed.command === "/memory") {
-        const args = parsed.args?.trim() ?? "";
-        if (args.toLowerCase().startsWith("remember ")) rememberMemory(args.slice("remember ".length).trim());
-        else if (args.toLowerCase() === "pause") toggleMemory(false);
-        else if (args.toLowerCase() === "resume") toggleMemory(true);
-        else if (args.toLowerCase() === "view") void showMemoryPrompt();
-        else void showMemory();
-      }
-      if (parsed.command === "/plan") {
-        const args = parsed.args?.trim() ?? "";
-        if (args.toLowerCase() === "exit") {
-          setAgentMode("default");
-          appendTransient("system", "Plan mode disabled.");
-        } else if (!args) {
-          setAgentMode("plan");
-          appendTransient("system", "Plan mode enabled. The agent can inspect and plan, but cannot use mutating tools.");
-        } else {
-          setAgentMode("plan");
-          void runChat(args, false, "plan");
+        if (parsed.command === "/login") enterCommandView({ kind: "login" });
+        if (parsed.command === "/model") void openModelPicker();
+        if (parsed.command === "/models") void showModels();
+        if (parsed.command === "/status") showStatus();
+        if (parsed.command === "/context") enterCommandView({ kind: "context" });
+        if (parsed.command === "/diff") void showWorkspaceDiff();
+        if (parsed.command === "/verify") void runManualVerification(parsed.args ?? "");
+        if (parsed.command === "/undo") void undoWorkflow();
+        if (parsed.command === "/compact") runCompact(parsed.args ?? "");
+        if (parsed.command === "/reasoning") setReasoning(parsed.args ?? "");
+        if (parsed.command === "/doctor") runDoctor(parsed.args ?? "");
+        if (parsed.command === "/permissions") enterCommandView({ kind: "permissions" });
+        if (parsed.command === "/mcp") void showMcp();
+        if (parsed.command === "/skills") enterCommandView({ kind: "skills" });
+        if (parsed.command === "/memory") {
+          const args = parsed.args?.trim() ?? "";
+          if (args.toLowerCase().startsWith("remember ")) rememberMemory(args.slice("remember ".length).trim());
+          else if (args.toLowerCase() === "pause") toggleMemory(false);
+          else if (args.toLowerCase() === "resume") toggleMemory(true);
+          else if (args.toLowerCase() === "view") void showMemoryPrompt();
+          else void showMemory();
         }
+        if (parsed.command === "/plan") {
+          const args = parsed.args?.trim() ?? "";
+          if (args.toLowerCase() === "exit") {
+            setAgentMode("default");
+            appendTransient("system", "Plan mode disabled.");
+          } else if (!args) {
+            setAgentMode("plan");
+            appendTransient("system", "Plan mode enabled. The agent can inspect and plan, but cannot use mutating tools.");
+          } else {
+            setAgentMode("plan");
+            void runChat(args, false, "plan");
+          }
+        }
+        if (parsed.command === "/goal") handleGoal(parsed.args?.trim() ?? "");
+        if (parsed.command === "/outputs") enterCommandView({ kind: "outputs" });
+        if (parsed.command === "/history") enterCommandView({ kind: "input-history" });
+        if (parsed.command === "/terminal-setup") enterCommandView({ kind: "terminal-setup" });
+        if (parsed.command === "/new") void createNewSession();
+        if (parsed.command === "/resume") void openResume(parsed.args ?? "");
+        if (parsed.command === "/logout") void openLogout();
+        if (parsed.command === "/clear") clearConversation();
+        if (parsed.command === "/help") openInfo("/help · Help", TUI_HELP);
+        if (parsed.command === "/exit") exit(0);
+        return true;
+      };
+
+      if (parsed.kind !== "chat" || (parseFileReferences(parsed.text).length === 0 && !parsed.text.includes('@"'))) {
+        return submitResolved([]);
       }
-      if (parsed.command === "/goal") handleGoal(parsed.args?.trim() ?? "");
-      if (parsed.command === "/outputs") enterCommandView({ kind: "outputs" });
-      if (parsed.command === "/history") enterCommandView({ kind: "input-history" });
-      if (parsed.command === "/terminal-setup") enterCommandView({ kind: "terminal-setup" });
-      if (parsed.command === "/new") void createNewSession();
-      if (parsed.command === "/resume") void openResume();
-      if (parsed.command === "/logout") void openLogout();
-      if (parsed.command === "/clear") clearConversation();
-      if (parsed.command === "/help") openInfo("/help · Help", TUI_HELP);
-      if (parsed.command === "/exit") exit(0);
+      return (async () => {
+        const controller = new AbortController();
+        attachmentController.current?.abort(new Error("Superseded attachment resolution"));
+        attachmentController.current = controller;
+        const capturedSessionId = activeSessionId.current;
+        const capturedWorkspace = workspacePath;
+        try {
+          const attachments = await resolveFileAttachments(parsed.text, capturedWorkspace, controller.signal);
+          if (activeSessionId.current !== capturedSessionId || workspacePath !== capturedWorkspace) {
+            appendTransient("error", "File attachments were cancelled because the session or workspace changed.");
+            return false;
+          }
+          return submitResolved(attachments);
+        } catch (error) {
+          if (!controller.signal.aborted) {
+            appendTransient("error", `File attachment failed: ${error instanceof Error ? error.message : String(error)}`);
+          }
+          return false;
+        } finally {
+          if (attachmentController.current === controller) attachmentController.current = undefined;
+        }
+      })();
     },
     [
       clearConversation,
@@ -2091,6 +2173,7 @@ export function EverpeaceApp({
       runCompact,
       setReasoning,
       runDoctor,
+      workspacePath,
     ],
   );
 
@@ -2175,7 +2258,7 @@ export function EverpeaceApp({
         return;
       }
     },
-    { isActive: view.kind === "chat" || confirmation !== undefined || (view.kind === "loading" && directController.current !== undefined) },
+    { isActive: view.kind === "chat" || view.kind === "context" || confirmation !== undefined || (view.kind === "loading" && directController.current !== undefined) },
   );
 
   useEffect(
@@ -2294,6 +2377,19 @@ export function EverpeaceApp({
           />
         ) : view.kind === "goal-status" ? (
           <GoalStatusSurface {...(view.goal ? { goal: view.goal } : {})} onPause={pauseGoal} onResume={resumeGoal} onBack={returnToChat} />
+        ) : view.kind === "workspace-diff" ? (
+          <WorkspaceDiffSurface
+            initialIndex={view.index}
+            {...(view.workflow === undefined ? {} : { workflow: view.workflow })}
+            readDetail={(entry, signal) => readWorkspaceChange(workspacePath, entry, signal)}
+            refresh={(signal) => listWorkspaceChanges(workspacePath, signal)}
+            onBack={returnToChat}
+          />
+        ) : view.kind === "context" ? (
+          <ContextSurface
+            {...(agent?.getContextSnapshot ? { getSnapshot: () => agent.getContextSnapshot?.() } : {})}
+            onBack={returnToChat}
+          />
         ) : view.kind === "login" ? (
           <LoginWizard
             dependencies={dependencies}
@@ -2330,8 +2426,9 @@ export function EverpeaceApp({
           />
         ) : view.kind === "session-picker" ? (
           <SessionPicker
-            sessions={view.sessions}
-            {...(view.notice === undefined ? {} : { notice: view.notice })}
+            initialResult={view.result}
+            {...(view.initialQuery === undefined ? {} : { initialQuery: view.initialQuery })}
+            search={searchSessions}
             onSelect={(session) => void chooseSession(session)}
             onDelete={deleteSessions}
             onCancel={returnToChat}
@@ -2393,6 +2490,7 @@ export function EverpeaceApp({
             history={resumedInputHistory ?? inputHistory}
             editorRef={editorRef}
             historyNavigationRef={historyNavigationRef}
+            getFileSuggestions={getFileSuggestions}
             onEmptyInterrupt={() => abortController.current?.abort()}
             onSubmit={handleSubmit}
           />
@@ -2419,6 +2517,7 @@ export function EverpeaceApp({
                 history={resumedInputHistory ?? inputHistory}
                 editorRef={editorRef}
                 historyNavigationRef={historyNavigationRef}
+                getFileSuggestions={getFileSuggestions}
                 onEmptyInterrupt={() => abortController.current?.abort()}
                 onSubmit={handleSubmit}
               />
@@ -2438,6 +2537,7 @@ export function EverpeaceApp({
             history={resumedInputHistory ?? inputHistory}
             editorRef={editorRef}
             historyNavigationRef={historyNavigationRef}
+            getFileSuggestions={getFileSuggestions}
             onEmptyInterrupt={() => abortController.current?.abort()}
             onSubmit={handleSubmit}
           />
@@ -2449,6 +2549,7 @@ export function EverpeaceApp({
           history={resumedInputHistory ?? inputHistory}
             editorRef={editorRef}
             historyNavigationRef={historyNavigationRef}
+          getFileSuggestions={getFileSuggestions}
           onEmptyInterrupt={() => exit(0)}
           onSubmit={handleSubmit}
         />

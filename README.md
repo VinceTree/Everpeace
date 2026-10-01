@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.3.2) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.3) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -103,13 +103,15 @@ The input area follows the terminal's available width and reserves the final col
 
 The TUI runs inline, so the normal scroll wheel can browse the completed Everpeace conversation. After Ctrl + scroll wheel changes the font size, Everpeace performs a synchronized source-backed redraw after Codex's 75 ms trailing delay, restoring the complete banner and conversation without exposing an empty intermediate frame.
 
-The first normal prompt creates a local JSONL session. Everpeace saves the conversation transcript and the model context needed to continue it, while a separate background model request generates a short title from that first prompt. Slash commands with informational or selection interfaces open an isolated temporary screen that hides the banner, transcript, composer, and global status bar. Command windows are centered horizontally and vertically, capped at 80 columns, and shrink with safe margins on narrow terminals. Press `Esc` to replay and return to the same session; command-screen contents are not added to session history. Direct `!` command output remains part of the recoverable transcript. `/new` immediately creates and enters an empty session; its temporary title is replaced after the first prompt. `/resume` lists every local session by title and last activity time, restores its original model and working directory, and continues appending to the same file. Session files live under the platform application-state directory (`%APPDATA%\Everpeace\sessions` on Windows).
+The first normal prompt creates a local JSONL session. Everpeace saves the conversation transcript and the model context needed to continue it, while a separate background model request generates a short title from that first prompt. Slash commands with informational or selection interfaces open an isolated temporary screen that hides the banner, transcript, composer, and global status bar. Command windows are centered horizontally and vertically, capped at 80 columns, and shrink with safe margins on narrow terminals. Press `Esc` to replay and return to the same session; command-screen contents are not added to session history. Direct `!` command output remains part of the recoverable transcript. `/new` immediately creates and enters an empty session; its temporary title is replaced after the first prompt. `/resume [query]` searches titles and user/assistant messages in the current workspace by default, can toggle to all workspaces, previews nearby conversation, and restores the original model, working directory, Goal, and verification state. Session files live under the platform application-state directory (`%APPDATA%\Everpeace\sessions` on Windows).
 
 Everpeace also keeps a separate learned-experience memory. After workflow verification and five minutes of real idle time, the current model may extract up to three evidence-linked candidates and consolidate non-conflicting lessons in the background. The persistent queue survives Agent recreation and process restarts; foreground work pauses background requests. Explicit long-term preferences are stored separately at user scope. Memory lives under the platform application-state directory (`%APPDATA%\Everpeace\memory` on Windows), never in the repository. Every logical Agent step refreshes a revisioned snapshot using the current request and files actually read; retries reuse that snapshot. The prompt receives a short untrusted index, while the read-only `memory_lookup` tool can retrieve a selected entry's redacted evidence. Secrets are redacted before truncation and again before storage, conflicts stay pending for review, and current user instructions and repository evidence always take precedence.
 
 `/status` opens a centered, isolated command screen showing the active model, actual Responses protocol, compaction strategy, reasoning level, endpoint, workspace, Session ID, context occupancy, and cumulative input, output, reasoning, cache-hit, and cache-write tokens. Coding and auxiliary model usage are displayed separately; auxiliary requests include title, Skill, Memory, and live doctor work. Cache reads and writes are tracked independently; a hit rate is calculated only over samples that included cache data and is marked partial when some samples omitted it. DeepSeek uses automatic prefix caching without sending OpenAI cache fields. Official OpenAI models may use a Session-scoped cache key and native compaction. Coding usage and request settings persist with the Session.
 
 Composer shortcuts follow Codex conventions: `Enter` submits; `Shift+Enter`, `Alt+Enter`, or `Ctrl+J` inserts a newline; `Home`/`End` and `Ctrl+A`/`Ctrl+E` move to the current line's start/end; `Ctrl+U`/`Ctrl+K` delete to the current line's start/end; `Ctrl+W` deletes the previous word; and `Ctrl+Y` restores the most recently killed text. Arrow keys, `Ctrl+B/F/P/N`, and `Alt+B/F` also move the cursor.
+
+Typing `@` opens a bounded workspace-file picker. Selecting a file inserts an explicit reference such as `@"src/example.ts"`; add `#L10-L40` for a range. On submission Everpeace reads each reference afresh and attaches its labeled excerpt once to model context while keeping the original prompt in input history and title generation. References in inline or fenced code stay literal. A message may contain up to eight excerpts, with a default 200 lines, an explicit maximum of 1,000 lines, 32 KiB per excerpt, and 64 KiB total. Invalid, missing, binary, or oversized references keep the draft and show an error. Attachments do not authorize later edits.
 
 Typing `/` at the start of the composer opens a slash-command menu below the input. The list filters by case-insensitive prefix as you type, shows up to eight commands at once, and scrolls to any remaining matches. Use `Up`/`Down` or `Ctrl+P/N` to select, `Enter` to run the selected command, `Tab` to complete it without running, and `Esc` to dismiss the menu while keeping the input.
 
@@ -121,7 +123,8 @@ TUI commands:
 - `/model`: Switch to a registered model and reset the conversation context.
 - `/models`: List all registered models and credential states.
 - `/status`: Show provider protocol, compaction mode, reasoning level, context usage, and independent token/cache statistics.
-- `/diff`: Show the bounded current workspace Git status and diff.
+- `/diff`: Review staged, unstaged, and untracked workspace changes in a file list with highlighted, paged detail; binary, symlink, submodule, and truncation states are explicit.
+- `/context`: Inspect the last admitted coding request's model, estimates, sources, tools, attachments, item counts, and redacted previews without making a model request.
 - `/verify [command]`: Run the complete discovered workspace suite with cancellation and file-revision binding. An explicit command is recorded only as supplemental evidence.
 - `/undo`: Undo the latest Agent turn when its files are unchanged; user edits are never overwritten.
 - `/permissions`: Select read-only, ask-for-approval, workspace-write, or full-access mode; control public web and model-shell networking separately; and persist user/project command policy.
@@ -137,7 +140,7 @@ TUI commands:
 - `/history`: Browse or explicitly clear global input history (not sessions).
 - `/terminal-setup`: Preview and optionally configure Shift+Enter in stable Windows Terminal; confirmation creates a settings backup before applying a global key binding.
 - `/new`: Immediately create and enter a new local session.
-- `/resume`: List, resume, or permanently batch-delete local JSONL sessions.
+- `/resume [query]`: Search titles and user/assistant messages in this workspace or all workspaces, preview, resume, or permanently batch-delete local JSONL sessions.
 - After `/resume`, Up/Down browse that session's saved user prompts and direct commands with source metadata; Down past the newest entry returns to an empty draft. Recalled slash commands do not open the command menu until edited. `/history` still shows global input history.
 - `/logout`: Select and remove models with their operating system credentials.
 - `/clear`: End the current conversation and start a fresh session on the next prompt while retaining the active model.

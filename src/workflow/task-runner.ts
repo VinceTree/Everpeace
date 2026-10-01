@@ -1,6 +1,7 @@
 import type { AgentTurnResult } from "../agent/react-agent.js";
 import type { LearnedTurnOutcome } from "../memory/learned-memory.js";
 import type { AgentMode } from "../plan/runtime.js";
+import type { FileAttachment } from "../agent/file-attachments.js";
 import type { SessionGoal } from "../storage/session-store.js";
 import type { BashResult } from "../tools/bash.js";
 import { formatWorkflowSummary, type CodingWorkflowRuntime } from "./runtime.js";
@@ -8,7 +9,7 @@ import type { VerificationSuiteResult, WorkflowRunResult, WorkflowTaskSource } f
 import { verificationPrompt } from "./verifier.js";
 
 export interface CodingTaskAgent {
-  runTurn(userInput: string, signal?: AbortSignal, options?: { mode?: AgentMode }): Promise<AgentTurnResult>;
+  runTurn(userInput: string, signal?: AbortSignal, options?: { mode?: AgentMode; attachments?: readonly FileAttachment[] }): Promise<AgentTurnResult>;
   beginTask?(): void | Promise<void>;
   waitForBackgroundJobs?(signal?: AbortSignal): Promise<unknown>;
   cancelBackgroundJobs?(reason?: unknown): Promise<unknown>;
@@ -29,6 +30,7 @@ export interface CodingTaskRunnerHost {
 
 export interface CodingTaskRunnerInput {
   text: string;
+  attachments?: readonly FileAttachment[];
   mode?: AgentMode;
   source?: WorkflowTaskSource;
   signal?: AbortSignal;
@@ -69,6 +71,7 @@ export class CodingTaskRunner {
     this.#running = true;
     let nextText = input.text;
     let nextMode = input.mode ?? "default";
+    let nextAttachments = input.attachments;
     let taskSource = input.source ?? "user";
     let workflowStarted = false;
     let lastAgentResult: AgentTurnResult = {};
@@ -106,7 +109,11 @@ export class CodingTaskRunner {
       }
 
       const started = now();
-      lastAgentResult = await this.#agent.runTurn(nextText, input.signal, { mode: nextMode }) ?? {};
+      lastAgentResult = await this.#agent.runTurn(nextText, input.signal, {
+        mode: nextMode,
+        ...(nextAttachments === undefined ? {} : { attachments: nextAttachments }),
+      }) ?? {};
+      nextAttachments = undefined;
       if (lastAgentResult.stopReason) {
         await this.#agent.cancelBackgroundJobs?.(new Error(`Task stopped: ${lastAgentResult.stopReason}`));
         await this.#agent.finalizePendingGoalCompletion?.(false);

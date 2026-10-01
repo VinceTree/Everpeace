@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { createReadStream, promises as fs } from "node:fs";
+import { createInterface } from "node:readline";
 import os from "node:os";
 import path from "node:path";
 import { isCommandRecord, type CommandRecord } from "../tools/command-record.js";
@@ -17,6 +18,7 @@ import {
 import type { VerificationSuiteResult, WorkflowPhase, WorkflowState, VerificationResult } from "../workflow/types.js";
 import type { LearnedMemoryPolicy } from "../memory/learned-memory.js";
 import { isModelRequestSettings, type ModelRequestSettings } from "../providers/capabilities.js";
+import { normalizeWorkspacePath } from "../memory/learned-memory.js";
 
 const SESSION_FORMAT_VERSION = 1;
 
@@ -94,6 +96,30 @@ export interface SessionListResult {
   skipped: number;
 }
 
+export interface SessionSearchMatch {
+  summary: SessionSummary;
+  match?: {
+    kind: "title" | "user" | "assistant";
+    snippet: string;
+    timelineIndex?: number;
+  };
+  preview?: Array<{ kind: "user" | "assistant"; snippet: string }>;
+}
+
+export interface SessionSearchResult {
+  matches: SessionSearchMatch[];
+  total: number;
+  skipped: number;
+}
+
+export interface SessionSearchOptions {
+  query: string;
+  workspacePath?: string;
+  offset?: number;
+  limit?: number;
+  signal?: AbortSignal;
+}
+
 export interface CreateSessionInput {
   title: string;
   titlePending: boolean;
@@ -125,6 +151,7 @@ export interface SessionStoreLike {
     preserveContext: boolean,
   ): Promise<void>;
   list(): Promise<SessionListResult>;
+  search?(options: SessionSearchOptions): Promise<SessionSearchResult>;
   deleteMany(sessionIds: readonly string[]): Promise<void>;
   load(sessionId: string): Promise<LoadedSession>;
   setGoal(sessionId: string, goal: SessionGoal): Promise<void>;
@@ -575,12 +602,134 @@ function modelRef(model: SessionModelRef): SessionModelRef {
   };
 }
 
+interface SessionSearchProjection {
+  summary: SessionSummary;
+  messages: Array<{ kind: "user" | "assistant"; text: string; timelineIndex: number }>;
+}
+
+interface CachedSearchProjection {
+  size: number;
+  mtimeMs: number;
+  bytes: number;
+  projection: SessionSearchProjection;
+}
+
+const MAX_SEARCH_CACHE_BYTES = 16 * 1024 * 1024;
+
+async function fileEndsWithNewline(filePath: string, size: number): Promise<boolean> {
+  if (size === 0) return true;
+  const handle = await fs.open(filePath, "r");
+  try {
+    const value = Buffer.alloc(1);
+    await handle.read(value, 0, 1, size - 1);
+    return value[0] === 10;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function readSearchProjection(filePath: string, signal?: AbortSignal): Promise<SessionSearchProjection> {
+  signal?.throwIfAborted();
+  const stat = await fs.stat(filePath);
+  const terminated = await fileEndsWithNewline(filePath, stat.size);
+  const input = createReadStream(filePath, { encoding: "utf8" });
+  const lines = createInterface({ input, crlfDelay: Infinity });
+  let pending: string | undefined;
+  let lineNumber = 0;
+  let header: SessionCreatedEvent | undefined;
+  let title = "";
+  let titlePending = false;
+  let model: SessionModelRef | undefined;
+  let updatedAt = "";
+  let goal: SessionGoal | undefined;
+  let workflow: WorkflowState | undefined;
+  let memoryPolicy: LearnedMemoryPolicy | undefined;
+  let timelineIndex = 0;
+  const messages: SessionSearchProjection["messages"] = [];
+
+  const processLine = (line: string, allowIncomplete: boolean) => {
+    lineNumber += 1;
+    if (!line.trim()) return;
+    let event: SessionEvent;
+    try {
+      event = parseEvent(JSON.parse(line));
+    } catch (error) {
+      if (allowIncomplete) return;
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`Invalid session JSONL at ${filePath}:${lineNumber}: ${reason}`);
+    }
+    if (!header) {
+      if (event.type !== "session_created") throw new Error(`Session file has no valid header: ${filePath}`);
+      header = event;
+      title = event.title;
+      titlePending = event.title_pending;
+      model = event.model;
+      updatedAt = event.at;
+      return;
+    }
+    updatedAt = event.at;
+    if (event.type === "title_updated") {
+      title = event.title;
+      titlePending = false;
+    }
+    if (event.type === "timeline_entry") {
+      if (event.entry.kind === "user" || event.entry.kind === "assistant") {
+        messages.push({ kind: event.entry.kind, text: event.entry.text, timelineIndex });
+      }
+      timelineIndex += 1;
+    }
+    if (event.type === "model_selected") model = event.model;
+    if (event.type === "goal_updated") goal = { ...event.goal };
+    if (event.type === "workflow_updated") workflow = { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
+    if (event.type === "memory_policy_updated") memoryPolicy = { ...event.policy };
+  };
+
+  try {
+    for await (const line of lines) {
+      signal?.throwIfAborted();
+      if (pending !== undefined) processLine(pending, false);
+      pending = line;
+    }
+    if (pending !== undefined) processLine(pending, !terminated);
+  } finally {
+    lines.close();
+    input.destroy();
+  }
+  if (!header || !model) throw new Error(`Session file has no valid header: ${filePath}`);
+  return {
+    summary: {
+      id: header.session_id,
+      title,
+      title_pending: titlePending,
+      created_at: header.at,
+      updated_at: updatedAt,
+      workspace_path: header.workspace_path,
+      model,
+      ...(goal ? { goal } : {}),
+      ...(workflow ? { workflow } : {}),
+      ...(memoryPolicy ? { memory_policy: memoryPolicy } : {}),
+    },
+    messages,
+  };
+}
+
+function searchSnippet(text: string, normalizedQuery: string): string {
+  const normalizedText = text.replace(/\s+/gu, " ").trim();
+  if (!normalizedQuery) return normalizedText.slice(0, 160);
+  const index = normalizedText.toLocaleLowerCase().indexOf(normalizedQuery);
+  const start = Math.max(0, index - 60);
+  const end = Math.min(normalizedText.length, Math.max(index + normalizedQuery.length + 60, start + 160));
+  return `${start > 0 ? "…" : ""}${normalizedText.slice(start, end)}${end < normalizedText.length ? "…" : ""}`;
+}
+
 export class SessionStore implements SessionStoreLike {
   readonly #directory: string;
   readonly #now: () => Date;
   readonly #createId: () => string;
   readonly #writeQueues = new Map<string, Promise<void>>();
   readonly #deletedSessionIds = new Set<string>();
+  readonly #searchCache = new Map<string, CachedSearchProjection>();
+  #searchCacheBytes = 0;
 
   constructor(options: SessionStoreOptions = {}) {
     this.#directory = options.directory ?? defaultSessionDirectory();
@@ -766,10 +915,77 @@ export class SessionStore implements SessionStoreLike {
     return { sessions, skipped };
   }
 
+  async search(options: SessionSearchOptions): Promise<SessionSearchResult> {
+    await Promise.all(
+      [...this.#writeQueues.values()].map((pending) => pending.catch(() => undefined)),
+    );
+    options.signal?.throwIfAborted();
+    let entries;
+    try {
+      entries = await fs.readdir(this.#directory, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { matches: [], total: 0, skipped: 0 };
+      throw error;
+    }
+    const normalizedQuery = options.query.trim().toLocaleLowerCase();
+    const workspace = options.workspacePath === undefined
+      ? undefined
+      : normalizeWorkspacePath(options.workspacePath);
+    const matches: SessionSearchMatch[] = [];
+    let skipped = 0;
+    for (const entry of entries) {
+      options.signal?.throwIfAborted();
+      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+      try {
+        const projection = await this.#searchProjection(path.join(this.#directory, entry.name), options.signal);
+        if (workspace !== undefined && normalizeWorkspacePath(projection.summary.workspace_path) !== workspace) continue;
+        let match: SessionSearchMatch["match"];
+        if (normalizedQuery && projection.summary.title.toLocaleLowerCase().includes(normalizedQuery)) {
+          match = { kind: "title", snippet: searchSnippet(projection.summary.title, normalizedQuery) };
+        } else if (normalizedQuery) {
+          const message = [...projection.messages].reverse().find((candidate) => candidate.text.toLocaleLowerCase().includes(normalizedQuery));
+          if (!message) continue;
+          match = {
+            kind: message.kind,
+            snippet: searchSnippet(message.text, normalizedQuery),
+            timelineIndex: message.timelineIndex,
+          };
+        }
+        const matchedMessage = match?.timelineIndex === undefined
+          ? undefined
+          : projection.messages.findIndex((message) => message.timelineIndex === match.timelineIndex);
+        const previewStart = matchedMessage === undefined || matchedMessage < 0
+          ? Math.max(0, projection.messages.length - 3)
+          : Math.max(0, matchedMessage - 1);
+        const preview = projection.messages
+          .slice(previewStart, previewStart + 3)
+          .map((message) => ({ kind: message.kind, snippet: searchSnippet(message.text, normalizedQuery) }));
+        matches.push({
+          summary: projection.summary,
+          ...(match === undefined ? {} : { match }),
+          ...(preview.length === 0 ? {} : { preview }),
+        });
+      } catch (error) {
+        if (options.signal?.aborted) throw error;
+        skipped += 1;
+      }
+    }
+    matches.sort((left, right) =>
+      right.summary.updated_at.localeCompare(left.summary.updated_at) ||
+      left.summary.id.localeCompare(right.summary.id));
+    const total = matches.length;
+    const offset = Math.max(0, Math.floor(options.offset ?? 0));
+    const limit = Math.max(1, Math.min(50, Math.floor(options.limit ?? 50)));
+    return { matches: matches.slice(offset, offset + limit), total, skipped };
+  }
+
   async deleteMany(sessionIds: readonly string[]): Promise<void> {
     const uniqueIds = [...new Set(sessionIds)];
     uniqueIds.forEach((sessionId) => this.#assertSessionId(sessionId));
-    uniqueIds.forEach((sessionId) => this.#deletedSessionIds.add(sessionId));
+    uniqueIds.forEach((sessionId) => {
+      this.#deletedSessionIds.add(sessionId);
+      this.#dropSearchCache(this.#filePath(sessionId));
+    });
     await Promise.all(uniqueIds.map((sessionId) => {
       const previous = this.#writeQueues.get(sessionId) ?? Promise.resolve();
       const next = previous
@@ -799,6 +1015,7 @@ export class SessionStore implements SessionStoreLike {
       return Promise.reject(new Error("Session has been deleted"));
     }
     const serialized = `${JSON.stringify(event)}\n`;
+    this.#dropSearchCache(this.#filePath(sessionId));
     const previous = this.#writeQueues.get(sessionId) ?? Promise.resolve();
     const next = previous
       .catch(() => undefined)
@@ -815,6 +1032,39 @@ export class SessionStore implements SessionStoreLike {
 
   #filePath(sessionId: string): string {
     return path.join(this.#directory, `${sessionId}.jsonl`);
+  }
+
+  async #searchProjection(filePath: string, signal?: AbortSignal): Promise<SessionSearchProjection> {
+    const stat = await fs.stat(filePath);
+    const cached = this.#searchCache.get(filePath);
+    if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) {
+      this.#searchCache.delete(filePath);
+      this.#searchCache.set(filePath, cached);
+      return cached.projection;
+    }
+    if (cached) this.#dropSearchCache(filePath);
+    const projection = await readSearchProjection(filePath, signal);
+    signal?.throwIfAborted();
+    const finalStat = await fs.stat(filePath);
+    const bytes = Buffer.byteLength(JSON.stringify(projection), "utf8");
+    if (bytes <= MAX_SEARCH_CACHE_BYTES && finalStat.size === stat.size && finalStat.mtimeMs === stat.mtimeMs) {
+      const value = { size: finalStat.size, mtimeMs: finalStat.mtimeMs, bytes, projection };
+      this.#searchCache.set(filePath, value);
+      this.#searchCacheBytes += bytes;
+      while (this.#searchCacheBytes > MAX_SEARCH_CACHE_BYTES) {
+        const oldest = this.#searchCache.keys().next().value as string | undefined;
+        if (oldest === undefined) break;
+        this.#dropSearchCache(oldest);
+      }
+    }
+    return projection;
+  }
+
+  #dropSearchCache(filePath: string): void {
+    const cached = this.#searchCache.get(filePath);
+    if (!cached) return;
+    this.#searchCache.delete(filePath);
+    this.#searchCacheBytes = Math.max(0, this.#searchCacheBytes - cached.bytes);
   }
 
   #assertSessionId(sessionId: string): void {

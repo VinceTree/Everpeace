@@ -1252,6 +1252,37 @@ test("agent restores prior context and persists each new context batch", async (
   assert.equal(persisted.some((items) => items.some(isPersistedRuleSnapshot)), true);
 });
 
+test("agent persists file attachments once and reuses them without duplicating retries or later turns", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const persisted: Array<Record<string, unknown>> = [];
+  const agent = new ReactAgent({
+    client: { responses: { async create(params) {
+      requests.push(structuredClone(params));
+      return { id: `response-${requests.length}`, output_text: "done", output: [] };
+    } } },
+    model: "deepseek-flash",
+    io: { async confirmBash() { return false; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+    async onHistoryAppend(items) { persisted.push(...items.map((item) => structuredClone(item))); },
+  });
+  const attachment = {
+    path: "src/example.ts",
+    startLine: 2,
+    endLine: 3,
+    totalLines: 10,
+    content: "second\nthird",
+    sha256: "b".repeat(64),
+    truncated: true,
+  };
+  await agent.runTurn('Review @"src/example.ts"#L2-L3', undefined, { attachments: [attachment] });
+  await agent.runTurn("continue without reattaching");
+
+  const markerCount = (value: unknown) => JSON.stringify(value).match(/<host_file_attachment /gu)?.length ?? 0;
+  assert.equal(markerCount(requests[0]?.input), 1);
+  assert.equal(markerCount(requests[1]?.input), 1);
+  assert.equal(markerCount(persisted), 1);
+  assert.match(JSON.stringify(persisted), /Review @\\"src\/example\.ts\\"#L2-L3/u);
+});
+
 test("agent reports usage for every response in a tool loop", async () => {
   const usage: Array<{
     input_tokens: number;

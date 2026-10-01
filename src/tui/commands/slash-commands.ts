@@ -4,6 +4,7 @@ export const SLASH_COMMANDS = [
   "/model",
   "/models",
   "/status",
+  "/context",
   "/diff",
   "/verify",
   "/undo",
@@ -73,6 +74,7 @@ export const TUI_HELP = `Slash commands
   /model   Switch between signed-in models
   /models  View models and credential status
   /status  View session, model, and token usage
+  /context Inspect the last coding request submitted in this process
   /diff    View bounded workspace changes
   /verify  Run discovered checks, or /verify <command>
   /undo    Undo the latest Agent turn when its files are unchanged
