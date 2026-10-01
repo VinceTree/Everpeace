@@ -24,6 +24,22 @@ test("apply_patch creates, updates with unified hunks, and deletes files", async
   });
 });
 
+test("apply_patch accepts a workspace reached through a filesystem alias", async (context) => {
+  if (process.platform === "win32") { context.skip("Windows temporary-directory aliases are covered by the clean-checkout CI"); return; }
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-apply-patch-alias-"));
+  const workspace = path.join(parent, "workspace");
+  const alias = path.join(parent, "alias");
+  try {
+    await fs.mkdir(workspace);
+    await fs.symlink(workspace, alias, "dir");
+    const result = await runApplyPatch([{ path: "note.txt", action: "create", content: "safe\n" }], alias);
+    assert.equal(result.status, "applied", result.error);
+    assert.equal(await fs.readFile(path.join(workspace, "note.txt"), "utf8"), "safe\n");
+  } finally {
+    await fs.rm(parent, { recursive: true, force: true });
+  }
+});
+
 test("apply_patch rejects traversal, stale hashes, and invalid patch context without writing", async () => {
   await withWorkspace(async (workspace) => {
     await fs.writeFile(path.join(workspace, "file.txt"), "before\n", "utf8");

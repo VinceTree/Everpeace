@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync } from "node:fs";
+import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { PermissionPolicy } from "../permissions/policy.js";
@@ -38,6 +38,11 @@ function comparable(value: string, platform: NodeJS.Platform): string {
   return platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
+function canonicalExistingPath(value: string, platform: NodeJS.Platform): string {
+  const resolved = pathApi(platform).resolve(value);
+  try { return realpathSync.native(resolved); } catch { return resolved; }
+}
+
 function isWithin(candidate: string, root: string, platform: NodeJS.Platform): boolean {
   const api = pathApi(platform);
   const relative = api.relative(comparable(root, platform), comparable(candidate, platform));
@@ -74,11 +79,12 @@ export function createEffectiveSandboxPolicy(
 ): EffectiveSandboxPolicy {
   const platform = options.platform ?? process.platform;
   const api = pathApi(platform);
-  const workspace = api.resolve(workspaceRoot);
+  const workspace = canonicalExistingPath(workspaceRoot, platform);
   const permissionProfile = codexSandboxProfile(permissionPolicy);
-  const normalizedReadableRoots = [...new Set(readableRoots.map((root) => api.resolve(root)))];
+  const normalizedReadableRoots = [...new Set(readableRoots.map((root) => canonicalExistingPath(root, platform)))];
   const controlPaths = CONTROL_DIRECTORIES.map((name) => api.join(workspace, name));
   const globalState = applicationStateRoots(platform, options.env ?? process.env, options.homeDirectory ?? os.homedir())
+    .map((root) => canonicalExistingPath(root, platform))
     .filter((root) => !isWithin(workspace, root, platform));
   const pathRules = permissionProfile === ":danger-full-access"
     ? []

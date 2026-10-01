@@ -1,6 +1,6 @@
 ## 最新执行：全面对标后的 coding 能力加固
 
-状态快照：2026-10-01。本轮交付展示版本为 `0.3.1`。交付提交使用 `[skip publish]`，测试 CI 继续运行，Release workflow 跳过，不创建 tag 或 GitHub Release；本轮未运行付费模型请求。首次启用的 clean-checkout CI 暴露并修复了跨宿主 Windows 路径断言与 pnpm 10 原生依赖构建准入；安装脚本仅允许仓库已经锁定并打补丁的 `node-pty`。
+状态快照：2026-10-01。本轮交付展示版本为 `0.3.1`。交付提交使用 `[skip publish]`，测试 CI 继续运行，Release workflow 跳过，不创建 tag 或 GitHub Release；本轮未运行付费模型请求。首次启用的 clean-checkout CI 暴露并修复了跨宿主 Windows 路径断言、Windows runner 临时目录短路径别名、ripgrep 环境准备与 pnpm 10 原生依赖构建准入；安装脚本仅允许仓库已经锁定并打补丁的 `node-pty`。
 
 正确性边界已收口：后台命令在启动时绑定 coding task，取消、权限收紧、预算停止、异常和退出都会终止并等待进程树；最终验证后、Goal 完成前再次检查取消。`CodingTaskRunner` 统一 TUI 与 benchmark 的清理、三轮诊断、最终验证、Goal 和 Memory 结算，并返回真实 workflow outcome、停止原因、诊断轮数和首次 suite。模型流使用 attempt 级 AbortController，空闲超时会关闭 iterator/transport 后才允许重试。四 worker 只读池在连续结果可落盘时立即保存和释放，同时把全部已完成但未落盘的有界结果计入背压。
 
@@ -10,7 +10,7 @@ Provider 请求统一通过 request executor：coding、stream recovery、fallba
 
 Benchmark 已有可执行的内部 campaign：`pnpm benchmark:campaign -- --config <file> --prove-fixtures` 只做离线 proof，`--live` 才加载系统凭据并要求 per-task/campaign token budget。生产 adapter 构造真实 Agent、Session、权限、sandbox、workflow 和 `CodingTaskRunner`；通用外部 harness 继续使用受校验的 `EVERPEACE_BENCHMARK_RESULT` JSON。固定 dsh adapter 会核对完整 `639ed015397290b3745d163aafe02ffee4aa3f84` checkout，直接启动其中的 built JS entry，创建内容锁定的专用 headless profile，并在上游 `llm/stream` 边界校验主请求的 model/high/32K、按 attempt 记录 cache/unknown usage 和执行预算准入。随机计划记录 seed，执行目录按 campaign/harness/task/repetition 隔离，独立 acceptance 不受工作区脚本篡改影响。十项 Chalk/Commander/Day.js fixture 均已人工复核并离线证明 pristine pass → seed fail → reference pass；Chalk 固定 revision 原本禁用 lockfile，评测材料另存 evaluator-owned `package-lock.json`，全部 setup 使用固定 npmjs registry 的 `npm ci --ignore-scripts`。
 
-当前待办只剩外部证据与后续能力：在固定 dsh checkout 完成官方依赖安装/build 并实际启动生成的 profile，运行 9 次 smoke 后再运行 90 次正式付费比较，并在真实 Windows Terminal 验收失败→修复→完整通过、Ctrl+C 和 Session 恢复。当前没有相对 dsh 的性能结论。最终 Windows Node 22 门禁：`pnpm test` 共 417 项，416 通过、1 项按平台跳过、0 失败；`pnpm typecheck` 与 `pnpm build` 通过；排除用户原有 `.gitignore`、`LICENSE` CRLF 差异后的 `git diff --check` 通过。完整差异检查仍只报告这两个既有文件的 CRLF 行尾；未改写或清理它们。用户原有未跟踪 `.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`tests/unit/codex/`、`{}` 继续保留。
+当前待办只剩外部证据与后续能力：在固定 dsh checkout 完成官方依赖安装/build 并实际启动生成的 profile，运行 9 次 smoke 后再运行 90 次正式付费比较，并在真实 Windows Terminal 验收失败→修复→完整通过、Ctrl+C 和 Session 恢复。当前没有相对 dsh 的性能结论。最终 Windows Node 22 门禁：`pnpm test` 共 418 项，416 通过、2 项按平台跳过、0 失败；`pnpm typecheck` 与 `pnpm build` 通过；排除用户原有 `.gitignore`、`LICENSE` CRLF 差异后的 `git diff --check` 通过。完整差异检查仍只报告这两个既有文件的 CRLF 行尾；未改写或清理它们。用户原有未跟踪 `.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`tests/unit/codex/`、`{}` 继续保留。
 
 ## 最新执行：DeepSeek Harness 全面对标可靠性与工具补齐
 

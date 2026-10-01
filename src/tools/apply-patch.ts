@@ -230,7 +230,7 @@ async function preparePatch(
     for (const operation of operations) {
       patchBytes += Buffer.byteLength(operation.content ?? operation.patch ?? "", "utf8");
       if (patchBytes > MAX_PATCH_BYTES) throw new Error("Patch batch exceeds the 512 KiB limit");
-      const target = path.resolve(workspace, operation.path);
+      const target = path.resolve(root, operation.path);
       await assertSafeTarget(root, target);
       const relative = path.relative(root, target);
       if (relative.includes(":")) throw new Error("Alternate data streams are not supported");
