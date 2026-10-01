@@ -43,7 +43,7 @@ Windows 的 Codex restricted-token backend 可以运行系统 PowerShell，但 G
 
 除标准 tools 外，当前也把 MCP resources/prompts 映射为受审批的合成 function call：`list_resources`、`read_resource`、`list_prompts` 和 `get_prompt`。这些能力按 MCP 分页读取并沿用同一超时、取消、结果大小和 context 持久化边界。Codex OAuth 凭据复用、`http_headers_helper`、elicitation、sampling、tasks、list-changed 热更新和按工具持久审批策略尚未接入。OAuth/header-helper server 会以明确失败状态显示；不得声称与完整 Codex MCP runtime 等价。
 
-模型文件编辑通过统一兼容的 `apply_patch` function tool 接入，支持有界 unified diff、可选 hash、原子批次和回滚；它不是完整 Codex 原生 `apply_patch_call` wire protocol。
+模型文件编辑通过兼容的 `apply_patch` function tool 接入，支持有界 unified diff；生产 update/delete 强制匹配宿主读版本，审批绑定 preview hash 与权限 revision。更新逐文件原子替换，创建排他执行；批量失败仅回滚仍匹配本次 post-image 的已写文件，冲突或回滚错误明确报告，不保证整个批次原子成功。详见 [TOOLS](TOOLS.md)；它不是完整 Codex 原生 `apply_patch_call` wire protocol。
 
 ## Skills
 
@@ -61,7 +61,7 @@ Windows 的 Codex restricted-token backend 可以运行系统 PowerShell，但 G
 
 `/skills` 现为三入口管理向导：
 
-- 创建：每次选择项目或用户作用域，向当前模型发送无工具、`store: false` 的生成请求，只接受一个完整 `SKILL.md`；生成后可让模型再次校验/改进、在 TUI 中编辑完整文件，或确认保存。
+- 创建：每次选择项目或用户作用域，按供应商能力构造无工具的有界辅助请求，只接受一个完整 `SKILL.md`；非 OpenAI 端点不强行发送 `store` 字段。生成后可让模型再次校验/改进、在 TUI 中编辑完整文件，或确认保存。
 - URL 安装：接受公开 HTTPS GitHub 仓库/文件夹、任意公开 Git 仓库根、直接 `SKILL.md` 和单/多 Skill ZIP。来源先进入系统临时目录；Git 来源先 shallow、no-checkout clone，再从 Git tree 读取候选 metadata、按 Skill 名称优先保留规范 `skills/<name>` 副本，并只 sparse checkout 通过预检的候选目录；发现多个不同 Skill 时用户只选择一个。完整 `SKILL.md`、来源和文件数量先预览，之后再选择作用域并明确确认。
 - 查看：列出所有发现的 Skill，显示完整内容；可把 `$name` 回填到主输入框，实际显式激活仍发生在用户提交该问题时。
 

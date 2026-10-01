@@ -2,6 +2,8 @@
 
 Everpeace 将 OpenAI Codex 的核心 turn/sampling/follow-up 控制流程适配为 TypeScript，并通过 `ReactAgent` 接入真实 CLI/TUI；这不是完整 Rust runtime 的原样复制。
 
+先读 [RUNTIME](RUNTIME.md) 了解当前生产请求、workflow 与结算关系；本文保留 loop 的协议细节和上游出处。最新验证证据见 [HANDOFF](../HANDOFF.md)。
+
 ## 上游来源
 
 固定参考：`openai/codex` revision `e269f2164cbb9f499e4f22301c393500e2a831f3`。
@@ -37,7 +39,7 @@ benchmark 只用于协议变更前建立证据，不是当前实现的替代品�
 
 ## 工具能力与并发准入
 
-`runAgentLoop` 可接收可选的 `toolCapabilities`，声明 `readOnly`、`idempotent`、`parallelSafe` 和 `resourceKeys`。只有前三项均为真且批次内资源键不冲突时才允许并发；未知能力或共享资源键保持串行。旧的 `canRunInParallel` 仅作为兼容回调，在没有能力声明时使用，不改变默认串行语义。ReactAgent 只为当前 step 提供的内置文件/Skill 读取声明并发能力；MCP annotations 不授予本地 parallelSafe，MCP 与所有审批保持串行。显式开启 `parallelToolCalls` 后每批默认最多 4 项，可由 `maxParallelTools` 调整。
+`runAgentLoop` 可接收可选的 `toolCapabilities`，声明 `readOnly`、`idempotent`、`parallelSafe` 和 `resourceKeys`。只有前三项均为真且批次内资源键不冲突时才允许并发；未知能力或共享资源键保持串行。旧的 `canRunInParallel` 仅作为兼容回调，在没有能力声明时使用。ReactAgent 只为当前 step 提供的内置文件/Skill 读取声明并发能力；MCP annotations 不授予本地 parallelSafe，MCP 与所有审批保持串行。生产通过 `parallelReadTools` 开启宿主读取并发，默认最多 4 项，可由 `maxParallelTools` 调整；与供应商 `parallelToolCalls` 参数分离。连续就绪结果在池内按序持久化后释放，全部已完成但尚未持久化的结果计入数量与字节背压。
 
 function call 仍先完整校验并 durable record，再 dispatch；无效或重复 call_id、缺少 name/arguments 的响应在落盘和副作用前拒绝。这是当前 `response.completed` 批处理模型的安全边界，不等价于 Codex 的 `output_item.done` item-level 调度。
 
@@ -47,13 +49,13 @@ P0 协议基线已完成：`LoopEvent` 可报告 `response_rejected`；incomplet
 
 当前阶段必须保持：半截 response 或 `response.failed` 不执行工具；响应 durable record 先于副作用；工具结果按模型顺序落盘；采样重试不重跑已完成工具；取消和持久化失败 fail-closed。
 
-本地 no-op adapter smoke 只验证 benchmark harness 记录链路，不构成真实 provider baseline。固定任务 manifest 和真实 provider smoke 完成前，不以模拟或本地 smoke 结果推动 P1 协议改变。
+本地 no-op adapter smoke 只验证 benchmark harness 记录链路，不构成真实 provider baseline。固定任务和 fixture proof 已接入，见 [BENCHMARKING](../BENCHMARKING.md)；真实 provider smoke 和正式比较的证据仍须独立取得，不以模拟结果推动 P1 协议改变。
 
 ## 当前与上游差异
 
 上游是 Rust async runtime、流式 Responses 事件及多服务 Session；本地现在优先使用 Responses SSE。只有端点在尚未发出任何事件前明确拒绝 streaming 时，当前 Agent 才切换到 buffered `create`，并在该 Agent 生命周期内记住这个能力结果。连接中断、异常 EOF 和 `response.failed` 不会 fallback，而是按错误分类进行有界重试或失败。没有复制 Codex prompt、UI、账户登录或内部私有服务。
 
-当前未移植：hook、多 Agent、流中途提前执行工具。并行工具只限显式能力标记的无副作用读取工具；基于 response id 的流续接也只在 provider 明确提供 adapter 时启用。`ReactAgent` 已支持已知阈值前置压缩，并在明确的 context-limit 错误后最多额外执行一次原生 compaction 和恢复采样；压缩失败不会进入普通采样重试，也不做本地摘要回退。模型 shell 已通过固定版本 Codex CLI 接入平台 sandbox；MCP tools 和主机 Skills 已作为现有 function-call 调度器的扩展接入，但不等同于 Codex 的完整 MCP/Plugin/Skill provider runtime，边界见 [CODEX_CAPABILITIES.md](./CODEX_CAPABILITIES.md)。循环提供 `LoopEvent`、流式文字 delta 和 safe-checkpoint steering：采样中的纠正会停止当前 SSE，工具执行中的纠正在工具结果持久化后生效；未启动的 function call 会写入 `steered` output，保证后续请求上下文完整。Ctrl+C 取消时，已提交但尚未应用的纠正会先写入模型 context，避免遗留到未来轮次。实时增量只属于当前 UI，不写入 JSONL。新增的批次/续接事件只用于 TUI、测试和诊断，不写入 Session JSONL。
+当前未移植：hook、多 Agent、流中途提前执行工具。并行工具只限显式能力标记的无副作用读取工具；基于 response id 的流续接也只在 provider 明确提供 adapter 时启用。`ReactAgent` 支持已知阈值前置压缩，并在明确 context-limit 后最多额外压缩恢复一次：官方 OpenAI 按声明能力走 native compact，DeepSeek/compatible 走普通模型请求摘要；压缩失败不会进入普通采样重试，也不替换原 context。模型 shell 已通过固定版本 Codex CLI 接入平台 sandbox；MCP tools 和主机 Skills 已作为现有 function-call 调度器的扩展接入，但不等同于完整 MCP/Plugin/Skill provider runtime，边界见 [CODEX_CAPABILITIES.md](./CODEX_CAPABILITIES.md)。循环提供 `LoopEvent`、流式文字 delta 和 safe-checkpoint steering：采样中的纠正会停止当前 SSE，工具执行中的纠正在工具结果持久化后生效；未启动的 function call 会写入 `steered` output，保证后续请求上下文完整。Ctrl+C 取消时，已提交但尚未应用的纠正会先写入模型 context，避免遗留到未来轮次。实时增量只属于当前 UI，不写入 JSONL。新增的批次/续接事件只用于 TUI、测试和诊断，不写入 Session JSONL。
 
 自动测试使用模拟 Responses 与现有真实工具回归；不声称已验证真实供应商完整端到端或与 Codex 全功能等价。
 
@@ -65,7 +67,7 @@ Steering 使用独立的 `hasPendingSteering` 查看接口和 `applySteering` �
 
 `runAgentLoop` 返回 `AgentLoopResult`，`AgentTurnResult.stopReason` 可为 `budget_limited` 或 `usage_limited`。本轮关联 Goal 的状态在采样/重试前、usage 更新后及工具检查点检查；触达限额后保留已收到响应，为未执行调用补齐带原因的 `skipped`，发出 `stopped` phase，不发出伪 `completed`。TUI 显示停止原因并跳过 workflow 自动验证修复及 Goal 自动续跑。预算基于已返回 usage，正在进行的单次请求可能越过剩余预算；已知消耗仍如实累计。预算停止不触发 learned-memory 成功提炼。
 
-`PersistenceError` 区分 context、usage、Goal 和 workflow 存储失败；不会进入模型请求重试，也不会被转换成普通工具失败继续执行。真正的工具错误仍返回 function output。并行批次等待所有已启动调用结束，按模型顺序落盘，取消后不启动下一批。所有步数、重试及并发配置必须是合法有限整数。
+`PersistenceError` 区分 context、usage、Goal 和 workflow 存储失败；不会进入模型请求重试，也不会被转换成普通工具失败继续执行。真正的工具错误仍返回 function output。并发池按原顺序持续落盘连续就绪结果；取消后停止补充调用并等待已启动调用收束。所有步数、重试及并发配置必须是合法有限整数。
 
 ## 压缩与流缓存
 

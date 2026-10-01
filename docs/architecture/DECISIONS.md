@@ -1,8 +1,14 @@
 # Architecture Decisions
 
+## 文档分层与按任务阅读
+
+开发知识统一放在 `docs/`，`dosc/` 只保留导航入口。根 [AGENTS](../../AGENTS.md) 保存启动流程与全局约束；[知识库索引](../README.md) 路由专题；[PROJECT_MAP](PROJECT_MAP.md) 关联实际源码和回归测试。新 Session 只必读 AGENTS 与 [HANDOFF](../HANDOFF.md)，然后按任务选择必要专题与修改点，不重复全仓调查。
+
+专题说明当前机制，HANDOFF 保存当前证据与待验收项，[PLAN](../PLAN.md) 维护当前范围；历史交接与计划完整移入 [archive](../archive/README.md)，旧结论不当作当前行为或执行授权。代码和测试推翻文档时先服从证据，再同步修正说明；文档不能替代修改前的定向代码阅读。本文同主题内容须保持一致，不依赖读者自行猜测后面的段落覆盖前文。
+
 ## Coding workflow and verification
 
-普通 coding turn 使用进程内状态机协调理解、实现、验证、诊断和完成阶段，不替换 Responses/ReAct 工具循环，也不自动提交 Git。`apply_patch` 成功后立即选择有界快速检查，回合结束选择完整检查；命令只从工作区 manifest/锁文件和常见项目标志中发现，不执行任意脚本发现逻辑。验证 stdout/stderr 有界保留，失败作为结构化结果返回模型，修复次数超过三次后进入 `blocked`。
+普通 coding turn 使用进程内状态机协调理解、实现、验证、诊断和完成阶段，不替换 Responses/ReAct 工具循环，也不自动提交 Git。`apply_patch` 成功后执行有界快速检查，回合结束运行完整检查集合；命令只从工作区 manifest/锁文件和常见项目标志中发现，不执行任意脚本发现逻辑。验证 stdout/stderr 有界保留，失败作为结构化结果返回模型；宿主实际启动最多三轮诊断，耗尽后进入 `blocked`，同一轮多次 patch 失败不重复扣减。
 
 个人开发语义以 Node/TypeScript 单包项目为目标。每个逻辑 step 读取工作区根到已访问目标目录的 `AGENTS.md` chain 和 `package.json` scripts；该内容属于低优先级项目背景，不能提升权限或覆盖当前用户/开发者指令，网络重试复用同一 step 快照。最终检查不再选择单条命令，而是重新发现当前 manifest，按 `typecheck`、`lint`、`test`、`build` 串行首败停止；不存在检查时返回 `unavailable`，不能等价为成功。
 
@@ -30,7 +36,7 @@
 
 模型 Bash 与 Codex CLI JSON 请求必须共享同一条 bounded process executor，避免只在 `runCodexCli` 测试路径覆盖 Windows sandbox helper retry，而真实 Bash 仍绕过它。携带 `--` payload 的 sandbox 命令不得根据 stdout/stderr 中的 helper 文案自动重试；只有无 payload 的 helper 调用保留一次重试，且成功退出不得重试。取消、超时和最终失败都保持 fail-closed，不得回退宿主 shell。
 
-文件编辑使用兼容 provider 的 `apply_patch` function tool，而不是要求所有端点支持原生 patch call。工具先完整预检工作区边界、符号链接、大小、重复路径和可选 SHA-256，再以临时文件/rename 应用多文件批次；任何失败都尽力恢复原内容。权限策略不进入 Session JSONL：用户 command prefix rules 写入平台配置目录，项目策略写入 `.everpeace/permissions.json` 时只允许收紧权限，避免仓库内容提升模型能力；patch staging 数据仍只存在进程内。
+文件编辑使用兼容 provider 的 `apply_patch` function tool，而不是要求所有端点支持原生 patch call。工具完整预检路径、符号链接、大小和重复操作；生产 update/delete 强制使用宿主读取观察的原始字节 SHA-256，模型省略可选 hash 不能绕过。审批再次绑定 preview 版本和权限 revision，create 排他创建；批量失败只回滚仍匹配本次 post-image 的已写文件，并报告冲突/IO 错误。权限策略不进入 Session JSONL：用户 command prefix rules 写入平台配置目录，项目策略只允许收紧；patch staging 数据仍只存在进程内。
 
 ## Model shell timeout boundary
 
@@ -42,15 +48,15 @@ benchmark runner 是 Agent/TUI 之外的独立评测边界。任务通过 adapte
 
 benchmark 结果不是 Session 事件，不写入 JSONL，也不进入模型 context。adapter 必须把取消信号传递给底层 harness；runner 在任务超时后立即结束记录并将结果标记为 `timed_out`，底层 adapter 仍需自行终止其子进程或网络请求。unsafe action 会使运行失败，即使验证命令通过。
 
-验证失败默认允许最多三次有界修复尝试。第一次 adapter 调用使用 `implement` phase，后续调用使用 `diagnose` phase，并通过 `previousVerification` 传递上一次验证结果；同一个 adapter 应复用 Agent/session context。任务前后只读记录 Git 快照，正式 benchmark 使用临时 clone/worktree，日常目录不自动回滚。可选 artifact sink 独立保存脱敏诊断文件，不进入 Session JSONL。
+通用 adapter 兼容有界 `implement/diagnose` 尝试；生产 adapter 声明 `managesRepairs` 并复用 `CodingTaskRunner` 和连续 Session，只保留生产三轮诊断，不叠加评测器修复循环。独立 acceptance 不能把取消或预算停止改为整体成功。任务前后只读记录 Git 快照，正式 benchmark 使用隔离工作区，日常目录不自动回滚。可选 artifact sink 保存脱敏结果，不进入 Session JSONL。完整契约见 [BENCHMARKING](../BENCHMARKING.md)。
 
 Provider capability profile 只记录已观察的模型能力和 context window。未知兼容端点保持保守默认值，第一阶段不自动路由或切换模型，避免把未验证的 provider 假设变成运行时策略。
 
 ## Context compaction
 
-`/compact` 和自动压缩都调用供应商原生 Responses `/responses/compact`，不生成本地摘要。原始输出必须原样保留为新的模型 context，包括供应商的 retained items 与 opaque compaction item；可见 transcript 和既有 JSONL timeline 不裁剪。压缩成功后以 `context_compacted` 事件原子替换 context，并把压缩 usage 累计进 session token 统计；手动命令在模型轮次或直接命令运行时拒绝，已知 context window 达到 80% 时在下一次采样前自动触发，未知 window 不自动触发。
+`/compact`、阈值压缩和 context-limit 恢复共用供应商能力选择：官方 OpenAI 走声明的 native compact，DeepSeek/compatible 使用普通模型请求生成 summary。native 输出原样保留 retained/opaque item；summary 按完整 assistant/tool-result 边界压缩，保留最近两个完整单元与未闭合链，拒绝 incomplete、空白或未缩短结果。可见 timeline 不裁剪，context 仅在持久化成功后替换；失败或取消保留原 context。
 
-响应式恢复继续复用同一原生 compaction 接口：只有明确的 context-limit 错误才触发，每个 `runTurn` 最多一次；压缩成功后才用替换后的 context 重试采样，压缩失败不进入普通采样重试，也不做本地摘要回退。SSE 只有收到 `response.completed` 才算成功；能力拒绝必须发生在首个事件之前才允许切到 buffered 请求，连接中断、异常 EOF 或半截输出只从未持久化的历史有界重试。
+阈值取 `min(窗口 × 80%, 窗口 − 实际输出预算 − 安全余量)`，安全余量为窗口 5%、最多 32K；未知窗口不自动按阈值触发。`context_compacted` 保留现有持久化渠道，压缩用量计入消耗但压缩后占用设为未知。明确 context-limit 的恢复每个 `runTurn` 最多一次，失败不转为普通采样重试。SSE 只有收到 `response.completed` 才算成功；首个事件之前明确拒绝 streaming 才允许 buffered fallback，半截结果不得启动工具。
 
 Agent Loop 可靠性预算彼此隔离：普通采样重试默认最多两次，provider event-cursor 续接和 context compaction 各使用独立的一次性预算；半截 SSE 永不写入 context 或执行工具，续接失败回退到有界整轮重试。供应商请求仍默认 `parallelToolCalls=false`；宿主读取调度与该参数分离，生产中只允许 `read_file`、`list_directory`、`read_skill` 等明确声明安全能力的调用进入最多四项的任务池。调用并发执行但按模型顺序持久化，副作用工具和审批永不自动并行。批次、续接和 retry 分类事件只供当前 UI/诊断使用，不扩展 Session JSONL schema。
 
@@ -218,7 +224,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 ## 长上下文、usage 与终端控制
 
 - 已知窗口的自动阈值取 `min(80%, window-outputBudget-headroom)`；headroom 为窗口 5%、最多 32K。真实 usage 与请求估算不混写为同一观测；阈值压缩在同一 history revision 上只执行一次。
-- 官方 OpenAI 使用声明的 native compact；DeepSeek/compatible 使用模型摘要，最多 8K 输出，保留最近两个完整用户交互单元。摘要明确区分宿主验证证据与模型自述，取消、失败或持久化失败不会替换原 context。明确 context-limit 每轮只恢复一次。
+- 官方 OpenAI 使用声明的 native compact；DeepSeek/compatible 使用模型摘要，最多 8K 输出，保留最近两个完整 assistant/tool-result 交互单元，不依赖用户消息数量。摘要明确区分宿主验证证据与模型自述，取消、失败或持久化失败不会替换原 context。明确 context-limit 每轮只恢复一次。
 - 进入模型 context 的单项工具结果限制为 32 KiB；超限时返回含首尾、总字节数和进程内续读 ID 的有效 JSON，终端保留输出不因此缩小。
 - Usage 独立累计输入、输出、reasoning、cache hit、cache write 和带缓存统计的输入分母。缺少 write 不抹掉 hit；缺失样本使完整性保持 partial。DeepSeek cache miss 不伪装成 cache write。
 - `/reasoning` 只在任务间改变下一轮快照并随 Session 保存；`/doctor` 默认仅检查本地 Node、shell、sandbox 和配置，只有 `--live` 发出一次有界模型请求。`/status` 展示实际协议、压缩策略、推理档位及独立 usage。

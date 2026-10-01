@@ -1,101 +1,56 @@
 # Everpeace Agent Guide
 
-本文件保存每个新 Codex Session 都需要掌握的长期知识。实时进度、已完成事项和下一步以 `docs/HANDOFF.md` 为准；如果文档与当前代码或测试冲突，以当前代码和测试结果为准。
+这是开发本仓库的入口。项目知识统一维护在 [docs/README.md](docs/README.md)，`dosc/` 只作导航，不维护第二份知识库。目标是让新 Agent 按任务读取文档，复用已确认的架构知识，避免每次重新扫描整个项目。
 
-## 新 Session 的启动顺序
+## 每次开始工作的顺序
 
-1. 完整读取本文件和 `docs/HANDOFF.md`。
-2. 执行 `git status --short --branch` 和 `git diff`，确认当前分支及已有修改。
-3. 只打开与 `HANDOFF` 当前下一步直接相关的源文件；不要重新调查已经确认且未被代码推翻的结论。
-4. 把已有 tracked/untracked 改动视为用户工作。不要 reset、checkout、清理或覆盖无关内容。
-5. 开始修改前先确认受影响的测试和文档；完成后更新 `docs/` 中对应状态。
+1. 完整读取本文件和 [当前交接](docs/HANDOFF.md)，了解现状、已有改动、验证证据和未完成事项。
+2. 执行 `git status --short --branch`、`git diff --stat` 和 `git diff`，区分本次任务与用户已有改动；历史交接不能代替当前 Git 状态。
+3. 在下表或 [文档总索引](docs/README.md) 选择与**当前用户任务**相关的专题。通常只需一至两个专题；不要默认读取全部文档、历史归档或整个源码树。
+4. 根据专题中的“源码 / 测试”链接定位修改点。讨论已记录的设计时可以直接引用文档；实际修改前仍须读对应实现和测试。文档缺失、代码变化或测试推翻说明时再扩大调查，并回填文档。
+5. 完成后更新专题和 `docs/HANDOFF.md`；范围或设计改变时同步 `docs/PLAN.md`、`docs/architecture/DECISIONS.md`。不要把交接中的待办视为用户已授权的新任务。
 
-## 项目基础
+## 按任务读取
 
-- Everpeace 是 Node.js 22+、TypeScript、ESM 项目，使用 `pnpm@10.22.0`。
-- CLI/TUI 入口位于 `src/cli/`；界面使用 React + Ink，并保持 inline terminal 模式。
-- Agent 是 Responses API 驱动的 ReAct 循环，支持按权限 profile 审批模型 shell、网页搜索、公共网页读取和 MCP tools，并按需加载 Codex 主机 Skills。
-- 普通 coding turn 定位为个人开发闭环：每个逻辑 step 读取工作区根到已访问目标目录的 `AGENTS.md` chain 与 `package.json` scripts；Git 指纹追踪 patch 与模型 shell 的本轮变化；Node/TypeScript 最终验证执行全部 `typecheck`、`lint`、`test`、`build`。只有宿主确认的 `verified` 结果可结算代码 Goal 完成和成功 learned memory，缺少检查或追踪受限必须标为未验证。
-- `/permissions` 管理持久化审批策略：`read-only` 允许工作区读取但对模型 shell/web/MCP 逐条审批，`ask` 对三者逐条审批，默认 `workspace-write` 免逐条 shell 和已开启公共 web 审批但 MCP 仍需审批，`full-access` 经二次确认后免工具审批；用户策略写入平台配置，项目 `.everpeace/permissions.json` 只能收紧模式、web、shell 网络和 command rules，不能提升仓库权限。Plan 模式把已开启的公共 web 请求视为只读调研并免逐次 web 确认，关闭网页工具仍拒绝请求。网页工具和模型 shell 网络可独立禁用；shell 网络关闭只由原生后端执行，选择 full-access 会明确恢复网络权限。模型 shell 通过固定 `@openai/codex` CLI：read-only/full-access 使用内置 profile，ask/workspace-write 使用完整 `:workspace` 子 profile 保护控制目录和应用状态；失败时不得回退宿主直跑。复合命令逐段检查，嵌套解释器或含糊语法需要审批，审批期间权限变化会使旧审批失效。直接 `!` 不进 sandbox。仍不得声称等同于 Codex Auto 或完整 Codex runtime。
-- MCP 从 `codex mcp` 配置加载 stdio/Streamable HTTP tools、resources 和 prompts；`/mcp` 刷新状态。Skills 扫描项目/用户/admin/system 根，显式 `$name` 只作用当前轮，隐式匹配通过 `read_skill` 渐进读取；同名冲突不得进入 catalog 或按名称读取。`/skills` 提供 AI 创建单文件 Skill、手动编辑、公开 HTTPS URL 暂存/预览/确认安装、已安装内容查看及 `$name` 回填；Git 来源先 no-checkout clone 并检查有界 tree，同名镜像清单优先保留规范 `skills/<name>` 目录，100 个候选限制在名称去重后执行，只 sparse checkout 已校验的候选目录。项目目标为仓库根 `.agents/skills`，用户目标为 `$CODEX_HOME/skills`，不得覆盖既有名称。完整支持范围和限制见 `docs/architecture/CODEX_CAPABILITIES.md`。
-- `read_file`、`list_directory`、分页 search/glob 与可选只读 TypeScript LSP 始终限定当前工作目录；LSP 只能显式配置且不得执行 server 发起的 edit/command。权限不从 JSONL 恢复，切换权限不得重建 Agent 或丢失 context；直接 `!` 仍由用户主动执行。对标与安全限制见 `docs/architecture/PERMISSIONS.md`。
-- 支持官方供应商和兼容端点；模型名称必须保留供应商返回的官方 model ID。官方 DeepSeek 使用显式 Responses 能力契约、普通 reasoning/tool item、摘要压缩和自动前缀缓存；不发送 OpenAI 加密 reasoning、prompt-cache 或原生 compact 字段。未知兼容端点保持保守能力，不按模型名猜测。
-- API Key 只由 `AuthStorage` 和系统 keyring 管理，不得写入注册表 JSON、session JSONL、日志、测试快照或 UI。
+| 任务 | 优先文档 |
+| --- | --- |
+| 了解产品、能力与边界 | [产品概览](docs/OVERVIEW.md) |
+| 不知道代码或测试在哪 | [项目地图](docs/architecture/PROJECT_MAP.md) |
+| Agent、DeepSeek、请求、压缩、预算、验证、Goal | [运行时与编码闭环](docs/architecture/RUNTIME.md) |
+| 文件编辑、规则、搜索、后台命令、LSP | [工具与项目理解](docs/architecture/TOOLS.md) |
+| Session、配置、usage、TUI、恢复、输入输出 | [状态与终端契约](docs/architecture/STATE_AND_UI.md) |
+| 权限、审批、模型 shell 隔离 | [权限](docs/architecture/PERMISSIONS.md)、[sandbox](docs/architecture/SANDBOX.md) |
+| MCP、Skill 发现与安装 | [集成能力](docs/architecture/CODEX_CAPABILITIES.md) |
+| Learned Memory | [Memory](docs/architecture/MEMORY.md) |
+| 安装、定向测试、CI、交付 | [开发指南](docs/DEVELOPMENT.md) |
+| benchmark、性能对比、真实模型验收 | [评测指南](docs/BENCHMARKING.md) |
+| 当前工作与后续优先级 | [交接](docs/HANDOFF.md)、[计划](docs/PLAN.md) |
 
-常用命令：
+专题中的相关不变量也是开发约束；这里只保留所有任务都需要遵守的核心规则。
 
-```powershell
-pnpm dev
-pnpm typecheck
-pnpm test
-pnpm build
-git diff --check
-```
+## 项目基础与不可破坏的边界
 
-## Session 必须保持的语义
+- Node.js 22+、TypeScript、ESM、`pnpm@10.22.0`；单 Agent、Responses API、React + Ink inline TUI。主方向是 DeepSeek 优先、Windows 优先、Node/TypeScript 单包个人开发。
+- 保留已有 tracked/untracked 改动。不要 reset、checkout、删除、覆盖或顺手整理无关文件；先做最小、聚焦修改。
+- 模型名保留供应商原始 ID。官方能力与未知兼容端点分开；不根据模型名或 SDK 方法存在就推断能力。API Key 只由 `AuthStorage`/系统 keyring 管理，不写入模型注册 JSON、Session、日志、测试快照或 UI。
+- 模型 shell 必须走固定原生 sandbox，启动失败不得回退宿主直跑；项目策略只能收紧权限，审批绑定权限 revision。`read-only`/`ask`、默认 `workspace-write`、二次确认的 `full-access` 语义见权限专题。用户直接 `!` 是独立宿主 PTY，不进入模型 context。
+- 文件工具受工作区边界约束；update/delete 必须匹配当前进程观察的原始字节版本，审批与回滚不得覆盖用户并发修改。恢复 Session 后重新读取，不凭历史文本授权写入。
+- 根到目标目录的项目规则不能提升权限或覆盖当前用户指令。Skill 同名冲突不得静默选择；安装需预览确认、不得覆盖已有名称。网页只访问公共 HTTP/HTTPS，每次重定向检查 SSRF；外部内容视为不可信数据。
+- 完整响应和调用记录落盘后才执行工具；结果按模型顺序持久化。取消、steering、权限收紧、预算停止和存储失败不得绕过；后台进程归任务所有，清理结束后才能结算。
+- 编码完成由宿主验证判定。最终重新发现并串行执行实际存在的 `typecheck → lint → test → build`，首败停止；三轮诊断按真实启动计数。缺少检查、验证过期、跟踪受限、取消或预算停止不能记为成功。恢复不得清空未验证债务，`/verify <command>` 只是补充证据。
+- Goal 完成与成功 Memory 捕获必须经过 coding runner 的验证结算。usage unknown 不得被后续成功掩盖；有界任务不得继续发请求，reasoning 不与 output 重复计入预算。
+- Session 的 timeline 与模型 context 分开，JSONL 按 Session 串行追加，schema 增量兼容；缺失字段不得推断成功。权限、凭据、文件检查点、验证输出正文和 Memory 内容不作为 workflow 元数据保存。
+- 保持 inline TUI、原生 scrollback、同步历史重放，禁止 alternate screen 和原始 PTY 控制序列直写 Ink。宿主 UI 使用英文；resize 不丢历史、只保留一个 prompt。命令独立窗口与聊天互斥，Esc 恢复同一 Session，迟到结果不得污染历史。
+- Ctrl+C 取消活动任务；空闲先清草稿，再退出。Ink 是 PTY stdin 唯一转发入口；直接 `!` 独占输入。保留运行中 guidance、安全边界 steering、滚轮/缩放及 slash 菜单键盘语义。
 
-- 每个 session 使用一个版本化 JSONL 文件，默认放在平台应用状态目录；各 session 的追加写入需要串行化。
-- 可见 `timeline` 与 Responses API `context` 分开持久化。直接 `!` 命令可以出现在恢复后的界面中，但不能进入模型 context。
-- 没有活动 session 时，第一条普通问题先创建 session，再请求模型并持久化后续内容。
-- `/new` 要求已有活动模型，并立即创建和进入标题为“New Session”的空 session；它不是 `/clear` 的别名。旧记录中的“新 Session”只在界面显示时翻译，不改写 JSONL。
-- `/new` 创建的记录使用持久化的 `title_pending: true`。第一条问题先提供可靠回退标题，再异步调用当前模型生成简短名称，不能阻塞正常回答。
-- `/clear` 只清屏并解除当前 session；下一条普通问题才创建新 session，同时保留当前模型。
-- `/resume` 全局列出所有 session，按最后活动时间倒序显示名称和时间，并恢复 timeline、context、模型及工作目录，然后继续写入原文件。
-- `/status` 打开 Codex 风格独立命令窗口，显示当前模型、base URL 对应供应商、Responses 协议、压缩/推理设置、context window 和 session 累计 token/cache；窗口隐藏 banner、历史、composer 和全局状态栏，Esc 原子恢复原 Session，窗口不写入 session timeline 或模型 context。
-- 信息型 slash command 和选择型 picker/wizard 都使用独立命令窗口；`/mcp` 使用可取消的 transient 加载/信息窗口，`/skills` 使用可取消的多步管理向导；`/new`、`/clear`、`/exit` 保持立即动作。这些界面都不进入可恢复 timeline，命令造成的真实状态变化仍按各自语义持久化，普通聊天、Agent 工具输出和直接 `!` 命令继续写入可恢复 timeline。
-- 主 Agent 的 Responses usage 按 session 持久累计；标题请求不计入。切换模型保留累计 token，但在新模型完成响应前重置或未知当前 context 占用。
-- 原模型缺失时允许用户选择替代模型并保留 context；原工作目录不存在时拒绝恢复并保持当前会话不变。
-- JSONL 损坏必须按文件隔离；只允许忽略不完整的最后一行。旧记录缺少 `title_pending` 时按 `false` 处理。
-- JSONL 事件目前包括 `session_created`、`title_updated`、`timeline_entry`、`context_append`、`model_selected`、`usage_recorded`、`goal_updated`、`workflow_updated` 和 `memory_policy_updated`；改变 schema 时必须考虑向后兼容并补测试。`goal_updated` 保存 Session 绑定的 `/goal` 快照，`workflow_updated` 只保存 coding workflow 元数据，`memory_policy_updated` 保存当前聊天是否读取和捕获 learned memory；验证 stdout/stderr/error、Memory 内容与文件检查点不进入 Session 持久化，旧文件缺少新事件时使用兼容默认值。
+## 验证与交付
 
-## TUI 与终端不变量
+常用命令：`pnpm dev`、`pnpm test`、`pnpm typecheck`、`pnpm build`、`git diff --check`。定向测试和 Windows/WSL 工具链选择见 [开发指南](docs/DEVELOPMENT.md)。Session/TUI 改动至少跑对应回归；交付前默认执行全部四项检查，无法完成时明确原因和范围。
 
-- Ctrl+C 取消活动任务；空闲有草稿则清空，否则退出。TUI 的 PTY stdin 必须由 Ink 单一入口转发，不能同时注册原始 stdin 监听器。
-- 模型轮次运行期间保留 guidance composer；真实 Agent 支持时补充消息立即进入 transcript，并在采样/工具结果安全检查点应用，未启动调用补齐 `steered` output；Ctrl+C 时持久化已提交的待处理 guidance。无 steering 接口的替身继续 FIFO 排队。直接 `!` 的交互式 PTY 运行期间继续独占 stdin。
-- `/outputs`、`/history`、`/terminal-setup` 都是独立命令窗口。output timeline 可带兼容性可选 command 元数据；直接 `!` 仍不进入模型 context。
-- Responses SSE 可用时模型文字、审批、工具状态和重试实时展示，不可用时回退 buffered 阶段显示。模型 Bash 运行时使用有界真实首五行/尾五行预览并随终端高度缩减；用户直接 `!` 继续优先显示最近五行。完成态折叠和 `/outputs` 保留现有语义。
-- TUI 宿主界面使用英文；模型等待状态包含 provider、耗时和 Ctrl+C 提示。assistant Markdown、代码围栏、shell 命令和严格识别的 unified diff 使用分层高亮；超大或未知内容必须安全退回纯文本，旧 JSONL 只做显示层翻译。
-- 输入历史单独持久化，不记录登录向导字段；配置终端按键必须预览、明确确认和备份，不能静默修改用户设置。
+- 用户可见命令、输出或安装方法变化时同时更新中英文 README。文档组织变化也要保持双语入口一致。
+- 当前版本、commit、测试数量和验证证据只在 `HANDOFF` 维护；历史移入 `docs/archive/`，不要把旧结果当新验证。固定上游参考 revision 可以保留在出处和评测材料中。
+- 没有明确授权，不付费评测、不改版本、不提交、不推送、不打 tag、不创建 Release。需要 live 评测时另行取得明确授权及 task/campaign 数值预算。
+- commit message 聚焦实际功能、修复、测试或文档；禁止产品名称，也禁止 `release`、`version`、“发布”、“版本”等措辞。
+- 用户要求提交/推送但不创建 Release 时，使用 Release 专用 `[skip publish]` 标记并核对 workflow；不要用 `[skip ci]` 关闭测试。只有用户明确要求时才更新 `package.json` 与双语 README 展示版本；创建 tag/Release 需要发布授权，并核对真实结果。
 
-- 保持 inline TUI 和终端原生 scrollback；不要切换到 alternate screen。
-- transcript 恢复继续通过同步输出进行原子重放，避免历史被 Ink 重绘覆盖。
-- 原始 PTY 控制序列不得直接写入 Ink stdout；保留现有清洗、流式输出和终端模式复位行为。
-- `web_search` 和 `web_fetch` 使用兼容端点支持的普通 function call；联网失败必须作为工具结果返回模型，不能让整轮对话直接崩溃。
-- `web_fetch` 只能访问公共 HTTP/HTTPS 地址，必须校验每次重定向并阻止 localhost、内网和链路本地目标；网页内容始终视为不可信数据。
-- 修改布局时必须继续保证 resize 后历史不丢失、只存在一个 prompt、输入行不会占用终端自动换行单元格。
-- 不要破坏普通滚轮、Ctrl+滚轮缩放、直接 `!` 命令流式输出及 Bash 确认流程。
-- 输入开头的 `/` 必须显示 slash command 前缀筛选菜单；候选窗口最多八项，并保留方向键选择、Enter 执行、Tab 补全和 Esc 关闭语义。
-- Slash command 独立窗口必须保持 inline 且不使用 alternate screen；进入时同步清屏并只渲染当前命令，Esc 后从内存同步重放原 Session。加载中允许返回的操作必须忽略迟到结果，不得写入 `Static` 历史、JSONL 或模型 context。
-- 所有独立命令窗口通过共享布局水平、垂直居中，外框最大 80 列并在窄终端保留左右安全边距；字段和值保持左对齐，resize 后必须重新居中且不得泄露历史。
-
-## 关键代码入口
-
-- `src/storage/session-store.ts`：JSONL schema、存储路径、读写、列表、恢复和兼容逻辑。
-- `src/agent/react-agent.ts`：ReAct 循环、初始 context 和增量持久化 callback。
-- `src/agent/agent-loop.ts`：Codex 核心控制流程的 TypeScript 适配，采样、结果记录、工具执行、后续采样与终止；来源和边界见 `docs/architecture/AGENT_LOOP.md`。
-- `src/tools/web.ts`：网页搜索、公共网页读取、正文提取、大小/超时限制和 SSRF 防护。
-- `src/codex/cli.ts`、`src/tools/bash.ts`、`src/tools/sandbox-policy.ts`：固定 Codex CLI 解析、有效策略/原生 profile 启动、失败关闭和模型 shell 输出。
-- `src/mcp/runtime.ts`：Codex MCP 配置读取、stdio/Streamable HTTP 连接、工具目录和调用。
-- `src/skills/catalog.ts`：主机 Skill roots、frontmatter、同名冲突、catalog、显式激活和资源读取。
-- `src/skills/manager.ts`、`src/tui/components/wizards/skill-wizard.tsx`：Skill 创建、公开 URL 安全暂存/安装、作用域选择、预览确认和管理界面。
-- `src/tui/app/app.tsx`：TUI 状态机、session 生命周期、`/new`、`/resume`、命名和目录切换。
-- `src/tui/components/navigation/session-picker.tsx`：session 选择界面。
-- `src/tui/app/dependencies.ts`：默认依赖、SessionStore、标题请求和工作目录切换。
-- `docs/architecture/TUI_STRUCTURE.md`：TUI 源码目录职责和依赖方向。
-- `src/storage/auth-storage.ts`：凭据和模型注册信息边界。
-- `tests/unit/storage/session-store.test.ts`：session 存储及兼容性回归。
-- `tests/unit/tui/app.test.tsx`：TUI 与完整 session 流程回归。
-- `docs/architecture/DECISIONS.md`：已经确定的架构语义。
-- `docs/PLAN.md`：当前目标及验收计划。
-- `docs/HANDOFF.md`：最近状态、验证结果和下一步。
-
-## 修改与交付规则
-
-- 先做最小、聚焦的修改，不顺手重构无关代码。
-- 功能、行为、接口、测试状态或发布状态变化时，同一批改动必须更新相关 `docs/`；至少检查 `PLAN.md`、`architecture/DECISIONS.md` 和 `HANDOFF.md`。
-- 用户可见命令、输出或安装方法变化时，同时更新 `README.md` 和 `README.zh-CN.md`。
-- Session 或 TUI 改动至少运行相关单测；交付前默认运行 `pnpm test`、`pnpm typecheck`、`pnpm build` 和 `git diff --check`。如果无法运行，必须明确说明原因和未验证范围。
-- 测试数量和 commit/hash 属于易变化状态，只记录在 `docs/HANDOFF.md`，不要固化在本文件。
-- Git commit message 必须聚焦本次实际改动，使用功能新增、功能优化、缺陷修复、测试补充或文档更新等具体表述。commit message 中禁止出现任何产品名称（包括但不限于 Codex、Pi、OMP），也禁止出现 `release`、`version`、“发布”、“版本”等措辞；即使提交伴随发版或版本号调整，也必须按实际功能变化命名，例如 `feat: add bounded command output previews`。
-- 未经用户明确要求，不提交、推送、打 tag 或创建 Release。
-- 发布时更新 `package.json` 版本及 README 中的展示版本，验证后提交并推送。`.github/workflows/release.yml` 会根据版本创建 `v<version>` tag 和 GitHub Release，必须确认 workflow 与 Release 实际成功。
+文档是已核对知识的索引，不是自动生成的源码镜像。事实与当前代码或测试冲突时，以当前证据为准，并在本次任务中修正文档。

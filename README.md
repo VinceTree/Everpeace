@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.3.1) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.2) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -188,6 +188,8 @@ Behavior notes:
 While a model turn is running, the composer stays available with the `Add guidance while working` placeholder. Submitted messages are recorded immediately and applied at the next safe checkpoint: sampling is interrupted when possible, while an already-running tool is allowed to checkpoint its result first. The model then continues with the durable context and your correction. `Ctrl+C` still cancels the active turn immediately; any submitted guidance is retained in the session context for the next turn. Elapsed time uses `s`, then `m s`, then `h m s` after the corresponding thresholds.
 
 ## Project structure
+
+For development, start with [AGENTS.md](AGENTS.md), the [current handoff](docs/HANDOFF.md), and the [knowledge base index](docs/README.md). The index routes each task to architecture notes, source files, and regression tests, so a new agent can reuse project knowledge and inspect only the relevant implementation. Old plans and execution records are kept separately in [the archive](docs/archive/README.md).
 
 ```text
 src/

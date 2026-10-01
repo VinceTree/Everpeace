@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.3.1) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.2) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -188,6 +188,8 @@ Skills 从工作区到仓库根的 `.agents/skills`、项目 `.codex/skills`、`
 模型工作期间输入框不会消失，会显示 `Add guidance while working`。此时提交的补充信息会立即写入 transcript，并在下一个安全检查点应用：采样通常会被中止，已经运行的工具先保存结果，再用当前上下文继续执行修正后的计划；`Ctrl+C` 仍会立即取消当前轮次，已提交的纠正会保留在 session context 供下一轮使用。耗时少于一分钟显示秒，超过一分钟显示分钟和秒，超过一小时显示小时、分钟和秒。
 
 ## 项目结构
+
+开始开发先读 [AGENTS.md](AGENTS.md)、[当前交接](docs/HANDOFF.md) 和 [知识库索引](docs/README.md)。索引按任务关联架构说明、源码入口和回归测试，让新 Agent 复用项目知识，仅定向检查相关实现。旧计划与执行记录单独保留在 [历史归档](docs/archive/README.md)。
 
 ```text
 src/
