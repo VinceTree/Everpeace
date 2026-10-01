@@ -34,7 +34,21 @@ jobs:
         run: choco install ripgrep --yes --no-progress
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm test
+      - name: Run tests
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          pnpm test 2>&1 | tee test-output.log
+          status=${PIPESTATUS[0]}
+          if [[ "$status" -ne 0 ]]; then
+            excerpt="$(grep --after-context=35 --max-count=3 '^not ok' test-output.log || true)"
+            excerpt="${excerpt//'%'/'%25'}"
+            excerpt="${excerpt//$'\r'/'%0D'}"
+            excerpt="${excerpt//$'\n'/'%0A'}"
+            echo "::error title=Test failure::${excerpt:-pnpm test failed without a TAP failure block}"
+          fi
+          exit "$status"
       - run: pnpm build
       - name: Check whitespace
         shell: bash
