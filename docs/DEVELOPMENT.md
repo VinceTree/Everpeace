@@ -84,8 +84,11 @@ pnpm exec tsx --test --test-name-pattern="cancel" tests/unit/agent/react-agent.t
 完整操作和结果语义见 [BENCHMARKING.md](BENCHMARKING.md)，配置从 [campaign 示例](benchmark/CAMPAIGN_CONFIG.example.json) 开始。内部开发入口为：
 
 ```powershell
+pnpm benchmark:campaign -- --config .\campaign.json --preflight
 pnpm benchmark:campaign -- --config .\campaign.json --prove-fixtures
 ```
+
+`--preflight` 不读取 keyring 或发出真实 provider 请求。它启动命名 checkout 的 fresh worker，并通过合成 provider 响应启动固定 dsh CLI/profile；30 秒 deadline、dummy credential、socket guard、请求边界与 checkout digest 结果写入 `preflight-result.json`。这项结果与 scored benchmark 分开；它不替代 fixture proof，也不构成操作系统级断网证明。
 
 `--prove-fixtures` 不请求付费模型，但会克隆固定源码、下载并安装锁定依赖，所以“离线 proof”不等于完全断网。必须证明 pristine pass → 指定 seed assertion fail → reference repair pass；超时、缺依赖和进程启动失败不能作为 seed 有效的证据。
 
@@ -100,7 +103,7 @@ pnpm benchmark:campaign -- --config .\campaign.json --prove-fixtures
 1. 开始时执行 `git status --short --branch` 与 `git diff`，记录用户已有 tracked/untracked 差异。
 2. 按任务文档定位最小源码、测试和接口范围；实现依赖的当前代码仍须阅读，文档不能替代真实写入前检查。
 3. 行为、接口或持久化变化同步补相关回归；纯文档变化检查链接、示例和事实即可，不写镜像实现的测试。
-4. 默认执行 `pnpm test`、`pnpm typecheck`、`pnpm build`、`git diff --check`。无法完成的命令注明原因与未验证范围。
+4. 默认串行执行 `pnpm typecheck`、`pnpm test`、`pnpm build`，然后运行 `git diff --check`。无法完成的命令注明原因与未验证范围。
 5. 全仓 diff 因用户原有差异失败时单独报告；再对本次文件做 scoped 检查，不修改用户文件来制造全绿。新建未跟踪文档须另行检查，普通 `git diff --check` 不覆盖它们。
 6. 更新对应专题文档，并检查 [PLAN.md](PLAN.md)、[DECISIONS.md](architecture/DECISIONS.md)、[HANDOFF.md](HANDOFF.md)；命令、输出或安装行为变化时同步两份 README。
 7. HANDOFF 保存最新状态、实测证据、已知限制和下一步；专题保存稳定契约；根 AGENTS 保存通用约束与阅读路径。旧记录不得覆盖当前事实。

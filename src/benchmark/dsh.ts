@@ -3,10 +3,11 @@ import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { BoundedOutputBuffer } from "../tools/command-record.js";
 import { stopProcessTree } from "../tools/process-cancel.js";
+import { modelShellEnvironment } from "../tools/sandbox-policy.js";
 import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult } from "./types.js";
 
 export const PINNED_DSH_REVISION = "639ed015397290b3745d163aafe02ffee4aa3f84";
@@ -26,6 +27,8 @@ export interface InstrumentedDshAdapterOptions {
   reasoning: "high";
   maxOutputTokens: 32_768;
   instrumentationPath?: string;
+  /** Credential-free startup validation; never forwards a provider request. */
+  preflight?: boolean;
 }
 
 interface DshLedger {
@@ -46,6 +49,10 @@ function quoteYaml(value: string): string {
 function resolvedInstrumentationPath(options: InstrumentedDshAdapterOptions): string {
   return resolve(options.instrumentationPath
     ?? fileURLToPath(new URL("../../docs/benchmark/dsh-instrumentation/index.mjs", import.meta.url)));
+}
+
+function resolvedPreflightGuardPath(): string {
+  return resolve(fileURLToPath(new URL("../../docs/benchmark/dsh-instrumentation/preflight-network-guard.mjs", import.meta.url)));
 }
 
 function profileFiles(options: InstrumentedDshAdapterOptions): { manifest: string; patch: string } {
@@ -214,11 +221,13 @@ export function createInstrumentedDshAdapter(options: InstrumentedDshAdapterOpti
       if (!context.tokenBudgetRemaining || context.tokenBudgetRemaining <= 0) throw new Error("dsh requires a positive remaining task token budget");
       await assertPinnedSource(options);
       await ensureDshBenchmarkProfile(options);
+      if (options.preflight && !(await stat(resolvedPreflightGuardPath())).isFile()) throw new Error("dsh preflight network guard is not a file");
       const runDirectory = await mkdtemp(join(tmpdir(), "everpeace-dsh-benchmark-"));
       const ledgerPath = join(runDirectory, "request-ledger.json");
       try {
+        const baseEnvironment = options.preflight ? modelShellEnvironment(process.env) : process.env;
         const result = await runDsh(options, ["--profile", options.profile, "--json", task.prompt], task.workspacePath, {
-          ...process.env,
+          ...baseEnvironment,
           DSH_HOME: resolve(options.dshHome),
           DSH_AGENTS_HOME: join(resolve(options.dshHome), "agents"),
           DSH_TELEMETRY_DISABLED: "1",
@@ -232,6 +241,10 @@ export function createInstrumentedDshAdapter(options: InstrumentedDshAdapterOpti
           EVERPEACE_BENCHMARK_REASONING: options.reasoning,
           EVERPEACE_BENCHMARK_MAX_OUTPUT_TOKENS: String(options.maxOutputTokens),
           EVERPEACE_BENCHMARK_TOKEN_BUDGET: String(context.tokenBudgetRemaining),
+          ...(options.preflight ? {
+            EVERPEACE_DSH_PREFLIGHT: "1",
+            NODE_OPTIONS: `--import=${pathToFileURL(resolvedPreflightGuardPath()).href}`,
+          } : {}),
         }, context.signal);
         await context.writeArtifact?.("harness-stdout.txt", result.stdout);
         await context.writeArtifact?.("harness-stderr.txt", result.stderr);
@@ -258,7 +271,12 @@ export function createInstrumentedDshAdapter(options: InstrumentedDshAdapterOpti
           notes: `Pinned dsh ${options.revision.slice(0, 8)} profile ${options.profile}`,
         };
       } finally {
-        await rm(runDirectory, { recursive: true, force: true });
+        try {
+          const ledgerText = await readIfPresent(ledgerPath);
+          if (ledgerText !== undefined) await context.writeArtifact?.("dsh-request-ledger.json", ledgerText);
+        } finally {
+          await rm(runDirectory, { recursive: true, force: true });
+        }
       }
     },
   };

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
-import { parseApplyPatchArguments, previewApplyPatch, runApplyPatch } from "../../../src/tools/apply-patch.js";
+import { ApplyPatchError, parseApplyPatchArguments, previewApplyPatch, runApplyPatch } from "../../../src/tools/apply-patch.js";
 
 async function withWorkspace(callback: (workspace: string) => Promise<void>): Promise<void> {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-apply-patch-"));
@@ -104,4 +104,54 @@ test("apply_patch accepts raw-byte observations and preserves BOM plus CRLF", as
     const stale = await runApplyPatch([{ path: "bom.txt", action: "delete", expectedSha256 }], workspace);
     assert.equal(stale.status, "rejected");
   });
+});
+
+test("apply_patch performs one exact replacement while preserving BOM and CRLF", async () => {
+  await withWorkspace(async (workspace) => {
+    const target = path.join(workspace, "replace.txt");
+    await fs.writeFile(target, Buffer.from("\ufeffbefore\r\nunique value\r\nafter\r\n", "utf8"));
+    const result = await runApplyPatch([{
+      path: "replace.txt",
+      action: "update",
+      replace: { oldText: "before\nunique value\nafter", newText: "before\nchanged value\nafter" },
+    }], workspace);
+    assert.equal(result.status, "applied");
+    assert.deepEqual(await fs.readFile(target), Buffer.from("\ufeffbefore\r\nchanged value\r\nafter\r\n", "utf8"));
+  });
+});
+
+test("apply_patch rejects missing, ambiguous, and unchanged replacements with stable codes", async () => {
+  await withWorkspace(async (workspace) => {
+    await fs.writeFile(path.join(workspace, "replace.txt"), "same same\n", "utf8");
+    const missing = await runApplyPatch([{ path: "replace.txt", action: "update", replace: { oldText: "absent", newText: "value" } }], workspace);
+    assert.equal(missing.errorCode, "REPLACEMENT_NOT_FOUND");
+    assert.match(missing.remedy ?? "", /Read the current file/u);
+
+    const ambiguous = await runApplyPatch([{ path: "replace.txt", action: "update", replace: { oldText: "same", newText: "value" } }], workspace);
+    assert.equal(ambiguous.errorCode, "REPLACEMENT_AMBIGUOUS");
+
+    const unchanged = await runApplyPatch([{ path: "replace.txt", action: "update", replace: { oldText: "same same", newText: "same same" } }], workspace);
+    assert.equal(unchanged.errorCode, "REPLACEMENT_UNCHANGED");
+  });
+});
+
+test("apply_patch replacement is mutually exclusive with content and patch", async () => {
+  await withWorkspace(async (workspace) => {
+    await fs.writeFile(path.join(workspace, "replace.txt"), "old\n", "utf8");
+    const result = await runApplyPatch([{
+      path: "replace.txt",
+      action: "update",
+      content: "new\n",
+      replace: { oldText: "old", newText: "new" },
+    }], workspace);
+    assert.equal(result.status, "rejected");
+    assert.equal(result.errorCode, "INVALID_ARGUMENTS");
+  });
+});
+
+test("apply_patch parsing rejects unsupported top-level fields with a stable code", () => {
+  assert.throws(
+    () => parseApplyPatchArguments('{"operations":[{"path":"x.txt","action":"create","content":"x"}],"alternate":true}'),
+    (error: unknown) => error instanceof ApplyPatchError && error.code === "INVALID_ARGUMENTS",
+  );
 });

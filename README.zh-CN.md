@@ -68,7 +68,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.3.3) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.4) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -165,17 +165,17 @@ Skills 从工作区到仓库根的 `.agents/skills`、项目 `.codex/skills`、`
 
 - 权限档位把 sandbox 范围与审批分开：`read-only` 对模型 shell、网页和 MCP 逐项审批，并使用 Codex `:read-only`；`ask` 逐项审批，shell 获批后使用 `:workspace`；`workspace-write` 在 `:workspace` 内免逐条 shell 审批，已开启的公共网页工具也免逐次确认，MCP 仍单独审批；`full-access` 二次明确确认后选择 `:danger-full-access` 并跳过工具审批。
 - 模型可以用 `read_file` 按行分页查看工作区内不超过 16 MiB 的 UTF-8 文件并取得基于原始字节的全文件 SHA-256。参数化 ripgrep 的 `search_files`/`glob_files` 返回有界结果快照的进程内续读引用（默认每页 100 项，最多 200 项）；`list_directory` 列出最多 500 个目录项。拒绝目录外路径和符号链接越界。超大模型工具结果保持有效 JSON，并提供仅当前进程可用的 `read_tool_output` 续读。文件正文会进入模型 context 和 Session 文件，请避免读取机密。
-- 将 `EVERPEACE_TYPESCRIPT_LSP` 指向已存在的本地 language server 后，会暴露只读 `code_navigation`，支持 definition、references、implementation 和 hover；可选参数用 `EVERPEACE_TYPESCRIPT_LSP_ARGS` 的 JSON 字符串数组提供。程序不会静默安装 server；请求串行且有界，并拒绝 server 发起的 edit 或 command。
+- 将 `EVERPEACE_TYPESCRIPT_LSP` 指向已存在的本地 language server 后，会暴露只读 `code_navigation`，支持 definition、references、implementation 和 hover；可选参数用 `EVERPEACE_TYPESCRIPT_LSP_ARGS` 的 JSON 字符串数组提供，额外只读源码根可用 `EVERPEACE_TYPESCRIPT_LSP_READ_ROOTS` 的 JSON 字符串数组声明。每次查询都在固定 Codex 原生 sandbox 中启动全新的 server 进程，过滤凭据、拒绝 workspace 写入和应用状态访问；协议限制为 8 KiB header、2 MiB frame、8 MiB 总入站流量和 64 KiB stderr。启动配置的 server 前还必须用直接 socket 探针证明后端实际执行了所请求的网络拒绝，否则工具和 `/doctor` 报告 unavailable，并保留 lexical search。当前固定 Windows 后端仍允许该探针，因此 Windows 上的原生 LSP 导航会失败关闭。原生后端仍有平台 ambient read 与临时目录权限。程序不会静默安装 server；请求串行且有界，并拒绝 server 发起的 edit 或 command。
 - 用户权限保存于平台配置目录，重启后仍会恢复；`/permissions` 也可把项目策略写入 `.everpeace/permissions.json`。项目策略只允许收紧用户策略、关闭模型 shell 网络或公共网页，不能提升权限。shell 网络开关由原生后端执行，不改变 web 或 MCP 权限。切换权限不丢失 context，恢复 JSONL 不会恢复完全访问授权。
 - 模型 shell 通过固定的 `@openai/codex@0.155.1` 原生 OS sandbox 启动，运行时无法启动则失败关闭。Windows 模型命令使用 PowerShell，因为 Git Bash/MSYS 无法在 restricted token 内初始化；macOS/Linux 使用 Bash。模型 shell 默认 120 秒超时，超时会以结构化结果返回；直接 `!` 不进入模型 sandbox，生命周期仍由用户控制。详见 [对标与安全限制](docs/architecture/PERMISSIONS.md)。
 - 每次模型 shell 启动前都会捕获不可变的有效策略，显式遵守后端 managed requirements，并过滤继承的凭据及启动注入变量。workspace/ask 模式使用原生子 profile：`.git`、`.codex`、`.agents` 和由宿主预先创建的 `.everpeace` 控制目录保持只读，模型也不能读取 Everpeace 的全局状态目录。命令输出不能触发 payload 自动重放；full-access 与直接 `!` 保留各自已说明的权限。对比依据与后续路线见 [Sandbox 对比与优化计划](docs/architecture/SANDBOX.md)。
-- 模型编辑尽量使用限定在工作区内的 `apply_patch` 工具：update/delete 必须匹配宿主通过 `read_file` 记录的版本，preview hash 与权限 revision 绑定实际写入，create 使用排他创建，回滚不会覆盖用户随后写入的内容。预览与执行默认保护 `.git`、`.codex`、`.agents`、`.everpeace`，明确选择 full-access 后才能通过编辑器修改；始终拒绝 Windows ADS。持久化的模型 Bash 规则会检查每个顶层命令段；含糊的命令替换和嵌套解释器必须审批，明确 deny 继续失败关闭。审批等待期间权限变化会使该审批失效。直接 `!` 不受影响。
+- 模型编辑尽量使用限定在工作区内的 `apply_patch` 工具：update/delete 必须匹配宿主通过 `read_file` 记录的版本，preview hash 与权限 revision 绑定实际写入，create 使用排他创建，回滚不会覆盖用户随后写入的内容。update 可使用精确且唯一的 `replace: { oldText, newText }`；缺少观察、旧版本、未匹配或多重匹配、hunk 不符和策略拒绝会返回稳定原因及修复建议。预览与执行默认保护 `.git`、`.codex`、`.agents`、`.everpeace`，明确选择 full-access 后才能通过编辑器修改；始终拒绝 Windows ADS。持久化的模型 Bash 规则会检查每个顶层命令段；含糊的命令替换和嵌套解释器必须审批，明确 deny 继续失败关闭。审批等待期间权限变化会使该审批失效。直接 `!` 不受影响。
 - 普通 coding 回合使用单 Agent 的个人开发工作流。每个逻辑 step 都会重新读取工作区根目录到已访问目标目录的 `AGENTS.md` chain，以及 `package.json` 中声明的 scripts，作为低于当前用户与开发者指令的项目背景。新发现或已变化的嵌套规则会把结构化编辑推迟到下一次模型边界，当前规则在 context 压缩后仍然生效。patch 成功后先做快速检查；Node/TypeScript 最终验证会重新读取 manifest，并按 `typecheck → lint → test → build` 顺序运行所有已声明脚本，首个失败后停止。没有发现检查命令时会标记为未验证，而不是通过。
 - 宿主最多并发执行四个明确安全的只读工具，并仍按模型顺序保存结果。该调度与供应商的 parallel-tool 提示相互独立；写入、shell、MCP、审批、取消和资源冲突仍是串行屏障。模型请求由同一份含真实输出预留的快照生成和测量，命令输出使用增量有界缓冲，流式正文按 40ms 合并刷新，以减少长任务中的宿主开销。
-- Git 状态使用 NUL 分隔的结构化结果解析，并把变更文件指纹与任务开始时的既有脏状态比较，因此模型 shell 对已有脏文件的再次修改、未跟踪文件和中文路径也会进入同一验证闭环。追踪超限、非 Git 项目的 shell 改动、审批拒绝或修复次数耗尽时都不能报告为已验证。`workspace_status`、`workspace_diff` 仍为只读工具；`/undo` 继续只覆盖未被再次修改的结构化编辑。
+- Git 状态使用 NUL 分隔的结构化结果解析，并把变更文件指纹与任务开始时的既有脏状态比较，因此模型 shell 对已有脏文件的再次修改、未跟踪文件和中文路径也会进入同一验证闭环。追踪超限、非 Git 项目的 shell 改动、审批拒绝或修复次数耗尽时都不能报告为已验证。模型可用 `list_workspace_changes` 捕获 staged、unstaged 和 untracked 列表，再用 `read_workspace_change` 惰性读取有界详情；列表快照刷新后旧引用会明确过期。既有 `workspace_status`、`workspace_diff` 调用保持兼容；审阅内容不授予写权限，也不表示变更归 Agent 所有。`/undo` 继续只覆盖未被再次修改的结构化编辑。
 - 模型回复结束与工作流验证完成采用不同状态。宿主会显示观察到的路径和完整检查结果，只有真正验证通过的 coding 回合才能进入成功经验提炼；活动 Goal 的完成请求会等宿主接受最终验证后才落盘。Session JSONL 只保存兼容的结果元数据，不保存检查输出、错误正文、文件内容或撤销检查点。
 - 模型最多可在相同 sandbox 和权限策略中运行两个非交互后台命令，提供有界的运行中预览，并可查询或停止；默认上限十分钟，由当前 coding task 持有。取消、权限收紧、预算停止、异常、最终验证或销毁 Agent 都会终止并等待进程树。后台任务只存在当前进程，不随 Session 恢复。
-- 维护者可使用 `pnpm benchmark:campaign -- --config <campaign.json> --prove-fixtures|--live` 离线证明十项固定 Node fixture，或执行带完整记录的内部对比；详见 [benchmark 文档](docs/BENCHMARKING.md)。固定 dsh adapter 会核对完整源码 revision，并通过专用 profile 在上游请求边界计量。Live 模式需要另行授权、已注册模型，以及每任务和 campaign 数值 token 预算，不会自动发起真实请求。
+- 维护者可使用 `pnpm benchmark:campaign -- --config <campaign.json> --preflight|--prove-fixtures|--live`。preflight 会在无真实模型请求的情况下启动命名 checkout 的生产 adapter 与固定 dsh profile，核对源码/build digest、请求边界、固定 `high`/32K 设置和清理；`taskIds` 可固定 3 项 smoke 或完整 10 项计划。详见 [benchmark 文档](docs/BENCHMARKING.md)。固定 dsh adapter 会核对完整源码 revision，并通过专用 profile 在上游请求边界计量。Live 模式需要另行授权、已注册模型，以及每任务和 campaign 数值 token 预算，不会自动发起真实请求。
 - 普通聊天中，`read-only` 和 `ask` 会在每个网页请求前审批；`workspace-write` 与 `full-access` 跳过该确认。Plan 模式把已开启的公共网页访问视为只读调研并跳过逐次确认，关闭网页工具时仍会拒绝请求。搜索词会先发送给 Bing，失败时回退到 DuckDuckGo；打开搜索结果时会向对应网站发送请求。
 - 网页读取只允许公共 HTTP/HTTPS 地址，会逐次检查重定向、阻止本机和内网地址，并限制超时与响应大小；返回内容始终作为不可信数据处理。
 - 搜索可用性和结果质量取决于外部搜索服务及当前网络。联网失败会作为工具结果返回模型，由模型说明限制或尝试其他来源。

@@ -28,6 +28,18 @@ export interface EffectiveSandboxPolicy {
 
 const CONTROL_DIRECTORIES = [".git", ".codex", ".agents", ".everpeace"] as const;
 export const MODEL_WORKSPACE_PROFILE = "everpeace-model-workspace";
+export const LSP_READ_ONLY_PROFILE = "everpeace-lsp-readonly";
+
+export interface LspSandboxPolicy {
+  backend: "codex-cli";
+  permissionProfile: typeof LSP_READ_ONLY_PROFILE;
+  workspaceRoot: string;
+  readableRoots: readonly string[];
+  deniedRoots: readonly string[];
+  networkMode: "deny";
+  environmentPolicy: "filtered-inherit";
+  revision: string;
+}
 
 function pathApi(platform: NodeJS.Platform): typeof path.win32 | typeof path.posix {
   return platform === "win32" ? path.win32 : path.posix;
@@ -47,6 +59,10 @@ function isWithin(candidate: string, root: string, platform: NodeJS.Platform): b
   const api = pathApi(platform);
   const relative = api.relative(comparable(root, platform), comparable(candidate, platform));
   return relative === "" || (!relative.startsWith("..") && !api.isAbsolute(relative));
+}
+
+function overlaps(first: string, second: string, platform: NodeJS.Platform): boolean {
+  return isWithin(first, second, platform) || isWithin(second, first, platform);
 }
 
 export function applicationStateRoots(
@@ -150,6 +166,56 @@ export function nativePermissionProfileArgs(policy: EffectiveSandboxPolicy): str
     `default_permissions=${tomlString(MODEL_WORKSPACE_PROFILE)}`,
     "-c",
     `permissions.${MODEL_WORKSPACE_PROFILE}={extends=\":workspace\",filesystem={${filesystem}}}`,
+  ];
+}
+
+/** Build the stricter process policy used only for configured language servers. */
+export function createLspSandboxPolicy(
+  workspaceRoot: string,
+  readableRoots: readonly string[] = [],
+  options: {
+    platform?: NodeJS.Platform;
+    env?: NodeJS.ProcessEnv;
+    homeDirectory?: string;
+  } = {},
+): LspSandboxPolicy {
+  const platform = options.platform ?? process.platform;
+  const workspace = canonicalExistingPath(workspaceRoot, platform);
+  const deniedRoots = [
+    ...CONTROL_DIRECTORIES.map((name) => pathApi(platform).join(workspace, name)),
+    ...applicationStateRoots(platform, options.env ?? process.env, options.homeDirectory ?? os.homedir()),
+  ].map((root) => canonicalExistingPath(root, platform));
+  const roots = [...new Set([workspace, ...readableRoots.map((root) => canonicalExistingPath(root, platform))])];
+  for (const root of roots.slice(1)) {
+    if (deniedRoots.some((denied) => overlaps(root, denied, platform))) {
+      throw new Error(`Language-server read root overlaps protected application state: ${root}`);
+    }
+  }
+  const revision = JSON.stringify({ workspace, readableRoots: roots, deniedRoots, networkMode: "deny" });
+  return Object.freeze({
+    backend: "codex-cli" as const,
+    permissionProfile: LSP_READ_ONLY_PROFILE,
+    workspaceRoot: workspace,
+    readableRoots: Object.freeze(roots),
+    deniedRoots: Object.freeze(deniedRoots),
+    networkMode: "deny" as const,
+    environmentPolicy: "filtered-inherit" as const,
+    revision,
+  });
+}
+
+export function nativeLspPermissionProfileArgs(policy: LspSandboxPolicy): string[] {
+  const filesystem = [
+    ...policy.readableRoots.map((root) => `${tomlString(root)}=${tomlString("read")}`),
+    ...policy.deniedRoots.map((root) => `${tomlString(root)}=${tomlString("none")}`),
+  ].join(",");
+  return [
+    "-P",
+    policy.permissionProfile,
+    "-c",
+    `default_permissions=${tomlString(policy.permissionProfile)}`,
+    "-c",
+    `permissions.${policy.permissionProfile}={extends=\":read-only\",filesystem={${filesystem}}}`,
   ];
 }
 

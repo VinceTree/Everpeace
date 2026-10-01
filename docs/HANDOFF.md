@@ -1,84 +1,78 @@
 # 当前交接
 
-更新日期：2026-10-01。新 Session 先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 选专题；本文件只保存当前状态。旧记录完整保留在 [历史交接](archive/HANDOFF_HISTORY.md)。
+更新日期：2026-10-01。新 Session 先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 选择当前任务专题；本文件只保存最新状态。旧记录位于 [历史交接](archive/HANDOFF_HISTORY.md)。
 
 ## 当前基线
 
-- 产品：DeepSeek 优先、Windows 优先的单 Agent 个人开发 CLI；Node/TypeScript 单包、Responses、inline TUI。
-- 本轮起点：`main` 与 `origin/main` 一致，HEAD `ba8caaf5140f7d64c92b9828d0f15ce95e953cfe`，package 展示版本 `0.3.2`。
-- 用户随后授权将展示版本提升至 `0.3.3` 并提交、推送；提交使用 `[skip publish]`，不创建 tag 或 GitHub Release。本轮未升级依赖，也未进行付费模型请求。
+- 产品保持 DeepSeek 优先、Windows 优先、单 Agent、Node/TypeScript 单包、Responses 与 inline TUI。
+- 本轮按用户指定以 tracked commit `b226bfcdd5e8421676f9f47454ef68db75370732` 为实现 baseline；交付版本为 `0.3.4`，最终 delivery commit 以当前 Git `HEAD` 为准。
+- 本轮没有升级依赖、打 tag、创建 Release 或发送付费模型请求；用户已明确授权更新版本并提交、推送，commit 使用 `[skip publish]` 阻止 Release workflow 发布。
 
-## 本次完成：日常使用优化
+## 本次完成：Coding reliability
 
-### Composer 文件引用
+### 可复现比较准备
 
-- 输入 `@` 使用可取消的有界 `rg --files` 候选，最多显示八项；选择后插入 `@"path"`，可追加 `#L10-L40`。
-- 只展开 Markdown code 之外的显式引用；提交时通过既有工作区包含、真实路径、UTF-8 和二进制保护重新读取。
-- 默认 200 行，显式范围最多 1,000 行；每条消息最多八个摘录，单个 32 KiB、合计 64 KiB。失败保留草稿并显示错误。
-- 用户原文和附件作为同一 durable context item 先持久化。附件只附加一次，普通问题与 guidance 保持顺序，retry/repair/Goal continuation 不重复。
-- 引用路径参与 nested project-rule 发现；附件不产生文件观察或写权限，恢复后也不能凭附件覆盖文件。
+- baseline/candidate 使用名称唯一的 `everpeace-checkout` 配置，在相同 fresh Node worker 中动态导入各 checkout 的 production adapter。每次运行重新核对完整 revision、runtime source digest 与 build entry digest；source identity 包含 `src` 中 tracked、deleted 和未忽略 untracked 内容，以及 manifest/lockfile/TypeScript 配置，不受根目录无关差异影响。
+- worker 与 production adapter 强制原始模型 ID、`high` reasoning、32,768 output tokens，不继承个人保存设置。digest mismatch 会同时报告 expected/actual，便于 reviewed 配置更新。
+- campaign 模式严格三选一：`--preflight`、`--prove-fixtures`、`--live`。可选有序 `taskIds` 支持 3 task × 3 harness × 1 = 9 次 smoke；完整 10 task × 3 harness × 3 = 90 次正式计划。
+- checkout preflight 在 30 秒边界内启动真实 worker 和 production adapter，在真实 provider request boundary 注入合成 SSE response；使用 dummy credential、过滤宿主凭据并用 Node socket guard 阻断网络。它记录 request settings、usage、source/build identity 与 cleanup，不生成 scored result。
+- 固定 dsh preflight 启动真实 CLI/profile 并在 `llm/stream` boundary 注入合成 response。instrumentation 对缺失/非法 token usage 永久标记 incomplete 并阻止后续请求；cache 字段缺失保持未观察，取消/失败时在清理前保存 ledger。
 
-### 可读工作区变更审阅
+### 完整模型变更审阅
 
-- `/diff` 使用新的只读 human-review 服务，从结构化 Git status 分别列出 staged、unstaged、untracked；同一路径可同时出现 staged 与 unstaged 条目。
-- tracked 文本惰性显示 unified diff；untracked UTF-8 文件显示有界预览；binary、symlink、submodule 和非普通文件显示明确摘要。
-- 支持八行列表、详情分页、`R` 刷新及 Esc 详情 → 列表 → 聊天；异步加载可取消并忽略迟到结果。
-- 仓库子目录 workspace 只显示其范围内路径，禁用 external diff/textconv；详情上限 2 MiB 或 10,000 行并显式标记截断。
-- 界面显示 “Last task result”，不把当前变化声称为 Agent 所有。模型的既有 workspace tool contract 未改变。
+- 新增模型只读 `list_workspace_changes` / `read_workspace_change`，共用 `/diff` 的结构化 Git 服务并保留 `workspace_status` / `workspace_diff` 兼容。
+- captured index 分开 staged、unstaged、untracked，保留 overlap 与 rename old path；opaque reference 惰性读取 tracked unified diff、untracked UTF-8 preview 或 binary/symlink/submodule summary。
+- snapshot/page/result 都有进程内 retention、continuation、取消、containment 和 visible truncation。过期引用要求重新 list；review 不产生文件观察、写权限或变更归属。
+- Agent coding instruction 要求总结前检查完整变更。
 
-### 可搜索 Session 恢复
+### 精确编辑与恢复
 
-- `/resume [query]` 默认搜索当前工作区，可切换 All workspaces；标题及 user/assistant 对话采用不区分大小写的字面量匹配。
-- tool output、模型 context 和 learned Memory 不参与搜索。每个 Session 一条结果，按最新活动排序，八行显示、每页 50 项，并在恢复前显示本地对话预览。
-- JSONL 流式校验并生成 16 MiB 有界进程内 LRU 投影；追加/删除使缓存失效，损坏文件单独隔离，不增加持久索引或 schema migration。
-- query 使用 200ms debounce，旧搜索可取消且迟到结果被忽略。选择后仍走原恢复路径，保留模型、工作目录、Goal 与验证债务；原删除确认流程保留。
+- `ApplyPatchOperation` update 新增互斥的 `replace: { oldText, newText }`。oldText 必须非空并在统一 CRLF/LF 表示中大小写、空白完全一致且只出现一次；不做 fuzzy match。
+- replace 保留 UTF-8 BOM 与原换行风格，并沿用 512 KiB file/batch、fresh read observation、nested rules、approval revision、并发版本和 rollback safeguards。
+- 解析、预览与执行返回稳定原因与修复提示：invalid arguments、missing observation、stale version、unmatched/ambiguous/unchanged replacement、hunk mismatch、policy denial。权限拒绝不能通过自动 retry 或替代编辑路径绕过。
 
-### 最近 coding 请求检查
+### 隔离 LSP 导航
 
-- `/context` 显示 “Last submitted coding request”，只在 coding provider call 已准入并即将发送时捕获不可变内存快照。
-- 展示 model/provider、时间、context revision、序列化请求估算、output reserve、规则来源、Skills/Memory/MCP、广告工具、附件范围、conversation item counts 和 opaque item 大小。
-- 可见来源只提供有界脱敏预览；凭据、transport headers、reasoning/encrypted body 不进入预览。估算与 measured usage 分开，组件估算不要求相加等于请求估算。
-- 打开和刷新不发送模型请求、不刷新文件、不压缩 context。首次提交前、重启、恢复或 Agent 替换后显示明确空状态；辅助请求不覆盖 coding 快照。
+- definition/references/implementation/hover 保持每次查询 fresh server。新 duplex transport 直接通过 pinned Codex backend 启动 executable/argv，保留 raw stdout、处理 stdin backpressure、drain 64 KiB stderr、暴露 exit 并等待 process-tree termination。
+- dedicated child of `:read-only` 拒绝 workspace write 与 `.git`/`.codex`/`.agents`/`.everpeace`、Everpeace global state；用户 full access 不会放开该策略。权限 revision 或 task cancellation 会终止查询，cleanup failure 会覆盖成功结果。
+- JSON-RPC 限制为 8 KiB header、2 MiB frame、8 MiB aggregate incoming；现有 30 秒、16 MiB document、100 locations、64 KiB hover 保留。初始化 capability、当前 UTF-16 input position、document/returned-location containment 都在返回前验证。
+- 配置的 server 启动前运行相同 native policy 下的 direct-socket denial probe。固定 Windows `@openai/codex@0.155.1` 实测可拒绝 workspace 写入与应用状态读取，但仍允许 socket；运行时及 `/doctor` 因而报告 isolation unavailable，保留 lexical search，不在较弱边界下启动 LSP。`:read-only` 的 ambient system reads 与 temporary-directory grants 已明确记录。
 
 ## 主要实现与回归入口
 
 | 领域 | 实现 | 回归 |
 | --- | --- | --- |
-| 文件附件 | [file-attachments.ts](../src/agent/file-attachments.ts)、[react-agent.ts](../src/agent/react-agent.ts)、[prompt.tsx](../src/tui/composer/prompt.tsx)、[task-runner.ts](../src/workflow/task-runner.ts) | [file-attachments.test.ts](../tests/unit/agent/file-attachments.test.ts)、[react-agent.test.ts](../tests/unit/agent/react-agent.test.ts)、[prompt-history.test.tsx](../tests/unit/tui/prompt-history.test.tsx) |
-| `/diff` | [workspace-review.ts](../src/tools/workspace-review.ts)、[workspace-diff-surface.tsx](../src/tui/components/screens/workspace-diff-surface.tsx) | [workspace-review.test.ts](../tests/unit/tools/workspace-review.test.ts)、[daily-use-surfaces.test.tsx](../tests/unit/tui/daily-use-surfaces.test.tsx) |
-| `/resume` 搜索 | [session-store.ts](../src/storage/session-store.ts)、[session-picker.tsx](../src/tui/components/navigation/session-picker.tsx) | [session-store.test.ts](../tests/unit/storage/session-store.test.ts)、[session-picker.test.tsx](../tests/unit/tui/session-picker.test.tsx)、[app.test.tsx](../tests/unit/tui/app.test.tsx) |
-| `/context` | [context-inspection.ts](../src/agent/context-inspection.ts)、[context-surface.tsx](../src/tui/components/screens/context-surface.tsx) | [context-inspection.test.ts](../tests/unit/agent/context-inspection.test.ts)、[daily-use-surfaces.test.tsx](../tests/unit/tui/daily-use-surfaces.test.tsx) |
+| checkout/preflight | [checkout.ts](../src/benchmark/checkout.ts)、[worker](../src/benchmark/checkout-worker.ts)、[campaign CLI](../src/benchmark/campaign-cli.ts) | [checkout.test.ts](../tests/unit/benchmark/checkout.test.ts)、[campaign.test.ts](../tests/unit/benchmark/campaign.test.ts) |
+| dsh usage/preflight | [dsh.ts](../src/benchmark/dsh.ts)、[instrumentation](benchmark/dsh-instrumentation/index.mjs)、[network guard](benchmark/dsh-instrumentation/preflight-network-guard.mjs) | [dsh.test.ts](../tests/unit/benchmark/dsh.test.ts) |
+| 模型变更审阅 | [workspace.ts](../src/tools/workspace.ts)、[workspace-review.ts](../src/tools/workspace-review.ts)、[react-agent.ts](../src/agent/react-agent.ts) | [workspace-review.test.ts](../tests/unit/tools/workspace-review.test.ts)、[react-agent.test.ts](../tests/unit/agent/react-agent.test.ts) |
+| 精确编辑 | [apply-patch.ts](../src/tools/apply-patch.ts)、[react-agent.ts](../src/agent/react-agent.ts) | [apply-patch.test.ts](../tests/unit/tools/apply-patch.test.ts)、[react-agent.test.ts](../tests/unit/agent/react-agent.test.ts) |
+| LSP transport/isolation | [code-navigation.ts](../src/tools/code-navigation.ts)、[cli.ts](../src/codex/cli.ts)、[sandbox-policy.ts](../src/tools/sandbox-policy.ts) | [code-navigation.test.ts](../tests/unit/tools/code-navigation.test.ts)、[cli.test.ts](../tests/unit/codex/cli.test.ts)、[sandbox-boundaries.test.ts](../tests/unit/tools/sandbox-boundaries.test.ts) |
 
-中英文 README、PLAN、PROJECT_MAP、RUNTIME、TOOLS、STATE_AND_UI 和 DECISIONS 已同步。
+中英文 README、BENCHMARKING、DEVELOPMENT、PLAN、PROJECT_MAP、TOOLS、SANDBOX 和 DECISIONS 已同步。
 
 ## 验证证据
 
-本轮使用 Windows Node 工具链按要求串行执行：
+使用 Windows Node 工具链串行执行本轮最终门禁：
 
 - `pnpm typecheck`：通过。
-- `pnpm test`：438 项，436 通过、2 跳过、0 失败/取消；数量包含工作区已有未跟踪测试，不能充当全新 checkout 的固定计数。
+- `pnpm test`：456 项，454 通过、2 跳过、0 失败/取消。计数包含工作区已有未跟踪测试，不能作为 clean checkout 固定数量。
 - `pnpm build`：通过。
-- Linux Node 定向执行 `tests/unit/storage/session-store.test.ts`：18 项全部通过；覆盖 Windows workspace path 在非 Windows 主机上的大小写与分隔符归一化。
-- 从 `origin/main` 创建的全新 Windows clone 完成 `typecheck → test → build` 与 `git diff --check`；clean suite 为 434 项、432 通过、2 跳过，并额外连续重复两次完整测试，均为 0 失败。
-- 使用 GitHub runner 同版 Windows Node `22.22.1` 及 `D:\a\Everpeace\Everpeace` 路径再次执行完整 suite 仍通过；新增 TUI 回归已改用有界条件等待，移除依赖 60ms 余量的固定 sleep。
-- CI 现对失败的 TAP block 生成有界 annotation；据此确认 Windows runner 的真实失败位于 untracked 预览。该路径现在从已 `realpath` 的 workspace root 解析，避免 runner 临时目录的规范路径差异触发错误 containment 拒绝。
 - 仓库没有 lint script，因此未运行 lint。
-- 全工作区 `git diff --check` 仍只报告本轮开始前已有的 `.gitignore`、`LICENSE` CRLF 差异；排除这两个文件后的 tracked 差异通过。所有本轮新增源码/测试另行扫描，无行尾空白。
-- README、PLAN、HANDOFF 与 architecture Markdown 共 15 份已扫描，本地链接均可解析。
+- 全局 `git diff --check` 退出 2，仅报告任务开始前已有 `.gitignore` 与 `LICENSE` CRLF 差异；本轮所有 tracked/untracked 文件的 trailing-whitespace 定向扫描无匹配。
 
-定向回归覆盖附件的引用/Unicode/范围/长行/缺失/二进制/包含边界/大小上限/持久化，Git staged+unstaged overlap/untracked/nested workspace/特殊文件，Session 匹配/排除/scope/分页/cache invalidation/corrupt/deletion，以及 context 准入/脱敏/不可变/空状态和三个新 UI surface 的键盘流程。
+额外定向证据：checkout preflight 真实导入当前 production adapter 并在合成 provider boundary 完成一次 high/32K request，未读取 keyring、未发送网络请求；Windows native LSP fixture 实测 write/state denial 与 direct-network limitation，并验证 runtime fail-closed；fragmented/malformed frames、backpressure、noisy stderr、permission revision cancellation 和 cleanup failure 回归均通过。
 
-本轮未执行真实 Windows Terminal 手工验收，也未运行 live API 或付费 benchmark。clean-checkout 的 Linux 依赖安装在本地 WSL 因缺少 `make` 未完成；GitHub Ubuntu CI 首次运行据此发现并已修复 Session workspace path 的跨主机归一化问题。后续 Windows CI annotation 又定位到 canonical temp root 与 lexical root 混用，已改为从同一 canonical root 解析 untracked 路径。自动化测试不替代 resize、原生 scrollback、真实 Esc 重放和终端取消的人工证据。
+本轮没有可用的 pinned dsh checkout，因此未执行真实 dsh CLI/profile preflight。没有运行 live API、九次 smoke、九十次正式比较或真实 Windows Terminal 手工验收。
 
 ## 已知限制与下一步
 
-1. **真实 Windows Terminal 待验收**：重点检查 `@` 候选、三个命令窗口、窄屏/resize、Esc 层级、native scrollback、Ctrl+C 和 Session 恢复。
-2. **LSP 隔离尚未接通**：协议能力只读，但显式配置的 executable 仍由宿主直接 spawn；只可配置可信程序。
-3. **固定 dsh 与真实模型比较待授权**：先验收 checkout/profile 启动；九次 smoke 和九十次正式比较都需要单独的 task/campaign 数值预算。
-4. 持久 undo、LSP isolation、自动历史检索和模型速度/token 调优仍是独立后续工作。
+1. 在固定 dsh revision `639ed015397290b3745d163aafe02ffee4aa3f84` 的已安装/已构建 checkout 上运行 `--preflight`，保存真实 profile/request-boundary/cleanup artifact。
+2. 要在 Windows 启用 native LSP，需要 pinned backend 提供能通过 direct-socket probe 的网络隔离；Linux/macOS 也须各自通过 write/state/network 与 descendant cleanup probe。
+3. 真实模型比较仍需单独授权并给出 task/campaign 数值预算；先运行恰好九次 smoke，再决定是否运行九十次正式 campaign。
+4. 真实 Windows Terminal 仍需检查 resize、scrollback、Esc、Ctrl+C、后台 writer、Session 恢复与界面重放。
 
 ## 用户已有差异
 
-本轮开始前 `.gitignore`、`LICENSE` 有未暂存 CRLF 差异；未跟踪 `.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`tests/unit/codex/`、`{}`。这些内容不属于本轮实现，均未清理、覆盖或纳入修改。
+本轮开始前已有 `.gitignore`、`LICENSE` 未暂存 CRLF 差异，以及未跟踪 `.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`tests/unit/codex/`、`{}`。这些内容均未清理或覆盖；本轮只在已有未跟踪 `tests/unit/codex/cli.test.ts` 中追加 duplex transport 回归。新建的 benchmark checkout 源码/测试与 preflight guard 属于本轮实现。
 
 交接只是快照；下一轮仍须查看实时 Git 状态。

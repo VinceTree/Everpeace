@@ -101,6 +101,46 @@ test("dsh instrumentation keeps unknown usage sticky and rejects another provide
   assert.match((snapshot.configurationErrors as string[])[0]!, /unknown usage/u);
 });
 
+test("dsh instrumentation rejects invalid usage before it can reopen budget admission", async () => {
+  const { createInstrumentation } = await instrumentationModule();
+  const instrumentation = createInstrumentation(EXPECTED);
+  await collect(instrumentation.wrap({
+    provider: EXPECTED.provider,
+    model: EXPECTED.model,
+    reasoningEffort: EXPECTED.reasoning,
+    maxTokens: EXPECTED.maxOutputTokens,
+  }, async function* () {
+    yield { type: "usage", usage: { inputTokens: -1, outputTokens: 2 } };
+    yield { type: "finish", reason: { kind: "stop" } };
+  }));
+  let downstreamCalls = 0;
+  await collect(instrumentation.wrap({
+    provider: EXPECTED.provider,
+    model: EXPECTED.model,
+    reasoningEffort: EXPECTED.reasoning,
+    maxTokens: EXPECTED.maxOutputTokens,
+  }, async function* () { downstreamCalls += 1; }));
+  const snapshot = instrumentation.snapshot();
+  assert.equal(snapshot.complete, false);
+  assert.equal(downstreamCalls, 0);
+  assert.match((snapshot.configurationErrors as string[])[0]!, /invalid token counts/u);
+});
+
+test("dsh instrumentation does not claim cache coverage when cache fields are absent", async () => {
+  const { createInstrumentation } = await instrumentationModule();
+  const instrumentation = createInstrumentation(EXPECTED);
+  await collect(instrumentation.wrap({
+    provider: EXPECTED.provider,
+    model: EXPECTED.model,
+    reasoningEffort: EXPECTED.reasoning,
+    maxTokens: EXPECTED.maxOutputTokens,
+  }, async function* () {
+    yield { type: "usage", usage: { inputTokens: 8, outputTokens: 2 } };
+    yield { type: "finish", reason: { kind: "stop" } };
+  }));
+  assert.equal(instrumentation.snapshot().cacheObservedInputTokens, 0);
+});
+
 test("dedicated dsh profile is created once and mismatched existing files fail closed", async () => {
   const root = await mkdtemp(join(tmpdir(), "everpeace-dsh-profile-test-"));
   const instrumentationPath = join(root, "instrumentation.mjs");
@@ -166,4 +206,10 @@ test("campaign config accepts only the reviewed dsh revision and resolves its pa
     ...base,
     harnesses: [{ ...base.harnesses[0], revision: "deadbeef" }],
   }, configPath), /must be 639ed015/u);
+  assert.throws(() => parseCampaignConfig({ ...base, taskIds: ["one", "one"] }, configPath), /must not contain duplicates/u);
+  assert.deepEqual(parseCampaignConfig({ ...base, taskIds: ["one", "two"] }, configPath).taskIds, ["one", "two"]);
+  assert.throws(() => parseCampaignConfig({
+    ...base,
+    harnesses: [{ kind: "everpeace" }, { kind: "everpeace-checkout", name: "everpeace", sourceRoot: "upstream", entryPath: "upstream/dist/benchmark/production.js", revision: PINNED_DSH_REVISION, sourceDigest: "0".repeat(64), buildDigest: "1".repeat(64), expected: { model: "deepseek-flash", reasoning: "high", maxOutputTokens: 32_768 } }],
+  }, configPath), /names must be unique/u);
 });

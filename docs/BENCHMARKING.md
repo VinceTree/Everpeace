@@ -60,20 +60,25 @@ const summary = await runBenchmarkSuite(tasks, adapter, {
 });
 ```
 
-`createProcessHarnessAdapter()` 参数化启动固定外部程序，不使用 shell 拼接；通用外部 wrapper 必须在自己的 LLM 边界输出一行 `EVERPEACE_BENCHMARK_RESULT <JSON>`，launcher 不从最终回答猜测 usage。固定 dsh 使用 `createInstrumentedDshAdapter()`：它要求源码 checkout 的完整 HEAD 为 `639ed015397290b3745d163aafe02ffee4aa3f84`，直接通过 Node 启动该 checkout 内的 built `apps/cli/lib/bin.js`，并创建内容锁定的专用 headless profile。profile 在 dsh 的 `llm/stream` waterfall 记录每次 coding、重试、摘要和标题请求，校验模型原始 ID、主编码请求的 `high` reasoning 与 32K 输出上限，在每个 provider 请求前检查剩余预算，并把 cache/unknown usage 交回 campaign。Windows 不经过 `.cmd` 或 shell。
+`createCheckoutBenchmarkAdapter()` 为 baseline 与 candidate 提供同一条 fresh-process worker 路径。每次运行都从指定 checkout 动态导入 production adapter，并重新核对完整 Git revision、runtime source digest 和已构建 entry digest；source digest 覆盖 `src` 中 tracked、deleted 与未忽略 untracked 内容，以及 manifest、lockfile 和 TypeScript 配置，因此候选新增文件会改变身份，而仓库外或无关根目录文件不会。worker 强制使用配置中的原始模型 ID、`high` reasoning 和 32,768 output tokens，不继承个人保存的 request settings。基线和候选可以共享 revision，例如基线为干净 `b226bfc` checkout、候选为该 revision 上的明确工作树内容；digest 才区分两者。preflight 失败会在错误中给出实际 digest，供 reviewed 配置更新。
+
+`createProcessHarnessAdapter()` 参数化启动固定外部程序，不使用 shell 拼接；通用外部 wrapper 必须在自己的 LLM 边界输出一行 `EVERPEACE_BENCHMARK_RESULT <JSON>`，launcher 不从最终回答猜测 usage。固定 dsh 使用 `createInstrumentedDshAdapter()`：它要求源码 checkout 的完整 HEAD 为 `639ed015397290b3745d163aafe02ffee4aa3f84`，直接通过 Node 启动该 checkout 内的 built `apps/cli/lib/bin.js`，并创建内容锁定的专用 headless profile。profile 在 dsh 的 `llm/stream` waterfall 记录每次 coding、重试、摘要和标题请求，校验模型原始 ID、主编码请求的 `high` reasoning 与 32K 输出上限，在每个 provider 请求前检查剩余预算，并把 cache/unknown usage 交回 campaign。缺失或非法 token 字段会永久把该任务 usage 标为 incomplete 并阻止后续请求；cache 字段缺失时 denominator 保持未观察。取消或失败时仍在清理临时目录前保存脱敏 ledger。Windows 不经过 `.cmd` 或 shell。
 
 dsh 配置需要 `sourceRoot`、位于该目录内的 `entryPath`、独立 `dshHome` 与专用 `profile`。首次运行只在 profile 不存在时写入 reviewed manifest/patch；已有 profile 内容不一致会失败关闭。运行前需在固定 checkout 中完成官方依赖安装和 build，这一步不会由 campaign 静默执行。profile 禁用 Web tool、使用隔离的 Agents home 和关闭遥测；API key 只在 live 子进程环境中传递，不写入配置、ledger 或 artifact。
 
 ## Campaign command
 
-内部入口要求配置文件，并且必须在离线 proof 与 live campaign 中二选一：
+内部入口要求配置文件，并且必须在无凭据启动预检、离线 fixture proof 与 live campaign 中三选一：
 
 ```powershell
+pnpm benchmark:campaign -- --config .\campaign.json --preflight
 pnpm benchmark:campaign -- --config .\campaign.json --prove-fixtures
 pnpm benchmark:campaign -- --config .\campaign.json --live
 ```
 
-配置包含 `campaignId`、catalog/fixture/run/artifact/session 目录、已注册的 `modelId`、随机 `seed`、`repetitions`、`taskTokenBudget`、`campaignTokenBudget` 和 harness 列表。可从 [示例配置](benchmark/CAMPAIGN_CONFIG.example.json) 开始。`everpeace` harness 使用生产 factory；`dsh` harness 使用固定源码与内置 instrumentation；其他外部 harness 可继续使用 `instrumented-process`，明确提供 executable、参数模板、固定 revision 和预期模型设置。通用参数模板支持 `${PROMPT}`、`${WORKSPACE}` 和 `${TOKEN_BUDGET}`，以 argv 传递而非 shell 拼接。
+配置包含 `campaignId`、catalog/fixture/run/artifact/session 目录、已注册的 `modelId`、随机 `seed`、`repetitions`、`taskTokenBudget`、`campaignTokenBudget`、可选有序 `taskIds` 和名称唯一的 harness 列表。可从 [示例配置](benchmark/CAMPAIGN_CONFIG.example.json) 开始。`everpeace-checkout` 分别命名 baseline/candidate 并指定 source/build identity；`dsh` 使用固定源码与内置 instrumentation；既有单个 `everpeace` 和 `instrumented-process` 配置继续兼容。通用外部参数模板支持 `${PROMPT}`、`${WORKSPACE}` 和 `${TOKEN_BUDGET}`，以 argv 传递而非 shell 拼接。
+
+`--preflight` 不读取系统 credential storage，也不发送模型请求。它实际启动每个 checkout fresh worker、导入 production entry 并在真实 provider request boundary 注入合成 response；dsh 同样启动固定 CLI/profile，在 `llm/stream` boundary 注入合成响应。两者传入 dummy credential，在 Node socket guard 下要求 30 秒内完成。结果把 entry/profile loading、request-boundary interception、effective settings、checkout identity、usage ledger 与失败写入 `preflight-result.json`。这是 startup/admission 证据，不是 scored result，也不证明操作系统级断网。无 digest 的旧 `everpeace` 与未定义无凭据预检契约的通用 `instrumented-process` 在该模式失败关闭，live 兼容性不变。
 
 live 入口在任何请求前写入 `campaign-plan.json`，随后随机交错 harness 顺序；结果写入 `campaign-result.json`，包含完整 planned、executed、skipped、unknown usage 和 stop reason。每个 skipped 项保留 adapter、task 和 repetition。准备失败作为执行结果保存，不算有效 seed，也不会消费模型预算。
 
@@ -106,9 +111,9 @@ Performance trace 记录 context preparation、request snapshot、sampling、ret
 正式对比顺序固定为：
 
 1. 每项 fixture 先独立证明 pristine pass → seed fail → reference repair pass。
-2. 运行 3 项 × 当前版本/优化版本/固定 dsh × 1 次，共 9 次 smoke。
-3. 随机交错 harness 顺序，运行 10 项 × 3 harness × 3 次，共 90 次正式比较。
+2. smoke 配置列出 3 个 `taskIds`、3 个 harness、`repetitions: 1`，计划必须恰好产生 9 次运行。
+3. 正式配置包含全部 10 项、相同 3 个 harness、`repetitions: 3`，随机交错计划必须恰好产生 90 次运行。
 
 三组固定模型原始 ID、`high` 推理、32K 产品输出预算、十五分钟任务时限和最多三轮诊断。报告独立通过次数、首次通过、人工介入、双方均成功任务的配对耗时、总 token/成功任务、缓存统计完整性，以及协议、sandbox、工具差异。
 
-十项离线 proof 与固定 dsh instrumentation 代码已完成；固定 checkout 的实际 build/profile 启动、真实 API smoke、九十次对比及 Windows Terminal 验收均未执行。真实调用需要另行显式授权，并同时给出 task 与 campaign token 预算；在此之前不能发布排名、冷缓存结论或相对 dsh 的性能优势声明。
+十项离线 proof、命名 checkout worker、无凭据 preflight 路径和固定 dsh instrumentation 代码已完成；当前机器没有可供验收的 pinned dsh checkout，因此实际 CLI/profile preflight 仍未执行。真实 API smoke、九十次对比及 Windows Terminal 验收也均未执行。真实调用需要另行显式授权，并同时给出 task 与 campaign token 预算；在此之前不能发布排名、冷缓存结论或相对 dsh 的性能优势声明。

@@ -54,6 +54,14 @@ Phase B is being delivered in independently validated slices:
 
 Acceptance: same protected targets fail through shell and patch; malicious project configuration cannot expand roots or weaken rules; denied compound commands never launch; permission changes invalidate stale approvals; Windows/Linux/macOS tests identify actual enforcement and capability failures. No migration of permissions into Session JSONL.
 
+### Isolated LSP navigation
+
+Optional TypeScript navigation now uses the same pinned native backend through a dedicated duplex process transport rather than host `child_process.spawn`. Each query launches executable and argv directly with a complete child of `:read-only`: workspace writes are denied, `.git`/`.codex`/`.agents`/`.everpeace` plus the global application-state root are inaccessible, and native network denial is requested. This policy is independent of the interactive permission tier, including full access. Before the configured server starts, a direct-socket probe runs under the same policy; if a connection succeeds or denial cannot be proved, the tool and `/doctor` report unavailable and retain lexical search. There is no host fallback.
+
+The transport retains raw stdout, honors stdin backpressure, drains bounded stderr and exposes an awaited exit/termination result. The query queue advances only after cleanup. Task cancellation and permission-revision changes terminate the active server. Platform runtime reads and native temporary-directory grants remain ambient backend capabilities; documentation must not describe the process as seeing only workspace bytes.
+
+Protocol parsing separately limits headers to 8 KiB, frames to 2 MiB, aggregate incoming traffic to 8 MiB and retained stderr to 64 KiB. These bounds and policy construction have automated regressions. A native Windows fixture confirmed denied workspace writes and application-state reads, then demonstrated that pinned `@openai/codex@0.155.1` still permits a direct socket even when the disable-network flag is supplied. The runtime therefore fails closed on that backend; Linux/macOS and future backend revisions still require their own probes before navigation is advertised as usable.
+
 ## Phase C — lifecycle, diagnostics and measured performance
 
 1. Introduce typed outcomes (launch failure, policy refusal, command exit, timeout, cancellation), preserving original command exit/output. A helper retry requires a machine-verifiable pre-execution failure, not matching stderr.
@@ -67,4 +75,4 @@ Acceptance: fake launch failures cause no fallback or replay; cancellation leave
 
 Windows Node with the installed pinned backend was exercised using disposable directories and fixed fixture commands, without model/API requests. The built-in profile allowed `.everpeace`, confirming the original gap. The new complete child profile then allowed an ordinary workspace write while rejecting `.everpeace` file creation, rename and delete attempts; the automated native regression covers ordinary write plus protected write. Non-temp sibling writes, read-only workspace writes and `.git` writes also failed. A sibling inside the system temp directory was writable, as a temporary-directory grant permits; this is not a workspace escape test.
 
-Linux/macOS native isolation, live terminal approval flows, process-tree ownership and network-denial probes are not covered by these Windows filesystem results. Automated counts and the latest full-validation status belong in `../HANDOFF.md`.
+Linux/macOS native isolation, live terminal approval flows and process-tree ownership are not covered by these Windows results. The Windows LSP probe covers a direct socket and records the backend limitation above; it does not establish general shell-network enforcement. Automated counts and the latest full-validation status belong in `../HANDOFF.md`.

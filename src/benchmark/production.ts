@@ -29,6 +29,7 @@ function safeName(value: string): string {
  * The benchmark evaluator remains outside this stack and scores the resulting workspace.
  */
 export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAdapterOptions): BenchmarkHarnessAdapter {
+  const comparisonSettings = { reasoningEffort: "high" as const, maxOutputTokens: 32_768 };
   return {
     name: "everpeace",
     managesRepairs: true,
@@ -49,7 +50,7 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
           id: options.model.id,
           model_name: options.model.model_name,
           base_url: options.model.base_url,
-          ...(options.model.request_settings ? { request_settings: { ...options.model.request_settings } } : {}),
+          request_settings: { ...comparisonSettings },
         },
       });
       const workflow = new CodingWorkflowRuntime({
@@ -59,7 +60,7 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
       const provider = createProviderRuntime(
         options.model.base_url,
         options.model.api_key,
-        options.model.request_settings,
+        comparisonSettings,
         options.model.model_name,
       );
       const client: ResponsesClientLike = {

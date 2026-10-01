@@ -3,6 +3,7 @@ export { createBenchmarkCampaignPlan, runBenchmarkCampaign, type BenchmarkCampai
 export { createFileBenchmarkArtifactSink, redactBenchmarkText } from "./artifacts.js";
 export { createProviderCapabilityProfile, type ProviderCapabilityOverrides } from "./capabilities.js";
 export { createProductionBenchmarkAdapter, type ProductionBenchmarkAdapterOptions } from "./production.js";
+export { assertBenchmarkCheckoutIdentity, captureBenchmarkCheckoutIdentity, createCheckoutBenchmarkAdapter, preflightBenchmarkCheckout, type BenchmarkCheckoutIdentity, type CheckoutBenchmarkAdapterOptions } from "./checkout.js";
 export { createInstrumentedDshAdapter, ensureDshBenchmarkProfile, PINNED_DSH_REVISION, type InstrumentedDshAdapterOptions } from "./dsh.js";
 export { createCodingTaskRunnerBenchmarkAdapter, createDshHeadlessAdapter, createEverpeaceBenchmarkAdapter, createProcessHarnessAdapter, type CodingTaskRunnerFactory, type DshHeadlessAdapterOptions, type ProcessHarnessAdapterOptions, type ProductionBenchmarkTaskRunner } from "./adapters.js";
 export { parseBenchmarkTaskCatalog, parseReproducibleBenchmarkTaskCatalog, type BenchmarkTaskCatalogEntry } from "./catalog.js";

@@ -1,18 +1,26 @@
-import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
+import { createServer } from "node:net";
+import os from "node:os";
 import path from "node:path";
+import type { Readable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { stopProcessTree } from "./process-cancel.js";
+import { startCodexDuplexProcess, type CodexDuplexExit, type CodexDuplexProcess } from "../codex/cli.js";
+import { decodeTextFile } from "./file-version.js";
+import { createLspSandboxPolicy, modelShellEnvironment, nativeLspPermissionProfileArgs, type LspSandboxPolicy } from "./sandbox-policy.js";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_LOCATIONS = 100;
 const MAX_DOCUMENT_BYTES = 16 * 1024 * 1024;
 const MAX_HOVER_BYTES = 64 * 1024;
+const MAX_HEADER_BYTES = 8 * 1024;
+const MAX_FRAME_BYTES = 2 * 1024 * 1024;
+const MAX_INCOMING_BYTES = 8 * 1024 * 1024;
+const MAX_STDERR_BYTES = 64 * 1024;
 
 export const CODE_NAVIGATION_TOOL_DEFINITION = {
   type: "function" as const,
   name: "code_navigation",
-  description: "Use the configured read-only TypeScript language server for definition, references, implementation, or hover. Positions are one-based UTF-16 line and column values.",
+  description: "Use the configured sandboxed read-only TypeScript language server for definition, references, implementation, or hover. Positions are one-based UTF-16 line and column values.",
   parameters: {
     type: "object",
     properties: {
@@ -54,7 +62,23 @@ export interface CodeNavigationResult {
 export interface CodeNavigationRuntimeLike {
   query(request: CodeNavigationRequest, signal?: AbortSignal): Promise<CodeNavigationResult>;
   describe(): string;
+  probeIsolation?(signal?: AbortSignal): Promise<void>;
 }
+
+export interface LanguageServerProcess {
+  readonly stdout: Readable;
+  readonly exit: Promise<CodexDuplexExit | void>;
+  write(data: Uint8Array | string): Promise<void>;
+  closeInput(): void;
+  terminate(): Promise<unknown>;
+}
+
+export type LanguageServerProcessFactory = (options: {
+  command: string;
+  args: readonly string[];
+  cwd: string;
+  policy: LspSandboxPolicy;
+}) => LanguageServerProcess;
 
 function inside(root: string, target: string): boolean {
   const relative = path.relative(root, target);
@@ -85,28 +109,60 @@ function contentText(value: unknown): string {
   return "";
 }
 
+function nativeProcessFactory(options: Parameters<LanguageServerProcessFactory>[0]): CodexDuplexProcess {
+  return startCodexDuplexProcess([
+    "sandbox",
+    ...nativeLspPermissionProfileArgs(options.policy),
+    "-C",
+    options.cwd,
+    ...options.policy.readableRoots.flatMap((root) => ["--sandbox-state-readable-root", root]),
+    "--sandbox-state-disable-network",
+    "--include-managed-config",
+    "-c",
+    "shell_environment_policy.ignore_default_excludes=false",
+    "--",
+    options.command,
+    ...options.args,
+  ], { cwd: options.cwd, env: modelShellEnvironment(process.env), stderrMaxBytes: MAX_STDERR_BYTES });
+}
+
 class JsonRpcProcess {
-  readonly #child: ReturnType<typeof spawn>;
+  readonly #process: LanguageServerProcess;
   readonly #pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
   #nextId = 1;
   #buffer = Buffer.alloc(0);
+  #incomingBytes = 0;
   #closed: Error | undefined;
+  #writes: Promise<void> = Promise.resolve();
 
-  constructor(command: string, args: readonly string[], cwd: string) {
-    this.#child = spawn(command, [...args], {
-      cwd,
-      windowsHide: true,
-      shell: false,
-      detached: process.platform !== "win32",
-      stdio: ["pipe", "pipe", "pipe"],
+  constructor(process: LanguageServerProcess) {
+    this.#process = process;
+    process.stdout.on("data", (chunk: Buffer | string) => {
+      if (this.#closed) return;
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      this.#incomingBytes += bytes.length;
+      if (this.#incomingBytes > MAX_INCOMING_BYTES) { this.#fail(new Error("Language server exceeded the 8 MiB incoming-traffic limit")); return; }
+      this.#buffer = Buffer.concat([this.#buffer, bytes]);
+      this.#drain();
     });
-    this.#child.stdout!.on("data", (chunk: Buffer) => { this.#buffer = Buffer.concat([this.#buffer, chunk]); this.#drain(); });
-    this.#child.once("error", (error) => this.#fail(error));
-    this.#child.once("close", (code) => this.#fail(new Error(`Language server exited with ${code ?? "no exit code"}`)));
+    process.stdout.once("error", (error) => this.#fail(error));
+    void process.exit.then(
+      (result) => {
+        const details = result && typeof result === "object"
+          ? ` with ${result.exitCode === null ? (result.signal ?? "no exit code") : `exit code ${result.exitCode}`}${result.stderr ? `: ${result.stderr}` : ""}`
+          : "";
+        this.#fail(new Error(`Language server exited${details}`));
+      },
+      (error: unknown) => this.#fail(error instanceof Error ? error : new Error(String(error))),
+    );
   }
 
-  notify(method: string, params?: unknown): void {
-    this.#write({ jsonrpc: "2.0", method, ...(params === undefined ? {} : { params }) });
+  get closed(): boolean {
+    return this.#closed !== undefined;
+  }
+
+  notify(method: string, params?: unknown): Promise<void> {
+    return this.#write({ jsonrpc: "2.0", method, ...(params === undefined ? {} : { params }) });
   }
 
   async request(method: string, params: unknown, signal: AbortSignal): Promise<unknown> {
@@ -121,33 +177,44 @@ class JsonRpcProcess {
       pending.reject(signal.reason instanceof Error ? signal.reason : new Error("Language server request cancelled"));
     };
     signal.addEventListener("abort", aborted, { once: true });
-    this.#write({ jsonrpc: "2.0", id, method, params });
-    try { return await result; }
-    finally { signal.removeEventListener("abort", aborted); }
+    try {
+      await this.#write({ jsonrpc: "2.0", id, method, params });
+      return await result;
+    } finally {
+      signal.removeEventListener("abort", aborted);
+    }
   }
 
   async close(): Promise<void> {
-    if (this.#child.exitCode !== null || this.#child.killed) return;
-    const closed = new Promise<void>((resolve) => this.#child.once("close", () => resolve()));
-    if (this.#child.pid) stopProcessTree(this.#child.pid);
-    else this.#child.kill();
-    await Promise.race([closed, new Promise<void>((resolve) => setTimeout(resolve, 2_000))]);
+    this.#process.closeInput();
+    await this.#process.terminate();
   }
 
-  #write(message: Record<string, unknown>): void {
+  #write(message: Record<string, unknown>): Promise<void> {
+    if (this.#closed) return Promise.reject(this.#closed);
     const body = Buffer.from(JSON.stringify(message), "utf8");
-    this.#child.stdin!.write(`Content-Length: ${body.length}\r\n\r\n`);
-    this.#child.stdin!.write(body);
+    const frame = Buffer.concat([Buffer.from(`Content-Length: ${body.length}\r\n\r\n`, "ascii"), body]);
+    const write = this.#writes.then(() => this.#process.write(frame));
+    this.#writes = write.catch(() => undefined);
+    return write;
   }
 
   #drain(): void {
-    while (true) {
+    while (!this.#closed) {
       const headerEnd = this.#buffer.indexOf("\r\n\r\n");
-      if (headerEnd < 0) return;
+      if (headerEnd < 0) {
+        if (this.#buffer.length > MAX_HEADER_BYTES) this.#fail(new Error("Language server JSON-RPC header exceeds 8 KiB"));
+        return;
+      }
+      if (headerEnd > MAX_HEADER_BYTES) { this.#fail(new Error("Language server JSON-RPC header exceeds 8 KiB")); return; }
       const header = this.#buffer.subarray(0, headerEnd).toString("ascii");
       const length = /(?:^|\r\n)Content-Length:\s*(\d+)/iu.exec(header)?.[1];
       if (!length) { this.#fail(new Error("Language server sent an invalid JSON-RPC frame")); return; }
       const bodyLength = Number(length);
+      if (!Number.isSafeInteger(bodyLength) || bodyLength < 0 || bodyLength > MAX_FRAME_BYTES) {
+        this.#fail(new Error("Language server JSON-RPC frame exceeds 2 MiB or has an invalid length"));
+        return;
+      }
       const bodyStart = headerEnd + 4;
       if (this.#buffer.length < bodyStart + bodyLength) return;
       const body = this.#buffer.subarray(bodyStart, bodyStart + bodyLength).toString("utf8");
@@ -156,9 +223,8 @@ class JsonRpcProcess {
       try { message = JSON.parse(body) as Record<string, unknown>; }
       catch { this.#fail(new Error("Language server sent invalid JSON")); return; }
       if ((typeof message.id === "number" || typeof message.id === "string") && typeof message.method === "string") {
-        // The coding CLI is read-only from the server's perspective. Reject all server requests,
-        // including workspace/applyEdit and workspace/executeCommand.
-        this.#write({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Server requests are disabled" } });
+        void this.#write({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Server requests are disabled" } })
+          .catch((error: unknown) => this.#fail(error instanceof Error ? error : new Error(String(error))));
       } else if (typeof message.id === "number") {
         const pending = this.#pending.get(message.id);
         if (!pending) continue;
@@ -184,20 +250,72 @@ function languageId(filename: string): string {
   return "javascript";
 }
 
+function operationMethod(operation: CodeNavigationOperation): string {
+  return operation === "definition" ? "textDocument/definition"
+    : operation === "references" ? "textDocument/references"
+      : operation === "implementation" ? "textDocument/implementation"
+        : "textDocument/hover";
+}
+
+function supportsOperation(initializeResult: unknown, operation: CodeNavigationOperation): boolean {
+  if (!initializeResult || typeof initializeResult !== "object") return false;
+  const capabilities = (initializeResult as Record<string, unknown>).capabilities;
+  if (!capabilities || typeof capabilities !== "object") return false;
+  const key = operation === "definition" ? "definitionProvider"
+    : operation === "references" ? "referencesProvider"
+      : operation === "implementation" ? "implementationProvider"
+        : "hoverProvider";
+  const value = (capabilities as Record<string, unknown>)[key];
+  return value === true || (typeof value === "object" && value !== null);
+}
+
+function validatePosition(text: string, request: CodeNavigationRequest): void {
+  const line = text.replace(/\r\n/gu, "\n").split("\n")[request.line - 1];
+  if (line === undefined || request.column - 1 > line.length) throw new Error("Code navigation position is outside the current UTF-16 document bounds");
+}
+
 export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
   readonly #workspacePath: string;
   readonly #command: string;
   readonly #args: readonly string[];
+  readonly #policy: LspSandboxPolicy;
+  readonly #startProcess: LanguageServerProcessFactory;
+  readonly #permissionRevision: (() => string) | undefined;
+  readonly #verifyIsolation: boolean;
+  #isolationProbe: Promise<void> | undefined;
   #tail: Promise<void> = Promise.resolve();
 
-  constructor(options: { workspacePath: string; command: string; args?: readonly string[] }) {
+  constructor(options: {
+    workspacePath: string;
+    command: string;
+    args?: readonly string[];
+    policy: LspSandboxPolicy;
+    startProcess?: LanguageServerProcessFactory;
+    permissionRevision?: () => string;
+    verifyIsolation?: boolean;
+  }) {
     this.#workspacePath = path.resolve(options.workspacePath);
     this.#command = options.command;
     this.#args = [...(options.args ?? ["--stdio"])];
+    this.#policy = options.policy;
+    this.#startProcess = options.startProcess ?? nativeProcessFactory;
+    this.#permissionRevision = options.permissionRevision;
+    this.#verifyIsolation = options.verifyIsolation ?? options.startProcess === undefined;
   }
 
   describe(): string {
-    return `${this.#command} ${this.#args.join(" ")}`.trim();
+    return `${this.#command} ${this.#args.join(" ")} (native read-only sandbox)`.trim();
+  }
+
+  probeIsolation(signal?: AbortSignal): Promise<void> {
+    if (!this.#isolationProbe) {
+      const attempt = this.#probeNetworkIsolation(signal);
+      this.#isolationProbe = attempt.catch((error: unknown) => {
+        if (signal?.aborted) this.#isolationProbe = undefined;
+        throw error;
+      });
+    }
+    return this.#isolationProbe;
   }
 
   query(request: CodeNavigationRequest, signal?: AbortSignal): Promise<CodeNavigationResult> {
@@ -208,38 +326,43 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
 
   async #query(request: CodeNavigationRequest, signal?: AbortSignal): Promise<CodeNavigationResult> {
     const timeout = new AbortController();
+    const policyChange = new AbortController();
+    const expectedRevision = this.#permissionRevision?.();
     const timer = setTimeout(() => timeout.abort(new Error(`Language server request exceeded ${REQUEST_TIMEOUT_MS}ms`)), REQUEST_TIMEOUT_MS);
     timer.unref?.();
-    const combined = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
+    const policyTimer = expectedRevision === undefined ? undefined : setInterval(() => {
+      if (this.#permissionRevision?.() !== expectedRevision) policyChange.abort(new Error("Permission policy changed during language-server execution"));
+    }, 100);
+    policyTimer?.unref?.();
+    const combined = AbortSignal.any([...(signal ? [signal] : []), timeout.signal, policyChange.signal]);
     let rpc: JsonRpcProcess | undefined;
+    let openedUri: string | undefined;
     try {
       combined.throwIfAborted();
+      if (this.#verifyIsolation) await this.probeIsolation(combined);
       const root = await fs.realpath(this.#workspacePath);
       const target = await fs.realpath(path.resolve(root, request.path));
       if (!inside(root, target)) throw new Error("Code navigation is limited to the current workspace");
       const stat = await fs.stat(target);
       if (!stat.isFile() || stat.size > MAX_DOCUMENT_BYTES) throw new Error("Code navigation requires a bounded regular file");
-      const text = await fs.readFile(target, "utf8");
+      const text = decodeTextFile(await fs.readFile(target)).text;
+      validatePosition(text, request);
       const uri = pathToFileURL(target).href;
-      rpc = new JsonRpcProcess(this.#command, this.#args, root);
-      await rpc.request("initialize", {
+      rpc = new JsonRpcProcess(this.#startProcess({ command: this.#command, args: this.#args, cwd: root, policy: this.#policy }));
+      const initialized = await rpc.request("initialize", {
         processId: process.pid,
         rootUri: pathToFileURL(root).href,
         capabilities: { workspace: { applyEdit: false }, textDocument: { definition: {}, references: {}, implementation: {}, hover: {} } },
       }, combined);
-      rpc.notify("initialized", {});
-      rpc.notify("textDocument/didOpen", { textDocument: { uri, languageId: languageId(target), version: 1, text } });
-      const position = { line: request.line - 1, character: request.column - 1 };
-      const method = request.operation === "definition" ? "textDocument/definition"
-        : request.operation === "references" ? "textDocument/references"
-          : request.operation === "implementation" ? "textDocument/implementation"
-            : "textDocument/hover";
-      const raw = await rpc.request(method, {
+      if (!supportsOperation(initialized, request.operation)) throw new Error(`Language server does not advertise ${request.operation} support`);
+      await rpc.notify("initialized", {});
+      await rpc.notify("textDocument/didOpen", { textDocument: { uri, languageId: languageId(target), version: 1, text } });
+      openedUri = uri;
+      const raw = await rpc.request(operationMethod(request.operation), {
         textDocument: { uri },
-        position,
+        position: { line: request.line - 1, character: request.column - 1 },
         ...(request.operation === "references" ? { context: { includeDeclaration: true } } : {}),
       }, combined);
-      rpc.notify("textDocument/didClose", { textDocument: { uri } });
       if (request.operation === "hover") {
         const hover = contentText(raw);
         return { operation: request.operation, hover: hover ? Buffer.from(hover, "utf8").subarray(0, MAX_HOVER_BYTES).toString("utf8") : null, truncated: Buffer.byteLength(hover, "utf8") > MAX_HOVER_BYTES };
@@ -252,9 +375,11 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
         const locationUri = typeof record.uri === "string" ? record.uri : typeof record.targetUri === "string" ? record.targetUri : undefined;
         const range = (record.range ?? record.targetSelectionRange) as { start?: { line?: unknown; character?: unknown }; end?: { line?: unknown; character?: unknown } } | undefined;
         if (!locationUri || locationUri.slice(0, 5).toLowerCase() !== "file:" || !range?.start || !range.end) continue;
-        const locationPath = fileURLToPath(locationUri);
+        let locationPath: string;
+        try { locationPath = await fs.realpath(fileURLToPath(locationUri)); }
+        catch { continue; }
         if (!inside(root, locationPath)) continue;
-        if (![range.start.line, range.start.character, range.end.line, range.end.character].every(Number.isSafeInteger)) continue;
+        if (![range.start.line, range.start.character, range.end.line, range.end.character].every((coordinate) => Number.isSafeInteger(coordinate) && (coordinate as number) >= 0)) continue;
         locations.push({
           path: path.relative(root, locationPath).split(path.sep).join("/"),
           line: (range.start.line as number) + 1,
@@ -266,7 +391,82 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
       return { operation: request.operation, locations, truncated: values.length > MAX_LOCATIONS };
     } finally {
       clearTimeout(timer);
-      await rpc?.close();
+      if (policyTimer) clearInterval(policyTimer);
+      try {
+        if (rpc && openedUri && !combined.aborted && !rpc.closed) await rpc.notify("textDocument/didClose", { textDocument: { uri: openedUri } });
+      } finally {
+        await rpc?.close();
+      }
+    }
+  }
+
+  async #probeNetworkIsolation(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    const root = await fs.realpath(this.#workspacePath);
+    const listener = createServer();
+    const sockets = new Set<import("node:net").Socket>();
+    listener.on("connection", (socket) => {
+      sockets.add(socket);
+      socket.once("close", () => sockets.delete(socket));
+      socket.destroy();
+    });
+    await new Promise<void>((resolve, reject) => {
+      listener.once("error", reject);
+      listener.listen(0, "0.0.0.0", resolve);
+    });
+    const address = listener.address();
+    if (!address || typeof address === "string") {
+      listener.close();
+      throw new Error("Language-server isolation probe could not create a network listener; use lexical search");
+    }
+    const host = Object.values(os.networkInterfaces()).flat().find((candidate) =>
+      candidate?.family === "IPv4" && !candidate.internal)?.address ?? "127.0.0.1";
+    const script = [
+      "const { connect } = require('node:net');",
+      "let done = false;",
+      "const finish = (value) => { if (done) return; done = true; clearTimeout(timer); socket.destroy(); process.stdout.write(value); };",
+      "const socket = connect({ host: process.argv[1], port: Number(process.argv[2]) });",
+      "socket.once('connect', () => finish('allowed'));",
+      "socket.once('error', () => finish('denied'));",
+      "const timer = setTimeout(() => finish('timeout'), 1500);",
+    ].join("");
+    let processHandle: LanguageServerProcess | undefined;
+    try {
+      processHandle = this.#startProcess({
+        command: process.execPath,
+        args: ["-e", script, host, String(address.port)],
+        cwd: root,
+        policy: this.#policy,
+      });
+      const chunks: Buffer[] = [];
+      let bytes = 0;
+      processHandle.stdout.on("data", (chunk: Buffer | string) => {
+        const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        if (bytes < 4096) chunks.push(value.subarray(0, 4096 - bytes));
+        bytes += value.length;
+      });
+      processHandle.closeInput();
+      const timeout = AbortSignal.timeout(5_000);
+      const combined = AbortSignal.any([...(signal ? [signal] : []), timeout]);
+      combined.throwIfAborted();
+      const aborted = new Promise<never>((_resolve, reject) => {
+        combined.addEventListener("abort", () => reject(combined.reason), { once: true });
+      });
+      const result = await Promise.race([processHandle.exit, aborted]);
+      const output = Buffer.concat(chunks).toString("utf8").trim();
+      if (result && result.exitCode !== 0) {
+        throw new Error(`Language-server isolation probe failed with exit code ${result.exitCode}: ${result.stderr || "no diagnostic output"}`);
+      }
+      if (output !== "denied") {
+        throw new Error(`Language-server isolation is unavailable because direct networking was ${output === "allowed" ? "permitted" : "not conclusively denied"}; use lexical search`);
+      }
+    } finally {
+      try {
+        await processHandle?.terminate();
+      } finally {
+        for (const socket of sockets) socket.destroy();
+        await new Promise<void>((resolve) => listener.close(() => resolve()));
+      }
     }
   }
 }
@@ -275,17 +475,39 @@ export function parseCodeNavigationArguments(value: string): CodeNavigationReque
   return parseArguments(value);
 }
 
-export function createCodeNavigationFromEnvironment(workspacePath: string): CodeNavigationRuntime | undefined {
-  const command = process.env.EVERPEACE_TYPESCRIPT_LSP?.trim();
-  if (!command) return undefined;
-  let args: string[] | undefined;
-  const encoded = process.env.EVERPEACE_TYPESCRIPT_LSP_ARGS;
-  if (encoded) {
-    const parsed: unknown = JSON.parse(encoded);
-    if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) throw new Error("EVERPEACE_TYPESCRIPT_LSP_ARGS must be a JSON array of strings");
-    args = parsed;
-  }
-  return new CodeNavigationRuntime({ workspacePath, command, ...(args === undefined ? {} : { args }) });
+function jsonStringArray(value: string | undefined, name: string): string[] | undefined {
+  if (!value) return undefined;
+  const parsed: unknown = JSON.parse(value);
+  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) throw new Error(`${name} must be a JSON array of strings`);
+  return parsed;
 }
 
-export const codeNavigationLimits = { requestTimeoutMs: REQUEST_TIMEOUT_MS, maxLocations: MAX_LOCATIONS, maxDocumentBytes: MAX_DOCUMENT_BYTES } as const;
+export function createCodeNavigationFromEnvironment(
+  workspacePath: string,
+  options: { permissionRevision?: () => string; startProcess?: LanguageServerProcessFactory } = {},
+): CodeNavigationRuntime | undefined {
+  const command = process.env.EVERPEACE_TYPESCRIPT_LSP?.trim();
+  if (!command) return undefined;
+  const args = jsonStringArray(process.env.EVERPEACE_TYPESCRIPT_LSP_ARGS, "EVERPEACE_TYPESCRIPT_LSP_ARGS");
+  const configuredRoots = jsonStringArray(process.env.EVERPEACE_TYPESCRIPT_LSP_READ_ROOTS, "EVERPEACE_TYPESCRIPT_LSP_READ_ROOTS") ?? [];
+  const commandRoots = path.isAbsolute(command) ? [path.dirname(command)] : [];
+  const policy = createLspSandboxPolicy(workspacePath, [...commandRoots, ...configuredRoots]);
+  return new CodeNavigationRuntime({
+    workspacePath,
+    command,
+    policy,
+    ...(args === undefined ? {} : { args }),
+    ...(options.permissionRevision ? { permissionRevision: options.permissionRevision } : {}),
+    ...(options.startProcess ? { startProcess: options.startProcess } : {}),
+  });
+}
+
+export const codeNavigationLimits = {
+  requestTimeoutMs: REQUEST_TIMEOUT_MS,
+  maxLocations: MAX_LOCATIONS,
+  maxDocumentBytes: MAX_DOCUMENT_BYTES,
+  maxHeaderBytes: MAX_HEADER_BYTES,
+  maxFrameBytes: MAX_FRAME_BYTES,
+  maxIncomingBytes: MAX_INCOMING_BYTES,
+  maxStderrBytes: MAX_STDERR_BYTES,
+} as const;

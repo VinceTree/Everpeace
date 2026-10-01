@@ -26,7 +26,9 @@ import { runTerminalCommand } from "../../tools/terminal.js";
 import type { TuiDependencies, TuiModelRegistry } from "./types.js";
 import { truncateEnd } from "../rendering/text-width.js";
 import {
+  defaultPermissions,
   loadPermissionPolicy,
+  permissionPolicyRevision,
   savePermissionPolicy,
   type PermissionPolicy,
 } from "../../permissions/policy.js";
@@ -208,7 +210,11 @@ export function createDefaultTuiDependencies(
         ? { requestInput: io.requestPlanInput, reviewPlan: io.reviewPlan }
         : undefined;
       let codeNavigation;
-      try { codeNavigation = createCodeNavigationFromEnvironment(process.cwd()); }
+      try {
+        codeNavigation = createCodeNavigationFromEnvironment(process.cwd(), {
+          permissionRevision: () => permissionPolicyRevision(io.getPermissions?.() ?? defaultPermissions()),
+        });
+      }
       catch { codeNavigation = undefined; }
       return new ReactAgent({
         workspacePath: process.cwd(),
@@ -357,7 +363,9 @@ export function createDefaultTuiDependencies(
           const command = process.env.EVERPEACE_TYPESCRIPT_LSP!.trim();
           if (path.isAbsolute(command)) await fs.access(command);
           else await execFileAsync(process.platform === "win32" ? "where.exe" : "which", [command], { timeout: 5_000, windowsHide: true });
-          lines.push(`TypeScript navigation: executable discovered (${navigation.describe()}); semantic requests not yet probed`);
+          await navigation.probeIsolation(signal);
+          lines.push(`TypeScript navigation: configured (${navigation.describe()}); native network isolation probe passed`);
+          lines.push("TypeScript navigation boundary: writes and application state are denied; direct networking was denied by probe; native platform ambient reads and temp grants still apply");
         }
       } catch (error) {
         lines.push(`TypeScript navigation: unavailable (${error instanceof Error ? error.message : String(error)})`);

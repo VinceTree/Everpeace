@@ -9,6 +9,18 @@ function positiveInteger(value, name) {
   return parsed;
 }
 
+function nonNegativeSafeInteger(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function validatedUsage(value) {
+  if (!value || !nonNegativeSafeInteger(value.inputTokens) || !nonNegativeSafeInteger(value.outputTokens)) return undefined;
+  for (const field of ['reasoningTokens', 'cacheReadTokens', 'cacheWriteTokens']) {
+    if (value[field] !== undefined && !nonNegativeSafeInteger(value[field])) return undefined;
+  }
+  return value;
+}
+
 function statusFromFinish(reason) {
   if (reason?.kind === 'aborted') return 'cancelled';
   if (reason?.kind === 'error') return 'failed';
@@ -82,6 +94,14 @@ export function createInstrumentation(expected, persist = () => {}) {
       let usage;
       let status = 'failed';
       try {
+        if (process.env.EVERPEACE_DSH_PREFLIGHT === '1') {
+          yield { type: 'text-delta', delta: 'Preflight complete.' };
+          yield { type: 'usage', usage: { inputTokens: 0, outputTokens: 1, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } };
+          yield { type: 'finish', reason: { kind: 'stop' } };
+          usage = { inputTokens: 0, outputTokens: 1, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+          status = 'completed';
+          return;
+        }
         for await (const chunk of next()) {
           if (chunk?.type === 'usage') usage = chunk.usage;
           if (chunk?.type === 'finish') status = statusFromFinish(chunk.reason);
@@ -89,25 +109,27 @@ export function createInstrumentation(expected, persist = () => {}) {
         }
       } finally {
         attempt.status = status;
-        if (usage === undefined) {
+        const validUsage = validatedUsage(usage);
+        if (validUsage === undefined) {
           incomplete = true;
           attempt.usage = null;
+          configurationErrors.push('Provider has unknown usage: missing or invalid token counts');
         } else {
-          const cacheRead = usage.cacheReadTokens ?? 0;
-          const cacheWrite = usage.cacheWriteTokens ?? 0;
-          const totalInput = usage.inputTokens + cacheRead + cacheWrite;
+          const cacheRead = validUsage.cacheReadTokens ?? 0;
+          const cacheWrite = validUsage.cacheWriteTokens ?? 0;
+          const totalInput = validUsage.inputTokens + cacheRead + cacheWrite;
           attempt.usage = {
             inputTokens: totalInput,
-            outputTokens: usage.outputTokens,
-            reasoningTokens: usage.reasoningTokens ?? 0,
+            outputTokens: validUsage.outputTokens,
+            reasoningTokens: validUsage.reasoningTokens ?? 0,
             cacheReadTokens: cacheRead,
             cacheWriteTokens: cacheWrite,
           };
           inputTokens += totalInput;
-          outputTokens += usage.outputTokens;
-          reasoningTokens += usage.reasoningTokens ?? 0;
+          outputTokens += validUsage.outputTokens;
+          reasoningTokens += validUsage.reasoningTokens ?? 0;
           cachedInputTokens += cacheRead;
-          cacheObservedInputTokens += totalInput;
+          if (validUsage.cacheReadTokens !== undefined && validUsage.cacheWriteTokens !== undefined) cacheObservedInputTokens += totalInput;
           // Overshoot is reported by the aggregate fields; it is not hidden or clamped.
         }
         save();

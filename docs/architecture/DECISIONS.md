@@ -262,7 +262,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 
 ## 可复现对比边界
 
-- 测试 CI 与发布 workflow 分开，在 Windows 和 Linux 上运行安装、typecheck、test、build 与 diff check。benchmark 外部进程 adapter 不使用 shell 拼接；dsh 的固定入口为 `--profile headless <job>`，Windows 应传 Node 与已解析的 JS bin，避免 `.cmd` shell 注入。重复运行必须使用 prepare hook 返回的独立 task；内置准备器只写入已确认不存在的目标目录，checkout pinned HEAD 后应用 reviewed seed，证明流程要求同一验收命令 seed 失败且 reference repair 通过。
+- 测试 CI 与发布 workflow 分开，在 Windows 和 Linux 上运行安装、typecheck、test、build 与 diff check。benchmark 外部进程 adapter 不使用 shell 拼接；dsh 固定通过 Node 启动已解析的 JS bin，并用 `--profile <reviewed-profile> --json <prompt>` 参数运行，避免 `.cmd` 与 shell 注入。重复运行必须使用 prepare hook 返回的独立 task；内置准备器只写入已确认不存在的目标目录，checkout pinned HEAD 后应用 reviewed seed，证明流程要求同一验收命令 seed 失败且 reference repair 通过。
 - live benchmark 必须在每次 implement/diagnose attempt 前拥有正的 remaining token budget；usage 缺失或不完整立即停止后续任务。固定 catalog 的十项 fixture 已具备种子缺陷、参考修复与 pristine/seed/reference 离线证据。固定 dsh adapter 必须核对完整上游 commit，直接启动 checkout 内的 JS entry，并使用内容锁定的专用 profile 在 `llm/stream` 边界校验 coding 请求配置、按 attempt 计量和执行预算准入；不能从 headless 最终文本推测 usage。真实 API 评测未完成前仍不发布模型胜率结论。
 
 ## 性能计量与生产闭环
@@ -283,6 +283,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 - 文件版本的规范表示是原始字节 SHA-256。`read_file`、patch preview、执行、审批绑定和 rollback 使用同一摘要；文本编辑解码 UTF-8 后保留 BOM 和原有 LF/CRLF。模型读取到的正文规范化仅用于展示，不能成为并发保护的 hash 来源。
 - 项目规则是 workspace root 到目标目录的 `AGENTS.md` chain。宿主保存 scope、content hash、诊断和 target revision；新 scope 或更新未到达模型时拒绝结构化 edit 并要求下一 sampling boundary。规则 revision 通过现有 context channel 持久化，但请求只采用当前 workspace snapshot，历史快照不能在 compaction 后重新取得权威。
 - 搜索 continuation 引用进程内有界 snapshot，而不是重复运行可能变化的查询。默认每页 100、最大 200，单次 retained data 最多 2 MiB/5 秒；`has_more` 只表示已有下一页，`incomplete` 要求缩小查询。
-- TypeScript semantic navigation 是显式配置的只读能力。未配置 LSP 时不广告工具，也不自动安装；同一 workspace 串行查询当前磁盘文本，使用 1-based UTF-16 坐标，30 秒/100 locations 上限。所有 server edit/command request 均拒绝，navigation 结果不授予 edit observation。
-- benchmark campaign 先持久化带 seed 的完整计划，再发出 live request。fixture 必须有 pinned source、setup、pristine assertion、reviewed seed/reference 和 evaluator-owned acceptance；评分在隔离材料上执行。外部 harness 必须在 LLM boundary 提供结构化 usage 与配置确认，不能从最终文本推断。真实请求仍需要独立显式授权和数值预算。
+- TypeScript semantic navigation 是显式配置的只读能力。未配置 LSP 时不广告工具，也不自动安装；同一 workspace 串行查询当前磁盘文本，使用 1-based UTF-16 坐标，30 秒/100 locations 上限。每次查询通过 pinned native backend 的 dedicated read-only duplex 进程运行，application state/workspace write 不随 full-access 放开；配置的 server 启动前必须在相同策略中通过 direct-socket denial probe，失败时报告 unavailable 并保留 lexical search。取消或权限 revision 变化必须终止并等待清理。所有 server edit/command request 均拒绝，navigation 结果不授予 edit observation。平台 ambient system read 与 temp grant 单独记录，不包装成绝对文件隔离。固定 Windows backend 当前未通过 network probe，因此失败关闭。
+- 模型完整变更审阅复用 `/diff` 的结构化 Git 服务，通过进程内 captured snapshot 与 opaque detail reference 分页；staged/unstaged/untracked 分组及 overlap 保留，刷新使旧引用过期。审阅不进入 `read_file` 观察表，不授予写权限，也不建立变更归属。结构化 update 的精确 replace 只接受唯一、大小写/空白精确匹配；稳定错误原因区分可恢复的编辑错误、并发旧版本与 policy denial。
+- benchmark campaign 先持久化带 seed 的完整计划，再发出 live request。fixture 必须有 pinned source、setup、pristine assertion、reviewed seed/reference 和 evaluator-owned acceptance；评分在隔离材料上执行。baseline/candidate 使用命名 checkout、revision 与 source/build digest，并由同一个 fresh-process worker 动态导入 production adapter；请求准入固定 raw model ID、high reasoning 和 32,768 output tokens。`--preflight`、`--prove-fixtures`、`--live` 互斥，preflight 不读取 credential storage、不产生 scored result。外部 harness 必须在 LLM boundary 提供结构化 usage 与配置确认，不能从最终文本推断。真实请求仍需要独立显式授权和数值预算。
 - 不创建远程 tag/Release 的版本交付使用 Release workflow 专用 `[skip publish]` 提交标记；Test workflow 不读取该标记，仍在 `main` push 上执行 Windows/Linux 门禁。tag push 始终允许 Release workflow 运行。

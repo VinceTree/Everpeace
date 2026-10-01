@@ -6,6 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { test } from "node:test";
 import { listWorkspaceChanges, readWorkspaceChange } from "../../../src/tools/workspace-review.js";
+import { WorkspaceReviewSession } from "../../../src/tools/workspace.js";
 
 const exec = promisify(execFile);
 
@@ -164,6 +165,27 @@ test("workspace review marks line-bounded tracked detail as truncated", async ()
     const detail = await readWorkspaceChange(root, entry);
     assert.equal(detail.truncated, true);
     assert.match(detail.warning ?? "", /10,000 lines/u);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("model workspace review keeps opaque references bound to a captured index", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-review-session-"));
+  try {
+    await git(root, "init");
+    await fs.writeFile(path.join(root, "new file.txt"), "preview\n", "utf8");
+    const session = new WorkspaceReviewSession(root);
+    const page = await session.list("{}");
+    assert.equal(page.status, "ok");
+    assert.equal(page.total, 1);
+    const entry = (page.entries as Array<{ reference: string }>)[0];
+    assert.ok(entry?.reference);
+    const detail = await session.read(JSON.stringify({ reference: entry.reference }));
+    assert.equal(detail.contentKind, "text");
+    assert.equal(detail.text, "preview\n");
+    session.clear();
+    await assert.rejects(session.read(JSON.stringify({ reference: entry.reference })), /unknown or expired/u);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

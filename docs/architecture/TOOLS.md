@@ -12,8 +12,8 @@
 | 项目规则链 | [project-context.ts](../../src/agent/project-context.ts) | [project-context.test.ts](../../tests/unit/agent/project-context.test.ts) |
 | 结果截断与续读 | [context-limits.ts](../../src/agent/context-limits.ts) | [context-limits.test.ts](../../tests/unit/agent/context-limits.test.ts) |
 | 模型命令与后台任务 | [bash.ts](../../src/tools/bash.ts)、[background-jobs.ts](../../src/tools/background-jobs.ts) | [bash.test.ts](../../tests/unit/tools/bash.test.ts)、[background-jobs.test.ts](../../tests/unit/tools/background-jobs.test.ts) |
-| TypeScript 导航 | [code-navigation.ts](../../src/tools/code-navigation.ts) | [code-navigation.test.ts](../../tests/unit/tools/code-navigation.test.ts) |
-| 模型 Git 工具 | [workspace.ts](../../src/tools/workspace.ts) | [workspace.test.ts](../../tests/unit/tools/workspace.test.ts) |
+| TypeScript 导航 | [code-navigation.ts](../../src/tools/code-navigation.ts)、[cli.ts](../../src/codex/cli.ts) | [code-navigation.test.ts](../../tests/unit/tools/code-navigation.test.ts)、[cli.test.ts](../../tests/unit/codex/cli.test.ts) |
+| 模型 Git 工具与变更审阅 | [workspace.ts](../../src/tools/workspace.ts)、[workspace-review.ts](../../src/tools/workspace-review.ts) | [workspace.test.ts](../../tests/unit/tools/workspace.test.ts)、[workspace-review.test.ts](../../tests/unit/tools/workspace-review.test.ts) |
 | 人工变更审阅 | [workspace-review.ts](../../src/tools/workspace-review.ts)、[workspace-diff-surface.tsx](../../src/tui/components/screens/workspace-diff-surface.tsx) | [workspace-review.test.ts](../../tests/unit/tools/workspace-review.test.ts)、[daily-use-surfaces.test.tsx](../../tests/unit/tui/daily-use-surfaces.test.tsx) |
 | 公共网页 | [web.ts](../../src/tools/web.ts) | [web.test.ts](../../tests/unit/tools/web.test.ts) |
 
@@ -41,7 +41,9 @@
 
 ## 结构化编辑、审批和撤销
 
-`apply_patch` 接受 create/update/delete 操作，由宿主预览并绑定观察版本。审批绑定预览文件 SHA-256 与权限 revision；审批期间权限变化或文件内容变化时不能沿用旧批准继续写入。create 使用排他创建，不能把期间新增的用户文件覆盖。
+`apply_patch` 接受 create/update/delete 操作，由宿主预览并绑定观察版本。update 在完整 `content`、unified `patch` 和精确 `replace: { oldText, newText }` 中三选一；replace 要求非空 oldText 在规范化 CRLF/LF 后精确且唯一匹配，并拒绝不改变内容的替换。它保留原文件的 BOM 和主换行风格，不做大小写、空白或模糊匹配。
+
+解析、预览和执行错误返回稳定原因及修复提示，覆盖无效参数、缺少当前进程观察、旧版本、未匹配或多重匹配、hunk 不符及策略拒绝。策略拒绝与可修复的编辑错误保持不同；任何替代编辑路径仍需通过同一权限边界。审批绑定预览文件 SHA-256 与权限 revision；审批期间权限变化或文件内容变化时不能沿用旧批准继续写入。create 使用排他创建，不能把期间新增的用户文件覆盖。
 
 真正写入前再次比较目标版本；update 使用临时文件原子替换，delete 检查原版本后删除。工作区控制目录与平台状态保护继续有效，详见权限文档。
 
@@ -84,11 +86,13 @@ README、HANDOFF 等按任务需要读取；规则链并不意味着自动装入
 
 终端展示与模型上下文限制分离；模型结果压缩不能悄悄缩小已有 `/outputs` 或 scrollback 的保留语义。命令输出实现还需查看 [command-record](../../src/tools/command-record.ts) 和 [bash-output-preview](../../src/tools/bash-output-preview.ts)。
 
-## 人工工作区变更审阅
+## 工作区变更审阅
 
-`/diff` 使用独立只读服务，不改变模型的 `workspace_status` / `workspace_diff` 契约。列表从 `git status --porcelain=v1 -z` 构建，分别保留 staged、unstaged 和 untracked 条目；同一路径同时有两种 tracked 状态时会出现两项。Git 路径先按仓库根解释，再映射到当前活动工作区，仓库子目录之外的路径不进入列表。
+`/diff` 和模型的 `list_workspace_changes` / `read_workspace_change` 共用只读服务；既有 `workspace_status` / `workspace_diff` 契约保持兼容。列表从 `git status --porcelain=v1 -z` 构建，分别保留 staged、unstaged 和 untracked 条目；同一路径同时有两种 tracked 状态时会出现两项。Git 路径先按仓库根解释，再映射到当前活动工作区，仓库子目录之外的路径不进入列表。
 
-详情按选择惰性读取。tracked 文本使用禁用 external diff、text conversion 和 rename detection 的 unified diff；untracked 普通 UTF-8 文件显示有界正文预览。二进制、非法 UTF-8、符号链接、submodule 和非普通文件显示明确摘要。列表最多 2 MiB/10,000 项；详情最多保留前 2 MiB 或 10,000 行，并在界面显示截断。`R` 刷新当前列表或详情，`Esc` 按详情 → 列表 → 聊天返回；异步操作可取消，关闭后的迟到结果被忽略。界面显示持久工作流中的 “Last task result”，不把当前 Git 变化归属给 Agent。
+详情按选择惰性读取。tracked 文本使用禁用 external diff、text conversion 和 rename detection 的 unified diff；untracked 普通 UTF-8 文件显示有界正文预览。二进制、非法 UTF-8、符号链接、submodule 和非普通文件显示明确摘要。列表最多 2 MiB/10,000 项；详情最多保留前 2 MiB 或 10,000 行，并在界面显示截断。
+
+模型列表创建进程内快照和 opaque 引用，详情页只在同一快照内续读；刷新会创建新快照，过期引用要求重新 list。模型大结果仍使用既有 `read_tool_output` 续读边界。审阅结果不进入文件观察表、不授予更新权限，也不证明变更归 Agent 所有；编码说明要求在总结前检查完整变更。人工界面用 `R` 刷新当前列表或详情，`Esc` 按详情 → 列表 → 聊天返回；异步操作可取消，关闭后的迟到结果被忽略。界面显示持久工作流中的 “Last task result”。
 
 ## 模型 shell 与后台任务
 
@@ -104,15 +108,17 @@ README、HANDOFF 等按任务需要读取；规则链并不意味着自动装入
 
 ## 可选 TypeScript 导航
 
-显式配置 `EVERPEACE_TYPESCRIPT_LSP` 才暴露 `code_navigation`；`EVERPEACE_TYPESCRIPT_LSP_ARGS` 为 JSON 字符串数组，默认 `--stdio`。不下载或自动安装服务器；可用性由 `/doctor` 展示，缺失时仍可使用 lexical search。
+显式配置 `EVERPEACE_TYPESCRIPT_LSP` 才暴露 `code_navigation`；`EVERPEACE_TYPESCRIPT_LSP_ARGS` 为 JSON 字符串数组，默认 `--stdio`。语言服务器可执行文件目录自动加入只读根，额外 SDK/依赖源码根使用 `EVERPEACE_TYPESCRIPT_LSP_READ_ROOTS` 的 JSON 字符串数组声明。不下载或自动安装服务器；可用性和隔离错误由 `/doctor` 与工具结果展示，缺失时仍可使用 lexical search。
 
 支持 definition、references、implementation、hover。输入位置为一基 UTF-16 行列；查询按工作区串行，每次读取当前目标文档、启动服务器并 `didOpen`，请求结束后 `didClose` 和关闭进程。因此文件修改后下次查询读取新内容，不依赖旧编辑器缓冲。
 
-单次请求上限 30 秒，文档上限 16 MiB，位置最多 100 项，hover 文本最多 64 KiB。目标路径校验工作区真实路径；返回位置只保留工作区内的 file URI。
+单次请求上限 30 秒，文档上限 16 MiB，位置最多 100 项，hover 文本最多 64 KiB。JSON-RPC header 最多 8 KiB，单 frame 最多 2 MiB，单查询总入站流量最多 8 MiB，stderr 只保留前 64 KiB。输入的 UTF-16 位置先对当前文本验证；初始化返回的 capability 必须支持请求操作。目标路径校验工作区真实路径；返回位置只保留工作区内的 file URI。
 
 宿主拒绝所有 server 发起的请求，包括 applyEdit 和 executeCommand。导航结果不写入文件观察记录，不授权随后 patch；修改前仍需 `read_file`。
 
-**执行边界：当前 LSP executable 由 `child_process.spawn` 以 `shell: false` 直接启动，不经过模型 Bash 的 native sandbox。** “只读”指已实现的 LSP 协议能力和查询路径检查，不是对任意配置程序的 OS 隔离保证。只配置可信的本地程序；若后续接入原生执行接口，必须同步修改此处与对应集成测试。
+每次查询通过 pinned Codex backend 的 duplex 接口直接启动 executable/argv，不经过 shell wrapper，也不回退宿主执行。专用 `:read-only` 子策略拒绝 workspace 写入与应用全局状态，并请求 native network denial；该隔离不受用户选择 full access 影响。配置的 language server 启动前，宿主先在相同策略中运行直接 socket 探针；只在真实连接被拒绝时继续，否则工具返回 unavailable 并要求使用 lexical search。传输保持 raw stdout、处理 stdin backpressure、持续 drain 有界 stderr，并等待进程清理后才推进队列或结算成功。任务取消或权限 revision 变化会取消查询。
+
+`:read-only` 的平台 ambient system read 与临时目录能力仍然存在；额外源码根用于明确记录所需依赖，并不表示其余 ambient reads 被移除。Windows 上的固定 `@openai/codex@0.155.1` 已实测拒绝 workspace 写入与 Everpeace 应用状态读取，但仍允许直接网络探针，因此当前 Windows 原生 LSP 导航会失败关闭。原生可用性必须按平台验收，不能从 profile 名称或 CLI 参数推断。
 
 ## 外部工具与修改检查表
 

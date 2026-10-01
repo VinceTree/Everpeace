@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { SystemAuthStorage } from "../storage/auth-storage.js";
 import { ModelRegistry } from "../storage/model-registry.js";
@@ -10,6 +11,7 @@ import { parseReproducibleBenchmarkTaskCatalog } from "./catalog.js";
 import { prepareBenchmarkFixture, proveBenchmarkFixture } from "./preparation.js";
 import { createProductionBenchmarkAdapter } from "./production.js";
 import { createInstrumentedDshAdapter, PINNED_DSH_REVISION } from "./dsh.js";
+import { createCheckoutBenchmarkAdapter, preflightBenchmarkCheckout } from "./checkout.js";
 import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult, BenchmarkTask } from "./types.js";
 
 interface ExternalHarnessConfig {
@@ -23,6 +25,17 @@ interface ExternalHarnessConfig {
 }
 
 interface ProductionHarnessConfig { kind: "everpeace"; name?: "everpeace" }
+
+interface CheckoutHarnessConfig {
+  kind: "everpeace-checkout";
+  name: string;
+  sourceRoot: string;
+  entryPath: string;
+  revision: string;
+  sourceDigest: string;
+  buildDigest: string;
+  expected: { model: string; reasoning: "high"; maxOutputTokens: 32_768 };
+}
 
 interface DshHarnessConfig {
   kind: "dsh";
@@ -47,7 +60,8 @@ export interface CampaignConfig {
   repetitions: number;
   taskTokenBudget: number;
   campaignTokenBudget: number;
-  harnesses: Array<ProductionHarnessConfig | ExternalHarnessConfig | DshHarnessConfig>;
+  taskIds?: string[];
+  harnesses: Array<ProductionHarnessConfig | CheckoutHarnessConfig | ExternalHarnessConfig | DshHarnessConfig>;
 }
 
 function record(value: unknown, field: string): Record<string, unknown> {
@@ -75,14 +89,20 @@ function stringArray(value: unknown, field: string): string[] {
   return [...value] as string[];
 }
 
+function sha256(value: unknown, field: string): string {
+  const digest = string(value, field).toLowerCase();
+  if (!/^[a-f0-9]{64}$/u.test(digest)) throw new Error(`${field} must be a SHA-256 digest`);
+  return digest;
+}
+
 export function parseCampaignConfig(value: unknown, configPath: string): CampaignConfig {
   const input = record(value, "config");
   const root = dirname(resolve(configPath));
   if (!Array.isArray(input.harnesses) || input.harnesses.length === 0) throw new Error("harnesses must be a non-empty array");
-  const harnesses = input.harnesses.map((item, index): ProductionHarnessConfig | ExternalHarnessConfig | DshHarnessConfig => {
+  const harnesses = input.harnesses.map((item, index): ProductionHarnessConfig | CheckoutHarnessConfig | ExternalHarnessConfig | DshHarnessConfig => {
     const harness = record(item, `harnesses[${index}]`);
     if (harness.kind === "everpeace") return { kind: "everpeace", name: "everpeace" };
-    if (harness.kind !== "instrumented-process" && harness.kind !== "dsh") throw new Error(`harnesses[${index}].kind is unsupported`);
+    if (harness.kind !== "instrumented-process" && harness.kind !== "dsh" && harness.kind !== "everpeace-checkout") throw new Error(`harnesses[${index}].kind is unsupported`);
     const expected = record(harness.expected, `harnesses[${index}].expected`);
     if (expected.reasoning !== "high") throw new Error(`harnesses[${index}].expected.reasoning must be high`);
     const maxOutputTokens = integer(expected.maxOutputTokens, `harnesses[${index}].expected.maxOutputTokens`);
@@ -93,7 +113,7 @@ export function parseCampaignConfig(value: unknown, configPath: string): Campaig
       expected: {
         model: string(expected.model, `harnesses[${index}].expected.model`),
         reasoning: "high" as const,
-        maxOutputTokens,
+        maxOutputTokens: 32_768 as const,
       },
     };
     if (harness.kind === "dsh") {
@@ -107,6 +127,16 @@ export function parseCampaignConfig(value: unknown, configPath: string): Campaig
         profile: string(harness.profile, `harnesses[${index}].profile`),
       };
     }
+    if (harness.kind === "everpeace-checkout") {
+      return {
+        kind: "everpeace-checkout",
+        ...shared,
+        sourceRoot: resolve(root, string(harness.sourceRoot, `harnesses[${index}].sourceRoot`)),
+        entryPath: resolve(root, string(harness.entryPath, `harnesses[${index}].entryPath`)),
+        sourceDigest: sha256(harness.sourceDigest, `harnesses[${index}].sourceDigest`),
+        buildDigest: sha256(harness.buildDigest, `harnesses[${index}].buildDigest`),
+      };
+    }
     return {
       kind: "instrumented-process",
       ...shared,
@@ -115,7 +145,12 @@ export function parseCampaignConfig(value: unknown, configPath: string): Campaig
       argsTemplate: stringArray(harness.argsTemplate, `harnesses[${index}].argsTemplate`),
     };
   });
+  const harnessNames = harnesses.map((harness) => harness.kind === "everpeace" ? "everpeace" : harness.name);
+  if (new Set(harnessNames).size !== harnessNames.length) throw new Error("Harness names must be unique");
   const path = (field: string) => resolve(root, string(input[field], field));
+  const taskIds = input.taskIds === undefined ? undefined : stringArray(input.taskIds, "taskIds");
+  if (taskIds?.length === 0) throw new Error("taskIds must contain at least one task when provided");
+  if (taskIds && new Set(taskIds).size !== taskIds.length) throw new Error("taskIds must not contain duplicates");
   return {
     campaignId: string(input.campaignId, "campaignId"),
     catalogPath: path("catalogPath"),
@@ -128,6 +163,7 @@ export function parseCampaignConfig(value: unknown, configPath: string): Campaig
     repetitions: integer(input.repetitions, "repetitions"),
     taskTokenBudget: integer(input.taskTokenBudget, "taskTokenBudget"),
     campaignTokenBudget: integer(input.campaignTokenBudget, "campaignTokenBudget"),
+    ...(taskIds ? { taskIds } : {}),
     harnesses,
   };
 }
@@ -184,7 +220,12 @@ function externalAdapter(config: ExternalHarnessConfig): BenchmarkHarnessAdapter
 }
 
 async function loadTasks(config: CampaignConfig): Promise<BenchmarkTask[]> {
-  return parseReproducibleBenchmarkTaskCatalog(await readFile(config.catalogPath, "utf8"));
+  const tasks = parseReproducibleBenchmarkTaskCatalog(await readFile(config.catalogPath, "utf8"));
+  if (!config.taskIds) return tasks;
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const unknown = config.taskIds.filter((id) => !byId.has(id));
+  if (unknown.length > 0) throw new Error(`Unknown taskIds: ${unknown.join(", ")}`);
+  return config.taskIds.map((id) => byId.get(id)!);
 }
 
 async function prove(config: CampaignConfig): Promise<void> {
@@ -196,6 +237,98 @@ async function prove(config: CampaignConfig): Promise<void> {
     });
     process.stdout.write(`${task.id}: seed=${proof.seeded.exitCode} reference=${proof.repaired.exitCode}\n`);
   }
+}
+
+interface PreflightHarnessResult {
+  name: string;
+  kind: string;
+  status: "passed" | "failed";
+  evidence?: Record<string, unknown>;
+  error?: string;
+}
+
+export async function preflight(config: CampaignConfig): Promise<void> {
+  const results: PreflightHarnessResult[] = [];
+  for (const harness of config.harnesses) {
+    const name = harness.kind === "everpeace" ? "everpeace" : harness.name;
+    try {
+      if (harness.kind === "everpeace") {
+        throw new Error("Credential-free preflight requires a named everpeace-checkout with revision and source/build digests");
+      }
+      if (harness.kind === "everpeace-checkout") {
+        const identity = await preflightBenchmarkCheckout({ ...harness, modelName: harness.expected.model });
+        results.push({ name, kind: harness.kind, status: "passed", evidence: { ...identity, loaded: true, reasoning: "high", maxOutputTokens: 32_768 } });
+        continue;
+      }
+      if (harness.kind === "instrumented-process") throw new Error("instrumented-process harnesses require their own credential-free preflight contract");
+      const root = await mkdtemp(join(tmpdir(), "everpeace-dsh-preflight-"));
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(new Error("dsh preflight exceeded 30000ms")), 30_000);
+        timer.unref?.();
+        const artifacts: Record<string, string> = {};
+        try {
+          const adapter = createInstrumentedDshAdapter({
+            name,
+            sourceRoot: harness.sourceRoot,
+            entryPath: harness.entryPath,
+            dshHome: join(root, "dsh-home"),
+            profile: harness.profile,
+            revision: harness.revision,
+            model: harness.expected.model,
+            baseUrl: "http://127.0.0.1:9",
+            apiKey: "preflight-dummy",
+            reasoning: "high",
+            maxOutputTokens: 32_768,
+            preflight: true,
+          });
+          const task: BenchmarkTask = { id: "dsh-preflight", prompt: "Return a short preflight acknowledgement.", workspacePath: root };
+          const result = await adapter.run(task, {
+            task,
+            signal: controller.signal,
+            attempt: 1,
+            phase: "implement",
+            tokenBudgetRemaining: 100,
+            onPhase() {},
+            onEvent() {},
+            async writeArtifact(artifactName, content) { artifacts[artifactName] = content; return artifactName; },
+          });
+          if (result?.terminalOutcome !== "completed" || result.usage?.complete !== true) throw new Error(result?.stopReason ?? "dsh preflight did not complete at the instrumented provider boundary");
+          results.push({
+            name,
+            kind: harness.kind,
+            status: "passed",
+            evidence: {
+              revision: harness.revision,
+              profile: harness.profile,
+              providerBoundaryObserved: true,
+              networkCalls: 0,
+              processCleanup: "awaited",
+              usage: result.usage,
+              ledgerCaptured: typeof artifacts["dsh-request-ledger.json"] === "string",
+            },
+          });
+        } finally {
+          clearTimeout(timer);
+        }
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    } catch (error) {
+      results.push({ name, kind: harness.kind, status: "failed", error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  await mkdir(config.artifactsRoot, { recursive: true });
+  const outputPath = resolve(config.artifactsRoot, "preflight-result.json");
+  await writeFile(outputPath, JSON.stringify({
+    campaignId: config.campaignId,
+    createdAt: new Date().toISOString(),
+    model: config.modelId,
+    providerCredentialsLoaded: false,
+    results,
+  }, null, 2), "utf8");
+  process.stdout.write(`${JSON.stringify({ preflight: outputPath, results }, null, 2)}\n`);
+  if (results.some((result) => result.status === "failed")) throw new Error("Benchmark preflight failed");
 }
 
 async function live(config: CampaignConfig): Promise<void> {
@@ -211,6 +344,18 @@ async function live(config: CampaignConfig): Promise<void> {
   }
   const harnesses = config.harnesses.map((harness) => {
     if (harness.kind === "everpeace") return createProductionBenchmarkAdapter({ model, sessionsRoot: config.sessionsRoot });
+    if (harness.kind === "everpeace-checkout") {
+      return createCheckoutBenchmarkAdapter({
+        name: harness.name,
+        sourceRoot: harness.sourceRoot,
+        entryPath: harness.entryPath,
+        revision: harness.revision,
+        sourceDigest: harness.sourceDigest,
+        buildDigest: harness.buildDigest,
+        model: { ...model, request_settings: { reasoningEffort: "high", maxOutputTokens: 32_768 } },
+        sessionsRoot: resolve(config.sessionsRoot, harness.name),
+      });
+    }
     if (harness.kind === "dsh") {
       return createInstrumentedDshAdapter({
         name: harness.name,
@@ -264,10 +409,12 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   if (configIndex < 0 || !args[configIndex + 1]) throw new Error("Use --config <campaign.json>");
   const liveEnabled = args.includes("--live");
   const proveEnabled = args.includes("--prove-fixtures");
-  if (liveEnabled === proveEnabled) throw new Error("Choose exactly one of --live or --prove-fixtures");
+  const preflightEnabled = args.includes("--preflight");
+  if ([liveEnabled, proveEnabled, preflightEnabled].filter(Boolean).length !== 1) throw new Error("Choose exactly one of --preflight, --prove-fixtures, or --live");
   const configPath = resolve(args[configIndex + 1]!);
   const config = parseCampaignConfig(JSON.parse(await readFile(configPath, "utf8")), configPath);
-  if (proveEnabled) await prove(config);
+  if (preflightEnabled) await preflight(config);
+  else if (proveEnabled) await prove(config);
   else await live(config);
   return 0;
 }

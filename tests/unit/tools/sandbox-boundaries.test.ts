@@ -1,21 +1,43 @@
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
+import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { runCodexProcess } from "../../../src/codex/cli.js";
 import { resolveBashLaunch, runBash } from "../../../src/tools/bash.js";
+import { CodeNavigationRuntime } from "../../../src/tools/code-navigation.js";
 import {
   createEffectiveSandboxPolicy,
+  createLspSandboxPolicy,
   materializeSandboxControlPaths,
   modelShellEnvironment,
   nativePermissionProfileArgs,
+  nativeLspPermissionProfileArgs,
 } from "../../../src/tools/sandbox-policy.js";
 
 test("model shell strips inherited credentials and startup injection but keeps toolchain paths", () => {
   const source = { Path: "fixture-path", SystemRoot: "fixture-system", TEMP: "fixture-temp", CODEX_HOME: "fixture-home", OPENAI_API_KEY: "fake-key", github_token: "fake-token", DATABASE_PASSWORD: "fake-password", NODE_OPTIONS: "--require malicious.js", BASH_ENV: "malicious.sh", LD_PRELOAD: "malicious.so", PROJECT_SETTING: "yes" };
   assert.deepEqual(modelShellEnvironment(source), { Path: "fixture-path", SystemRoot: "fixture-system", TEMP: "fixture-temp", CODEX_HOME: "fixture-home", PROJECT_SETTING: "yes" });
   assert.equal(source.OPENAI_API_KEY, "fake-key");
+});
+
+test("language-server policy is read-only, network denied, and rejects protected read roots", () => {
+  const root = path.resolve("C:/workspace");
+  const policy = createLspSandboxPolicy(root, [path.resolve("C:/tools/typescript")], {
+    platform: "win32",
+    env: { APPDATA: "C:\\Users\\test\\AppData\\Roaming" },
+    homeDirectory: "C:\\Users\\test",
+  });
+  const args = nativeLspPermissionProfileArgs(policy);
+  assert.equal(policy.networkMode, "deny");
+  assert.match(args.join(" "), /everpeace-lsp-readonly/u);
+  assert.match(args.join(" "), /:read-only/u);
+  assert.throws(() => createLspSandboxPolicy(root, [path.join(root, ".everpeace")], {
+    platform: "win32",
+    env: { APPDATA: "C:\\Users\\test\\AppData\\Roaming" },
+    homeDirectory: "C:\\Users\\test",
+  }), /protected application state/u);
 });
 
 test("sandbox payload output cannot trigger replay on success or failure", async () => {
@@ -132,6 +154,104 @@ test("native workspace profile blocks model shell writes to .everpeace", {
     assert.equal(await fs.readFile(path.join(root, "regular.txt"), "utf8").then(() => true, () => false), true);
     assert.equal(await fs.readFile(path.join(root, ".everpeace", "blocked.txt"), "utf8").then(() => true, () => false), false);
   } finally {
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(stateParent, { recursive: true, force: true });
+  }
+});
+
+test("native LSP profile denies writes/state and fails closed when networking remains available", {
+  skip: process.platform !== "win32"
+    ? "Windows-only native LSP sandbox integration"
+    : process.env.GITHUB_ACTIONS === "true"
+      ? "GitHub-hosted Windows cannot initialize the nested native sandbox"
+      : false,
+  timeout: 30_000,
+}, async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-native-lsp-"));
+  const stateParent = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-native-lsp-state-"));
+  const server = createServer();
+  let connections = 0;
+  server.on("connection", (socket) => { connections += 1; socket.destroy(); });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "0.0.0.0", resolve);
+  });
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") assert.fail("Expected a TCP listener address");
+    const probeHost = Object.values(os.networkInterfaces()).flat().find((candidate) =>
+      candidate?.family === "IPv4" && !candidate.internal)?.address;
+    if (!probeHost) assert.fail("Native LSP network probe requires a non-loopback IPv4 address");
+    const stateRoot = path.join(stateParent, "Everpeace");
+    const stateFile = path.join(stateRoot, "private.json");
+    const attemptedWrite = path.join(root, "blocked.txt");
+    const source = path.join(root, "sample.ts");
+    const languageServer = path.join(root, "server.mjs");
+    await fs.mkdir(stateRoot, { recursive: true });
+    await fs.writeFile(stateFile, "fixture-private-state", "utf8");
+    await fs.writeFile(source, "export const value = 1;\n", "utf8");
+    await fs.writeFile(languageServer, String.raw`
+import { promises as fs } from 'node:fs';
+import { connect } from 'node:net';
+const [writePath, stateFile, networkHost, portText] = process.argv.slice(2);
+let buffer = Buffer.alloc(0);
+let evidence;
+const send = (message) => {
+  const body = Buffer.from(JSON.stringify(message));
+  process.stdout.write('Content-Length: ' + body.length + '\r\n\r\n');
+  process.stdout.write(body);
+};
+const networkDenied = () => new Promise((resolve) => {
+  let settled = false;
+  let timer;
+  const finish = (value) => { if (settled) return; settled = true; clearTimeout(timer); socket.destroy(); resolve(value); };
+  const socket = connect({ host: networkHost, port: Number(portText) });
+  socket.once('connect', () => finish(false));
+  socket.once('error', () => finish(true));
+  timer = setTimeout(() => finish(true), 1000);
+});
+const receive = async (message) => {
+  if (message.method === 'initialize') {
+    let writeDenied = false;
+    let stateDenied = false;
+    try { await fs.writeFile(writePath, 'blocked'); } catch { writeDenied = true; }
+    try { await fs.readFile(stateFile, 'utf8'); } catch { stateDenied = true; }
+    evidence = { writeDenied, stateDenied, networkDenied: await networkDenied() };
+    send({ jsonrpc: '2.0', id: message.id, result: { capabilities: { hoverProvider: true } } });
+  } else if (message.method === 'textDocument/hover') {
+    send({ jsonrpc: '2.0', id: message.id, result: { contents: JSON.stringify(evidence) } });
+  }
+};
+process.stdin.on('data', (chunk) => {
+  buffer = Buffer.concat([buffer, chunk]);
+  while (true) {
+    const end = buffer.indexOf('\r\n\r\n');
+    if (end < 0) break;
+    const length = Number(/Content-Length:\s*(\d+)/i.exec(buffer.subarray(0, end).toString('ascii'))?.[1]);
+    if (buffer.length < end + 4 + length) break;
+    const message = JSON.parse(buffer.subarray(end + 4, end + 4 + length).toString('utf8'));
+    buffer = buffer.subarray(end + 4 + length);
+    void receive(message);
+  }
+});
+`, "utf8");
+    const policy = createLspSandboxPolicy(root, [path.dirname(process.execPath)], {
+      env: { ...process.env, APPDATA: stateParent },
+    });
+    const runtime = new CodeNavigationRuntime({
+      workspacePath: root,
+      command: process.execPath,
+      args: [languageServer, attemptedWrite, stateFile, probeHost, String(address.port)],
+      policy,
+      verifyIsolation: false,
+    });
+    const result = await runtime.query({ operation: "hover", path: "sample.ts", line: 1, column: 1 });
+    assert.deepEqual(JSON.parse(result.hover ?? "{}"), { writeDenied: true, stateDenied: true, networkDenied: false });
+    assert.equal(connections, 1);
+    assert.equal(await fs.stat(attemptedWrite).then(() => true, () => false), false);
+    await assert.rejects(runtime.probeIsolation(), /direct networking was permitted/u);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     await fs.rm(root, { recursive: true, force: true });
     await fs.rm(stateParent, { recursive: true, force: true });
   }

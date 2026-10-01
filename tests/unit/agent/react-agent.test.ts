@@ -184,6 +184,7 @@ test("host file observations reject blind updates and bind the observed version"
     });
     await agent.runTurn("update file");
     assert.match(JSON.stringify(requests[1]?.input), /has not been observed/u);
+    assert.match(JSON.stringify(requests[1]?.input), /FILE_NOT_OBSERVED/u);
     assert.match(appliedOperations[0]?.expectedSha256 ?? "", /^[a-f0-9]{64}$/u);
     assert.equal(await fs.readFile(path.join(workspace, "file.txt"), "utf8"), "after\n");
   } finally {
@@ -1040,13 +1041,15 @@ test("workspace-write searches the web without per-request confirmation", async 
     "apply_patch",
     "workspace_status",
     "workspace_diff",
+    "list_workspace_changes",
+    "read_workspace_change",
     "web_search",
     "web_fetch",
     "read_file",
     "list_directory",
     "search_files",
     "glob_files",
-      "read_search_results",
+    "read_search_results",
     "read_tool_output",
   ]);
   const history = requests[1]?.input as Array<Record<string, unknown>>;

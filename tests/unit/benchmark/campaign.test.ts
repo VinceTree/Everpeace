@@ -22,6 +22,12 @@ test("campaign plans are reproducible and interleave every harness", () => {
   assert.notDeepEqual(first.map((item) => item.harness), [...first].sort((left, right) => left.harness.localeCompare(right.harness)).map((item) => item.harness));
 });
 
+test("comparison schedules contain nine smoke and ninety formal runs", () => {
+  const tenTasks = Array.from({ length: 10 }, (_, index): BenchmarkTask => ({ id: `task-${index}`, prompt: "fix", workspacePath: process.cwd() }));
+  assert.equal(createBenchmarkCampaignPlan(tenTasks.slice(0, 3), harnesses, 1, 7).length, 9);
+  assert.equal(createBenchmarkCampaignPlan(tenTasks, harnesses, 3, 7).length, 90);
+});
+
 test("campaign stops all harnesses after an unknown request attempt", async () => {
   let requests = 0;
   const adapter: BenchmarkHarnessAdapter = {
