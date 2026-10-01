@@ -1,4 +1,4 @@
-import type { AgentTurnResult } from "../agent/react-agent.js";
+import type { AgentTaskOptions, AgentTurnResult } from "../agent/react-agent.js";
 import type { LearnedTurnOutcome } from "../memory/learned-memory.js";
 import type { AgentMode } from "../plan/runtime.js";
 import type { FileAttachment } from "../agent/file-attachments.js";
@@ -10,7 +10,8 @@ import { verificationPrompt } from "./verifier.js";
 
 export interface CodingTaskAgent {
   runTurn(userInput: string, signal?: AbortSignal, options?: { mode?: AgentMode; attachments?: readonly FileAttachment[] }): Promise<AgentTurnResult>;
-  beginTask?(): void | Promise<void>;
+  beginTask?(options: AgentTaskOptions): void | Promise<void>;
+  endTask?(): void | Promise<void>;
   waitForBackgroundJobs?(signal?: AbortSignal): Promise<unknown>;
   cancelBackgroundJobs?(reason?: unknown): Promise<unknown>;
   finalizePendingGoalCompletion?(allow: boolean): Promise<void>;
@@ -91,7 +92,7 @@ export class CodingTaskRunner {
     });
 
     try {
-      await this.#agent.beginTask?.();
+      await this.#agent.beginTask?.({ mode: nextMode, source: taskSource });
       while (true) {
       input.signal?.throwIfAborted();
       if (nextMode === "default" && !workflowStarted) {
@@ -185,7 +186,11 @@ export class CodingTaskRunner {
       ]);
       throw error;
     } finally {
-      this.#running = false;
+      try {
+        await this.#agent.endTask?.();
+      } finally {
+        this.#running = false;
+      }
     }
   }
 }

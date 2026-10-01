@@ -21,12 +21,15 @@ test("coding task runner shares the production turn, verification, and settlemen
   await exec("git", ["commit", "--quiet", "-m", "fixture"], { cwd: workspacePath });
   const finalized: boolean[] = [];
   const memory: string[] = [];
+  const lifecycle: string[] = [];
   let turns = 0;
   const runner = new CodingTaskRunner({
     agent: {
+      async beginTask(options) { lifecycle.push(`begin:${options.mode}:${options.source}`); },
       async runTurn() { turns += 1; return {}; },
       async finalizePendingGoalCompletion(allow) { finalized.push(allow); },
       async finishMemoryTurn(outcome) { memory.push(outcome); },
+      async endTask() { lifecycle.push("end"); },
     },
     workflow: new CodingWorkflowRuntime({ workspacePath }),
     host: {
@@ -41,6 +44,7 @@ test("coding task runner shares the production turn, verification, and settlemen
   assert.equal(turns, 1);
   assert.deepEqual(finalized, [true]);
   assert.deepEqual(memory, ["unverified"]);
+  assert.deepEqual(lifecycle, ["begin:default:user", "end"]);
 });
 
 test("cancellation during final verification cannot complete Goal or verified Memory", async () => {
@@ -106,4 +110,36 @@ test("coding task runner rejects a new task while failed-task cleanup is unresol
   await assert.rejects(runner.run({ text: "second" }), /already running or cleaning up/u);
   releaseCleanup();
   await assert.rejects(first, /task failed/u);
+});
+
+test("a completed model checklist cannot bypass a failed host workflow", async () => {
+  const finalized: boolean[] = [];
+  const memory: string[] = [];
+  const workflow = {
+    state: { phase: "implement", repair_attempts: 3, changed_paths: [] },
+    async beginTurn() {},
+    async finishTurn() {
+      return {
+        state: { phase: "blocked", result: "failed", repair_attempts: 3, changed_paths: [] },
+        changed: true,
+      } as unknown as WorkflowRunResult;
+    },
+  } as unknown as CodingWorkflowRuntime;
+  const runner = new CodingTaskRunner({
+    agent: {
+      async runTurn() { return {}; },
+      async finalizePendingGoalCompletion(allow) { finalized.push(allow); },
+      async finishMemoryTurn(outcome) { memory.push(outcome); },
+    },
+    workflow,
+    host: {
+      async executeVerification() { return { stdout: "", stderr: "failed", exitCode: 1, signal: null }; },
+      async getGoal() { return undefined; },
+      async addGoalTime() { return undefined; },
+    },
+  });
+  const result = await runner.run({ text: "all checklist items completed" });
+  assert.equal(result.workflowResult?.state.result, "failed");
+  assert.deepEqual(finalized, [false]);
+  assert.deepEqual(memory, ["failed"]);
 });

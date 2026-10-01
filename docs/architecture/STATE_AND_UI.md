@@ -11,6 +11,7 @@
 | 对话、context、主请求 usage | [SessionStore](../../src/storage/session-store.ts)，每 Session 一个 JSONL | 从历史恢复的权限授权 |
 | 当前视图、审批、运行状态 | [TUI App](../../src/tui/app/app.tsx) 及依赖 | 临时命令窗口不能变为聊天历史 |
 | coding 结果与验证债务 | [workflow runtime](../../src/workflow/runtime.ts)，Session 只保存元数据 | 验证 stdout/stderr/error、文件检查点 |
+| 当前 coding 执行清单 | [TaskProgress](../../src/workflow/task-progress.ts)，Session 保存最新整体投影 | 验证成功、Goal 完成或权限授权 |
 | Goal | [GoalRuntime](../../src/goal/runtime.ts)，Session 绑定 | 无宿主验证的编码完成状态 |
 | Learned memory | [LearnedMemoryRuntime/Store](../../src/memory/learned-memory.ts)，独立平台目录 | 原始凭据、未经验证的成功事实 |
 | 权限 | [PermissionPolicy](../../src/permissions/policy.ts)，当前用户策略与项目限制交集 | JSONL 中历史授权、项目自提权 |
@@ -44,6 +45,7 @@
 | `usage_recorded` | 主请求的 usage 或明确 unknown |
 | `goal_updated` | Session Goal 状态、预算及已用量 |
 | `workflow_updated` | 修改路径、任务来源、验证债务、检查状态与文件 revision 等元数据 |
+| `task_progress_updated` | model-authored coding 清单的完整替换投影；空列表表示明确清除 |
 | `memory_policy_updated` | 当前聊天的 `readExisting` 与 `captureFuture` |
 
 `workflow_updated` 序列化会清空验证输出并去掉错误正文；这不代表普通 `timeline/context` 不保存用户消息或工具交互。不要将新的请求正文、文件快照或凭据塞入诊断元数据。压缩内容继续使用既有 context 通道。
@@ -58,13 +60,15 @@
 | `/new` | 必须已有模型；立即进入标题为 `New Session`、`title_pending: true` 的空 Session |
 | 第一条新 Session 问题 | 先生成可靠回退标题，再异步命名；不能阻塞回答 |
 | `/clear` | 清屏并解除当前 Session，保留模型；下一条普通消息才创建新 Session |
-| `/resume [query]` | 默认搜索当前工作区，可明确切换全部工作区；预览后仍通过原恢复路径加载 timeline、context、模型、工作目录、Goal、workflow 和聊天 Memory 策略，继续原文件 |
+| `/resume [query]` | 默认搜索当前工作区，可明确切换全部工作区；预览后仍通过原恢复路径加载 timeline、context、模型、工作目录、Goal、workflow、TaskProgress 和聊天 Memory 策略，继续原文件 |
 | 模型切换 | 保留累计 usage，重置或标记未知的新模型 context 占用 |
 | Session 删除 | 使用选择/确认流程；任务或直接命令运行期间不得删除 |
 
 恢复前先检查工作目录；目录不存在时保持当前会话不变。原模型缺失可选择替代，但含供应商专属加密/不透明 context 时不得跨供应商静默迁移。旧“新 Session”标题只在显示层翻译。
 
 恢复后重新读取项目规则与文件观察；权限读取当前配置，不从 JSONL 复活。`session_resume` 和 Goal 自动续跑必须保留修复计数与未验证债务，不能通过新的 `no_changes` 清除失败。后台命令和进程内 undo 检查点不可恢复。
+
+`session_resume` 恢复最后一个有效 `task_progress_updated`；repair 与同一顶层任务里的 Goal continuation 复用投影，新的用户 coding task 则先持久化空清单。清单随每次请求重新提供，包括 context 压缩之后；它始终是进度说明，不能推导 workflow 或 Goal 结果。旧 Session 没有该事件时按“尚无清单”处理。
 
 `SessionStore.search` 流式读取并校验 JSONL，只投影当前标题以及 user/assistant conversation message；tool output、模型 context 和 learned Memory 不参与匹配。匹配采用不区分大小写的字面量比较，每个 Session 只返回一项，按最新活动时间排序，并提供命中片段及最多三条本地对话预览。每页最多 50 项，界面显示八行；输入有 200ms debounce，新的 query/scope/page 会取消旧搜索并忽略迟到结果。
 
@@ -90,6 +94,8 @@
 - Composer 中 `@` 候选最多显示八项，Esc 只关闭候选；提交文件引用时异步读取，失败保留草稿。摘录只进入该 user context item，不复制进可见历史或标题请求。
 - `/diff` 先显示 staged/unstaged/untracked 文件列表，Enter 惰性加载分页详情；Esc 从详情回列表、再回聊天。`/resume` 搜索和预览保持八行列表与 50 项分页，并提供当前/全部工作区开关。
 - `/context` 展示当前 Agent 在已准入 provider-call 边界捕获的 “Last submitted coding request”。打开和刷新只读取不可变内存快照，不刷新文件、不压缩 context、也不发送模型请求；进程重启、Agent 替换或首次 coding 请求前显示明确空状态。
+- `/tasks` 只读显示当前完整清单及最新宿主 workflow result；状态栏仅显示完成数/总数。界面不得把全部步骤 completed 渲染为验证成功。
+- Plan 与 coding 共用结构化问题窗口。Plan 的 Esc 保持规划取消；coding 的 Esc 和 Ctrl+C 中止活动任务，触发相同的后台清理并恢复一个 prompt。迟到答案必须被忽略，已经 aborted 的 signal 不得打开窗口。
 - 命令窗口隐藏 banner、历史、composer 与全局状态栏，进入时同步清屏，Esc 从内存原子重放原 Session。窗口本身不得写入 `Static`、timeline 或 context。
 - 只有命令造成的真实变更进入对应状态存储。可取消加载使用操作身份检查，关闭窗口后忽略迟到结果。
 - 所有命令窗口共享居中布局，外框最多 80 列，窄屏有左右安全边距，字段左对齐；resize 后重新居中且不得泄露底层历史。
@@ -114,6 +120,7 @@
 | Session schema、恢复、usage | [Session 测试](../../tests/unit/storage/session-store.test.ts)、[status 测试](../../tests/unit/status/model-status.test.ts)、[App 测试](../../tests/unit/tui/app.test.tsx)；旧缺字段、损坏尾行、串行追加 |
 | Session 搜索与请求检查 | [Session 搜索](../../tests/unit/storage/session-store.test.ts)、[picker](../../tests/unit/tui/session-picker.test.tsx)、[context](../../tests/unit/agent/context-inspection.test.ts)、[surfaces](../../tests/unit/tui/daily-use-surfaces.test.tsx)；scope、分页、缓存失效、迟到结果、空状态与不可变快照 |
 | UI 命令或布局 | [命令目录](../../src/tui/commands/slash-commands.ts)、[command surface 测试](../../tests/unit/tui/command-surface.test.tsx)、[App 测试](../../tests/unit/tui/app.test.tsx)；Esc、resize、迟到结果、历史重放 |
+| TaskProgress 与结构化问题 | [task progress 测试](../../tests/unit/workflow/task-progress.test.ts)、[ReactAgent 测试](../../tests/unit/agent/react-agent.test.ts)、[App 测试](../../tests/unit/tui/app.test.tsx)；旧 Session、持久化失败、resume/new、压缩、Esc/Ctrl+C 与单 prompt |
 | Goal/Memory 结算 | [task runner 测试](../../tests/unit/workflow/task-runner.test.ts)、[Goal 测试](../../tests/unit/goal/runtime.test.ts)、[Memory 测试](../../tests/unit/memory/learned-memory.test.ts)；取消和验证债务 |
 | 权限与审批 | [PERMISSIONS](PERMISSIONS.md)、[SANDBOX](SANDBOX.md)；运行时权限 revision、取消、原生启动失败关闭 |
 

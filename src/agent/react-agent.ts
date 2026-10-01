@@ -31,7 +31,7 @@ import {
 } from "../skills/catalog.js";
 import { FILE_TOOL_DEFINITIONS, FileSearchSession, runFileTool } from "../tools/files.js";
 import { CODE_NAVIGATION_TOOL_DEFINITION, parseCodeNavigationArguments, type CodeNavigationRuntimeLike } from "../tools/code-navigation.js";
-import { BACKGROUND_JOB_TOOL_DEFINITIONS, BackgroundJobManager, parseBackgroundCommand, parseBackgroundJobId, type BackgroundJobSnapshot } from "../tools/background-jobs.js";
+import { BACKGROUND_JOB_TOOL_DEFINITIONS, BackgroundJobManager, parseBackgroundCommand, parseBackgroundJobId, type BackgroundJobCompletion, type BackgroundJobSnapshot } from "../tools/background-jobs.js";
 import {
   APPLY_PATCH_TOOL_DEFINITION,
   ApplyPatchError,
@@ -51,7 +51,7 @@ import {
   workspaceDiff,
   workspaceStatus,
 } from "../tools/workspace.js";
-import type { WorkflowPatchFollowup } from "../workflow/types.js";
+import type { WorkflowPatchFollowup, WorkflowTaskSource } from "../workflow/types.js";
 import {
   normalizeTokenUsageSample,
   type TokenUsageSample,
@@ -67,8 +67,9 @@ import {
 import type { LearnedMemoryPolicy, LearnedMemoryRuntimeLike, LearnedTurn, LearnedTurnOutcome, MemorySnapshot } from "../memory/learned-memory.js";
 import { GOAL_TOOL_DEFINITIONS, type GoalRuntime } from "../goal/runtime.js";
 import { loadProjectRuleSnapshot, type ProjectRuleSnapshot } from "./project-context.js";
-import { PLAN_INSTRUCTIONS, PLAN_TOOL_DEFINITIONS, parsePlanRequest, parseSubmittedPlan, type AgentMode, type PlanInteraction, type PlanReviewDecision } from "../plan/runtime.js";
+import { PLAN_INSTRUCTIONS, REQUEST_USER_INPUT_TOOL_DEFINITION, SUBMIT_PLAN_TOOL_DEFINITION, parsePlanRequest, parseSubmittedPlan, type AgentMode, type PlanInteraction, type PlanReviewDecision, type QuestionInteraction } from "../plan/runtime.js";
 import type { SessionGoal } from "../storage/session-store.js";
+import { UPDATE_PLAN_TOOL_DEFINITION, cloneTaskProgress, formatTaskProgress, parseTaskProgressArguments, type TaskProgress } from "../workflow/task-progress.js";
 import { READ_TOOL_OUTPUT_DEFINITION, ToolOutputStore } from "./context-limits.js";
 import { createRequestSnapshot, type RequestSnapshot } from "./request-snapshot.js";
 import { RequestAttemptLedger, type RequestPurpose } from "./request-attempt-ledger.js";
@@ -99,6 +100,7 @@ interface ResponseOutputItem extends Record<string, unknown> {
 }
 
 const PROJECT_RULE_MESSAGE_PREFIX = "Host-maintained project rule snapshot revision ";
+const MAX_OUTSTANDING_BACKGROUND_NOTICES = 20;
 
 function isPersistedProjectRuleSnapshot(item: Record<string, unknown>): boolean {
   return item.type === "message"
@@ -181,10 +183,12 @@ export interface AgentIO {
   confirmWeb?(request: string): Promise<boolean>;
   confirmMcp?(request: string): Promise<boolean>;
   confirmGoal?(request: string): Promise<boolean>;
-  requestPlanInput?(request: Parameters<PlanInteraction["requestInput"]>[0], signal?: AbortSignal): Promise<Record<string, string>>;
+  requestUserInput?(request: Parameters<QuestionInteraction["requestInput"]>[0], signal?: AbortSignal, mode?: AgentMode): Promise<Record<string, string>>;
   reviewPlan?(plan: Parameters<PlanInteraction["reviewPlan"]>[0], signal?: AbortSignal): Promise<PlanReviewDecision>;
   getGoal?(): Promise<SessionGoal | undefined>;
   setGoal?(goal: SessionGoal): Promise<void>;
+  getTaskProgress?(): TaskProgress | undefined;
+  setTaskProgress?(progress: TaskProgress): Promise<void>;
   runBash(command: string, signal?: AbortSignal): Promise<BashResult>;
   runBackgroundBash?(command: string, signal?: AbortSignal, timeoutMs?: number, onOutput?: (output: import("../tools/bash.js").BashOutputPreview) => void): Promise<BashResult>;
   runApplyPatch?(operations: readonly ApplyPatchOperation[], signal?: AbortSignal): Promise<ApplyPatchResult>;
@@ -224,8 +228,10 @@ export interface ReactAgentOptions {
   skills?: SkillCatalogLike;
   learnedMemory?: LearnedMemoryRuntimeLike;
   learnedMemoryPolicy?: Partial<LearnedMemoryPolicy>;
+  questionInteraction?: QuestionInteraction;
   planInteraction?: PlanInteraction;
   goalRuntime?: GoalRuntime;
+  initialTaskProgress?: TaskProgress;
   initialHistory?: readonly Record<string, unknown>[];
   contextWindow?: number | null;
   providerCapabilities?: ProviderCapabilities;
@@ -245,6 +251,11 @@ export interface ReactAgentOptions {
 export interface AgentTurnOptions {
   mode?: AgentMode;
   attachments?: readonly FileAttachment[];
+}
+
+export interface AgentTaskOptions {
+  mode: AgentMode;
+  source: WorkflowTaskSource;
 }
 
 export interface AgentTurnResult {
@@ -333,6 +344,7 @@ export class ReactAgent {
   readonly #mcp: McpRuntimeLike | undefined;
   readonly #skills: SkillCatalogLike | undefined;
   readonly #learnedMemory: LearnedMemoryRuntimeLike | undefined;
+  readonly #questionInteraction: QuestionInteraction | undefined;
   readonly #planInteraction: PlanInteraction | undefined;
   readonly #goalRuntime: GoalRuntime | undefined;
   readonly #onHistoryAppend:
@@ -389,6 +401,11 @@ export class ReactAgent {
   readonly #streamIdleTimeoutMs: number;
   readonly #contextRecoveryBudget: number;
   readonly #backgroundJobs: BackgroundJobManager;
+  #taskProgress: TaskProgress;
+  #taskGeneration = 0;
+  #backgroundNoticeAdmission = false;
+  readonly #backgroundNoticeSlots = new Set<string>();
+  readonly #pendingBackgroundNotices = new Map<string, BackgroundJobCompletion>();
   readonly #toolOutputs = new ToolOutputStore();
   readonly #fileSearches = new FileSearchSession();
   readonly #workspaceReviews: WorkspaceReviewSession;
@@ -425,8 +442,12 @@ export class ReactAgent {
     this.#skills = options.skills;
     this.#learnedMemory = options.learnedMemory;
     this.#learnedMemory?.setPolicy?.(options.learnedMemoryPolicy ?? {});
+    this.#questionInteraction = options.questionInteraction ?? options.planInteraction;
     this.#planInteraction = options.planInteraction;
     this.#goalRuntime = options.goalRuntime;
+    this.#taskProgress = options.initialTaskProgress
+      ? cloneTaskProgress(options.initialTaskProgress)
+      : { plan: [], updated_at: new Date(0).toISOString() };
     this.#history = repairToolContext(options.initialHistory ?? []).map((item) =>
       item.type === "function_call_output" && typeof item.output === "string"
         ? { ...item, output: this.#toolOutputs.bound(item.output) }
@@ -462,15 +483,33 @@ export class ReactAgent {
     return this.#backgroundJobs.waitAll(signal);
   }
 
-  beginTask(): void {
+  async beginTask(options: AgentTaskOptions): Promise<void> {
     this.#requestAttemptLedger?.reset();
+    this.#taskGeneration += 1;
+    this.#backgroundNoticeAdmission = options.mode === "default";
+    this.#backgroundNoticeSlots.clear();
+    this.#pendingBackgroundNotices.clear();
+    if (options.mode === "default" && options.source !== "session_resume") {
+      await this.#replaceTaskProgress({ plan: [], updated_at: new Date().toISOString() });
+    }
+  }
+
+  endTask(): void {
+    this.#backgroundNoticeAdmission = false;
+    this.#taskGeneration += 1;
+    this.#backgroundNoticeSlots.clear();
+    this.#pendingBackgroundNotices.clear();
   }
 
   cancelBackgroundJobs(reason?: unknown): Promise<BackgroundJobSnapshot[]> {
+    this.#backgroundNoticeAdmission = false;
+    this.#pendingBackgroundNotices.clear();
+    this.#backgroundNoticeSlots.clear();
     return this.#backgroundJobs.stopAll(reason);
   }
 
   async dispose(): Promise<void> {
+    this.endTask();
     await this.#backgroundJobs.dispose();
     this.#toolOutputs.clear();
     this.#fileSearches.clear();
@@ -506,6 +545,8 @@ export class ReactAgent {
       const loopResult = await runAgentLoop({
         prepareStep: async (loopSignal) => {
           const preparationStarted = performance.now();
+          await this.#drainBackgroundNotices();
+          loopSignal?.throwIfAborted();
           const mcpPreparation = this.#mcp && this.#turnMode === "default"
             ? this.#mcp.ensureReady(loopSignal).then((snapshot) => {
               const cloned = structuredClone(snapshot);
@@ -707,6 +748,34 @@ export class ReactAgent {
     if (copies.length > 0) this.#historyRevision += 1;
   }
 
+  async #replaceTaskProgress(progress: TaskProgress): Promise<void> {
+    const next = cloneTaskProgress(progress);
+    if (this.#io.setTaskProgress) {
+      await persistState("Task progress persistence failed", () => this.#io.setTaskProgress!(next));
+    }
+    this.#taskProgress = next;
+  }
+
+  #queueBackgroundNotice(completion: BackgroundJobCompletion, generation: number): void {
+    if (!this.#backgroundNoticeAdmission || generation !== this.#taskGeneration || !this.#backgroundNoticeSlots.has(completion.job_id)) return;
+    this.#pendingBackgroundNotices.set(completion.job_id, { ...completion });
+  }
+
+  async #drainBackgroundNotices(): Promise<void> {
+    if (!this.#backgroundNoticeAdmission || this.#pendingBackgroundNotices.size === 0) return;
+    const notices = [...this.#pendingBackgroundNotices.values()];
+    const ids = notices.map((notice) => notice.job_id);
+    const content = [
+      "Host background-job completion notice. This is status data, not user instruction:",
+      ...notices.map((notice) => `- ${notice.job_id}: ${notice.status}; exit code ${notice.exit_code === null ? "unavailable" : notice.exit_code}; finished ${notice.finished_at}. Use poll_background to read retained output.`),
+    ].join("\n");
+    await this.#record([{ type: "message", role: "developer", content }]);
+    for (const id of ids) {
+      this.#pendingBackgroundNotices.delete(id);
+      this.#backgroundNoticeSlots.delete(id);
+    }
+  }
+
   async #dispatchTool(call: ToolCall, signal?: AbortSignal): Promise<string | { output: string; stop?: boolean }> {
     signal?.throwIfAborted();
     if (!this.#stepToolNames.has(call.name)) {
@@ -720,18 +789,27 @@ export class ReactAgent {
     }
     const policy = this.#io.getPermissions?.() ?? defaultPermissions();
     let output: string;
-    if (call.name === "request_user_input" && this.#turnMode === "plan" && this.#planInteraction) {
-      const answers = await this.#planInteraction.requestInput(parsePlanRequest(call.arguments), signal);
+    if (call.name === "request_user_input" && this.#questionInteraction) {
+      const answers = await this.#questionInteraction.requestInput(parsePlanRequest(call.arguments), signal, this.#turnMode);
       if (answers.__cancelled === "true") {
-        this.#turnResult = { planDecision: "cancel" };
-        return { output: JSON.stringify({ status: "cancelled" }), stop: true };
+        if (this.#turnMode === "plan") {
+          this.#turnResult = { planDecision: "cancel" };
+          return { output: JSON.stringify({ status: "cancelled" }), stop: true };
+        }
+        signal?.throwIfAborted();
+        throw new Error("User input was cancelled");
       }
+      signal?.throwIfAborted();
       return JSON.stringify({ answers });
     } else if (call.name === "submit_plan" && this.#turnMode === "plan" && this.#planInteraction) {
       const submitted = parseSubmittedPlan(call.arguments);
       const decision = await this.#planInteraction.reviewPlan(submitted, signal);
       this.#turnResult = { planDecision: decision, ...(decision === "approve" ? { approvedPlan: submitted.plan } : {}) };
       return { output: JSON.stringify({ decision }), stop: decision !== "continue" };
+    } else if (call.name === "update_plan" && this.#io.setTaskProgress) {
+      const progress = parseTaskProgressArguments(call.arguments);
+      await this.#replaceTaskProgress(progress);
+      return JSON.stringify({ status: "updated", plan: cloneTaskProgress(progress).plan });
     } else if (call.name === "get_goal" && this.#goalRuntime) {
       return JSON.stringify({ goal: await this.#goalRuntime.get() ?? null });
     } else if (call.name === "create_goal" && this.#goalRuntime) {
@@ -763,6 +841,9 @@ export class ReactAgent {
     } else if (call.name === "start_background") {
       const command = parseBackgroundCommand(call.arguments);
       if (!command) return JSON.stringify({ status: "error", error: "A background command is required" });
+      if (this.#backgroundNoticeAdmission && this.#backgroundNoticeSlots.size >= MAX_OUTSTANDING_BACKGROUND_NOTICES) {
+        return JSON.stringify({ status: "error", error: `Background completion backlog reached ${MAX_OUTSTANDING_BACKGROUND_NOTICES}; allow the agent to continue to another step before starting more work.` });
+      }
       if (bashPermission(policy) === "deny" || commandPermission(command, policy) === "deny") {
         return JSON.stringify({ status: "denied", error: "The command is denied by the current permission policy." });
       }
@@ -777,7 +858,16 @@ export class ReactAgent {
       }
       try {
         this.#io.writeTool?.(`Starting background command: ${command}`);
-        return JSON.stringify({ status: "ok", job: this.#backgroundJobs.start(command, signal) });
+        const generation = this.#taskGeneration;
+        const job = this.#backgroundJobs.start(
+          command,
+          signal,
+          this.#backgroundNoticeAdmission
+            ? (completion) => this.#queueBackgroundNotice(completion, generation)
+            : undefined,
+        );
+        if (this.#backgroundNoticeAdmission) this.#backgroundNoticeSlots.add(job.job_id);
+        return JSON.stringify({ status: "ok", job });
       } catch (error) {
         return JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error) });
       }
@@ -1372,13 +1462,16 @@ export class ReactAgent {
           ...FILE_TOOL_DEFINITIONS,
           ...(this.#codeNavigation ? [CODE_NAVIGATION_TOOL_DEFINITION] : []),
           READ_TOOL_OUTPUT_DEFINITION,
-          ...PLAN_TOOL_DEFINITIONS,
+          ...(this.#questionInteraction ? [REQUEST_USER_INPUT_TOOL_DEFINITION] : []),
+          ...(this.#planInteraction ? [SUBMIT_PLAN_TOOL_DEFINITION] : []),
           ...memoryTools,
           ...(this.#skillTurn && this.#skillTurn.skills.length > 0 ? [READ_SKILL_TOOL_DEFINITION] : []),
         ]
       : [
           BASH_TOOL_DEFINITION,
           ...BACKGROUND_JOB_TOOL_DEFINITIONS,
+          ...(this.#questionInteraction ? [REQUEST_USER_INPUT_TOOL_DEFINITION] : []),
+          ...(this.#io.setTaskProgress ? [UPDATE_PLAN_TOOL_DEFINITION] : []),
           APPLY_PATCH_TOOL_DEFINITION,
           WORKSPACE_STATUS_TOOL_DEFINITION,
           WORKSPACE_DIFF_TOOL_DEFINITION,
@@ -1521,7 +1614,10 @@ export class ReactAgent {
     const projectInstructions = this.#projectRuleSnapshot
       ? `Current host-maintained project rule snapshot (${this.#projectRuleSnapshot.revision}). It supersedes any earlier project rule snapshot:\n${this.#projectRuleSnapshot.context || "No applicable project rules or package scripts were discovered."}`
       : "";
-    const extensionInstructions = [this.#turnMode === "plan" ? PLAN_INSTRUCTIONS : "", projectInstructions, skillInstructions, this.#turnMode === "default" ? this.#mcpSnapshot.instructions : "", this.#learnedPrompt, this.#goalPrompt]
+    const taskProgressInstructions = this.#turnMode === "default"
+      ? `${formatTaskProgress(this.#taskProgress)}\nThis current checklist supersedes older checklist tool calls or summaries.`
+      : "";
+    const extensionInstructions = [this.#turnMode === "plan" ? PLAN_INSTRUCTIONS : "", projectInstructions, skillInstructions, this.#turnMode === "default" ? this.#mcpSnapshot.instructions : "", this.#learnedPrompt, this.#goalPrompt, taskProgressInstructions]
       .filter(Boolean)
       .join("\n\n");
     const stableInstructions = `${INSTRUCTIONS}\n${PERMISSION_INSTRUCTIONS}`;

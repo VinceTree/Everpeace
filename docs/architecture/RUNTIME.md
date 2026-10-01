@@ -9,6 +9,7 @@
 | 模型参数、请求失败、token | 请求与计量 | [capabilities](../../src/providers/capabilities.ts)、[provider factory](../../src/providers/openai-compatible.ts)、[provider tests](../../tests/unit/providers/capabilities.test.ts) |
 | 重试、流、并发、steering | ReAct 循环 | [ReactAgent](../../src/agent/react-agent.ts)、[agent-loop](../../src/agent/agent-loop.ts)、[loop boundaries](../../tests/unit/agent/loop-boundaries.test.ts) |
 | 自动修复、完成状态、取消 | Coding task 与验证 | [task-runner](../../src/workflow/task-runner.ts)、[workflow](../../src/workflow/runtime.ts)、[runner tests](../../tests/unit/workflow/task-runner.test.ts) |
+| 编码提问、执行清单、后台完成通知 | ReAct 循环、Coding task 与验证 | [ReactAgent](../../src/agent/react-agent.ts)、[task progress](../../src/workflow/task-progress.ts)、[ReactAgent tests](../../tests/unit/agent/react-agent.test.ts) |
 | 压缩、上下文大小 | 上下文 | [request-snapshot](../../src/agent/request-snapshot.ts)、[ReactAgent tests](../../tests/unit/agent/react-agent.test.ts) |
 | 修改识别或手动验证 | 变更与检查 | [workspace-tracker](../../src/workflow/workspace-tracker.ts)、[verifier](../../src/workflow/verifier.ts)、[workflow tests](../../tests/unit/workflow/runtime.test.ts) |
 
@@ -50,9 +51,15 @@ CLI 分开显示主编码与辅助用量；Session 编码总量不混入标题�
 3. 先保存模型响应，再执行工具；工具结果按模型原始顺序保存。保存失败阻止后续副作用，不当成普通工具错误让模型继续。
 4. 有工具调用或明确 `end_turn: false` 则继续采样；普通回答结束并不等于编码任务验证通过。
 
+宿主提供交互回调时，`request_user_input` 在 Plan 和普通 coding 模式都可用。它保持一至三个问题、每题两至三个选项和 UI 自由文本入口；等待回答期间不发模型请求。回答按普通 function-call/output 配对先持久化，再继续该批剩余调用或下一次采样。Plan 的取消仍结束规划；coding 界面的 Esc/Ctrl+C 取消整个活动任务并进入统一后台清理。问题答案只是输入，不能批准 shell、patch、MCP 或其他权限操作。
+
+普通 coding 还可调用 `update_plan` 整体替换当前执行清单。清单最多 20 个唯一非空步骤，单项最多 240 个 Unicode 字符，状态为 `pending / in_progress / completed`，且最多一个 `in_progress`；空数组明确清除。宿主在发布新投影前保存 `task_progress_updated`，失败即停止执行。当前投影作为明确标注的 model-authored 动态上下文加入每个请求，压缩后的请求也重新注入，因此历史工具调用或摘要不能覆盖当前值。
+
 生产启用最多四个经过能力审定的只读工具并发；`parallelReadTools` 是宿主调度设置，和发给供应商的 `parallel_tool_calls` 分离。某个读取完成即可补入下一项，连续已就绪结果按序持久化后释放缓存；全部完成但未持久化结果受数量与字节背压限制。写入、shell、MCP、审批和不安全读取形成串行屏障。
 
 dispatch 仍检查实时权限、当前 step 广告工具集合、停止状态和取消。Plan 只读限制由宿主实施；不能依靠模型遵循提示。steering 在安全点保存并更新上下文，未启动工具补齐 `steered` output，不能遗留断开的工具链。
+
+活动 coding task 为每次 runner invocation 分配 generation。后台命令完成只排入该 generation 的元数据通知（job ID、终态、退出码、完成时间）；下一个普通 step 在工具结果配对和 steering 之后，通过既有 durable context 通道保存通知，成功后才确认出队，正文仍须用 `poll_background` 读取。通知不会唤醒空闲 Session 或额外发请求；任务结束会丢弃未送达项，迟到 callback 也因 generation 失效。运行中 job 与未送达通知合计最多 20 项，既有同时运行两个命令的限制继续生效。
 
 采样默认最多两次重试；退避支持 `Retry-After` 和取消。普通重试不包含永久错误或上下文超限，也不重新执行已完成工具。传输 fallback 只在尚无流事件且端点明确拒绝 streaming 时使用。
 
@@ -65,6 +72,8 @@ dispatch 仍检查实时权限、当前 step 广告工具集合、停止状态�
 ## Coding task 与验证
 
 `CodingTaskRunner` 持有整个任务的生命周期，协调 Agent、后台命令、验证、诊断、Goal 和 Memory；同一 runner 在执行或清理中拒绝第二个任务。取消、异常或预算停止先收束后台命令并丢弃待完成意图。最终检查返回后、Goal 结算前和 Memory 捕获前再次检查取消。
+
+执行清单属于顶层 coding task：repair turn 和同一次 runner 内的 Goal continuation 保留它；显式 `session_resume` 恢复 Session 最后投影；新的用户任务在第一次请求前持久化为空。清单全部 completed 只影响进度显示，不能改变 workflow result、跳过验证、完成 Goal 或触发成功 Memory。
 
 `WorkflowState` 将 phase 与结果分开：
 

@@ -6,6 +6,8 @@ import { ContextSurface } from "../../../src/tui/components/screens/context-surf
 import { WorkspaceDiffSurface } from "../../../src/tui/components/screens/workspace-diff-surface.js";
 import type { ContextInspectionSnapshot } from "../../../src/agent/context-inspection.js";
 import type { WorkspaceChangeIndex } from "../../../src/tools/workspace-review.js";
+import { TaskProgressSurface } from "../../../src/tui/components/screens/task-progress-surface.js";
+import { PlanQuestionsSurface } from "../../../src/tui/components/screens/plan-surface.js";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 35));
 
@@ -94,5 +96,66 @@ test("context surface distinguishes integrations without inspection support", as
     assert.match(view.lastFrame() ?? "", /unavailable for the active agent integration/u);
   } finally {
     view.unmount();
+  }
+});
+
+test("task progress surface shows the full checklist and host result separately", async () => {
+  const view = render(<TaskProgressSurface
+    progress={{
+      plan: [
+        { step: "Inspect", status: "completed" },
+        { step: "Implement", status: "in_progress" },
+        { step: "Verify", status: "pending" },
+      ],
+      updated_at: "2026-10-01T00:00:00.000Z",
+    }}
+    workflow={{
+      task_id: "task-1",
+      phase: "done",
+      repair_attempts: 0,
+      max_repair_attempts: 3,
+      changed_paths: [],
+      checkpoint_available: false,
+      result: "unverified",
+      result_reason: "No checks were discovered",
+      updated_at: "2026-10-01T00:00:00.000Z",
+    }}
+    onBack={() => {}}
+  />);
+  try {
+    await waitFor(() => (view.lastFrame() ?? "").includes("Implement"));
+    assert.match(view.lastFrame() ?? "", /Last task result: unverified · No checks were discovered/u);
+    assert.match(view.lastFrame() ?? "", /✓ Inspect/u);
+    assert.match(view.lastFrame() ?? "", /● Implement/u);
+    assert.match(view.lastFrame() ?? "", /○ Verify/u);
+    assert.match(view.lastFrame() ?? "", /verification determines completion/u);
+  } finally {
+    view.unmount();
+  }
+});
+
+test("question surface labels coding cancellation separately from Plan cancellation", async () => {
+  const request = { questions: [{
+    id: "path",
+    header: "Path",
+    question: "Which path?",
+    options: [{ label: "Safe", description: "Use safe" }, { label: "Fast", description: "Use fast" }],
+  }] };
+  let cancelled = 0;
+  const coding = render(<PlanQuestionsSurface request={request} mode="default" onComplete={() => {}} onCancel={() => { cancelled += 1; }} />);
+  try {
+    await waitFor(() => (coding.lastFrame() ?? "").includes("/question · Path"));
+    assert.match(coding.lastFrame() ?? "", /Esc to cancel the active task/u);
+    coding.stdin.write("\u001b");
+    await waitFor(() => cancelled === 1);
+  } finally {
+    coding.unmount();
+  }
+  const planning = render(<PlanQuestionsSurface request={request} mode="plan" onComplete={() => {}} onCancel={() => {}} />);
+  try {
+    await waitFor(() => (planning.lastFrame() ?? "").includes("/plan · Path"));
+    assert.match(planning.lastFrame() ?? "", /Esc to cancel planning/u);
+  } finally {
+    planning.unmount();
   }
 });

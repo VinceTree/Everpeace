@@ -550,3 +550,10 @@ Everpeace 需要提供完整的本地 Session 工作流：
 - 保持 inline TUI；不要切换 alternate screen，不允许原始 PTY 控制序列写入 Ink stdout。
 - 每次修改功能、行为、接口或测试状态后，同步更新相关 `docs/` 文档。
 - 每个新 Session 先读根级 `AGENTS.md` 和本文件；长期规则放在 `AGENTS.md`，实时状态只更新本文件。
+
+## 8. 2026-10-01：前次 Coding reliability 交接摘要
+
+- 以 tracked baseline `b226bfcdd5e8421676f9f47454ef68db75370732` 完成命名 baseline/candidate checkout、fresh Node worker、production adapter identity/digest 校验及互斥的 preflight/prove/live campaign 模式；固定 dsh instrumentation 在 provider boundary 校验 high/32K 请求、usage 完整性、socket guard 与清理。
+- 增加 `list_workspace_changes` / `read_workspace_change` 的 captured staged/unstaged/untracked 审阅，保留旧 Git 工具兼容；增加精确唯一 replace 编辑及稳定错误原因；TypeScript LSP 改为 pinned native read-only duplex transport，并在启动 server 前执行 direct-socket denial probe。
+- Windows 固定 backend 实测可拒绝 workspace 写入与 Everpeace 状态读取，但仍允许 socket，因此 LSP 按设计失败关闭。固定 dsh checkout preflight、live 模型比较和真实 Windows Terminal 验收仍未执行。
+- 当时最终门禁为 typecheck、454/456 tests、build 通过；lint 不存在。全局 diff check 只被任务前已有 `.gitignore` / `LICENSE` CRLF 差异阻断。该里程碑最终位于 `25105bf48683b88dafda1be4812ac44abbc2961d`。

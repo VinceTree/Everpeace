@@ -11,6 +11,7 @@ import { SkillCatalog } from "../skills/catalog.js";
 import { CodingTaskRunner } from "../workflow/task-runner.js";
 import { CodingWorkflowRuntime } from "../workflow/runtime.js";
 import type { PermissionPolicy } from "../permissions/policy.js";
+import { cloneTaskProgress, type TaskProgress } from "../workflow/task-progress.js";
 import { createProviderCapabilityProfile } from "./capabilities.js";
 import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult } from "./types.js";
 
@@ -79,6 +80,7 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
       let navigation;
       try { navigation = createCodeNavigationFromEnvironment(workspacePath); }
       catch { navigation = undefined; }
+      let taskProgress: TaskProgress | undefined;
       const execute = (command: string, signal?: AbortSignal, timeoutMs?: number, onOutput?: (output: BashOutputPreview) => void) => {
         const startup = performance.now();
         return runBash(command, {
@@ -100,6 +102,11 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
         async confirmWeb() { return false; },
         async confirmMcp() { return false; },
         async confirmGoal() { return false; },
+        getTaskProgress() { return taskProgress === undefined ? undefined : cloneTaskProgress(taskProgress); },
+        async setTaskProgress(progress) {
+          await sessionStore.setTaskProgress(session.id, progress);
+          taskProgress = cloneTaskProgress(progress);
+        },
         previewPatch(operations) { return previewApplyPatch(operations, workspacePath); },
         async runApplyPatch(operations: readonly ApplyPatchOperation[], signal?: AbortSignal) {
           await workflow.capturePatch(operations);

@@ -19,6 +19,7 @@ import type { VerificationSuiteResult, WorkflowPhase, WorkflowState, Verificatio
 import type { LearnedMemoryPolicy } from "../memory/learned-memory.js";
 import { isModelRequestSettings, type ModelRequestSettings } from "../providers/capabilities.js";
 import { normalizeWorkspacePath } from "../memory/learned-memory.js";
+import { cloneTaskProgress, isTaskProgress, type TaskProgress } from "../workflow/task-progress.js";
 
 const SESSION_FORMAT_VERSION = 1;
 
@@ -78,6 +79,7 @@ export interface SessionSummary {
   model: SessionModelRef;
   goal?: SessionGoal;
   workflow?: WorkflowState;
+  task_progress?: TaskProgress;
   memory_policy?: LearnedMemoryPolicy;
 }
 
@@ -88,6 +90,7 @@ export interface LoadedSession {
   usage: SessionUsage;
   goal?: SessionGoal;
   workflow?: WorkflowState;
+  taskProgress?: TaskProgress;
   memoryPolicy?: LearnedMemoryPolicy;
 }
 
@@ -157,6 +160,7 @@ export interface SessionStoreLike {
   setGoal(sessionId: string, goal: SessionGoal): Promise<void>;
   updateGoal(sessionId: string, patch: Partial<Pick<SessionGoal, "status" | "tokens_used" | "usage_complete" | "time_used_seconds" | "blocked_streak" | "updated_at">>): Promise<void>;
   setWorkflow?(sessionId: string, workflow: WorkflowState): Promise<void>;
+  setTaskProgress?(sessionId: string, progress: TaskProgress): Promise<void>;
   setMemoryPolicy?(sessionId: string, policy: LearnedMemoryPolicy): Promise<void>;
 }
 
@@ -218,6 +222,11 @@ interface WorkflowUpdatedEvent extends EventBase {
   workflow: WorkflowState;
 }
 
+interface TaskProgressUpdatedEvent extends EventBase {
+  type: "task_progress_updated";
+  progress: TaskProgress;
+}
+
 interface MemoryPolicyUpdatedEvent extends EventBase {
   type: "memory_policy_updated";
   policy: LearnedMemoryPolicy;
@@ -233,6 +242,7 @@ type SessionEvent =
   | UsageRecordedEvent
   | GoalUpdatedEvent
   | WorkflowUpdatedEvent
+  | TaskProgressUpdatedEvent
   | MemoryPolicyUpdatedEvent;
 
 export interface SessionStoreOptions {
@@ -406,6 +416,11 @@ function parseEvent(value: unknown): SessionEvent {
     };
   }
 
+  if (value.type === "task_progress_updated") {
+    if (!isTaskProgress(value.progress)) throw new Error("Session task progress is invalid");
+    return { ...base, type: "task_progress_updated", progress: cloneTaskProgress(value.progress) };
+  }
+
   if (value.type === "memory_policy_updated") {
     if (!isRecord(value.policy) || typeof value.policy.readExisting !== "boolean" || typeof value.policy.captureFuture !== "boolean") {
       throw new Error("Session memory policy is invalid");
@@ -545,6 +560,7 @@ function parseSession(contents: string, filePath: string): LoadedSession {
 
   let goal: SessionGoal | undefined;
   let workflow: WorkflowState | undefined;
+  let taskProgress: TaskProgress | undefined;
   let memoryPolicy: LearnedMemoryPolicy | undefined;
   for (const event of events.slice(1)) {
     updatedAt = event.at;
@@ -568,6 +584,7 @@ function parseSession(contents: string, filePath: string): LoadedSession {
     }
     if (event.type === "goal_updated") goal = { ...event.goal };
     if (event.type === "workflow_updated") workflow = { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
+    if (event.type === "task_progress_updated") taskProgress = cloneTaskProgress(event.progress);
     if (event.type === "memory_policy_updated") memoryPolicy = { ...event.policy };
   }
 
@@ -582,6 +599,7 @@ function parseSession(contents: string, filePath: string): LoadedSession {
       model,
       ...(goal ? { goal } : {}),
       ...(workflow ? { workflow } : {}),
+      ...(taskProgress ? { task_progress: cloneTaskProgress(taskProgress) } : {}),
       ...(memoryPolicy ? { memory_policy: memoryPolicy } : {}),
     },
     timeline,
@@ -589,6 +607,7 @@ function parseSession(contents: string, filePath: string): LoadedSession {
     usage,
     ...(goal ? { goal } : {}),
     ...(workflow ? { workflow } : {}),
+    ...(taskProgress ? { taskProgress: cloneTaskProgress(taskProgress) } : {}),
     ...(memoryPolicy ? { memoryPolicy } : {}),
   };
 }
@@ -643,6 +662,7 @@ async function readSearchProjection(filePath: string, signal?: AbortSignal): Pro
   let updatedAt = "";
   let goal: SessionGoal | undefined;
   let workflow: WorkflowState | undefined;
+  let taskProgress: TaskProgress | undefined;
   let memoryPolicy: LearnedMemoryPolicy | undefined;
   let timelineIndex = 0;
   const messages: SessionSearchProjection["messages"] = [];
@@ -681,6 +701,7 @@ async function readSearchProjection(filePath: string, signal?: AbortSignal): Pro
     if (event.type === "model_selected") model = event.model;
     if (event.type === "goal_updated") goal = { ...event.goal };
     if (event.type === "workflow_updated") workflow = { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
+    if (event.type === "task_progress_updated") taskProgress = cloneTaskProgress(event.progress);
     if (event.type === "memory_policy_updated") memoryPolicy = { ...event.policy };
   };
 
@@ -707,6 +728,7 @@ async function readSearchProjection(filePath: string, signal?: AbortSignal): Pro
       model,
       ...(goal ? { goal } : {}),
       ...(workflow ? { workflow } : {}),
+      ...(taskProgress ? { task_progress: cloneTaskProgress(taskProgress) } : {}),
       ...(memoryPolicy ? { memory_policy: memoryPolicy } : {}),
     },
     messages,
@@ -880,6 +902,16 @@ export class SessionStore implements SessionStoreLike {
       type: "workflow_updated",
       at: this.#now().toISOString(),
       workflow: workflowSnapshot(workflow),
+    });
+  }
+
+  setTaskProgress(sessionId: string, progress: TaskProgress): Promise<void> {
+    if (!isTaskProgress(progress)) return Promise.reject(new Error("Task progress is invalid"));
+    return this.#append(sessionId, {
+      version: SESSION_FORMAT_VERSION,
+      type: "task_progress_updated",
+      at: this.#now().toISOString(),
+      progress: cloneTaskProgress(progress),
     });
   }
 

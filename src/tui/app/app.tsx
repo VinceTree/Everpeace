@@ -65,6 +65,7 @@ import { PlanQuestionsSurface, PlanReviewSurface } from "../components/screens/p
 import { GoalConfirmationSurface, GoalStatusSurface } from "../components/screens/goal-surface.js";
 import { WorkspaceDiffSurface } from "../components/screens/workspace-diff-surface.js";
 import { ContextSurface } from "../components/screens/context-surface.js";
+import { TaskProgressSurface } from "../components/screens/task-progress-surface.js";
 import { HighlightedCommand, RichOutput } from "../rendering/rich-text.js";
 import { TUI_COLORS } from "../rendering/palette.js";
 import { truncateEnd } from "../rendering/text-width.js";
@@ -92,6 +93,7 @@ import {
   resolveFileAttachments,
   type FileAttachment,
 } from "../../agent/file-attachments.js";
+import { cloneTaskProgress, type TaskProgress } from "../../workflow/task-progress.js";
 
 type View =
   | { kind: "outputs" }
@@ -100,12 +102,13 @@ type View =
   | { kind: "permissions" }
   | { kind: "skills" }
   | { kind: "memory"; status: LearnedMemoryStatus; policy: LearnedMemoryPolicy }
-  | { kind: "plan-questions"; request: PlanRequest; complete(answers: Record<string, string>): void; cancel(): void }
+  | { kind: "plan-questions"; request: PlanRequest; mode: AgentMode; complete(answers: Record<string, string>): void; cancel(): void }
   | { kind: "plan-review"; submitted: SubmittedPlan; decide(decision: PlanReviewDecision): void }
   | { kind: "goal-confirm"; objective: string; tokenBudget?: number; confirm(): void; cancel(): void }
   | { kind: "goal-status"; goal?: SessionGoal }
   | { kind: "workspace-diff"; index: WorkspaceChangeIndex; workflow?: WorkflowState }
   | { kind: "context" }
+  | { kind: "tasks"; progress?: TaskProgress; workflow?: WorkflowState }
   | { kind: "chat" }
   | { kind: "login" }
   | {
@@ -347,6 +350,8 @@ export function EverpeaceApp({
   const [agentMode, setAgentMode] = useState<AgentMode>("default");
   const [activeGoal, setActiveGoal] = useState<SessionGoal>();
   const activeGoalProjection = useRef<SessionGoal | undefined>(undefined);
+  const [activeTaskProgress, setActiveTaskProgress] = useState<TaskProgress>();
+  const activeTaskProgressProjection = useRef<TaskProgress | undefined>(undefined);
   const [memoryPolicy, setMemoryPolicy] = useState<LearnedMemoryPolicy>({ readExisting: true, captureFuture: true });
   const [workspacePath, setWorkspacePath] = useState(dependencies.workspacePath);
   const [view, setView] = useState<View>(() => initialView(initialModels.available));
@@ -396,6 +401,7 @@ export function EverpeaceApp({
   const queuedGuidance = useRef<QueuedGuidance[]>([]);
   const attachmentController = useRef<AbortController | undefined>(undefined);
   useEffect(() => { activeGoalProjection.current = activeGoal; }, [activeGoal]);
+  useEffect(() => { activeTaskProgressProjection.current = activeTaskProgress; }, [activeTaskProgress]);
   const resumeGoalPending = useRef(false);
   const runChatRef = useRef<((text: string, timelineRecorded?: boolean, mode?: AgentMode, taskSource?: WorkflowTaskSource, attachments?: readonly FileAttachment[]) => Promise<void>) | undefined>(undefined);
   useEffect(() => {
@@ -651,8 +657,12 @@ export function EverpeaceApp({
     [],
   );
 
-  const requestPlanInput = useCallback((request: PlanRequest, signal?: AbortSignal): Promise<Record<string, string>> => (
-    new Promise((resolve) => {
+  const requestUserInput = useCallback((request: PlanRequest, signal?: AbortSignal, mode: AgentMode = "default"): Promise<Record<string, string>> => (
+    new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(signal.reason ?? new Error("Question cancelled"));
+        return;
+      }
       let finished = false;
       const finish = (answers: Record<string, string>) => {
         if (finished) return;
@@ -663,7 +673,15 @@ export function EverpeaceApp({
       };
       const cancel = () => finish({ __cancelled: "true" });
       signal?.addEventListener("abort", cancel, { once: true });
-      enterCommandView({ kind: "plan-questions", request, complete: finish, cancel });
+      enterCommandView({
+        kind: "plan-questions",
+        request,
+        mode,
+        complete: finish,
+        cancel: mode === "plan"
+          ? cancel
+          : () => abortController.current?.abort(new Error("Question cancelled by user")),
+      });
     })
   ), [enterCommandView, returnToChat]);
 
@@ -765,7 +783,7 @@ export function EverpeaceApp({
       confirmWeb: requestWebConfirmation,
       confirmMcp: requestMcpConfirmation,
       confirmGoal: requestGoalConfirmation,
-      requestPlanInput,
+      requestUserInput,
       reviewPlan,
       async getGoal() {
         return activeSessionId.current ? activeGoalProjection.current : undefined;
@@ -776,6 +794,20 @@ export function EverpeaceApp({
         await dependencies.sessionStore.setGoal(sessionId, goal);
         activeGoalProjection.current = goal;
         setActiveGoal(goal);
+      },
+      getTaskProgress() {
+        return activeTaskProgressProjection.current === undefined
+          ? undefined
+          : cloneTaskProgress(activeTaskProgressProjection.current);
+      },
+      async setTaskProgress(progress) {
+        const sessionId = activeSessionId.current;
+        if (!sessionId) throw new Error("Task progress requires an active session");
+        if (!dependencies.sessionStore.setTaskProgress) throw new Error("Task progress persistence is unavailable");
+        await dependencies.sessionStore.setTaskProgress(sessionId, progress);
+        const next = cloneTaskProgress(progress);
+        activeTaskProgressProjection.current = next;
+        setActiveTaskProgress(next);
       },
       async previewPatch(operations: readonly ApplyPatchOperation[]) {
         return previewApplyPatch(operations, workspacePath, { allowProtectedPaths: permissions.current.mode === "full-access" });
@@ -836,7 +868,7 @@ export function EverpeaceApp({
         }
       },
     }),
-    [append, clearLiveAssistant, dependencies.sessionStore, ensureWorkflow, executeBash, executeVerification, queueAssistantDelta, requestBashConfirmation, requestGoalConfirmation, requestMcpConfirmation, requestPatchConfirmation, requestPlanInput, requestWebConfirmation, reviewPlan, workspacePath],
+    [append, clearLiveAssistant, dependencies.sessionStore, ensureWorkflow, executeBash, executeVerification, queueAssistantDelta, requestBashConfirmation, requestGoalConfirmation, requestMcpConfirmation, requestPatchConfirmation, requestUserInput, requestWebConfirmation, reviewPlan, workspacePath],
   );
 
   const contextWindow = activeModel
@@ -850,6 +882,7 @@ export function EverpeaceApp({
             initialContext: sessionContext,
             contextWindow,
             initialContextTokens: sessionUsage.context_tokens,
+            ...(activeTaskProgressProjection.current === undefined ? {} : { initialTaskProgress: cloneTaskProgress(activeTaskProgressProjection.current) }),
             async onContextAppend(items) {
               const sessionId = activeSessionId.current;
               if (sessionId !== undefined) {
@@ -1269,6 +1302,8 @@ export function EverpeaceApp({
           setAgentMode("default");
           activeGoalProjection.current = loaded.goal;
           setActiveGoal(loaded.goal);
+          activeTaskProgressProjection.current = loaded.taskProgress === undefined ? undefined : cloneTaskProgress(loaded.taskProgress);
+          setActiveTaskProgress(loaded.taskProgress === undefined ? undefined : cloneTaskProgress(loaded.taskProgress));
           setMemoryPolicy(loaded.memoryPolicy ?? { readExisting: true, captureFuture: true });
           setWorkspacePath(restoredWorkspace);
           setSessionEpoch((current) => current + 1);
@@ -1452,6 +1487,8 @@ export function EverpeaceApp({
         setAgentMode("default");
         activeGoalProjection.current = undefined;
         setActiveGoal(undefined);
+        activeTaskProgressProjection.current = undefined;
+        setActiveTaskProgress(undefined);
         setMemoryPolicy({ readExisting: true, captureFuture: true });
         setResumedInputHistory(undefined);
         historyNavigationRef.current = { index: undefined, draft: "" };
@@ -1485,6 +1522,8 @@ export function EverpeaceApp({
     setAgentMode("default");
     activeGoalProjection.current = undefined;
     setActiveGoal(undefined);
+    activeTaskProgressProjection.current = undefined;
+    setActiveTaskProgress(undefined);
     setMemoryPolicy({ readExisting: true, captureFuture: true });
     const banner: TimelineEntry = {
       id: nextId.current++,
@@ -2076,6 +2115,11 @@ export function EverpeaceApp({
         if (parsed.command === "/models") void showModels();
         if (parsed.command === "/status") showStatus();
         if (parsed.command === "/context") enterCommandView({ kind: "context" });
+        if (parsed.command === "/tasks") enterCommandView({
+          kind: "tasks",
+          ...(activeTaskProgressProjection.current === undefined ? {} : { progress: cloneTaskProgress(activeTaskProgressProjection.current) }),
+          ...(workflowRuntime.current === undefined ? {} : { workflow: { ...workflowRuntime.current.state, changed_paths: [...workflowRuntime.current.state.changed_paths] } }),
+        });
         if (parsed.command === "/diff") void showWorkspaceDiff();
         if (parsed.command === "/verify") void runManualVerification(parsed.args ?? "");
         if (parsed.command === "/undo") void undoWorkflow();
@@ -2239,6 +2283,10 @@ export function EverpeaceApp({
   useInput(
     (input, key) => {
       if (key.eventType === "release") return;
+      if (view.kind === "plan-questions" && (key.escape || (key.ctrl && input === "c"))) {
+        view.cancel();
+        return;
+      }
       if (!(key.ctrl && input === "c")) {
         if (commandInput.current) {
           const encoded = key.return ? "\r" : key.backspace ? "\u007f" : key.tab ? "\t" : key.escape ? "\u001b" : key.upArrow ? "\u001b[A" : key.downArrow ? "\u001b[B" : key.rightArrow ? "\u001b[C" : key.leftArrow ? "\u001b[D" : key.home ? "\u001b[H" : key.end ? "\u001b[F" : key.delete ? "\u001b[3~" : key.ctrl && input.length === 1 ? String.fromCharCode(input.toUpperCase().charCodeAt(0) & 31) : input;
@@ -2258,7 +2306,7 @@ export function EverpeaceApp({
         return;
       }
     },
-    { isActive: view.kind === "chat" || view.kind === "context" || confirmation !== undefined || (view.kind === "loading" && directController.current !== undefined) },
+    { isActive: view.kind === "chat" || view.kind === "context" || view.kind === "plan-questions" || confirmation !== undefined || (view.kind === "loading" && directController.current !== undefined) },
   );
 
   useEffect(
@@ -2365,7 +2413,7 @@ export function EverpeaceApp({
             onClear={clearMemory}
           />
         ) : view.kind === "plan-questions" ? (
-          <PlanQuestionsSurface request={view.request} onComplete={view.complete} onCancel={view.cancel} />
+          <PlanQuestionsSurface request={view.request} mode={view.mode} onComplete={view.complete} onCancel={view.cancel} />
         ) : view.kind === "plan-review" ? (
           <PlanReviewSurface submitted={view.submitted} onDecision={view.decide} />
         ) : view.kind === "goal-confirm" ? (
@@ -2390,6 +2438,8 @@ export function EverpeaceApp({
             {...(agent?.getContextSnapshot ? { getSnapshot: () => agent.getContextSnapshot?.() } : {})}
             onBack={returnToChat}
           />
+        ) : view.kind === "tasks" ? (
+          <TaskProgressSurface progress={view.progress} workflow={view.workflow} onBack={returnToChat} />
         ) : view.kind === "login" ? (
           <LoginWizard
             dependencies={dependencies}
@@ -2561,6 +2611,7 @@ export function EverpeaceApp({
         mode={agentMode}
         reasoningEffort={requestSettings.reasoningEffort}
         {...(activeGoal ? { goalStatus: activeGoal.status } : {})}
+        {...(activeTaskProgress ? { taskProgress: activeTaskProgress } : {})}
       />
     </Box>
   );

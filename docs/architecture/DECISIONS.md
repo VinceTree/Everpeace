@@ -115,7 +115,8 @@ Git Skill 来源采用 shallow、no-checkout 克隆：先读取有界 Git tree �
 
 ## Plan 与 Goal
 
-- `/plan` 是进程内严格规划模式，不写计划文件；只暴露 read/list、web、Skill read、`request_user_input` 和 `submit_plan`，从工具列表层面阻止 Bash/MCP。启用网页工具时，Plan 的公共 web 请求按只读联网能力免逐次确认；关闭网页工具仍然拒绝请求，普通聊天继续遵循当前权限档位。结构化问题和最终计划均经 transient picker/review，用户批准后在同一 Session 切回 Default 执行。
+- `/plan` 是进程内严格规划模式，不写计划文件；只暴露 read/list、web、Skill read、`request_user_input` 和 `submit_plan`，从工具列表层面阻止 Bash/MCP。启用网页工具时，Plan 的公共 web 请求按只读联网能力免逐次确认；关闭网页工具仍然拒绝请求，普通聊天继续遵循当前权限档位。`request_user_input` 的 picker 同时用于普通 coding；等待不发模型请求，答案走普通 tool-result 持久化，且不能代替权限审批。Plan 的取消保持规划语义，coding 的取消进入活动任务清理。最终计划仍经独立 review，用户批准后在同一 Session 切回 Default 执行。
+- `update_plan` 整体替换最多 20 项的 model-authored TaskProgress；`task_progress_updated` 是 additive Session event，写入成功后才更新 UI。显式 resume、repair 与同一 runner 的 Goal continuation 保留投影，新用户任务先清空。每个 coding 请求重新注入当前投影，历史和压缩摘要不能覆盖它；`/tasks` 只读展示，任何清单状态都不授予 verified、Goal complete 或成功 Memory。
 - `/goal` 绑定原 Session，以 `goal_updated` JSONL 事件保存最新快照，旧 Session 文件缺少该事件时按无目标兼容读取。目标恢复只发生在用户 `/resume` 原 Session 后，不扫描其他 Session 自动运行；`/new` 和 `/clear` 不继承目标。
 - Goal 工具按 Codex 语义提供 `get_goal`、`create_goal`、`update_goal`；只有显式目标创建、用户确认的暂停/恢复，以及真实完成或连续三轮同一阻塞才改变状态。连续阻塞计数写入 goal 快照，跨 Agent 重建和 Session 恢复不丢失。token budget 只在用户显式指定时启用，缺失 usage 不伪造 token。
 
@@ -278,6 +279,8 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 ## Coding capability 加固边界
 
 - coding task 是后台进程的所有者。`start_background` 在创建时绑定 task signal；取消、权限收紧、预算停止、异常和 Agent dispose 都必须终止并等待进程树。cleanup 未完成时，runner 不得结算成功或开始下一项 benchmark。运行中输出只保留有界 preview，完成记录按数量和总字节淘汰，Session 恢复不伪造进程。
+- 后台完成 callback 只携带 job ID、终态、退出码和时间，并受 runner invocation generation 限制；下一普通 step 通过 durable context 保存后才确认通知。运行 job 与未送达通知共用 20 个槽位，任务结束关闭准入并丢弃余项，通知不唤醒 Session，输出仍由 `poll_background` 获取。
+- 搜索 continuation 只在 Agent 进程内保留最多 16 个搜索和 8 MiB 序列化 UTF-8 payload，按创建顺序淘汰；读完最后一页或 dispose 立即释放。单次 ripgrep 的 2 MiB 输入限额同时计算未终止记录，`has_more` 与 `incomplete` 保持不同含义。
 - `CodingTaskRunner` 是最终结算的唯一入口。验证完成后、Goal/Memory 写入前必须重查取消；异常路径统一拒绝待完成 Goal、停止后台作业并以 failed/stopped 结算学习。benchmark 必须返回 runner 的真实终态、workflow outcome、诊断轮和首次 suite，独立 acceptance 不能把 stopped/预算失败改写成整体成功。
 - provider request 通过 `RequestExecutor` 在实际 attempt 边界准入和结算。已发送但没有可靠 usage 的 attempt 使对应 task/campaign 永久 incomplete；被预算或 incomplete ledger 拒绝的 attempt 记录为 rejected，但不伪造 provider 消耗。coding 与 auxiliary 累计分开显示。每个 stream attempt 拥有独立 AbortController，iterator 和 transport 关闭前不得启动 retry。
 - 文件版本的规范表示是原始字节 SHA-256。`read_file`、patch preview、执行、审批绑定和 rollback 使用同一摘要；文本编辑解码 UTF-8 后保留 BOM 和原有 LF/CRLF。模型读取到的正文规范化仅用于展示，不能成为并发保护的 hash 来源。

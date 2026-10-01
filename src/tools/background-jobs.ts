@@ -42,6 +42,13 @@ export interface BackgroundJobSnapshot {
   result?: BashResult;
 }
 
+export interface BackgroundJobCompletion {
+  job_id: string;
+  status: Exclude<BackgroundJobStatus, "running">;
+  exit_code: number | null;
+  finished_at: string;
+}
+
 interface BackgroundJob extends BackgroundJobSnapshot {
   controller: AbortController;
   promise: Promise<void>;
@@ -72,7 +79,11 @@ export class BackgroundJobManager {
     this.#run = run;
   }
 
-  start(command: string, parentSignal?: AbortSignal): BackgroundJobSnapshot {
+  start(
+    command: string,
+    parentSignal?: AbortSignal,
+    onSettled?: (completion: BackgroundJobCompletion) => void,
+  ): BackgroundJobSnapshot {
     if ([...this.#jobs.values()].filter((job) => job.status === "running").length >= MAX_RUNNING_JOBS) {
       throw new Error(`At most ${MAX_RUNNING_JOBS} background jobs may run at once`);
     }
@@ -104,7 +115,18 @@ export class BackgroundJobManager {
         job.finished_at = new Date().toISOString();
         job.detachParent?.();
         delete job.detachParent;
-        this.#prune();
+        try {
+          onSettled?.({
+            job_id: job.job_id,
+            status: job.status as Exclude<BackgroundJobStatus, "running">,
+            exit_code: job.result?.exitCode ?? null,
+            finished_at: job.finished_at,
+          });
+        } catch {
+          // Settlement observers cannot change command completion or cleanup.
+        } finally {
+          this.#prune();
+        }
       });
     this.#jobs.set(job.job_id, job);
     return this.#snapshot(job);

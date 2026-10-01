@@ -15,6 +15,8 @@ import type { SessionGoal } from "../../../src/storage/session-store.js";
 import { resolveProviderCapabilities } from "../../../src/providers/capabilities.js";
 import { previewApplyPatch, runApplyPatch } from "../../../src/tools/apply-patch.js";
 import { RequestAttemptLedger } from "../../../src/agent/request-attempt-ledger.js";
+import { PersistenceError } from "../../../src/storage/persistence-error.js";
+import type { TaskProgress } from "../../../src/workflow/task-progress.js";
 
 function bashResult(stdout: string): BashResult {
   return { stdout, stderr: "", exitCode: 0, signal: null };
@@ -267,6 +269,36 @@ test("agent uses the native compaction output as the next context window", async
   assert.ok(createInputs[0]?.some((item) => item.type === "compaction"));
   assert.ok(createInputs[0]?.some((item) => item.role === "user" && item.content === "next question"));
   assert.ok(!createInputs[0]?.some((item) => item.content === "old context"));
+});
+
+test("native compaction keeps the restored task checklist in the next request", async () => {
+  let request: Record<string, unknown> | undefined;
+  const progress: TaskProgress = {
+    plan: [{ step: "Finish the retained task", status: "in_progress" }],
+    updated_at: "2026-10-01T00:00:00.000Z",
+  };
+  const agent = new ReactAgent({
+    model: "progress-compaction-test",
+    initialHistory: [{ role: "user", content: "context before compaction" }],
+    initialTaskProgress: progress,
+    client: { responses: {
+      async compact() { return { output: [{ type: "compaction", encrypted_content: "opaque" }] }; },
+      async create(params) { request = params; return { id: "done", output_text: "done", output: [] }; },
+    } },
+    io: {
+      async confirmBash() { return false; },
+      async runBash() { return bashResult(""); },
+      async setTaskProgress() {},
+      writeAssistant() {},
+    },
+  });
+  await agent.beginTask({ mode: "default", source: "session_resume" });
+  await agent.compact();
+  await agent.runTurn("continue");
+  agent.endTask();
+  assert.match(JSON.stringify(request), /Current task checklist/u);
+  assert.match(JSON.stringify(request), /Finish the retained task/u);
+  assert.doesNotMatch(JSON.stringify(request), /context before compaction/u);
 });
 
 test("DeepSeek summary compaction keeps the latest two interaction units", async () => {
@@ -566,6 +598,8 @@ test("plan mode exposes only read-only and planning tools", async () => {
     client: { responses: { async create(params) { request = params; return { id: "plan", output_text: "planned", output: [] }; } } },
     model: "test",
     io: { async confirmBash() { throw new Error("not allowed"); }, async runBash() { throw new Error("not allowed"); }, writeAssistant() {} },
+    questionInteraction: { async requestInput() { return {}; } },
+    planInteraction: { async requestInput() { return {}; }, async reviewPlan() { return "continue"; } },
   });
   await agent.runTurn("make a plan", undefined, { mode: "plan" });
   const names = (request?.tools as Array<{ name: string }>).map((tool) => tool.name);
@@ -574,6 +608,380 @@ test("plan mode exposes only read-only and planning tools", async () => {
   assert.ok(names.includes("submit_plan"));
   assert.ok(!names.includes("bash"));
   assert.ok(!names.includes("get_goal"));
+});
+
+test("plan questions use the shared interaction and persist answers before follow-up", async () => {
+  let requests = 0;
+  const modes: string[] = [];
+  const agent = new ReactAgent({
+    model: "plan-question-test",
+    client: { responses: { async create(params) {
+      requests += 1;
+      if (requests === 1) return {
+        id: "question",
+        output_text: "",
+        output: [{ type: "function_call", name: "request_user_input", call_id: "plan-question", arguments: JSON.stringify({ questions: [{ id: "scope", header: "Scope", question: "Which scope?", options: [{ label: "Small", description: "Keep it small" }, { label: "Large", description: "Cover everything" }] }] }) }],
+      };
+      assert.match(JSON.stringify(params.input), /Small/u);
+      return { id: "done", output_text: "planned", output: [] };
+    } } },
+    io: { async confirmBash() { return false; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+    planInteraction: {
+      async requestInput(_request, _signal, mode) { modes.push(mode ?? "missing"); return { scope: "Small" }; },
+      async reviewPlan() { return "continue"; },
+    },
+  });
+  await agent.runTurn("plan", undefined, { mode: "plan" });
+  assert.equal(requests, 2);
+  assert.deepEqual(modes, ["plan"]);
+});
+
+test("coding mode advertises structured questions only when the host can answer them", async () => {
+  const advertised: string[][] = [];
+  const makeAgent = (interactive: boolean) => new ReactAgent({
+    client: { responses: { async create(params) {
+      advertised.push((params.tools as Array<{ name: string }>).map((tool) => tool.name));
+      return { id: "done", output_text: "done", output: [] };
+    } } },
+    model: "test",
+    io: { async confirmBash() { return false; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
+    ...(interactive ? { questionInteraction: { async requestInput() { return {}; } } } : {}),
+  });
+  await makeAgent(false).runTurn("without interaction");
+  await makeAgent(true).runTurn("with interaction");
+  assert.equal(advertised[0]?.includes("request_user_input"), false);
+  assert.equal(advertised[1]?.includes("request_user_input"), true);
+  assert.equal(advertised[1]?.includes("submit_plan"), false);
+});
+
+test("coding questions persist their answer before later calls and sampling continue", async () => {
+  const history: Array<Record<string, unknown>> = [];
+  const modes: string[] = [];
+  let requests = 0;
+  let bashCalls = 0;
+  const agent = new ReactAgent({
+    model: "questions-test",
+    client: { responses: { async create(params) {
+      requests += 1;
+      if (requests === 1) return {
+        id: "questions",
+        output_text: "",
+        output: [
+          { type: "function_call", name: "request_user_input", call_id: "question-1", arguments: JSON.stringify({ questions: [{ id: "choice", header: "Choice", question: "Which path?", options: [{ label: "Safe", description: "Use the safe path" }, { label: "Fast", description: "Use the fast path" }] }] }) },
+          { type: "function_call", name: "bash", call_id: "bash-1", arguments: JSON.stringify({ command: "echo done" }) },
+        ],
+      };
+      const input = params.input as Array<Record<string, unknown>>;
+      const outputs = input.filter((item) => item.type === "function_call_output");
+      assert.equal(outputs.length, 2);
+      assert.match(String(outputs[0]?.output), /Safe/u);
+      return { id: "done", output_text: "done", output: [] };
+    } } },
+    io: {
+      async confirmBash() { return true; },
+      async runBash() { bashCalls += 1; return bashResult("done"); },
+      writeAssistant() {},
+    },
+    questionInteraction: {
+      async requestInput(_request, _signal, mode) {
+        modes.push(mode ?? "missing");
+        return { choice: "Safe" };
+      },
+    },
+    onHistoryAppend: async (items) => { history.push(...items); },
+  });
+  await agent.runTurn("implement");
+  assert.deepEqual(modes, ["default"]);
+  assert.equal(bashCalls, 1);
+  assert.ok(history.some((item) => item.type === "function_call_output" && item.call_id === "question-1"));
+});
+
+test("a late coding-question answer cannot outlive task cancellation or run later calls", async () => {
+  const controller = new AbortController();
+  let resolveQuestion!: (answers: Record<string, string>) => void;
+  let questionStarted!: () => void;
+  const started = new Promise<void>((resolve) => { questionStarted = resolve; });
+  let bashCalls = 0;
+  let requests = 0;
+  const agent = new ReactAgent({
+    model: "late-question-test",
+    client: { responses: { async create() {
+      requests += 1;
+      return {
+        id: "questions",
+        output_text: "",
+        output: [
+          { type: "function_call", name: "request_user_input", call_id: "question-1", arguments: JSON.stringify({ questions: [{ id: "choice", header: "Choice", question: "Which path?", options: [{ label: "Safe", description: "Use safe" }, { label: "Fast", description: "Use fast" }] }] }) },
+          { type: "function_call", name: "bash", call_id: "bash-1", arguments: '{"command":"echo should-not-run"}' },
+        ],
+      };
+    } } },
+    io: {
+      async confirmBash() { return true; },
+      async runBash() { bashCalls += 1; return bashResult(""); },
+      writeAssistant() {},
+    },
+    questionInteraction: {
+      async requestInput() {
+        questionStarted();
+        return await new Promise<Record<string, string>>((resolve) => { resolveQuestion = resolve; });
+      },
+    },
+  });
+  const turn = agent.runTurn("implement", controller.signal);
+  await started;
+  controller.abort(new Error("cancelled while asking"));
+  resolveQuestion({ choice: "Late" });
+  await assert.rejects(turn, /cancelled while asking/u);
+  assert.equal(requests, 1);
+  assert.equal(bashCalls, 0);
+});
+
+test("task progress persists before publication and supersedes restored checklist context", async () => {
+  const persisted: TaskProgress[] = [];
+  const requests: Array<Record<string, unknown>> = [];
+  let responses = 0;
+  const initialTaskProgress: TaskProgress = {
+    plan: [{ step: "Old restored step", status: "in_progress" }],
+    updated_at: "2026-09-30T00:00:00.000Z",
+  };
+  const agent = new ReactAgent({
+    model: "progress-test",
+    initialTaskProgress,
+    client: { responses: { async create(params) {
+      requests.push(params);
+      responses += 1;
+      return responses === 1
+        ? { id: "update", output_text: "", output: [{ type: "function_call", name: "update_plan", call_id: "plan-1", arguments: JSON.stringify({ plan: [{ step: "Implement the change", status: "in_progress" }, { step: "Run checks", status: "pending" }] }) }] }
+        : { id: "done", output_text: "done", output: [] };
+    } } },
+    io: {
+      async confirmBash() { return false; },
+      async runBash() { return bashResult(""); },
+      async setTaskProgress(progress) { persisted.push({ ...progress, plan: progress.plan.map((item) => ({ ...item })) }); },
+      writeAssistant() {},
+    },
+  });
+  await agent.beginTask({ mode: "default", source: "session_resume" });
+  await agent.runTurn("resume");
+  await agent.runTurn("repair or continue the same goal");
+  agent.endTask();
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0]?.plan[0]?.step, "Implement the change");
+  assert.match(JSON.stringify(requests[0]), /Old restored step/u);
+  assert.match(JSON.stringify(requests[1]), /Implement the change/u);
+  assert.doesNotMatch(JSON.stringify(requests[1]), /Current task checklist[^]*Old restored step/iu);
+  assert.match(JSON.stringify(requests[2]), /Implement the change/u);
+
+  await agent.beginTask({ mode: "default", source: "user" });
+  assert.deepEqual(persisted.at(-1)?.plan, []);
+  agent.endTask();
+});
+
+test("task-progress persistence failure stops before another provider request", async () => {
+  let requests = 0;
+  const agent = new ReactAgent({
+    model: "progress-persistence-test",
+    client: { responses: { async create() {
+      requests += 1;
+      return { id: "update", output_text: "", output: [{ type: "function_call", name: "update_plan", call_id: "plan-1", arguments: '{"plan":[{"step":"Implement","status":"in_progress"}]}' }] };
+    } } },
+    io: {
+      async confirmBash() { return false; },
+      async runBash() { return bashResult(""); },
+      async setTaskProgress() { throw new Error("disk full"); },
+      writeAssistant() {},
+    },
+  });
+  await assert.rejects(agent.runTurn("update progress"), (error: unknown) => error instanceof PersistenceError && /disk full/u.test(error.message));
+  assert.equal(requests, 1);
+});
+
+test("background completion is durably injected once at the next step", async () => {
+  const persisted: Array<Record<string, unknown>> = [];
+  const requests: Array<Record<string, unknown>> = [];
+  let samples = 0;
+  const agent = new ReactAgent({
+    model: "background-notice-test",
+    client: { responses: { async create(params) {
+      requests.push(params);
+      samples += 1;
+      return samples === 1
+        ? { id: "start", output_text: "", output: [{ type: "function_call", name: "start_background", call_id: "start-1", arguments: '{"command":"build"}' }] }
+        : { id: "done", output_text: "done", output: [] };
+    } } },
+    io: {
+      async confirmBash() { return true; },
+      async runBash() { return bashResult(""); },
+      async runBackgroundBash() { return bashResult("built"); },
+      writeAssistant() {},
+    },
+    onHistoryAppend: async (items) => { persisted.push(...items); },
+  });
+  await agent.beginTask({ mode: "default", source: "user" });
+  await agent.runTurn("build");
+  agent.endTask();
+  const notices = persisted.filter((item) => item.role === "developer" && String(item.content).includes("Host background-job completion notice"));
+  assert.equal(notices.length, 1);
+  assert.match(JSON.stringify(requests[1]?.input), /Use poll_background to read retained output/u);
+  assert.doesNotMatch(JSON.stringify(notices), /built/u);
+});
+
+test("background arrivals during notice persistence remain queued in order", async () => {
+  let resolveSecond!: (result: BashResult) => void;
+  let persistenceStarted!: () => void;
+  const started = new Promise<void>((resolve) => { persistenceStarted = resolve; });
+  let releasePersistence!: () => void;
+  const release = new Promise<void>((resolve) => { releasePersistence = resolve; });
+  const persistedNotices: string[] = [];
+  let requests = 0;
+  let noticeWrites = 0;
+  const agent = new ReactAgent({
+    model: "background-arrival-test",
+    client: { responses: { async create() {
+      requests += 1;
+      if (requests === 1) return { id: "starts", output_text: "", output: [
+        { type: "function_call", name: "start_background", call_id: "start-1", arguments: '{"command":"first"}' },
+        { type: "function_call", name: "start_background", call_id: "start-2", arguments: '{"command":"second"}' },
+      ] };
+      if (requests === 2) return { id: "continue", output_text: "", output: [], end_turn: false };
+      return { id: "done", output_text: "done", output: [] };
+    } } },
+    io: {
+      async confirmBash() { return true; },
+      async runBash() { return bashResult(""); },
+      async runBackgroundBash(command) {
+        if (command === "first") return bashResult("first output");
+        return await new Promise<BashResult>((resolve) => { resolveSecond = resolve; });
+      },
+      writeAssistant() {},
+    },
+    onHistoryAppend: async (items) => {
+      const notice = items.find((item) => item.role === "developer" && String(item.content).includes("Host background-job completion notice"));
+      if (!notice) return;
+      noticeWrites += 1;
+      if (noticeWrites === 1) {
+        persistenceStarted();
+        await release;
+      }
+      persistedNotices.push(String(notice.content));
+    },
+  });
+  await agent.beginTask({ mode: "default", source: "user" });
+  const turn = agent.runTurn("start both");
+  await started;
+  resolveSecond(bashResult("second output"));
+  await agent.waitForBackgroundJobs();
+  releasePersistence();
+  await turn;
+  agent.endTask();
+  assert.equal(requests, 3);
+  assert.equal(persistedNotices.length, 2);
+  const [firstNotice, secondNotice] = persistedNotices;
+  assert.ok(firstNotice && secondNotice);
+  assert.equal(firstNotice.split("Use poll_background").length - 1, 1);
+  assert.equal(secondNotice.split("Use poll_background").length - 1, 1);
+});
+
+test("a completion from an ended task generation is ignored by the next task", async () => {
+  let resolveOld!: (result: BashResult) => void;
+  let requests = 0;
+  const notices: string[] = [];
+  const agent = new ReactAgent({
+    model: "background-generation-test",
+    client: { responses: { async create() {
+      requests += 1;
+      return requests === 1
+        ? { id: "start", output_text: "", output: [{ type: "function_call", name: "start_background", call_id: "start-1", arguments: '{"command":"old"}' }] }
+        : { id: `done-${requests}`, output_text: "done", output: [] };
+    } } },
+    io: {
+      async confirmBash() { return true; },
+      async runBash() { return bashResult(""); },
+      async runBackgroundBash() { return await new Promise<BashResult>((resolve) => { resolveOld = resolve; }); },
+      writeAssistant() {},
+    },
+    onHistoryAppend: async (items) => {
+      notices.push(...items.filter((item) => item.role === "developer").map((item) => String(item.content)));
+    },
+  });
+  await agent.beginTask({ mode: "default", source: "user" });
+  await agent.runTurn("old task");
+  agent.endTask();
+  await agent.beginTask({ mode: "default", source: "user" });
+  resolveOld(bashResult("late output"));
+  await agent.waitForBackgroundJobs();
+  await agent.runTurn("new task");
+  agent.endTask();
+  assert.equal(notices.some((content) => content.includes("Host background-job completion notice")), false);
+});
+
+test("background notice persistence failure blocks the following provider request", async () => {
+  let requests = 0;
+  let failNotice = true;
+  const persistedNotices: Array<Record<string, unknown>> = [];
+  const agent = new ReactAgent({
+    model: "background-notice-persistence-test",
+    client: { responses: { async create() {
+      requests += 1;
+      return requests === 1
+        ? { id: "start", output_text: "", output: [{ type: "function_call", name: "start_background", call_id: "start-1", arguments: '{"command":"build"}' }] }
+        : { id: "done", output_text: "done", output: [] };
+    } } },
+    io: {
+      async confirmBash() { return true; },
+      async runBash() { return bashResult(""); },
+      async runBackgroundBash() { return bashResult("built"); },
+      writeAssistant() {},
+    },
+    onHistoryAppend: async (items) => {
+      const notices = items.filter((item) => item.role === "developer" && String(item.content).includes("Host background-job completion notice"));
+      if (notices.length > 0 && failNotice) throw new Error("notice storage failed");
+      persistedNotices.push(...notices);
+    },
+  });
+  await agent.beginTask({ mode: "default", source: "user" });
+  await assert.rejects(agent.runTurn("build"), (error: unknown) => error instanceof PersistenceError && /notice storage failed/u.test(error.message));
+  failNotice = false;
+  await agent.runTurn("retry durable notice");
+  agent.endTask();
+  assert.equal(requests, 2);
+  assert.equal(persistedNotices.length, 1);
+});
+
+test("background starts reserve twenty task-local notice slots until delivery", async () => {
+  let requests = 0;
+  let secondInput: Array<Record<string, unknown>> = [];
+  const calls = Array.from({ length: 21 }, (_, index) => ({
+    type: "function_call",
+    name: "start_background",
+    call_id: `start-${index + 1}`,
+    arguments: JSON.stringify({ command: `job-${index + 1}` }),
+  }));
+  const agent = new ReactAgent({
+    model: "background-backlog-test",
+    client: { responses: { async create(params) {
+      requests += 1;
+      if (requests === 1) return { id: "starts", output_text: "", output: calls };
+      secondInput = params.input as Array<Record<string, unknown>>;
+      return { id: "done", output_text: "done", output: [] };
+    } } },
+    io: {
+      async confirmBash() { return true; },
+      async runBash() { return bashResult(""); },
+      async runBackgroundBash() { return bashResult("done"); },
+      writeAssistant() {},
+    },
+  });
+  await agent.beginTask({ mode: "default", source: "user" });
+  await agent.runTurn("start jobs");
+  agent.endTask();
+  const outputs = secondInput.filter((item) => item.type === "function_call_output");
+  assert.equal(outputs.length, 21);
+  assert.match(String(outputs.at(-1)?.output), /backlog reached 20/u);
+  const notice = secondInput.find((item) => item.role === "developer" && String(item.content).includes("Host background-job completion notice"));
+  assert.ok(notice);
+  assert.equal(String(notice.content).split("Use poll_background").length - 1, 20);
 });
 
 test("plan mode can use enabled web tools without approval", async () => {

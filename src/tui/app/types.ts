@@ -23,11 +23,12 @@ import type {
   StatusSnapshot,
   TokenUsageSample,
 } from "../../status/model-status.js";
-import type { AgentTurnOptions, AgentTurnResult } from "../../agent/react-agent.js";
+import type { AgentTaskOptions, AgentTurnOptions, AgentTurnResult } from "../../agent/react-agent.js";
 import type { ModelRequestSettings } from "../../providers/capabilities.js";
 import type { BackgroundJobSnapshot } from "../../tools/background-jobs.js";
 import type { FileAttachment } from "../../agent/file-attachments.js";
 import type { ContextInspectionSnapshot } from "../../agent/context-inspection.js";
+import type { TaskProgress } from "../../workflow/task-progress.js";
 
 export interface AgentSession {
   runTurn(userInput: string, signal?: AbortSignal, options?: AgentTurnOptions): Promise<AgentTurnResult>;
@@ -42,7 +43,8 @@ export interface AgentSession {
   setRequestSettings?(settings: ModelRequestSettings): void;
   getRequestSettings?(): ModelRequestSettings;
   waitForBackgroundJobs?(signal?: AbortSignal): Promise<BackgroundJobSnapshot[]>;
-  beginTask?(): void;
+  beginTask?(options: AgentTaskOptions): void | Promise<void>;
+  endTask?(): void | Promise<void>;
   cancelBackgroundJobs?(reason?: unknown): Promise<BackgroundJobSnapshot[]>;
   dispose?(): void | Promise<void>;
 }
@@ -53,6 +55,7 @@ export interface AgentRestoreOptions {
   onContextCompacted?(items: readonly Record<string, unknown>[], automatic: boolean, usage: TokenUsageSample | null): Promise<void>;
   contextWindow?: number | null;
   initialContextTokens?: number | null;
+  initialTaskProgress?: TaskProgress;
   onUsage?(usage: TokenUsageSample | null): Promise<void>;
   onPhase?(phase: LoopPhase): void;
   onEvent?(event: LoopEvent): void;

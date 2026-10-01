@@ -12,6 +12,8 @@ const MAX_SEARCH_RESULTS = 200;
 const DEFAULT_SEARCH_RESULTS = 100;
 const MAX_SEARCH_BYTES = 2 * 1024 * 1024;
 const SEARCH_TIMEOUT_MS = 5_000;
+const MAX_RETAINED_SEARCHES = 16;
+const MAX_RETAINED_SEARCH_BYTES = 8 * 1024 * 1024;
 
 export const FILE_TOOL_DEFINITIONS = [
   {
@@ -101,19 +103,23 @@ interface RetainedSearch {
   items: SearchItem[];
   incomplete: boolean;
   cursors: Set<string>;
+  bytes: number;
 }
 
 /** In-memory, bounded continuation state. References intentionally do not survive Session restoration. */
 export class FileSearchSession {
   readonly #cursors = new Map<string, { search: RetainedSearch; offset: number }>();
   readonly #searches = new Set<RetainedSearch>();
+  #retainedBytes = 0;
 
   page(kind: SearchKind, items: SearchItem[], maximum: number, incomplete: boolean): { items: SearchItem[]; continuation: string | null; incomplete: boolean } {
-    const search: RetainedSearch = { kind, items, incomplete, cursors: new Set() };
+    const search: RetainedSearch = { kind, items, incomplete, cursors: new Set(), bytes: Buffer.byteLength(JSON.stringify(items), "utf8") };
     this.#searches.add(search);
+    this.#retainedBytes += search.bytes;
     const first = items.slice(0, maximum);
     const continuation = this.#cursor(search, first.length);
-    if (continuation === null) this.#searches.delete(search);
+    if (continuation === null) this.#delete(search);
+    else this.#enforceLimits();
     return { items: first, continuation, incomplete };
   }
 
@@ -131,6 +137,7 @@ export class FileSearchSession {
   clear(): void {
     this.#cursors.clear();
     this.#searches.clear();
+    this.#retainedBytes = 0;
   }
 
   #cursor(search: RetainedSearch, offset: number): string | null {
@@ -143,7 +150,15 @@ export class FileSearchSession {
 
   #delete(search: RetainedSearch): void {
     for (const cursor of search.cursors) this.#cursors.delete(cursor);
-    this.#searches.delete(search);
+    if (this.#searches.delete(search)) this.#retainedBytes -= search.bytes;
+  }
+
+  #enforceLimits(): void {
+    while (this.#searches.size > MAX_RETAINED_SEARCHES || this.#retainedBytes > MAX_RETAINED_SEARCH_BYTES) {
+      const oldest = this.#searches.values().next().value as RetainedSearch | undefined;
+      if (!oldest) break;
+      this.#delete(oldest);
+    }
   }
 }
 
@@ -196,6 +211,12 @@ function runRipgrep(args: string[], cwd: string, signal?: AbortSignal): Promise<
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
       if (stoppedByHost) return;
+      if (retainedBytes + Buffer.byteLength(pending, "utf8") + Buffer.byteLength(chunk, "utf8") > MAX_SEARCH_BYTES) {
+        incomplete = true;
+        stoppedByHost = true;
+        stop();
+        return;
+      }
       pending += chunk;
       let newline: number;
       while ((newline = pending.indexOf("\n")) >= 0) {
@@ -236,6 +257,12 @@ function runRipgrep(args: string[], cwd: string, signal?: AbortSignal): Promise<
     });
   });
 }
+
+export const fileSearchLimits = {
+  maxSearchBytes: MAX_SEARCH_BYTES,
+  maxRetainedSearches: MAX_RETAINED_SEARCHES,
+  maxRetainedSearchBytes: MAX_RETAINED_SEARCH_BYTES,
+} as const;
 
 export async function runFileTool(name: string, argumentsJson: string, workspace: string, signal?: AbortSignal, searches?: FileSearchSession): Promise<unknown> {
   const args: unknown = JSON.parse(argumentsJson);

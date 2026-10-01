@@ -5,76 +5,69 @@
 ## 当前基线
 
 - 产品保持 DeepSeek 优先、Windows 优先、单 Agent、Node/TypeScript 单包、Responses 与 inline TUI。
-- 本轮按用户指定以 tracked commit `b226bfcdd5e8421676f9f47454ef68db75370732` 为实现 baseline；交付版本为 `0.3.4`，最终 delivery commit 以当前 Git `HEAD` 为准。
-- 本轮没有升级依赖、打 tag、创建 Release 或发送付费模型请求；用户已明确授权更新版本并提交、推送，commit 使用 `[skip publish]` 阻止 Release workflow 发布。
+- 本轮开发起点为 `25105bf48683b88dafda1be4812ac44abbc2961d`；用户随后明确授权更新版本、提交并推送，包版本与双语 README 已同步为 `0.3.5`。交付 commit 以当前 Git `HEAD` 为准。
+- 交付使用 `[skip publish]` 标记，仅推送 `main`，不推送 tag 或更新 GitHub Release；已核对 Release workflow 的分支 push 跳过条件与独立 Test workflow。本轮没有升级依赖、运行 live benchmark 或发送付费模型请求。
 
-## 本次完成：Coding reliability
+## 本次完成：Daily coding reliability
 
-### 可复现比较准备
+### Coding 结构化问题
 
-- baseline/candidate 使用名称唯一的 `everpeace-checkout` 配置，在相同 fresh Node worker 中动态导入各 checkout 的 production adapter。每次运行重新核对完整 revision、runtime source digest 与 build entry digest；source identity 包含 `src` 中 tracked、deleted 和未忽略 untracked 内容，以及 manifest/lockfile/TypeScript 配置，不受根目录无关差异影响。
-- worker 与 production adapter 强制原始模型 ID、`high` reasoning、32,768 output tokens，不继承个人保存设置。digest mismatch 会同时报告 expected/actual，便于 reviewed 配置更新。
-- campaign 模式严格三选一：`--preflight`、`--prove-fixtures`、`--live`。可选有序 `taskIds` 支持 3 task × 3 harness × 1 = 9 次 smoke；完整 10 task × 3 harness × 3 = 90 次正式计划。
-- checkout preflight 在 30 秒边界内启动真实 worker 和 production adapter，在真实 provider request boundary 注入合成 SSE response；使用 dummy credential、过滤宿主凭据并用 Node socket guard 阻断网络。它记录 request settings、usage、source/build identity 与 cleanup，不生成 scored result。
-- 固定 dsh preflight 启动真实 CLI/profile 并在 `llm/stream` boundary 注入合成 response。instrumentation 对缺失/非法 token usage 永久标记 incomplete 并阻止后续请求；cache 字段缺失保持未观察，取消/失败时在清理前保存 ledger。
+- `request_user_input` 从 Plan 专用交互拆为共享 question interaction；宿主提供回调时，Plan 和普通 coding 都广告同一 1–3 问题、每题 2–3 选项加自由文本的 schema，`submit_plan` 仍只在 Plan 模式存在。
+- 等待答案期间不发模型请求；答案通过普通 function-call/output 配对持久化后继续。问题不能批准 shell、patch、MCP 或其他权限操作。
+- Plan Esc 保持原取消语义；coding Esc/Ctrl+C 中止活动任务并走 runner 的后台清理。已取消 signal 不打开窗口，迟到答案在继续执行前再次检查 signal；同批后续调用不会在取消后运行。
 
-### 完整模型变更审阅
+### 持久执行清单
 
-- 新增模型只读 `list_workspace_changes` / `read_workspace_change`，共用 `/diff` 的结构化 Git 服务并保留 `workspace_status` / `workspace_diff` 兼容。
-- captured index 分开 staged、unstaged、untracked，保留 overlap 与 rename old path；opaque reference 惰性读取 tracked unified diff、untracked UTF-8 preview 或 binary/symlink/submodule summary。
-- snapshot/page/result 都有进程内 retention、continuation、取消、containment 和 visible truncation。过期引用要求重新 list；review 不产生文件观察、写权限或变更归属。
-- Agent coding instruction 要求总结前检查完整变更。
+- 新增 [TaskProgress](../src/workflow/task-progress.ts) 与 `update_plan`：每次整体替换，最多 20 个唯一非空步骤，单项最多 240 个 Unicode 字符，状态为 `pending / in_progress / completed`，且最多一个 in-progress；空数组明确清除。
+- Session 增加 additive `task_progress_updated` 事件和独立最新投影。写入成功后才发布 UI；写入失败停止后续 provider 请求。旧 Session 无字段保持兼容。
+- checklist 属于顶层 coding task：repair 和同一 runner 的 Goal continuation 保留；显式 `session_resume` 恢复；新用户任务在首个请求前持久清空。当前投影每次请求重新注入，context compaction 后也不会被旧历史覆盖。
+- 状态栏显示完成数/总数，新增只读 `/tasks` 展示完整清单与最新宿主 workflow result。全部 completed 仍不能跳过验证、完成 Goal 或触发成功 Memory。
 
-### 精确编辑与恢复
+### Task-local 后台完成通知
 
-- `ApplyPatchOperation` update 新增互斥的 `replace: { oldText, newText }`。oldText 必须非空并在统一 CRLF/LF 表示中大小写、空白完全一致且只出现一次；不做 fuzzy match。
-- replace 保留 UTF-8 BOM 与原换行风格，并沿用 512 KiB file/batch、fresh read observation、nested rules、approval revision、并发版本和 rollback safeguards。
-- 解析、预览与执行返回稳定原因与修复提示：invalid arguments、missing observation、stale version、unmatched/ambiguous/unchanged replacement、hunk mismatch、policy denial。权限拒绝不能通过自动 retry 或替代编辑路径绕过。
+- [BackgroundJobManager](../src/tools/background-jobs.ts) 在终态建立后回调 job ID、状态、退出码和完成时间，不携带命令或输出，也不让 observer 异常改变 cleanup。
+- 每次 runner invocation 分配 generation；完成项只进入当前 task 队列，在下一普通 step 通过既有 durable context 保存，成功后才确认出队。持久化失败可重试且不会重复成功通知；到达持久化期间的新项留待下一次。
+- 运行 job 与未送达通知合计最多 20 项，仍最多同时运行两个命令。任务取消先关闭准入，再停止并等待进程；任务结束丢弃余项并忽略迟到 callback。通知不唤醒空闲 Session，输出继续用 `poll_background` 读取。
 
-### 隔离 LSP 导航
+### 有界搜索保留
 
-- definition/references/implementation/hover 保持每次查询 fresh server。新 duplex transport 直接通过 pinned Codex backend 启动 executable/argv，保留 raw stdout、处理 stdin backpressure、drain 64 KiB stderr、暴露 exit 并等待 process-tree termination。
-- dedicated child of `:read-only` 拒绝 workspace write 与 `.git`/`.codex`/`.agents`/`.everpeace`、Everpeace global state；用户 full access 不会放开该策略。权限 revision 或 task cancellation 会终止查询，cleanup failure 会覆盖成功结果。
-- JSON-RPC 限制为 8 KiB header、2 MiB frame、8 MiB aggregate incoming；现有 30 秒、16 MiB document、100 locations、64 KiB hover 保留。初始化 capability、当前 UTF-16 input position、document/returned-location containment 都在返回前验证。
-- 配置的 server 启动前运行相同 native policy 下的 direct-socket denial probe。固定 Windows `@openai/codex@0.155.1` 实测可拒绝 workspace 写入与应用状态读取，但仍允许 socket；运行时及 `/doctor` 因而报告 isolation unavailable，保留 lexical search，不在较弱边界下启动 LSP。`:read-only` 的 ambient system reads 与 temporary-directory grants 已明确记录。
+- `FileSearchSession` 最多保留 16 个搜索和 8 MiB 序列化 UTF-8 payload，超限按创建顺序淘汰并使所有旧 continuation 过期；读完最后一页和 Agent dispose 都释放状态。
+- 单次 ripgrep 2 MiB 上限同时计算已完成行、pending 文本和新 chunk，超长未终止记录不能绕过边界。`has_more` 仍只表示已保留后页，`incomplete` 表示搜索收集不完整。
 
 ## 主要实现与回归入口
 
 | 领域 | 实现 | 回归 |
 | --- | --- | --- |
-| checkout/preflight | [checkout.ts](../src/benchmark/checkout.ts)、[worker](../src/benchmark/checkout-worker.ts)、[campaign CLI](../src/benchmark/campaign-cli.ts) | [checkout.test.ts](../tests/unit/benchmark/checkout.test.ts)、[campaign.test.ts](../tests/unit/benchmark/campaign.test.ts) |
-| dsh usage/preflight | [dsh.ts](../src/benchmark/dsh.ts)、[instrumentation](benchmark/dsh-instrumentation/index.mjs)、[network guard](benchmark/dsh-instrumentation/preflight-network-guard.mjs) | [dsh.test.ts](../tests/unit/benchmark/dsh.test.ts) |
-| 模型变更审阅 | [workspace.ts](../src/tools/workspace.ts)、[workspace-review.ts](../src/tools/workspace-review.ts)、[react-agent.ts](../src/agent/react-agent.ts) | [workspace-review.test.ts](../tests/unit/tools/workspace-review.test.ts)、[react-agent.test.ts](../tests/unit/agent/react-agent.test.ts) |
-| 精确编辑 | [apply-patch.ts](../src/tools/apply-patch.ts)、[react-agent.ts](../src/agent/react-agent.ts) | [apply-patch.test.ts](../tests/unit/tools/apply-patch.test.ts)、[react-agent.test.ts](../tests/unit/agent/react-agent.test.ts) |
-| LSP transport/isolation | [code-navigation.ts](../src/tools/code-navigation.ts)、[cli.ts](../src/codex/cli.ts)、[sandbox-policy.ts](../src/tools/sandbox-policy.ts) | [code-navigation.test.ts](../tests/unit/tools/code-navigation.test.ts)、[cli.test.ts](../tests/unit/codex/cli.test.ts)、[sandbox-boundaries.test.ts](../tests/unit/tools/sandbox-boundaries.test.ts) |
+| questions / checklist | [react-agent.ts](../src/agent/react-agent.ts)、[plan runtime](../src/plan/runtime.ts)、[task-progress.ts](../src/workflow/task-progress.ts) | [react-agent.test.ts](../tests/unit/agent/react-agent.test.ts)、[task-progress.test.ts](../tests/unit/workflow/task-progress.test.ts) |
+| Session / runner scope | [session-store.ts](../src/storage/session-store.ts)、[task-runner.ts](../src/workflow/task-runner.ts) | [session-store.test.ts](../tests/unit/storage/session-store.test.ts)、[task-runner.test.ts](../tests/unit/workflow/task-runner.test.ts) |
+| background notices | [background-jobs.ts](../src/tools/background-jobs.ts)、[react-agent.ts](../src/agent/react-agent.ts) | [background-jobs.test.ts](../tests/unit/tools/background-jobs.test.ts)、[react-agent.test.ts](../tests/unit/agent/react-agent.test.ts) |
+| search retention | [files.ts](../src/tools/files.ts) | [files.test.ts](../tests/unit/tools/files.test.ts) |
+| TUI | [App](../src/tui/app/app.tsx)、[task surface](../src/tui/components/screens/task-progress-surface.tsx)、[question surface](../src/tui/components/screens/plan-surface.tsx) | [app.test.tsx](../tests/unit/tui/app.test.tsx)、[daily-use-surfaces.test.tsx](../tests/unit/tui/daily-use-surfaces.test.tsx) |
 
-中英文 README、BENCHMARKING、DEVELOPMENT、PLAN、PROJECT_MAP、TOOLS、SANDBOX 和 DECISIONS 已同步。
+中英文 README、OVERVIEW、PLAN、PROJECT_MAP、RUNTIME、TOOLS、STATE_AND_UI 和 DECISIONS 已同步；OVERVIEW 中“LSP 直接运行于宿主”的旧说明已改为当前 native sandbox + probe fail-closed 契约。
 
 ## 验证证据
 
-使用 Windows Node 工具链串行执行本轮最终门禁：
+版本同步后再次使用 Windows Node 工具链，按实际存在的脚本串行执行最终门禁：
 
 - `pnpm typecheck`：通过。
-- `pnpm test`：456 项，454 通过、2 跳过、0 失败/取消。计数包含工作区已有未跟踪测试，不能作为 clean checkout 固定数量。
+- lint：`package.json` 没有 lint script，未运行。
+- `pnpm test`：480 项，478 通过、2 跳过、0 失败/取消。计数包含工作区现有未跟踪测试，不能作为 clean checkout 固定数量。
 - `pnpm build`：通过。
-- 仓库没有 lint script，因此未运行 lint。
-- 全局 `git diff --check` 退出 2，仅报告任务开始前已有 `.gitignore` 与 `LICENSE` CRLF 差异；本轮所有 tracked/untracked 文件的 trailing-whitespace 定向扫描无匹配。
+- 本轮 tracked 文件定向 `git diff --check -- . ':(exclude).gitignore' ':(exclude)LICENSE'`：通过；三个本轮 untracked 新文件的 trailing-whitespace `rg` 扫描无匹配。
+- 全局 `git diff --check`：退出 2，只报告任务开始前已有 `.gitignore` 与 `LICENSE` CRLF 差异；两文件分别显示 143/143 与 201/201 行替换，本轮未修改或规范化它们。
 
-额外定向证据：checkout preflight 真实导入当前 production adapter 并在合成 provider boundary 完成一次 high/32K request，未读取 keyring、未发送网络请求；Windows native LSP fixture 实测 write/state denial 与 direct-network limitation，并验证 runtime fail-closed；fragmented/malformed frames、backpressure、noisy stderr、permission revision cancellation 和 cleanup failure 回归均通过。
-
-首次远端 Windows CI 暴露 permission-revision cancellation 与未完成 stdin write 之间的异步拒绝竞态；RPC 现并发观察 write/response，并用 150ms slow-write fixture 固定覆盖该路径。
-
-本轮没有可用的 pinned dsh checkout，因此未执行真实 dsh CLI/profile preflight。没有运行 live API、九次 smoke、九十次正式比较或真实 Windows Terminal 手工验收。
+定向 fixture 覆盖两种 question mode、缺少 host interaction、回答配对、Esc/Ctrl+C 既有任务取消链、already-aborted/迟到响应防护、同批后续调用；TaskProgress schema/恢复/清空/repair/Goal/compaction/持久失败与验证权；后台四种终态、顺序送达、失败重试去重、队列饱和、取消与 observer 隔离；搜索数量/UTF-8 字节淘汰、消费 cursor 和超长未终止记录。没有运行真实模型或付费调用。
 
 ## 已知限制与下一步
 
-1. 在固定 dsh revision `639ed015397290b3745d163aafe02ffee4aa3f84` 的已安装/已构建 checkout 上运行 `--preflight`，保存真实 profile/request-boundary/cleanup artifact。
-2. 要在 Windows 启用 native LSP，需要 pinned backend 提供能通过 direct-socket probe 的网络隔离；Linux/macOS 也须各自通过 write/state/network 与 descendant cleanup probe。
-3. 真实模型比较仍需单独授权并给出 task/campaign 数值预算；先运行恰好九次 smoke，再决定是否运行九十次正式 campaign。
-4. 真实 Windows Terminal 仍需检查 resize、scrollback、Esc、Ctrl+C、后台 writer、Session 恢复与界面重放。
+1. 在真实 Windows Terminal 中验收 `/tasks`、coding question、resize、scrollback、Esc、Ctrl+C、一个 prompt、后台完成通知及 Session resume；自动 Ink fixture 不能替代真实终端行为。
+2. 后台 job 若在最终回答期间才完成，按设计不会触发额外请求，通知可能在 task end 被丢弃；runner 仍等待进程并执行最终验证。
+3. 后续候选依次为模型可访问的压缩后历史检索、公开 headless execution 和 conversation branching。持久 undo 是独立恢复项目。
+4. Windows TypeScript LSP 仍取决于能通过现有 write/state/network isolation probes 的 native backend；当前固定 backend 因 socket probe 失败而保持 unavailable。
 
 ## 用户已有差异
 
-本轮开始前已有 `.gitignore`、`LICENSE` 未暂存 CRLF 差异，以及未跟踪 `.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`tests/unit/codex/`、`{}`。这些内容均未清理或覆盖；本轮只在已有未跟踪 `tests/unit/codex/cli.test.ts` 中追加 duplex transport 回归。新建的 benchmark checkout 源码/测试与 preflight guard 属于本轮实现。
+本轮开始前已有 `.gitignore`、`LICENSE` 未暂存 CRLF 差异，以及未跟踪 `.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`。这些内容均未清理、覆盖或纳入本轮实现。
 
 交接只是快照；下一轮仍须查看实时 Git 状态。

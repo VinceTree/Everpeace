@@ -2,16 +2,15 @@
 
 产品目标是 DeepSeek 优先、Windows 优先的个人编码 CLI，以可验证完成率和日常使用效率为首要目标。当前版本、提交和实测结果只见 [HANDOFF](HANDOFF.md)；机制见 [知识库](README.md)。旧阶段计划完整归档至 [PLAN_HISTORY](archive/PLAN_HISTORY.md)，不再作为当前待办。
 
-## 本轮：Coding reliability
+## 本轮：Daily coding reliability
 
-- [x] 可复现比较准备：以 `b226bfc` 为 tracked baseline，为 baseline/candidate 增加命名 checkout identity 与相同 fresh-process worker；三种 campaign 模式互斥，preflight 不读取凭据或发送真实 provider 请求。
-- [x] 完整模型变更审阅：增加 captured `list_workspace_changes` / lazy `read_workspace_change`，复用 `/diff` 安全服务并保留旧工具兼容。
-- [x] 精确编辑与恢复：update 支持唯一精确 replace，并在解析、预览、执行返回稳定错误原因和修复建议。
-- [x] 隔离 LSP 导航：每次查询通过 pinned native sandbox 的 duplex 进程，验证 capability/UTF-16，限制协议流量、取消并等待清理。
-- [x] 保持 JSONL 兼容、单 Agent、既有权限/取消/验证边界；双语 README 与相关架构文档同步。
-- [x] 完成本轮串行 `typecheck → test → build`；全局 `git diff --check` 仅被任务前已有 `.gitignore` / `LICENSE` CRLF 差异阻断，本轮文件定向空白扫描通过，真实结果写入 HANDOFF。
+- [x] 普通 coding 与 Plan 共用阻塞式 `request_user_input`，分别保持活动任务取消和规划取消语义；回答按标准工具结果持久化，不能授予权限。
+- [x] 增加 Session 持久化的 `TaskProgress` / `update_plan`、请求动态上下文、状态栏摘要和只读 `/tasks`；repair、Goal continuation 与显式 resume 保留，新用户任务清空，验证权仍归宿主。
+- [x] 后台 job 终态以 task generation 隔离并在下一 step 持久送达；运行项和未送达通知合计最多 20，取消先关闭通知准入，正文继续通过 poll 获取。
+- [x] 搜索 continuation 最多保留 16 个搜索和 8 MiB 序列化 payload；读完、淘汰和 dispose 释放，未终止超长记录也受单次 2 MiB 输入边界约束。
+- [x] 完成本轮串行 `typecheck → test → build`、本轮文件定向空白检查和差异审阅；全局 CRLF 差异及真实 Windows Terminal 验收在 HANDOFF 单独记录。
 
-本轮不升级依赖、不改版本、不提交、不推送、不创建 tag/Release，也不执行付费评测。Windows LSP native probe 已执行并证明当前 backend 的网络隔离不可用；固定 dsh checkout/profile preflight、Linux/macOS LSP 探针和 Windows Terminal 手工验收仍需相应外部环境，未执行时必须保持为待验收。
+用户随后明确授权更新版本、提交并推送；交付使用 `[skip publish]`，仅推送分支，不更新 tag/Release。无需依赖升级或付费评测；功能验证使用确定性的 fake provider/process fixture，不发 live 模型请求。
 
 ## 已实现的能力里程碑
 
@@ -23,15 +22,15 @@
 
 | 顺序 | 工作 | 完成判据 / 前提 |
 | --- | --- | --- |
-| 1 | 验收固定 dsh checkout/profile preflight | 在 pinned upstream build 上运行无凭据启动门禁，核对 provider-boundary、socket guard、ledger 与进程清理证据 |
-| 2 | 取得可用的 LSP 原生网络隔离 | Windows 已证明 workspace 写入与应用状态读取被拒绝，但固定 backend 仍允许直接 socket，运行时会失败关闭；后续 backend/platform 必须通过相同探针 |
-| 3 | 真实模型九次 smoke | 另行授权 task/campaign 预算，验证三组执行器、计量、独立评分和产物 |
-| 4 | 九十次正式比较 | 同模型、推理、预算与 OS；随机交错；统计完整才报告对比，不足样本不推广结论 |
-| 5 | 真实 Windows Terminal 验收 | 文件候选、diff、resume、context、resize、Esc、Ctrl+C、后台 writer、Session 恢复与界面重放 |
+| 1 | 真实 Windows Terminal 验收 | `/tasks`、coding 问题、resize、scrollback、Esc/Ctrl+C、一个 prompt、后台完成通知与 Session 恢复 |
+| 2 | 模型可访问的压缩后历史检索 | 先定义不泄露权限/凭据且不让旧历史覆盖当前投影的范围、索引和引用失效契约 |
+| 3 | 公开 headless execution | 复用 `CodingTaskRunner`、验证权、预算和清理，不把内部 benchmark adapter 直接当公共 API |
+| 4 | Session conversation branching | 定义 timeline/context/Goal/workflow/TaskProgress 的分支所有权及 JSONL 兼容迁移 |
+| 5 | 取得可用的 LSP 原生网络隔离 | Windows 固定 backend 仍允许直接 socket，运行时失败关闭；后续 backend/platform 必须通过相同探针 |
 
 这些待办用于规划，不授权付费请求、安装任意扩展、提交或发布。当前保持单 Agent、Responses、inline TUI、现有权限、high/32K 默认和完整最终验证。
 
-持久 undo、LSP pooling/更多 semantic operation、模糊编辑、自动历史检索和模型速度/token 调优作为独立后续工作。公开 headless/SDK/ACP、Session 分支、图片附件、多 Agent、Web/Desktop、完整插件化、自研 sandbox 和新协议继续后置。output-item 提前执行工具仅在供应商和持久化/恢复证据充分时单独评估，当前仍等待完整响应。
+持久 undo 是独立恢复项目。LSP pooling/更多 semantic operation、模糊编辑和模型速度/token 调优作为后续工作；固定 dsh preflight 与真实模型比较仍需对应环境及单独预算授权。图片附件、多 Agent、Web/Desktop、完整插件化、自研 sandbox 和新协议继续后置。output-item 提前执行工具仅在供应商和持久化/恢复证据充分时单独评估，当前仍等待完整响应。
 
 ## 验收门槛
 

@@ -6,8 +6,11 @@ export interface PlanRequest { questions: PlanQuestion[]; }
 export type PlanReviewDecision = "approve" | "continue" | "cancel";
 export interface SubmittedPlan { title: string; plan: string; }
 
-export interface PlanInteraction {
-  requestInput(request: PlanRequest, signal?: AbortSignal): Promise<Record<string, string>>;
+export interface QuestionInteraction {
+  requestInput(request: PlanRequest, signal?: AbortSignal, mode?: AgentMode): Promise<Record<string, string>>;
+}
+
+export interface PlanInteraction extends QuestionInteraction {
   reviewPlan(plan: SubmittedPlan, signal?: AbortSignal): Promise<PlanReviewDecision>;
 }
 
@@ -51,28 +54,31 @@ export function parseSubmittedPlan(value: string): SubmittedPlan {
   return { title, plan };
 }
 
-export const PLAN_TOOL_DEFINITIONS = [
-  {
-    type: "function", name: "request_user_input",
-    description: "Ask one to three material planning questions. The UI adds an Other response automatically.",
-    parameters: {
-      type: "object", required: ["questions"], additionalProperties: false,
-      properties: { questions: {
-        type: "array", minItems: 1, maxItems: 3,
-        items: {
-          type: "object", required: ["id", "header", "question", "options"], additionalProperties: false,
-          properties: {
-            id: { type: "string" }, header: { type: "string" }, question: { type: "string" },
-            options: {
-              type: "array", minItems: 2, maxItems: 3,
-              items: { type: "object", required: ["label", "description"], additionalProperties: false, properties: { label: { type: "string" }, description: { type: "string" } } },
-            },
+export const REQUEST_USER_INPUT_TOOL_DEFINITION = {
+  type: "function", name: "request_user_input",
+  description: "Ask one to three material questions that must be answered before work can continue. The UI adds an Other response automatically.",
+  parameters: {
+    type: "object", required: ["questions"], additionalProperties: false,
+    properties: { questions: {
+      type: "array", minItems: 1, maxItems: 3,
+      items: {
+        type: "object", required: ["id", "header", "question", "options"], additionalProperties: false,
+        properties: {
+          id: { type: "string" }, header: { type: "string" }, question: { type: "string" },
+          options: {
+            type: "array", minItems: 2, maxItems: 3,
+            items: { type: "object", required: ["label", "description"], additionalProperties: false, properties: { label: { type: "string" }, description: { type: "string" } } },
           },
         },
-      } },
-    },
+      },
+    } },
   },
-  { type: "function", name: "submit_plan", description: "Submit a decision-complete implementation plan for review.", parameters: { type: "object", properties: { title: { type: "string" }, plan: { type: "string" } }, required: ["title", "plan"], additionalProperties: false } },
-] as const;
+} as const;
+
+export const SUBMIT_PLAN_TOOL_DEFINITION = {
+  type: "function", name: "submit_plan", description: "Submit a decision-complete implementation plan for review.", parameters: { type: "object", properties: { title: { type: "string" }, plan: { type: "string" } }, required: ["title", "plan"], additionalProperties: false },
+} as const;
+
+export const PLAN_TOOL_DEFINITIONS = [REQUEST_USER_INPUT_TOOL_DEFINITION, SUBMIT_PLAN_TOOL_DEFINITION] as const;
 
 export const PLAN_INSTRUCTIONS = `You are in strict Plan mode. Inspect the real environment and produce a decision-complete implementation plan, but do not implement or mutate anything. Only read-only file, web, skill, request_user_input, and submit_plan tools are available. Ask only material questions with real alternatives, put the recommended option first and suffix its label with (Recommended), then submit the final Markdown plan for explicit approval.`;

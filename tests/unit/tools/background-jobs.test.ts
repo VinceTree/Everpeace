@@ -50,3 +50,44 @@ test("disposing background jobs waits for aborted workers to settle", async () =
   assert.equal(settled, true);
   assert.equal(jobs[0]?.status, "cancelled");
 });
+
+test("background jobs report one bounded completion after terminal state is established", async () => {
+  const completions: Array<{ job_id: string; status: string; exit_code: number | null; finished_at: string }> = [];
+  const manager = new BackgroundJobManager(async (command) => command === "fail"
+    ? { stdout: "", stderr: "failed", exitCode: 7, signal: null }
+    : { stdout: "done", stderr: "", exitCode: 0, signal: null });
+  const completed = manager.start("pass", undefined, (value) => completions.push(value));
+  const failed = manager.start("fail", undefined, (value) => completions.push(value));
+  await manager.waitAll();
+  assert.deepEqual(completions.map((value) => [value.job_id, value.status, value.exit_code]), [
+    [completed.job_id, "completed", 0],
+    [failed.job_id, "failed", 7],
+  ]);
+  assert.ok(completions.every((value) => Boolean(value.finished_at)));
+  assert.equal(completions.length, 2);
+});
+
+test("background settlement reports timeout and cancellation without trusting observers", async () => {
+  const completions: Array<{ job_id: string; status: string; exit_code: number | null }> = [];
+  const manager = new BackgroundJobManager((command, signal) => {
+    if (command === "timeout") {
+      return Promise.resolve({ stdout: "", stderr: "", exitCode: null, signal: null, timedOut: true });
+    }
+    return new Promise((resolve) => {
+      signal.addEventListener("abort", () => resolve({ stdout: "", stderr: "", exitCode: null, signal: null, cancelled: true }), { once: true });
+    });
+  });
+  const timedOut = manager.start("timeout", undefined, (value) => completions.push(value));
+  const cancelled = manager.start("cancel", undefined, (value) => completions.push(value));
+  await manager.stop(cancelled.job_id);
+  await manager.waitAll();
+  assert.deepEqual(completions.map((value) => [value.job_id, value.status, value.exit_code]), [
+    [timedOut.job_id, "timed_out", null],
+    [cancelled.job_id, "cancelled", null],
+  ]);
+
+  const isolated = new BackgroundJobManager(async () => ({ stdout: "ok", stderr: "", exitCode: 0, signal: null }));
+  const job = isolated.start("pass", undefined, () => { throw new Error("observer failed"); });
+  await isolated.waitAll();
+  assert.equal(isolated.poll(job.job_id)?.status, "completed");
+});

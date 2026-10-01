@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { FileSearchSession, runFileTool } from "../../../src/tools/files.js";
+import { FileSearchSession, fileSearchLimits, runFileTool } from "../../../src/tools/files.js";
 
 test("file tools read and list within the workspace and reject escapes and unsupported content", async () => {
   const parent = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-files-"));
@@ -114,6 +114,45 @@ test("search continuations traverse more than 200 retained Unicode results", asy
     ) as { matches: unknown[]; continuation: string | null };
     assert.equal(third.matches.length, 50);
     assert.equal(third.continuation, null);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("search continuations evict oldest retained searches by count and UTF-8 payload bytes", () => {
+  const countBounded = new FileSearchSession();
+  const references: string[] = [];
+  for (let index = 0; index < fileSearchLimits.maxRetainedSearches + 1; index += 1) {
+    const page = countBounded.page("files", [`${index}-first`, `${index}-second`], 1, false);
+    references.push(page.continuation!);
+  }
+  assert.throws(() => countBounded.next(references[0]!, 1), /unknown or expired/iu);
+  assert.deepEqual(countBounded.next(references.at(-1)!, 1).items, [`${fileSearchLimits.maxRetainedSearches}-second`]);
+
+  const byteBounded = new FileSearchSession();
+  const bytesPerSearch = Math.floor(fileSearchLimits.maxRetainedSearchBytes / 4);
+  const byteReferences = Array.from({ length: 5 }, (_, index) => byteBounded.page(
+    "files",
+    [`${index}-${"界".repeat(Math.ceil(bytesPerSearch / 3))}`, `${index}-tail`],
+    1,
+    false,
+  ).continuation!);
+  assert.throws(() => byteBounded.next(byteReferences[0]!, 1), /unknown or expired/iu);
+  assert.deepEqual(byteBounded.next(byteReferences.at(-1)!, 1).items, ["4-tail"]);
+});
+
+test("search bounds a long unterminated ripgrep record and reports incomplete results", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-files-long-search-"));
+  try {
+    await fs.writeFile(path.join(root, "long.txt"), `needle ${"x".repeat(fileSearchLimits.maxSearchBytes + 128 * 1024)}`, "utf8");
+    const result = await runFileTool("search_files", JSON.stringify({ query: "needle" }), root, undefined, new FileSearchSession()) as {
+      matches: unknown[];
+      incomplete: boolean;
+      has_more: boolean;
+    };
+    assert.equal(result.incomplete, true);
+    assert.equal(result.has_more, false);
+    assert.deepEqual(result.matches, []);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

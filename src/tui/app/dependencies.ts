@@ -206,8 +206,11 @@ export function createDefaultTuiDependencies(
       const goalRuntime = io.getGoal && io.setGoal
         ? new GoalRuntime({ getGoal: io.getGoal, setGoal: io.setGoal })
         : undefined;
-      const planInteraction = io.requestPlanInput && io.reviewPlan
-        ? { requestInput: io.requestPlanInput, reviewPlan: io.reviewPlan }
+      const questionInteraction = io.requestUserInput
+        ? { requestInput: io.requestUserInput }
+        : undefined;
+      const planInteraction = io.requestUserInput && io.reviewPlan
+        ? { requestInput: io.requestUserInput, reviewPlan: io.reviewPlan }
         : undefined;
       let codeNavigation;
       try {
@@ -241,7 +244,11 @@ export function createDefaultTuiDependencies(
         skills,
         learnedMemory,
         ...(goalRuntime ? { goalRuntime } : {}),
+        ...(questionInteraction ? { questionInteraction } : {}),
         ...(planInteraction ? { planInteraction } : {}),
+        ...(restore?.initialTaskProgress === undefined
+          ? {}
+          : { initialTaskProgress: restore.initialTaskProgress }),
         ...(restore?.initialContext === undefined
           ? {}
           : { initialHistory: restore.initialContext }),

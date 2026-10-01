@@ -1,12 +1,13 @@
 import { Select, TextInput } from "@inkjs/ui";
 import { Box, Text, useInput } from "ink";
 import React, { useState } from "react";
-import type { PlanRequest, PlanReviewDecision, SubmittedPlan } from "../../../plan/runtime.js";
+import type { AgentMode, PlanRequest, PlanReviewDecision, SubmittedPlan } from "../../../plan/runtime.js";
 import { RichOutput } from "../../rendering/rich-text.js";
 import { CommandSurface } from "./command-surface.js";
 
-export function PlanQuestionsSurface({ request, onComplete, onCancel }: {
+export function PlanQuestionsSurface({ request, mode = "plan", onComplete, onCancel }: {
   request: PlanRequest;
+  mode?: AgentMode;
   onComplete(answers: Record<string, string>): void;
   onCancel(): void;
 }) {
@@ -21,7 +22,7 @@ export function PlanQuestionsSurface({ request, onComplete, onCancel }: {
     else { setAnswers(next); setIndex(index + 1); setOther(false); }
   };
   return (
-    <CommandSurface title={`/plan · ${question.header}`}>
+    <CommandSurface title={`${mode === "plan" ? "/plan" : "/question"} · ${question.header}`}>
       <Text bold>{question.question}</Text>
       <Text dimColor>Question {index + 1} of {request.questions.length}</Text>
       {other ? (
@@ -32,7 +33,7 @@ export function PlanQuestionsSurface({ request, onComplete, onCancel }: {
           { label: "Other", value: "__other__" },
         ]} onChange={(value) => value === "__other__" ? setOther(true) : choose(value)} />
       )}
-      <Text dimColor>Esc to cancel planning</Text>
+      <Text dimColor>{mode === "plan" ? "Esc to cancel planning" : "Esc to cancel the active task"}</Text>
     </CommandSurface>
   );
 }

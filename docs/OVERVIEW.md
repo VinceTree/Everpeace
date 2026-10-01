@@ -15,11 +15,11 @@ Node.js + TypeScript ESM；React/Ink 提供 inline 终端交互。一个 Respons
 | 能力 | 当前行为 | 深入说明 |
 | --- | --- | --- |
 | 需求与项目理解 | root-to-target `AGENTS.md`、package scripts、按需 Skill、Memory 与运行中 guidance | [工具](architecture/TOOLS.md)、[Memory](architecture/MEMORY.md) |
-| 文件与搜索 | 分页读取、目录、ripgrep search/glob、结果续读、显式配置的 TS 语义导航 | [工具](architecture/TOOLS.md) |
+| 文件与搜索 | 分页读取、目录、有界保留的 ripgrep search/glob、结果续读、显式配置的 TS 语义导航 | [工具](architecture/TOOLS.md) |
 | 受保护的编辑 | 宿主读版本、审批绑定、BOM/换行保留、排他创建、冲突回滚和进程内 undo | [工具](architecture/TOOLS.md) |
-| 命令执行 | 受权限约束的 sandbox shell、任务所有的后台命令、poll/stop 与有界预览 | [sandbox](architecture/SANDBOX.md) |
+| 命令执行 | 受权限约束的 sandbox shell、任务所有的后台命令、poll/stop、有界预览与持久完成通知 | [sandbox](architecture/SANDBOX.md) |
 | 验证与修复 | 最新 manifest 全集合检查、三轮诊断、快照过期检测与验证债务 | [运行时](architecture/RUNTIME.md) |
-| Plan / Goal | 只读规划、结构化问题；Session 绑定 Goal、预算与宿主完成门槛 | [状态](architecture/STATE_AND_UI.md) |
+| Plan / Task / Goal | Plan 与 coding 结构化问题、持久执行清单；Session 绑定 Goal、预算与宿主完成门槛 | [状态](architecture/STATE_AND_UI.md) |
 | 长任务 | 完整工具配对、按能力选择压缩、取消/失败保留 context、按 attempt 计量 | [运行时](architecture/RUNTIME.md) |
 | Session | JSONL、分离的 timeline/context、恢复模型和目录、跨请求 usage | [状态](architecture/STATE_AND_UI.md) |
 | Learned Memory | 项目/用户分层召回、聊天策略、验证后后台提炼与审查 | [Memory](architecture/MEMORY.md) |
@@ -39,7 +39,7 @@ Node.js + TypeScript ESM；React/Ink 提供 inline 终端交互。一个 Respons
 
 - 主产品仍是单 Agent 终端工具；内部 benchmark launcher 不等于公开 headless/SDK/ACP。没有多 Agent 调度、Web/Desktop 或完整插件架构。
 - MCP OAuth/elicitation/tasks 等高级生命周期、私有认证 Skill 安装及 Skill 更新/删除不属于当前完整支持范围；具体支持列表见集成文档。
-- 读取和编辑有宿主路径/版本保护；不要把所有本地工具都描述成 OS sandbox 隔离。显式配置的 LSP 当前直接启动本地进程，协议禁止编辑不等于进程没有宿主权限。
+- 读取和编辑有宿主路径/版本保护；不要把所有本地工具都描述成 OS sandbox 隔离。显式配置的 LSP 通过固定原生 read-only sandbox 启动并先验证网络隔离；后端不满足探针时失败关闭，当前固定 Windows 后端因此尚不可用。
 - Learned Memory 是不可信召回背景，不替代当前指令、项目规则、真实工具结果或验证证据。
 - 自动测试、fixtures 离线证明、真实模型比较与真实 Windows Terminal 是不同验收。尚无充分证据宣称编码成功率或性能优于 dsh。
 - 真实 API 评测需额外授权和数值预算；token 准入不能保证供应商账单硬封顶，在途请求可能超出剩余预算。

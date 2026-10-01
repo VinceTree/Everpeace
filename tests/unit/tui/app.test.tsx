@@ -35,6 +35,7 @@ import {
   type SlashCommand,
 } from "../../../src/tui/commands/slash-commands.js";
 import { textWidth } from "../../../src/tui/rendering/text-width.js";
+import { cloneTaskProgress, type TaskProgress } from "../../../src/workflow/task-progress.js";
 
 test("formats active turn elapsed time with useful units", () => {
   assert.equal(formatElapsed(0), "0s");
@@ -167,6 +168,12 @@ function createMemorySessionStore(): MemorySessionStore {
       session.usage = resetContextUsage(session.usage, preserveContext);
       session.summary.updated_at = timestamp();
     },
+    async setTaskProgress(sessionId: string, progress: TaskProgress) {
+      const session = requireSession(sessionId);
+      session.taskProgress = cloneTaskProgress(progress);
+      session.summary.task_progress = cloneTaskProgress(progress);
+      session.summary.updated_at = timestamp();
+    },
     async list() {
       return {
         sessions: [...sessions.values()]
@@ -181,10 +188,15 @@ function createMemorySessionStore(): MemorySessionStore {
     async load(sessionId) {
       const session = requireSession(sessionId);
       return {
-        summary: { ...session.summary, model: { ...session.summary.model } },
+        summary: {
+          ...session.summary,
+          model: { ...session.summary.model },
+          ...(session.summary.task_progress ? { task_progress: cloneTaskProgress(session.summary.task_progress) } : {}),
+        },
         timeline: session.timeline.map((entry) => ({ ...entry })),
         context: session.context.map((item) => ({ ...item })),
         usage: { ...session.usage },
+        ...(session.taskProgress ? { taskProgress: cloneTaskProgress(session.taskProgress) } : {}),
       };
     },
   };
@@ -347,6 +359,118 @@ test("TUI accepts chat and renders the assistant response", async () => {
   const topBorders = frameLines.filter((line) => line.startsWith("╭"));
   assert.deepEqual(topBorders.map((line) => line.length), [60]);
   view.unmount();
+});
+
+test("coding questions block in the shared surface and Esc cancels task cleanup", async () => {
+  const model: RegisteredModel = { id: "question-model", model_name: "test", base_url: "https://example.com/v1", api_key: "secret" };
+  let cleanupCalls = 0;
+  let endCalls = 0;
+  let turns = 0;
+  let alreadyAbortedRejected = false;
+  const fixture = createFixture({
+    initial: [model],
+    createAgent: (_model, io) => ({
+      async beginTask() {},
+      async runTurn(_input, signal) {
+        turns += 1;
+        if (turns === 2) {
+          const controller = new AbortController();
+          controller.abort(new Error("already aborted"));
+          try {
+            await io.requestUserInput?.({
+              questions: [{
+                id: "path",
+                header: "Path",
+                question: "Which path?",
+                options: [{ label: "Safe", description: "Use safe" }, { label: "Fast", description: "Use fast" }],
+              }],
+            }, controller.signal, "default");
+          } catch (error) {
+            alreadyAbortedRejected = error instanceof Error && /already aborted/u.test(error.message);
+          }
+          io.writeAssistant("question signal checked");
+          return {};
+        }
+        await io.requestUserInput?.({
+          questions: [{
+            id: "approach",
+            header: "Approach",
+            question: "Which implementation should be used?",
+            options: [
+              { label: "Safe", description: "Use the safe implementation" },
+              { label: "Fast", description: "Use the fast implementation" },
+            ],
+          }],
+        }, signal, "default");
+        signal?.throwIfAborted();
+        return {};
+      },
+      async cancelBackgroundJobs() { cleanupCalls += 1; return []; },
+      async endTask() { endCalls += 1; },
+    }),
+  });
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await tick();
+    view.stdin.write("ask first");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("/question · Approach"));
+    view.stdin.write("\u001b");
+    await waitFor(() => cleanupCalls >= 1 && endCalls >= 1);
+    await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
+    assert.equal(cleanupCalls, 1);
+    assert.equal(endCalls, 1);
+    assert.equal((view.lastFrame() ?? "").match(/Ask Everpeace/g)?.length, 1);
+
+    view.stdin.write("check aborted question");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => alreadyAbortedRejected && (view.lastFrame() ?? "").includes("question signal checked"));
+    assert.doesNotMatch(view.lastFrame() ?? "", /\/question · Path/u);
+    assert.equal((view.lastFrame() ?? "").match(/Ask Everpeace/g)?.length, 1);
+  } finally {
+    view.unmount();
+  }
+});
+
+test("/tasks shows the persisted checklist and latest host workflow result", async () => {
+  const model: RegisteredModel = { id: "tasks-model", model_name: "test", base_url: "https://example.com/v1", api_key: "secret" };
+  const fixture = createFixture({
+    initial: [model],
+    createAgent: (_model, io) => ({
+      async runTurn() {
+        await io.setTaskProgress?.({
+          plan: [
+            { step: "Inspect the runtime", status: "completed" },
+            { step: "Verify the change", status: "in_progress" },
+          ],
+          updated_at: "2026-10-01T00:00:00.000Z",
+        });
+        io.writeAssistant("progress saved");
+        return {};
+      },
+    }),
+  });
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await tick();
+    view.stdin.write("track work");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("progress saved"));
+    view.stdin.write("/tasks");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("/tasks · Current task"));
+    assert.match(view.lastFrame() ?? "", /Inspect the runtime/u);
+    assert.match(view.lastFrame() ?? "", /Verify the change/u);
+    assert.match(view.lastFrame() ?? "", /Last task result: no_changes/u);
+    view.stdin.write("\u001b");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
+  } finally {
+    view.unmount();
+  }
 });
 
 test("host workflow settles no-change goals without marking learned memory verified", async () => {

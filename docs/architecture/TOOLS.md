@@ -72,13 +72,14 @@ README、HANDOFF 等按任务需要读取；规则链并不意味着自动装入
 | 范围 | 当前上限/行为 |
 |---|---|
 | 搜索页 | 默认 100 项，最大 200 项 |
-| 单次搜索收集 | 最多 5 秒、2 MiB，按流收集结果 |
+| 单次搜索收集 | 最多 5 秒、2 MiB，已完成行与未终止记录共同计入 |
 | 后续页面 | `read_search_results` 使用 opaque continuation |
+| 搜索续读保留 | 最多 16 个搜索、序列化 UTF-8 payload 合计 8 MiB |
 | 模型单项工具结果 | 默认最多 32 KiB，保持有效 JSON envelope |
 | 大结果存储 | 进程内最多 16 项，每项保留前 2 MiB |
 | 工具结果续读页 | `read_tool_output` 最多 24 KiB，按 UTF-8 边界切片 |
 
-`has_more` 只表示还有已保留页面；`incomplete` 表示搜索达到时间/字节限制，需缩小 query 才能继续获得未收集结果。两者不能混为“下一页会涵盖所有匹配”。每个 continuation 消费后生成下一引用，未知/过期引用要求重新搜索，Session 恢复不保留引用内容。
+`has_more` 只表示还有已保留页面；`incomplete` 表示搜索达到时间/字节限制，需缩小 query 才能继续获得未收集结果。两者不能混为“下一页会涵盖所有匹配”。每个 continuation 消费后生成下一引用，最后一页会立即释放对应搜索；数量或 UTF-8 字节超限时按创建顺序淘汰最旧搜索并使其所有引用过期。未知/已消费/已淘汰引用都要求重新搜索，Session 恢复与 Agent dispose 不保留引用内容。
 
 搜索结果行列来自 ripgrep，其中 column 是字节偏移加一；LSP column 则是 UTF-16 位置，中文行中不能直接等同。
 
@@ -100,9 +101,11 @@ README、HANDOFF 等按任务需要读取；规则链并不意味着自动装入
 
 `start_background`、`poll_background`、`stop_background` 复用模型 shell 的权限及执行器：最多两个运行任务，每项默认十分钟，没有交互 stdin。启动立即绑定 coding task 的 AbortSignal，poll 返回运行首尾预览和终态结果。
 
+完成 callback 只向当前 coding task 报告 job ID、终态、退出码和时间，不携带命令或输出。通知在下一普通 Agent step 持久化并送入 context，模型仍用 poll 取得输出；它不会主动唤醒 Session。运行 job 与尚未送达的完成通知共用 20 个 task-local 槽位，满时新的 start 返回可操作的 backlog 错误，通知成功落盘后才释放槽位。
+
 完成任务保留受数量和输出字节约束，最多 20 项、总终态输出 4 MiB；旧任务可被淘汰。job ID 是进程内状态，恢复 Session 不能假装恢复旧进程。
 
-取消、预算停止、异常、权限收紧和退出应用都需要终止并等待进程树。最终验证前 runner 等待所有后台命令收束，清理未结束不能开始新的编码任务。进程树停止实现位于 [process-cancel](../../src/tools/process-cancel.ts)，Windows 和 Unix 路径分别覆盖。
+取消先关闭通知准入，再终止并等待进程树；预算停止、异常、权限收紧和退出应用采用相同收束边界。任务结束丢弃未送达通知并忽略迟到 callback。最终验证前 runner 等待所有后台命令收束，清理未结束不能开始新的编码任务。进程树停止实现位于 [process-cancel](../../src/tools/process-cancel.ts)，Windows 和 Unix 路径分别覆盖。
 
 等待和取消不是只改 UI 标签：测试必须验证实际任务结束，特别是采样中取消后不能残留写文件进程。原生 Windows Terminal 的端到端证据与 hosted CI 的跳过范围单独记录在 HANDOFF。
 

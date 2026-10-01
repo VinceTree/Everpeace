@@ -22,7 +22,7 @@ Everpeace 是 DeepSeek 优先、Windows 优先的个人开发 CLI；保留官方
 | `src/tui/` | 应用状态与展示；目录分层见 [TUI_STRUCTURE](TUI_STRUCTURE.md) |
 | `src/agent/` | Responses 交互、step/context、请求执行与计量、压缩、项目规则 |
 | `src/providers/` | client 工厂、能力契约、用途设置、模型列表 |
-| `src/workflow/` | coding 任务编排、变更追踪、检查发现/执行、检查点与结果 |
+| `src/workflow/` | coding 任务编排、变更追踪、检查发现/执行、检查点、TaskProgress 与结果 |
 | `src/tools/`、`src/codex/` | 工具实现、输出/进程资源与原生 sandbox 启动；不负责 UI 生命周期 |
 | `src/storage/`、`src/status/` | 凭据引用、配置、Session/input history、usage/status 数据模型 |
 | `src/permissions/` | 用户与项目策略组合、授权判断、权限 revision |
@@ -46,6 +46,7 @@ Everpeace 是 DeepSeek 优先、Windows 优先的个人开发 CLI；保留官方
 | 最近 coding 请求检查 | [context inspection](../../src/agent/context-inspection.ts)、[react-agent](../../src/agent/react-agent.ts)、[context surface](../../src/tui/components/screens/context-surface.tsx) | [context inspection](../../tests/unit/agent/context-inspection.test.ts)、[daily-use surfaces](../../tests/unit/tui/daily-use-surfaces.test.tsx) | [RUNTIME](RUNTIME.md)、[STATE_AND_UI](STATE_AND_UI.md) |
 | 项目规则、嵌套 AGENTS、动态约束 | [project context](../../src/agent/project-context.ts)、[react-agent](../../src/agent/react-agent.ts) | [project context](../../tests/unit/agent/project-context.test.ts) | [TOOLS](TOOLS.md) |
 | 最终检查、诊断、取消后结算 | [task runner](../../src/workflow/task-runner.ts)、[runtime](../../src/workflow/runtime.ts)、[verifier](../../src/workflow/verifier.ts) | [task runner](../../tests/unit/workflow/task-runner.test.ts)、[runtime](../../tests/unit/workflow/runtime.test.ts)、[verifier](../../tests/unit/workflow/verifier.test.ts) | [RUNTIME](RUNTIME.md) |
+| coding 提问、执行清单、`/tasks` | [react-agent](../../src/agent/react-agent.ts)、[task progress](../../src/workflow/task-progress.ts)、[App](../../src/tui/app/app.tsx)、[task surface](../../src/tui/components/screens/task-progress-surface.tsx) | [react-agent](../../tests/unit/agent/react-agent.test.ts)、[task progress](../../tests/unit/workflow/task-progress.test.ts)、[App](../../tests/unit/tui/app.test.tsx) | [RUNTIME](RUNTIME.md)、[STATE_AND_UI](STATE_AND_UI.md) |
 | Git/显式路径追踪、undo、并发编辑保护 | [tracker](../../src/workflow/workspace-tracker.ts)、[checkpoint](../../src/workflow/checkpoint.ts)、[apply patch](../../src/tools/apply-patch.ts)、[raw file version](../../src/tools/file-version.ts) | [tracker](../../tests/unit/workflow/workspace-tracker.test.ts)、[patch](../../tests/unit/tools/apply-patch.test.ts)、[checkpoint](../../tests/unit/workflow/checkpoint.test.ts) | [TOOLS](TOOLS.md)、[RUNTIME](RUNTIME.md) |
 | 分页文件读取、搜索/glob、结果续读 | [files](../../src/tools/files.ts)、[workspace](../../src/tools/workspace.ts) | [files](../../tests/unit/tools/files.test.ts)、[workspace](../../tests/unit/tools/workspace.test.ts) | [TOOLS](TOOLS.md) |
 | Composer 文件引用 | [attachments](../../src/agent/file-attachments.ts)、[prompt](../../src/tui/composer/prompt.tsx)、[task runner](../../src/workflow/task-runner.ts) | [attachments](../../tests/unit/agent/file-attachments.test.ts)、[prompt](../../tests/unit/tui/prompt-history.test.tsx)、[react-agent](../../tests/unit/agent/react-agent.test.ts) | [TOOLS](TOOLS.md)、[STATE_AND_UI](STATE_AND_UI.md) |
@@ -86,7 +87,7 @@ CLI → model registry + keyring → TUI dependencies → App
 1. TUI 把用户消息交给任务 runner；工具/模型回调更新显示，同时按对应通道保存 Session。
 2. Agent 在完整响应边界执行工具，后续 step 更新适用规则、Memory 和工具快照；普通网络重试复用同一步快照。
 3. workflow 记录任务开始内容基线，跟踪结构化与 shell 修改，在最终检查前后对比 revision，过期结果不得结算。
-4. runner 统一诊断轮数、后台资源清理、停止原因、Goal 完成与 Memory outcome；benchmark 复用这条链。
+4. runner 统一顶层 task generation、执行清单范围、诊断轮数、后台资源清理与完成通知、停止原因、Goal 完成与 Memory outcome；benchmark 复用这条链。
 5. 评测器另建评分工作区并用 evaluator-owned assertions 判断结果；通过可被模型改写的 npm scripts 不等于独立验收通过。
 
 持久化的 timeline、模型 context 与 workflow 元数据是不同通道；详细字段和恢复不变量见 [STATE_AND_UI](STATE_AND_UI.md)。
