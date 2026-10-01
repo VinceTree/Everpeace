@@ -37,8 +37,8 @@ export function defaultPermissionPath(
   homeDirectory = os.homedir(),
 ): string {
   if (platform === "win32") {
-    const root = env.APPDATA?.trim() || path.join(homeDirectory, "AppData", "Roaming");
-    return path.join(root, "Everpeace", "permissions.json");
+    const root = env.APPDATA?.trim() || path.win32.join(homeDirectory, "AppData", "Roaming");
+    return path.win32.join(root, "Everpeace", "permissions.json");
   }
   if (platform === "darwin") return path.join(homeDirectory, "Library", "Application Support", "Everpeace", "permissions.json");
   const root = env.XDG_CONFIG_HOME?.trim() || path.join(homeDirectory, ".config");
@@ -46,7 +46,10 @@ export function defaultPermissionPath(
 }
 
 export function projectPermissionPath(workspacePath: string): string {
-  return path.join(workspacePath, ".everpeace", "permissions.json");
+  const pathApi = path.win32.isAbsolute(workspacePath) && !path.posix.isAbsolute(workspacePath)
+    ? path.win32
+    : path;
+  return pathApi.join(workspacePath, ".everpeace", "permissions.json");
 }
 
 function isPolicy(value: unknown): value is PermissionPolicy {

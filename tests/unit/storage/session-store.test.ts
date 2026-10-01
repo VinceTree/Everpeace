@@ -473,7 +473,7 @@ test("session load ignores only an incomplete final JSONL line", async () => {
 test("default session directory follows platform state locations", () => {
   assert.equal(
     defaultSessionDirectory("win32", { APPDATA: "C:\\Config" }, "C:\\Users\\Test"),
-    path.join("C:\\Config", "Everpeace", "sessions"),
+    "C:\\Config\\Everpeace\\sessions",
   );
   assert.equal(
     defaultSessionDirectory("linux", { XDG_STATE_HOME: "/state" }, "/home/test"),

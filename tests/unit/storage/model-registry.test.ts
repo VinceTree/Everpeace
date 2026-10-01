@@ -178,7 +178,7 @@ test("invalid registry JSON is reported instead of overwritten", async () => {
 test("defaultRegistryPath follows platform configuration directories", () => {
   assert.equal(
     defaultRegistryPath("win32", { APPDATA: "C:\\Config" }, "C:\\Users\\Test"),
-    path.join("C:\\Config", "Everpeace", "models.json"),
+    "C:\\Config\\Everpeace\\models.json",
   );
   assert.equal(
     defaultRegistryPath("linux", { XDG_CONFIG_HOME: "/config" }, "/home/test"),

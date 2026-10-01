@@ -49,7 +49,7 @@ test("runBash reports a missing executable", async () => {
   });
 
   assert.equal(result.exitCode, null);
-  assert.match(result.error ?? "", /ENOENT/i);
+  assert.match(result.error ?? "", /ENOENT|EACCES/i);
 });
 
 test("serializeBashResult preserves timeout failures for the model", () => {

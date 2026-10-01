@@ -220,8 +220,8 @@ export function defaultSessionDirectory(
   homeDirectory = os.homedir(),
 ): string {
   if (platform === "win32") {
-    const root = env.APPDATA?.trim() || path.join(homeDirectory, "AppData", "Roaming");
-    return path.join(root, "Everpeace", "sessions");
+    const root = env.APPDATA?.trim() || path.win32.join(homeDirectory, "AppData", "Roaming");
+    return path.win32.join(root, "Everpeace", "sessions");
   }
 
   if (platform === "darwin") {
