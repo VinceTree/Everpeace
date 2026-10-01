@@ -6,6 +6,14 @@ import { Prompt } from "../../../src/tui/composer/prompt.js";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 30));
 
+async function waitFor(check: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (check()) return;
+    await tick();
+  }
+  assert.fail("Timed out waiting for prompt update");
+}
+
 test("recalled slash commands do not capture history arrows and Down returns to empty", async () => {
   const view = render(<Prompt activeModelName="test" history={["old question", "/resume"]} onSubmit={() => {}} />);
   try {
@@ -61,7 +69,7 @@ test("file completion inserts an explicit quoted reference and reports one-shot 
   try {
     await tick();
     view.stdin.write("@src");
-    await new Promise((resolve) => setTimeout(resolve, 160));
+    await waitFor(() => (view.lastFrame() ?? "").includes("src/空 file.ts"));
     assert.match(view.lastFrame() ?? "", /src\/空 file\.ts/u);
     view.stdin.write("\r");
     await tick();

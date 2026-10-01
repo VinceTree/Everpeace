@@ -9,6 +9,14 @@ import type { WorkspaceChangeIndex } from "../../../src/tools/workspace-review.j
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 35));
 
+async function waitFor(check: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (check()) return;
+    await tick();
+  }
+  assert.fail("Timed out waiting for daily-use surface update");
+}
+
 test("workspace diff surface opens detail and Esc returns through list to chat", async () => {
   const index: WorkspaceChangeIndex = {
     workspacePath: "C:\\repo",
@@ -24,19 +32,19 @@ test("workspace diff surface opens detail and Esc returns through list to chat",
     onBack={() => { backs += 1; }}
   />);
   try {
-    await tick();
+    await waitFor(() => /unstaged\s+M file\.ts/u.test(view.lastFrame() ?? ""));
     assert.match(view.lastFrame() ?? "", /Last task result: unavailable/u);
     assert.match(view.lastFrame() ?? "", /unstaged\s+M file\.ts/u);
     view.stdin.write("\r");
-    await tick();
+    await waitFor(() => (view.lastFrame() ?? "").includes("UNSTAGED · file.ts"));
     assert.match(view.lastFrame() ?? "", /UNSTAGED · file\.ts/u);
     assert.match(view.lastFrame() ?? "", /new/u);
     view.stdin.write("\u001b");
-    await tick();
+    await waitFor(() => /unstaged\s+M file\.ts/u.test(view.lastFrame() ?? ""));
     assert.match(view.lastFrame() ?? "", /unstaged\s+M file\.ts/u);
     assert.equal(backs, 0);
     view.stdin.write("\u001b");
-    await tick();
+    await waitFor(() => backs === 1);
     assert.equal(backs, 1);
   } finally {
     view.unmount();
@@ -47,7 +55,7 @@ test("context surface has an explicit empty state and refreshes the latest in-me
   let snapshot: ContextInspectionSnapshot | undefined;
   const view = render(<ContextSurface getSnapshot={() => snapshot} onBack={() => {}} />);
   try {
-    await tick();
+    await waitFor(() => (view.lastFrame() ?? "").includes("No coding request has been submitted"));
     assert.match(view.lastFrame() ?? "", /No coding request has been submitted/u);
     snapshot = {
       model: "deepseek-chat",
@@ -71,7 +79,7 @@ test("context surface has an explicit empty state and refreshes the latest in-me
       previews: [],
     };
     view.stdin.write("r");
-    await tick();
+    await waitFor(() => (view.lastFrame() ?? "").includes("Model: deepseek-chat"));
     assert.match(view.lastFrame() ?? "", /Model: deepseek-chat/u);
     assert.match(view.lastFrame() ?? "", /Estimated input: 123 tokens/u);
   } finally {
@@ -82,7 +90,7 @@ test("context surface has an explicit empty state and refreshes the latest in-me
 test("context surface distinguishes integrations without inspection support", async () => {
   const view = render(<ContextSurface onBack={() => {}} />);
   try {
-    await tick();
+    await waitFor(() => (view.lastFrame() ?? "").includes("unavailable for the active agent integration"));
     assert.match(view.lastFrame() ?? "", /unavailable for the active agent integration/u);
   } finally {
     view.unmount();

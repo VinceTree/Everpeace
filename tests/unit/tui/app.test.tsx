@@ -54,9 +54,9 @@ import type {
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 async function waitFor(check: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
     if (check()) return;
-    await tick();
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
   assert.fail("Timed out waiting for TUI update");
 }
