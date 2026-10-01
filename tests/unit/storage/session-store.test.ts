@@ -99,7 +99,7 @@ test("session search matches titles and conversation text while excluding tool a
     const second = await fixture.store.create({ title: "Other task", titlePending: false, workspacePath: "D:\\other", model });
     await fixture.store.appendTimeline(second.id, { kind: "assistant", text: "Unicode in another workspace" });
 
-    const title = await fixture.store.search({ query: "PARSER", workspacePath: "c:\\repo" });
+    const title = await fixture.store.search({ query: "PARSER", workspacePath: "c:/repo/" });
     assert.deepEqual(title.matches.map((match) => [match.summary.id, match.match?.kind]), [[first.id, "title"]]);
     const message = await fixture.store.search({ query: "unicode", workspacePath: "C:\\repo" });
     assert.deepEqual(message.matches.map((match) => [match.summary.id, match.match?.kind]), [[first.id, "user"]]);

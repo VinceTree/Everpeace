@@ -722,6 +722,13 @@ function searchSnippet(text: string, normalizedQuery: string): string {
   return `${start > 0 ? "…" : ""}${normalizedText.slice(start, end)}${end < normalizedText.length ? "…" : ""}`;
 }
 
+function normalizeSessionWorkspacePath(value: string): string {
+  if (/^(?:[A-Za-z]:[\\/]|[\\/]{2})/u.test(value)) {
+    return path.win32.normalize(value).replace(/[\\/]+$/u, "").toLowerCase();
+  }
+  return normalizeWorkspacePath(value);
+}
+
 export class SessionStore implements SessionStoreLike {
   readonly #directory: string;
   readonly #now: () => Date;
@@ -930,7 +937,7 @@ export class SessionStore implements SessionStoreLike {
     const normalizedQuery = options.query.trim().toLocaleLowerCase();
     const workspace = options.workspacePath === undefined
       ? undefined
-      : normalizeWorkspacePath(options.workspacePath);
+      : normalizeSessionWorkspacePath(options.workspacePath);
     const matches: SessionSearchMatch[] = [];
     let skipped = 0;
     for (const entry of entries) {
@@ -938,7 +945,7 @@ export class SessionStore implements SessionStoreLike {
       if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
       try {
         const projection = await this.#searchProjection(path.join(this.#directory, entry.name), options.signal);
-        if (workspace !== undefined && normalizeWorkspacePath(projection.summary.workspace_path) !== workspace) continue;
+        if (workspace !== undefined && normalizeSessionWorkspacePath(projection.summary.workspace_path) !== workspace) continue;
         let match: SessionSearchMatch["match"];
         if (normalizedQuery && projection.summary.title.toLocaleLowerCase().includes(normalizedQuery)) {
           match = { kind: "title", snippet: searchSnippet(projection.summary.title, normalizedQuery) };
