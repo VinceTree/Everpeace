@@ -45,6 +45,30 @@ test("workspace review separates overlapping staged, unstaged, and untracked cha
   }
 });
 
+test("workspace review resolves untracked previews from the canonical workspace root", async (context) => {
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-review-canonical-"));
+  try {
+    const root = path.join(parent, "repository");
+    const alias = path.join(parent, "workspace-alias");
+    await fs.mkdir(root);
+    await git(root, "init");
+    await fs.writeFile(path.join(root, "new file.txt"), "canonical preview\n", "utf8");
+    try {
+      await fs.symlink(root, alias, process.platform === "win32" ? "junction" : "dir");
+    } catch {
+      context.skip("This platform does not permit a temporary workspace alias.");
+      return;
+    }
+
+    const entry = (await listWorkspaceChanges(alias)).entries.find((candidate) => candidate.path === "new file.txt");
+    assert.ok(entry);
+    const detail = await readWorkspaceChange(alias, entry);
+    assert.deepEqual({ kind: detail.contentKind, text: detail.text }, { kind: "text", text: "canonical preview\n" });
+  } finally {
+    await fs.rm(parent, { recursive: true, force: true });
+  }
+});
+
 test("workspace review scopes nested workspaces and summarizes binary and symbolic-link files", async (context) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-review-kinds-"));
   try {

@@ -173,7 +173,7 @@ async function untrackedDetail(
     return { entry, contentKind: "summary", text: "Windows alternate data streams are not previewed.", truncated: false };
   }
   const root = await fs.realpath(workspacePath);
-  const lexical = path.resolve(workspacePath, entry.path);
+  const lexical = path.resolve(root, entry.path);
   if (!inside(root, lexical)) throw new Error("Changed path escapes the active workspace");
   const stat = await fs.lstat(lexical);
   if (stat.isSymbolicLink()) return { entry, contentKind: "summary", text: "Untracked symbolic link; target contents are not previewed.", truncated: false };
