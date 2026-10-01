@@ -550,7 +550,16 @@ export class LearnedMemoryStore {
     const temporary = `${filePath}.${process.pid}.${Date.now()}.tmp`;
     try {
       await fs.writeFile(temporary, contents, { encoding: "utf8", mode: 0o600 });
-      await fs.rename(temporary, filePath);
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          await fs.rename(temporary, filePath);
+          break;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (process.platform !== "win32" || attempt >= 5 || (code !== "EPERM" && code !== "EACCES" && code !== "EBUSY")) throw error;
+          await new Promise<void>((resolve) => setTimeout(resolve, 10 * (2 ** attempt)));
+        }
+      }
     } finally {
       await fs.rm(temporary, { force: true }).catch(() => undefined);
     }

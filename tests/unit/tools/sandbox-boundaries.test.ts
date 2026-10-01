@@ -102,7 +102,14 @@ test("sandbox preparation rejects a redirected .everpeace control path", async (
   }
 });
 
-test("native workspace profile blocks model shell writes to .everpeace", { skip: process.platform !== "win32", timeout: 20_000 }, async () => {
+test("native workspace profile blocks model shell writes to .everpeace", {
+  skip: process.platform !== "win32"
+    ? "Windows-only native sandbox integration"
+    : process.env.GITHUB_ACTIONS === "true"
+      ? "GitHub-hosted Windows cannot initialize the nested native sandbox"
+      : false,
+  timeout: 20_000,
+}, async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-native-policy-"));
   const stateParent = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-native-state-"));
   try {
