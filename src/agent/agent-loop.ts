@@ -89,10 +89,12 @@ export interface AgentLoopOptions {
   sample(signal?: AbortSignal): Promise<LoopResponse>;
   record(items: readonly Record<string, unknown>[]): Promise<void>;
   dispatch(call: ToolCall, signal?: AbortSignal): Promise<string | { output: string; stop?: boolean }>;
-  assistant(text: string): void;
+  assistant(text: string): void | Promise<void>;
   signal?: AbortSignal;
   onPhase?(phase: LoopPhase): void;
   onEvent?(event: LoopEvent): void;
+  /** Await public tool delivery at execution/commit boundaries, independently of SSE telemetry. */
+  onToolEvent?(event: Extract<LoopEvent, { type: "tool_started" | "tool_finished" }>): void | Promise<void>;
   prepareStep?(signal?: AbortSignal): Promise<void>;
   hasPendingSteering?(): boolean;
   applySteering?(): Promise<number>;
@@ -222,10 +224,21 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       ? deadlineController.signal
       : AbortSignal.any([externalSignal, deadlineController.signal]);
   const samplingBudget = { remaining: retries, total: retries };
+  const pendingCalls = new Map<string, ToolCall>();
+  const outputFailures = new Set<Error>();
+  const deliver = async (run: () => void | Promise<void>): Promise<void> => {
+    try { await run(); }
+    catch (value) {
+      const error = value instanceof Error ? value : new Error(String(value));
+      outputFailures.add(error);
+      throw error;
+    }
+  };
   const closeCalls = async (calls: readonly ToolCall[], status: string, reason?: string) => {
     for (const call of calls) {
       await options.record([{ type: "function_call_output", call_id: call.call_id,
         output: JSON.stringify({ status, ...(reason ? { reason } : {}) }) }]);
+      pendingCalls.delete(call.call_id);
     }
   };
   const steer = async (remaining: readonly ToolCall[] = []): Promise<boolean> => {
@@ -320,6 +333,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
           : options.canRunInParallel?.(call) === true;
       });
       await options.record(response.output);
+      for (const call of calls) pendingCalls.set(call.call_id, call);
       options.onEvent?.({ type: "response_received", response });
       if (externalSignal?.aborted) {
         await closeCalls(calls, "cancelled");
@@ -328,7 +342,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       const responseStop = await stop(calls);
       if (responseStop) return responseStop;
       if (await steer(calls)) continue;
-      if (response.output_text.trim()) options.assistant(response.output_text.trim());
+      if (response.output_text.trim()) await deliver(() => options.assistant(response.output_text.trim()));
       if (calls.length) options.onPhase?.("tools");
       let stopAfterTools = false;
       for (let index = 0; index < calls.length;) {
@@ -357,10 +371,16 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
           try {
             executionSignal.throwIfAborted();
             options.onEvent?.({ type: "tool_started", call });
+            if (options.onToolEvent) await deliver(() => options.onToolEvent!({ type: "tool_started", call }));
+            executionSignal.throwIfAborted();
             const dispatched = await options.dispatch(call, executionSignal);
             rawOutput = typeof dispatched === "string" ? dispatched : dispatched.output;
             stop = typeof dispatched === "object" && dispatched.stop === true;
           } catch (error) {
+            if (error instanceof Error && outputFailures.has(error)) {
+              segmentController.abort(error);
+              return { call, fatal: error, executionMs: performance.now() - executionStarted };
+            }
             if (error instanceof PersistenceError) return { call, fatal: error, executionMs: performance.now() - executionStarted };
             rawOutput = JSON.stringify(executionSignal.aborted ? { status: "cancelled" }
               : { status: "error", error: error instanceof Error ? error.message : String(error) });
@@ -379,7 +399,9 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
           const record = { type: "function_call_output", call_id: item.call.call_id, output: item.output! };
           if (item.prepared && options.recordToolResult) await options.recordToolResult(record, item.prepared);
           else await options.record([record]);
+          pendingCalls.delete(item.call.call_id);
           options.onEvent?.({ type: "tool_finished", call: item.call, output: item.output! });
+          if (options.onToolEvent) await deliver(() => options.onToolEvent!({ type: "tool_finished", call: item.call, output: item.output! }));
           options.onEvent?.({ type: "timing_recorded", operation: "tool_execution", durationMs: item.executionMs });
           stopAfterTools ||= item.stop === true;
         };
@@ -418,7 +440,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
               && completedBytes < MAX_PENDING_PARALLEL_TOOL_BYTES
             ) {
               gateStop = await options.checkStop?.();
-              if (externalSignal?.aborted || deadlineController.signal.aborted || options.hasPendingSteering?.() || gateStop) break;
+              if (externalSignal?.aborted || deadlineController.signal.aborted || segmentController.signal.aborted || options.hasPendingSteering?.() || gateStop) break;
               const absolute = start + launched;
               const keys = capabilities[absolute]?.resourceKeys ?? [];
               if (keys.some((key) => activeKeys.has(key))) break;
@@ -488,6 +510,11 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       }
     }
   } catch (error) {
+    // Public output can fail after the response is durable. Close its outstanding
+    // tool chain without attempting further delivery or side effects.
+    if (error instanceof Error && outputFailures.has(error) && !(error instanceof PersistenceError)) {
+      await closeCalls([...pendingCalls.values()], externalSignal?.aborted ? "cancelled" : "skipped", "output_delivery_failed");
+    }
     options.onPhase?.(externalSignal?.aborted ? "cancelled" : "failed");
     throw error;
   } finally {

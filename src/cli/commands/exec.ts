@@ -7,6 +7,8 @@ import {
   type ExecJsonlUsage,
   type ExecProgressEvent,
 } from "../exec-output.js";
+import { ExecPipeProcess, ExecOutputError, ExecStreamWriter, isExecOutputError } from "../exec-writer.js";
+import type { Writable } from "node:stream";
 
 const MAX_STDIN_PROMPT_BYTES = 8 * 1024 * 1024;
 
@@ -14,11 +16,13 @@ export interface ExecCommandHost {
   cwd(): string;
   stdinIsTTY: boolean;
   readStdin(signal: AbortSignal): Promise<string>;
-  writeStdout(text: string): void;
+  writeStdout(text: string, signal?: AbortSignal): void | Promise<void>;
   flushStdout?(): Promise<void>;
-  writeStderr(text: string): void;
+  writeStderr(text: string, signal?: AbortSignal): void | Promise<void>;
   onSignal(handler: (exitCode: 130 | 143) => void): () => void;
   onStdoutError(handler: (error: Error) => void): () => void;
+  onStderrError?(handler: (error: Error) => void): () => void;
+  disposeOutput?(): Promise<void>;
 }
 
 export interface ExecCommandDependencies {
@@ -71,16 +75,25 @@ async function readProcessStdin(signal: AbortSignal): Promise<string> {
   return Buffer.concat(chunks, bytes).toString("utf8");
 }
 
-export function createProcessExecCommandHost(): ExecCommandHost {
+export function createProcessExecCommandHost(options: { outputStallMs?: number } = {}): ExecCommandHost {
+  const writerOptions = options.outputStallMs === undefined ? {} : { stallMs: options.outputStallMs };
+  const pipeProcess = process.platform === "win32" && (!process.stdout.isTTY || !process.stderr.isTTY) ? new ExecPipeProcess() : undefined;
+  const stdoutStream = pipeProcess && !process.stdout.isTTY ? pipeProcess.stream(1) : process.stdout;
+  const stderrStream = pipeProcess && !process.stderr.isTTY ? pipeProcess.stream(2) : process.stderr;
+  const stdout = new ExecStreamWriter(stdoutStream, writerOptions);
+  const stderr = new ExecStreamWriter(stderrStream, writerOptions);
+  const watch = (stream: Writable, handler: (error: Error) => void) => {
+    const closed = () => handler(new ExecOutputError("Exec output was closed"));
+    stream.on("error", handler);
+    stream.on("close", closed);
+    return () => { stream.off("error", handler); stream.off("close", closed); };
+  };
   return {
     cwd: () => process.cwd(),
     stdinIsTTY: process.stdin.isTTY === true,
     readStdin: readProcessStdin,
-    writeStdout: (text) => { process.stdout.write(text); },
-    flushStdout: () => new Promise<void>((resolve, reject) => {
-      process.stdout.write("", (error) => error ? reject(error) : resolve());
-    }),
-    writeStderr: (text) => { process.stderr.write(text); },
+    writeStdout: (text, signal) => stdout.write(text, signal),
+    writeStderr: (text, signal) => stderr.write(text, signal),
     onSignal(handler) {
       const interrupt = () => handler(130);
       const terminate = () => handler(143);
@@ -91,10 +104,9 @@ export function createProcessExecCommandHost(): ExecCommandHost {
         process.off("SIGTERM", terminate);
       };
     },
-    onStdoutError(handler) {
-      process.stdout.on("error", handler);
-      return () => process.stdout.off("error", handler);
-    },
+    onStdoutError: (handler) => watch(stdoutStream, handler),
+    onStderrError: (handler) => watch(stderrStream, handler),
+    ...(pipeProcess ? { disposeOutput: () => pipeProcess.dispose() } : {}),
   };
 }
 
@@ -171,16 +183,17 @@ export async function runExecCommand(
     if (runtimeOptions) runtimeOptions.signalExitCode = exitCode;
     controller.abort(abortError(exitCode === 130 ? "Interrupted by SIGINT" : "Terminated by SIGTERM", "ExecSignalError"));
   });
-  const removeStdoutHandler = host.onStdoutError((error) => {
-    if (!isEpipe(error)) return;
+  const outputFailed = (error: Error) => {
     outputClosed = true;
-    controller.abort(abortError("Exec output was closed", "ExecOutputClosedError"));
-  });
+    controller.abort(new ExecOutputError("Exec output failed or closed", { cause: error }));
+  };
+  const removeStdoutHandler = host.onStdoutError(outputFailed);
+  const removeStderrHandler = host.onStderrError?.(outputFailed);
 
   let emitter: ExecJsonlEmitter | undefined;
   try {
     if (options.json) {
-      emitter = new ExecJsonlEmitter({ write: (line) => host.writeStdout(line) });
+      emitter = new ExecJsonlEmitter({ write: (chunk, signal) => host.writeStdout(chunk, signal) });
     }
     const stdinText = host.stdinIsTTY ? undefined : await host.readStdin(controller.signal);
     const prompt = resolveExecPrompt(options, { stdinIsTTY: host.stdinIsTTY, ...(stdinText === undefined ? {} : { stdinText }) });
@@ -208,19 +221,19 @@ export async function runExecCommand(
     };
 
     if (options.json) {
-      runtimeOptions.onEvent = (event) => emitter!.emit(progressEvent(event));
+      runtimeOptions.onEvent = (event) => emitter!.emit(progressEvent(event), controller.signal);
     } else {
-      runtimeOptions.onEvent = (event) => {
+      runtimeOptions.onEvent = async (event) => {
         const line = humanProgress(event);
-        if (line) host.writeStderr(sanitizeExecOutput(line));
+        if (line) await host.writeStderr(sanitizeExecOutput(line), controller.signal);
       };
     }
 
     const result = await (dependencies.run ?? runExec)(runtimeOptions, { registry: resolvedRegistry });
-    if (outputClosed) return 1;
+    if (outputClosed || emitter?.broken) return signalExitCode ?? 1;
     if (options.json) {
       const usage = jsonUsage(result);
-      emitter!.finish({
+      await emitter!.finish({
         type: "run_finished",
         ...(result.sessionId ? { sessionId: result.sessionId } : {}),
         status: result.classification,
@@ -229,20 +242,20 @@ export async function runExecCommand(
         ...(result.workflowResult ? { workflowResult: result.workflowResult } : {}),
         ...(usage ? { usage } : {}),
       });
-      if (result.error) host.writeStderr(sanitizeExecOutput(`${result.error}\n`));
+      if (result.error) await host.writeStderr(sanitizeExecOutput(`${result.error}\n`));
     } else {
-      if (result.assistantText) host.writeStdout(`${sanitizeExecOutput(result.assistantText, Number.MAX_SAFE_INTEGER)}\n`);
-      host.writeStderr(sanitizeExecOutput(finalHumanMessage(result)));
+      if (result.assistantText && signalExitCode === undefined) await host.writeStdout(`${sanitizeExecOutput(result.assistantText, Number.MAX_SAFE_INTEGER)}\n`, controller.signal);
+      await host.writeStderr(sanitizeExecOutput(finalHumanMessage(result)));
     }
     await host.flushStdout?.();
     if (outputClosed) return 1;
     return signalExitCode ?? result.exitCode;
   } catch (error) {
-    if (outputClosed || isEpipe(error)) return 1;
+    if (outputClosed || isExecOutputError(error) || emitter?.broken) return signalExitCode ?? 1;
     if (signalExitCode !== undefined) {
       try {
         if (options.json && emitter && !emitter.finished) {
-          emitter.finish({
+          await emitter.finish({
             type: "run_finished",
             status: "cancelled",
             usageComplete: true,
@@ -258,9 +271,9 @@ export async function runExecCommand(
     }
     const message = error instanceof Error ? error.message : String(error);
     try {
-      host.writeStderr(`${sanitizeExecOutput(message)}\n`);
+      await host.writeStderr(`${sanitizeExecOutput(message)}\n`);
       if (options.json && emitter && !emitter.finished) {
-        emitter.finish({
+        await emitter.finish({
           type: "run_finished",
           status: error instanceof CliArgumentError ? "configuration_error" : "runtime_error",
           usageComplete: true,
@@ -273,7 +286,9 @@ export async function runExecCommand(
     }
     return error instanceof CliArgumentError ? 2 : 1;
   } finally {
+    await host.disposeOutput?.();
     removeStdoutHandler();
+    removeStderrHandler?.();
     removeSignalHandlers();
   }
 }

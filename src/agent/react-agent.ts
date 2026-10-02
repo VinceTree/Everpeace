@@ -212,7 +212,7 @@ export interface AgentIO {
   runBackgroundBash?(command: string, signal?: AbortSignal, timeoutMs?: number, onOutput?: (output: import("../tools/bash.js").BashOutputPreview) => void): Promise<BashResult>;
   runApplyPatch?(operations: readonly ApplyPatchOperation[], signal?: AbortSignal): Promise<ApplyPatchResult>;
   afterPatchApplied?(operations: readonly ApplyPatchOperation[], result: ApplyPatchResult, signal?: AbortSignal): Promise<WorkflowPatchFollowup | void>;
-  writeAssistant(text: string): void;
+  writeAssistant(text: string): void | Promise<void>;
   writeAssistantDelta?(text: string): void;
   writeTool?(text: string): void;
   onToolProgress?(event: {
@@ -233,6 +233,7 @@ export interface AgentInteractionRequired {
 export interface ReactAgentOptions {
   onPhase?(phase: LoopPhase): void;
   onEvent?(event: LoopEvent): void;
+  onToolEvent?: import("./agent-loop.js").AgentLoopOptions["onToolEvent"];
   workspacePath?: string;
   client: ResponsesClientLike;
   model: string;
@@ -522,6 +523,7 @@ export class ReactAgent {
   #running = false;
   readonly #onPhase: ((phase: LoopPhase) => void) | undefined;
   readonly #onEvent: ((event: LoopEvent) => void) | undefined;
+  readonly #onToolEvent: ReactAgentOptions["onToolEvent"];
   readonly #workspacePath: string;
   readonly #client: ResponsesClientLike;
   readonly #model: string;
@@ -614,6 +616,7 @@ export class ReactAgent {
   constructor(options: ReactAgentOptions) {
     this.#onPhase = options.onPhase;
     this.#onEvent = options.onEvent;
+    this.#onToolEvent = options.onToolEvent;
     this.#workspacePath = options.workspacePath ?? process.cwd();
     this.#workspaceReviews = new WorkspaceReviewSession(this.#workspacePath);
     this.#client = options.client;
@@ -839,14 +842,15 @@ export class ReactAgent {
           prepareToolOutput: (output: string, call: ToolCall) => prepareToolOutput(output, call.name),
           recordToolResult: (item: Record<string, unknown>, prepared: PreparedToolOutput) => this.#recordToolResult(item, prepared),
         } : {}),
-        assistant: (text) => {
+        assistant: async (text) => {
           assistantTexts.push(text);
           const renderStarted = performance.now();
-          try { this.#io.writeAssistant(text); }
+          try { await this.#io.writeAssistant(text); }
           finally { this.#onEvent?.({ type: "timing_recorded", operation: "rendering", durationMs: performance.now() - renderStarted }); }
         },
         ...(this.#onPhase ? { onPhase: this.#onPhase } : {}),
         ...(this.#onEvent ? { onEvent: this.#onEvent } : {}),
+        ...(this.#onToolEvent ? { onToolEvent: this.#onToolEvent } : {}),
         hasPendingSteering: () => this.#pendingSteering.length > 0,
         applySteering: () => this.#applyPendingSteering(),
         checkStop: () => this.#checkStop(),

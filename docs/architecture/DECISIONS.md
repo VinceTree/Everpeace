@@ -66,7 +66,9 @@ Provider capability profile 只记录已观察的模型能力和 context window�
 
 真实运行依赖由 `src/runtime/production.ts` 统一装配：provider、ReactAgent、Session 历史/附件、Skills、MCP、learned Memory、Goal、代码导航及原生 sandbox command executor 不再由 TUI 和 benchmark 分别拼装。Ink 只提供交互与显示回调；公开 `everpeace exec` 通过同一 factory 和 `CodingTaskRunner` 运行，内部 benchmark 只保留 reviewed 参数与批准策略覆盖。这样共享的是生产行为，不把 benchmark adapter 暴露为公共 API。
 
-exec 采用 CLI + JSONL，而非本期新增 TypeScript SDK。每次调用创建正常可恢复 Session，模型先按注册 ID、再按唯一名称解析；提示词只来自位置参数或非 TTY stdin。首版没有非交互 resume、Plan 或自动批准，所有需要用户的审批/结构化问题先保存配对结果，再以 `interaction_required` 结算。可选 token budget、deadline 和 step 上限覆盖完整 runner/repair 生命周期。默认 stdout 只保留最终正文，JSON 模式只输出脱敏白名单事件，并在清理完成后发布唯一终态；帮助解析不得提前加载 keyring、MCP 或 TUI。
+exec 采用 CLI + JSONL，而非本期新增 TypeScript SDK。每次调用创建正常可恢复 Session，模型先按注册 ID、再按唯一名称解析；提示词只来自位置参数或非 TTY stdin。首版没有非交互 resume、Plan 或自动批准，所有需要用户的审批/结构化问题先保存配对结果，再以 `interaction_required` 结算。可选 token budget、deadline 和 step 上限覆盖完整 runner/repair 生命周期。默认 stdout 只保留最终正文，JSON 模式只输出脱敏白名单事件，并在任务清理后尝试发布唯一终态；帮助解析不得提前加载 keyring、MCP 或 TUI。
+
+exec 输出接受消费端背压，正文完整保留并分块转义，助手/工具事件的异步回调向生产循环传递等待。Windows 非 TTY 标准管道由 CLI host 拥有的 writer 子进程负责写入，避免同步管道阻塞主循环取消与清理。管道失败或半条 JSONL 中断后不能保证终态可写，消费端同时检查退出码；具体大小与超时契约见 [STATE_AND_UI](STATE_AND_UI.md#非交互-exec)。
 
 ## Context compaction
 
@@ -100,6 +102,10 @@ Agent Loop 的正常 follow-up sampling step 使用独立预算，默认每个 t
 
 完整边界见 [CODEX_CAPABILITIES.md](./CODEX_CAPABILITIES.md)。sandbox 复用 `@openai/codex@0.155.1` 的平台后端而非复制 Rust 实现；Windows 模型 shell 固定用 PowerShell，其他平台用 Bash。MCP 复用 `codex mcp` 配置，以官方 TypeScript SDK 连接 stdio/Streamable HTTP，非 full-access 的 tools、resources、prompts 调用逐次审批。每个 server 独立监督断连、退避和关闭；断连立即撤下工具且不重放中断调用。list-changed 只有完整分页发现成功后才原子替换目录，step snapshot 通过 connection/definition binding 防止旧批准调用新能力；`/mcp` 重载配置并重置 supervisor。主机 Skills 扫描 Codex 项目/用户/admin/system 根，只把无名称冲突的 metadata catalog 预载到 instructions，显式 `$name` 在本轮完整注入，隐式匹配通过受路径约束的 `read_skill` 渐进读取。`/mcp` 是 transient 状态窗口；`/skills` 是不进入 session timeline/context 的多步管理向导，可在每次操作中选择项目或用户作用域，AI 创建单个 `SKILL.md`，或从公开 HTTPS GitHub/Git/SKILL.md/ZIP 来源先暂存、校验和预览，再明确确认安装。创建/安装不得覆盖任一发现根的同名 Skill，重复名称在解决前不得自动或显式调用。三者均不改变 JSONL schema；当前不包含完整 Plugin、OAuth、远端 Skill provider 或 managed-policy runtime，Skill 管理也不包含私有认证、更新或删除。
 
+MCP 的发布单位包含完整定义和执行校验器。宿主通过 SDK 公共 request/schema 接口完成分页和调用，避免 SDK 的分页 metadata cache 改变旧目录的校验行为；output schema 与 execution metadata 同样进入 binding。资源、模板和提示采用 capabilities 注册的稳定入口与按需单页请求，不为列表更新引入缓存或订阅。要求 tasks 的工具显式标为 unsupported，不以普通调用代替。
+
+可选 LSP 的可用性取决于有正对照的原生隔离证据，普通连接错误不能作为网络拒绝证据。证据限定本次 TCP/IPv4 目标；allowed 和 inconclusive 都不启动配置的 server。保持每次查询独立进程，Windows 探针仍允许连接时不提前启用 registry/pool，也不退回宿主运行。路径、UTF-16 与协议契约见 [TOOLS](TOOLS.md#可选-typescript-导航)。
+
 Git Skill 来源采用 shallow、no-checkout 克隆：先读取有界 Git tree 和候选 `SKILL.md` metadata，同名打包副本按规范 `skills/<name>` 路径优先去重，预检候选文件类型、数量和字节数后才 sparse checkout。原始 `SKILL.md` 清单数与去重后的不同 Skill 候选数使用独立上限，100 个候选限制只对去重结果生效，避免同一仓库中的 Codex/评审镜像副本在实际候选未超限时被提前拒绝。该顺序避免 Windows 在无关深层路径上提前失败，也防止为了一个 Skill 展开整个仓库工作树；它不改变公开 HTTPS、无认证、超时、无覆盖和显式确认边界。
 
 ## Session 持久化
@@ -109,6 +115,8 @@ Git Skill 来源采用 shallow、no-checkout 克隆：先读取有界 Git tree �
 - 可见 timeline 与 Responses API context 分开记录，保证恢复界面完整，同时不把直接 `!` 命令错误加入模型上下文。
 - 写入按 session 串行追加；不完整末行可忽略，其他损坏只隔离对应文件。追加和当前 step EOF 捕获先在事务锁内恢复末行：完整有效的旧无 LF 事件补换行，无效 partial 截回上一 LF；超过 8 MiB 保留原文件并失败关闭。完整事件的原始字节和引用摘要不改变。
 - `session_created` 保存模型引用、工作目录及 usage tracking 能力；`model_selected` 表达模型变化及是否重置 context；`usage_recorded` 保存每次主 Agent 响应的 token 增量。
+
+Session 优化保持 JSONL 与 v1 输出附件格式：load/list/search 共用逐条字节流解析，摘要列表不构造 timeline/context；附件按页读取，输出定位缓存只保存有界 metadata。缓存命中仍证明日志身份、结果摘要和 call→result 来源，不能以性能优化绕过损坏记录、同工作区或文件改写检查。性能证据只反映宿主读取和临时占用，不能推导真实模型质量或 token 收益。
 
 ## Session 分支与 lineage
 

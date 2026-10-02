@@ -37,16 +37,24 @@ class ExecConfigurationError extends Error {
 
 function safeText(value: string, maximum = MAX_EVENT_TEXT_CHARS): string {
   const redacted = redactSecretsPreservingLayout(value);
-  const points = [...redacted];
-  return points.length <= maximum ? redacted : `${points.slice(0, maximum).join("")}…`;
+  if (redacted.length <= maximum) return redacted;
+  let result = "";
+  let count = 0;
+  for (const point of redacted) {
+    if (count === maximum) return `${result}…`;
+    result += point;
+    count += 1;
+  }
+  return redacted;
 }
 
 function errorText(error: unknown): string {
   return safeText(error instanceof Error ? error.message : String(error));
 }
 
-function isEpipe(error: unknown): boolean {
-  return Boolean(error && typeof error === "object" && (error as NodeJS.ErrnoException).code === "EPIPE");
+function isOutputError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && ((error as NodeJS.ErrnoException).code === "EPIPE"
+    || (error as Error).name === "ExecOutputError"));
 }
 
 function waitWithSignal<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -230,14 +238,16 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
   const taskSignal = options.signal
     ? AbortSignal.any([options.signal, controller.signal])
     : controller.signal;
-  const emit = (event: ExecEvent): void => {
+  const emit = async (event: ExecEvent): Promise<void> => {
     if (outputClosed) return;
     try {
-      options.onEvent?.(event);
+      await options.onEvent?.(event);
     } catch (error) {
-      if (!isEpipe(error)) throw error;
-      outputClosed = true;
-      controller.abort(error);
+      if (isOutputError(error)) {
+        outputClosed = true;
+        controller.abort(error);
+      }
+      throw error;
     }
   };
 
@@ -271,7 +281,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
       pendingInteraction ??= { kind, tool, ...(prompt ? { prompt: safeText(prompt) } : {}) };
       return false;
     };
-    const assistantMessages: string[] = [];
+    let lastAssistantText: string | undefined;
     const executeDelegate: ProductionCommandExecutor = (command, signal, timeoutMs, onOutput) => {
       if (!execute) throw new Error("Command executor is not initialized");
       return execute(command, signal, timeoutMs, onOutput);
@@ -314,22 +324,22 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
         },
       },
       output: {
-        assistant(text) {
+        async assistant(text) {
           const safe = safeText(text, Number.MAX_SAFE_INTEGER);
-          assistantMessages.push(safe);
+          lastAssistantText = safe;
           queueTimeline("assistant", safe);
-          emit({ type: "assistant_message", text: safe });
+          await emit({ type: "assistant_message", text: safe });
         },
         assistantDelta() {},
         tool() {},
       },
     });
-    const onAgentEvent = (event: LoopEvent): void => {
+    const onAgentEvent = async (event: LoopEvent): Promise<void> => {
       if (event.type === "tool_started") {
-        emit({ type: "tool_started", name: event.call.name, callId: event.call.call_id });
+        await emit({ type: "tool_started", name: event.call.name, callId: event.call.call_id });
       } else if (event.type === "tool_finished") {
         const status = toolStatus(event.output);
-        emit({ type: "tool_finished", name: event.call.name, callId: event.call.call_id, ...(status ? { status } : {}) });
+        await emit({ type: "tool_finished", name: event.call.name, callId: event.call.call_id, ...(status ? { status } : {}) });
       }
     };
     handle = createAgent({
@@ -359,7 +369,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
           if (!sessionId) throw new Error("Usage persistence requires an active session");
           return sessionStore.appendUsage(sessionId, usage);
         },
-        onEvent: onAgentEvent,
+        onToolEvent: onAgentEvent,
       },
     });
     execute = createCommandExecutor({
@@ -385,7 +395,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
       workspacePath,
       async onState(state) {
         await sessionStore.setWorkflow(sessionId!, state);
-        emit({
+        await emit({
           type: "workflow_updated",
           phase: state.phase,
           taskId: state.task_id,
@@ -400,7 +410,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
     });
     queueTimeline("user", safeText(options.prompt, Number.MAX_SAFE_INTEGER));
     await timeline;
-    emit({
+    await emit({
       type: "session_started",
       sessionId,
       modelId: selected.model.id,
@@ -429,9 +439,9 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
     });
     const runnerResult = await runner.run({ text: options.prompt, source: "exec", signal: taskSignal });
     await timeline;
-    const assistantText = assistantMessages.at(-1);
+    const assistantText = lastAssistantText;
     result = successfulResult(runnerResult, sessionId, assistantText, ledger);
-    if (result.interaction) emit({ type: "interaction_required", ...result.interaction });
+    if (result.interaction) await emit({ type: "interaction_required", ...result.interaction });
   } catch (error) {
     if (deadlineExceeded) {
       result = runtimeResult("limit_reached", 4, "deadline_exceeded", ledger, {

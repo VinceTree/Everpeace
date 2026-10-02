@@ -61,7 +61,7 @@ P0 协议基线已完成：`LoopEvent` 可报告 `response_rejected`；incomplet
 
 ## 交叉边界与停止结果
 
-每个逻辑 step 深复制 MCP/Skill metadata 与工具 definitions，并冻结广告工具集合；MCP snapshot 同时包含 annotations 和绑定 connection/definition 的 opaque capability ID。请求重试复用该集合，dispatch 拒绝未提供的工具、过期 MCP binding，并重新检查当前权限。工具列表通知只影响完整刷新后的下一 step；审批等待期间发生断连或定义变化时，旧调用不得落到新连接。Plan 的只读限制在 dispatch 生效，不依赖模型遵守工具列表。guidance 中的显式 Skill 引用参与下一个 step 的准备。
+每个逻辑 step 深复制 MCP/Skill metadata 与工具 definitions，并冻结广告工具集合；MCP snapshot 同时包含 annotations 和绑定 connection/完整原始 definition 的 opaque capability ID，output schema 与 execution metadata 变化同样使旧 binding 失效。请求重试复用该集合，dispatch 拒绝未提供的工具、过期 MCP binding，并重新检查当前权限。工具列表通知只影响完整刷新后的下一 step；审批等待期间发生断连或定义变化时，旧调用不得落到新连接，已经派发的调用按原定义校验结果。Plan 的只读限制在 dispatch 生效，不依赖模型遵守工具列表。guidance 中的显式 Skill 引用参与下一个 step 的准备。
 
 Steering 使用独立的 `hasPendingSteering` 查看接口和 `applySteering` 提交接口。先按顺序持久化工具结果及未启动调用的 `steered` output，再保存用户消息；消息保存成功才移出队列。新 guidance 刷新 step 并消耗正常步数，完成前再次检查 pending input。取消或正常错误收尾保留已接收 guidance；持久化失败立即停止，不在同一次失败处理中自动重试存储。
 

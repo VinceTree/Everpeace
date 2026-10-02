@@ -217,7 +217,7 @@ const receive = async (message) => {
     try { await fs.writeFile(writePath, 'blocked'); } catch { writeDenied = true; }
     try { await fs.readFile(stateFile, 'utf8'); } catch { stateDenied = true; }
     evidence = { writeDenied, stateDenied, networkDenied: await networkDenied() };
-    send({ jsonrpc: '2.0', id: message.id, result: { capabilities: { hoverProvider: true } } });
+    send({ jsonrpc: '2.0', id: message.id, result: { capabilities: { hoverProvider: true, textDocumentSync: 1 } } });
   } else if (message.method === 'textDocument/hover') {
     send({ jsonrpc: '2.0', id: message.id, result: { contents: JSON.stringify(evidence) } });
   }
@@ -250,6 +250,13 @@ process.stdin.on('data', (chunk) => {
     assert.equal(connections, 1);
     assert.equal(await fs.stat(attemptedWrite).then(() => true, () => false), false);
     await assert.rejects(runtime.probeIsolation(), /direct networking was permitted/u);
+    assert.deepEqual(runtime.getIsolationEvidence(), {
+      outcome: "allowed",
+      positiveControl: "passed",
+      transport: "tcp_ipv4",
+      target: "non_loopback",
+      reason: "connection_succeeded",
+    });
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await fs.rm(root, { recursive: true, force: true });

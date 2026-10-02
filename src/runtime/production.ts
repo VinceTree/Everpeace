@@ -29,7 +29,7 @@ import { DEFAULT_MODEL_BASH_TIMEOUT_MS, runBash, type BashOutputPreview, type Ba
 import type { CodeNavigationRuntimeLike } from "../tools/code-navigation.js";
 import { createCodeNavigationFromEnvironment } from "../tools/code-navigation.js";
 import { createEffectiveSandboxPolicy } from "../tools/sandbox-policy.js";
-import type { PermissionPolicy } from "../permissions/policy.js";
+import { defaultPermissions, permissionPolicyRevision, type PermissionPolicy } from "../permissions/policy.js";
 import {
   previewApplyPatch,
   runApplyPatch,
@@ -52,6 +52,7 @@ export type ProductionAgentRestore = Pick<
   | "onUsage"
   | "onPhase"
   | "onEvent"
+  | "onToolEvent"
 >;
 
 export interface ProductionAgentOptions {
@@ -162,7 +163,11 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
 
   let codeNavigation = options.codeNavigation === null ? undefined : options.codeNavigation;
   if (options.codeNavigation === undefined) {
-    try { codeNavigation = createCodeNavigationFromEnvironment(options.workspacePath); }
+    try {
+      codeNavigation = createCodeNavigationFromEnvironment(options.workspacePath, {
+        permissionRevision: () => permissionPolicyRevision(options.io.getPermissions?.() ?? defaultPermissions()),
+      });
+    }
     catch { codeNavigation = undefined; }
   }
   const goalRuntime = options.io.getGoal && options.io.setGoal
@@ -225,6 +230,7 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     ...(restore?.onUsage === undefined ? {} : { onUsage: restore.onUsage }),
     ...(restore?.onPhase === undefined ? {} : { onPhase: restore.onPhase }),
     ...(restore?.onEvent === undefined ? {} : { onEvent: restore.onEvent }),
+    ...(restore?.onToolEvent === undefined ? {} : { onToolEvent: restore.onToolEvent }),
   });
 
   const disposeAgent = agent.dispose.bind(agent);
@@ -308,7 +314,7 @@ export interface ProductionWorkflowInteractionBridge {
 }
 
 export interface ProductionWorkflowOutputBridge {
-  assistant?(text: string): void;
+  assistant?(text: string): void | Promise<void>;
   assistantDelta?(text: string): void;
   tool?(text: string): void;
   toolProgress?: AgentIO["onToolProgress"];

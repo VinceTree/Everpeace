@@ -31,6 +31,14 @@ export interface PreparedOutputAttachment {
   tool_name: string;
 }
 
+/** A bounded slice of an already-redacted retained attachment, using absolute byte offsets. */
+export interface StoredToolOutputRange extends PreparedOutputAttachment {
+  retained_bytes: number;
+  range_start_bytes: number;
+  /** Host-only I/O accounting; excluded from model result fields. */
+  read_bytes?: number;
+}
+
 export interface PreparedToolOutput {
   output: string;
   attachment?: PreparedOutputAttachment;
@@ -95,26 +103,30 @@ export function parseReadToolOutputArguments(argumentsJson: string): ReadToolOut
   };
 }
 
-export function readStoredToolOutput(entry: PreparedOutputAttachment, arguments_: ReadToolOutputArguments, metadata: Record<string, unknown> = {}): Record<string, unknown> {
+export function readStoredToolOutput(entry: PreparedOutputAttachment | StoredToolOutputRange, arguments_: ReadToolOutputArguments, metadata: Record<string, unknown> = {}): Record<string, unknown> {
   try {
+    const rangeStart = "range_start_bytes" in entry ? entry.range_start_bytes : 0;
+    const retainedBytes = "retained_bytes" in entry ? entry.retained_bytes : entry.bytes.byteLength;
     let maximum = arguments_.max_bytes;
     while (true) {
-      const page = utf8Page(entry.bytes, arguments_.offset_bytes, maximum);
-      const retainedComplete = page.end >= entry.bytes.byteLength;
+      const page = utf8Page(entry.bytes, Math.max(0, arguments_.offset_bytes - rangeStart), maximum);
+      const start = rangeStart + page.start;
+      const end = rangeStart + page.end;
+      const retainedComplete = end >= retainedBytes;
       const result = {
         status: "ok",
         output_id: entry.output_id,
         tool_name: entry.tool_name,
         ...(arguments_.session_id === undefined ? {} : { session_id: arguments_.session_id }),
         content: page.content,
-        start_offset_bytes: page.start,
-        end_offset_bytes: page.end,
+        start_offset_bytes: start,
+        end_offset_bytes: end,
         total_bytes: entry.total_bytes,
         original_bytes: entry.original_bytes,
-        retained_bytes: entry.bytes.byteLength,
-        complete: retainedComplete && entry.bytes.byteLength === entry.total_bytes,
-        ...(retainedComplete ? {} : { next_offset_bytes: page.end }),
-        ...(entry.bytes.byteLength < entry.total_bytes ? { retention_truncated: true } : {}),
+        retained_bytes: retainedBytes,
+        complete: retainedComplete && retainedBytes === entry.total_bytes,
+        ...(retainedComplete ? {} : { next_offset_bytes: end }),
+        ...(retainedBytes < entry.total_bytes ? { retention_truncated: true } : {}),
         ...metadata,
       };
       const serializedBytes = Buffer.byteLength(JSON.stringify(result), "utf8");

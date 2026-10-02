@@ -58,7 +58,7 @@ export interface ExecOptions {
   /** CLI supplies 130 for SIGINT and 143 for SIGTERM. */
   signalExitCode?: 130 | 143;
   version?: string;
-  onEvent?(event: ExecEvent): void;
+  onEvent?(event: ExecEvent): void | Promise<void>;
 }
 
 export interface ExecResult {

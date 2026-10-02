@@ -12,6 +12,7 @@ permissions:
 jobs:
   test:
     name: ${{ matrix.os }} · Node 22
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -29,6 +30,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - name: Run tests
+        timeout-minutes: 10
         shell: bash
         run: |
           set +e

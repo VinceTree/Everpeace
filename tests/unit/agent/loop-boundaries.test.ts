@@ -18,6 +18,60 @@ const loop = (overrides: Partial<AgentLoopOptions>): AgentLoopOptions => ({
   sample: async () => response(), record: async () => {}, dispatch: async () => "ok", assistant() {}, ...overrides,
 });
 
+test("assistant delivery blocks tools and the next sample until output drains", async () => {
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const order: string[] = [];
+  let samples = 0;
+  const running = runAgentLoop(loop({
+    sample: async () => {
+      order.push("sample");
+      return samples++ === 0 ? { ...response([call("one")]), output_text: "large answer" } : response();
+    },
+    assistant: async () => { order.push("assistant"); await blocked; },
+    dispatch: async () => { order.push("dispatch"); return "ok"; },
+  }));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ["sample", "assistant"]);
+  release();
+  await running;
+  assert.deepEqual(order, ["sample", "assistant", "dispatch", "sample"]);
+});
+
+test("assistant output failure closes durable calls without dispatch or retry", async () => {
+  const recorded: Record<string, unknown>[] = [];
+  const failure = new Error("output closed");
+  let samples = 0;
+  await assert.rejects(runAgentLoop(loop({
+    sample: async () => { samples++; return { ...response([call("one"), call("two")]), output_text: "answer" }; },
+    record: async (items) => { recorded.push(...items); },
+    assistant: async () => { throw failure; },
+    dispatch: async () => { assert.fail("output failure must prevent dispatch"); },
+  })), (error) => error === failure);
+  assert.equal(samples, 1);
+  assert.deepEqual(recorded.filter((item) => item.type === "function_call_output").map((item) => item.call_id), ["one", "two"]);
+  for (const item of recorded.filter((item) => item.type === "function_call_output")) {
+    assert.equal(JSON.parse(item.output as string).reason, "output_delivery_failed");
+  }
+});
+
+test("tool delivery failure preserves the committed result and closes remaining calls", async () => {
+  const recorded: Record<string, unknown>[] = [];
+  const failure = new Error("tool delivery failed");
+  const dispatched: string[] = [];
+  await assert.rejects(runAgentLoop(loop({
+    sample: async () => response([call("one"), call("two")]),
+    record: async (items) => { recorded.push(...items); },
+    dispatch: async (item) => { dispatched.push(item.call_id); return "completed"; },
+    onToolEvent: async (event) => { if (event.type === "tool_finished") throw failure; },
+  })), (error) => error === failure);
+  assert.deepEqual(dispatched, ["one"]);
+  const outputs = recorded.filter((item) => item.type === "function_call_output");
+  assert.deepEqual(outputs.map((item) => item.call_id), ["one", "two"]);
+  assert.equal(outputs[0]?.output, "completed");
+  assert.equal(JSON.parse(outputs[1]?.output as string).status, "skipped");
+});
+
 async function goalFixture() {
   let goal: SessionGoal | undefined;
   const runtime = new GoalRuntime({ getGoal: async () => goal, setGoal: async (value) => { goal = value; } });

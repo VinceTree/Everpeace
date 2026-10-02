@@ -29,6 +29,11 @@ export class PerformanceTrace {
     this.#counters.set(counter, (this.#counters.get(counter) ?? 0) + value);
   }
 
+  observeMax(counter: string, value: number): void {
+    if (!counter || !Number.isFinite(value) || value < 0) return;
+    this.#counters.set(counter, Math.max(this.#counters.get(counter) ?? 0, value));
+  }
+
   snapshot(): PerformanceTraceSnapshot {
     return {
       timings: Object.fromEntries([...this.#timings].sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) => [key, { ...value }])),

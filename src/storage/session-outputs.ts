@@ -1,7 +1,10 @@
 import { constants, createReadStream, promises as fs } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
-import { RETAINED_TOOL_OUTPUTS, RETAINED_TOOL_OUTPUT_MAX_BYTES, type PreparedOutputAttachment } from "../agent/context-limits.js";
+import { RETAINED_TOOL_OUTPUTS, RETAINED_TOOL_OUTPUT_MAX_BYTES, READ_TOOL_OUTPUT_MAX_BYTES, type PreparedOutputAttachment, type ReadToolOutputArguments, type StoredToolOutputRange } from "../agent/context-limits.js";
+import type { PerformanceTrace } from "../performance/trace.js";
+
+export type { StoredToolOutputRange } from "../agent/context-limits.js";
 
 const MAX_HEADER_BYTES = 4096;
 const MAX_REFERENCE_LINE_BYTES = 8 * 1024 * 1024;
@@ -41,7 +44,7 @@ export function toolOutputAttachmentReference(attachment: PreparedOutputAttachme
 }
 
 /** Retention order comes from append events, including events preceding compaction. */
-export async function readToolOutputReferences(filePath: string, sessionId: string, finalRecordValidator?: (value: unknown) => boolean): Promise<{ references: ToolOutputAttachmentReference[]; safeToClean: boolean }> {
+export async function readToolOutputReferences(filePath: string, sessionId: string, finalRecordValidator?: (value: unknown) => boolean, trace?: PerformanceTrace): Promise<{ references: ToolOutputAttachmentReference[]; safeToClean: boolean }> {
   const references = new Map<string, ToolOutputAttachmentReference>();
   let pending = Buffer.alloc(0);
   let oversized = false;
@@ -76,6 +79,7 @@ export async function readToolOutputReferences(filePath: string, sessionId: stri
   try {
     for await (const value of stream) {
       const chunk = value as Buffer;
+      trace?.increment("output_reference_scan_bytes", chunk.byteLength);
       let offset = 0;
       while (offset < chunk.byteLength) {
         const newline = chunk.indexOf(10, offset);
@@ -117,9 +121,11 @@ function assertId(value: string): void {
 /** Immutable bounded binary attachments; callers serialize commits with their session log. */
 export class SessionOutputStorage {
   readonly #root: string;
+  readonly #trace: PerformanceTrace | undefined;
 
-  constructor(sessionDirectory: string) {
+  constructor(sessionDirectory: string, trace?: PerformanceTrace) {
     this.#root = path.join(sessionDirectory, "outputs");
+    this.#trace = trace;
   }
 
   async sessions(): Promise<string[]> {
@@ -203,6 +209,7 @@ export class SessionOutputStorage {
       if (!stat.isFile() || stat.dev !== before.dev || stat.ino !== before.ino) throw new Error("Tool output attachment changed while opening");
       if (stat.size > RETAINED_TOOL_OUTPUT_MAX_BYTES + MAX_HEADER_BYTES) return null;
       const bytes = await handle.readFile(signal === undefined ? undefined : { signal });
+      this.#trace?.increment("attachment_read_bytes", bytes.byteLength);
       signal?.throwIfAborted();
       const newline = bytes.indexOf(10);
       if (newline < 0 || newline >= MAX_HEADER_BYTES) return null;
@@ -226,6 +233,71 @@ export class SessionOutputStorage {
     } finally {
       await handle?.close();
     }
+  }
+
+  /** Read v1 header plus one UTF-8 page; the existing format requires no migration. */
+  async readRange(sessionId: string, reference: ToolOutputAttachmentReference, arguments_: ReadToolOutputArguments, signal?: AbortSignal): Promise<StoredToolOutputRange | null> {
+    signal?.throwIfAborted();
+    assertId(sessionId);
+    assertId(reference.output_id);
+    if (!Number.isSafeInteger(arguments_.offset_bytes) || arguments_.offset_bytes < 0
+      || !Number.isSafeInteger(arguments_.max_bytes) || arguments_.max_bytes < 1 || arguments_.max_bytes > READ_TOOL_OUTPUT_MAX_BYTES) {
+      throw new RangeError("Invalid retained output byte range");
+    }
+    if (!await this.#directory(this.#root, false) || !await this.#directory(this.#sessionDirectory(sessionId), false)) return null;
+    const filePath = this.#filePath(sessionId, reference.output_id);
+    let handle: FileHandle | undefined;
+    try {
+      const before = await fs.lstat(filePath);
+      if (!before.isFile() || before.isSymbolicLink()) throw new Error("Tool output attachment is not a regular file");
+      handle = await fs.open(filePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.dev !== before.dev || stat.ino !== before.ino) throw new Error("Tool output attachment changed while opening");
+      if (stat.size > RETAINED_TOOL_OUTPUT_MAX_BYTES + MAX_HEADER_BYTES) return null;
+      let readBytes = 0;
+      const readAt = async (length: number, position: number): Promise<Buffer> => {
+        const bytes = Buffer.allocUnsafe(length);
+        let offset = 0;
+        while (offset < length) {
+          signal?.throwIfAborted();
+          const result = await handle!.read(bytes, offset, length - offset, position + offset);
+          readBytes += result.bytesRead;
+          this.#trace?.increment("attachment_read_bytes", result.bytesRead);
+          if (result.bytesRead === 0) break;
+          offset += result.bytesRead;
+        }
+        signal?.throwIfAborted();
+        return bytes.subarray(0, offset);
+      };
+      const header = await readAt(Math.min(MAX_HEADER_BYTES, stat.size), 0);
+      const newline = header.indexOf(10);
+      if (newline < 0 || newline >= MAX_HEADER_BYTES) return null;
+      const metadata: unknown = JSON.parse(header.subarray(0, newline).toString("utf8"));
+      if (!metadata || typeof metadata !== "object" || (metadata as Record<string, unknown>).version !== 1 || !isToolOutputAttachmentReference(metadata)) return null;
+      for (const key of ["output_id", "tool_name", "total_bytes", "original_bytes", "retained_bytes"] as const) {
+        if (metadata[key] !== reference[key]) return null;
+      }
+      if (stat.size !== newline + 1 + reference.retained_bytes) return null;
+      const start = Math.min(arguments_.offset_bytes, reference.retained_bytes);
+      const count = Math.min(reference.retained_bytes - start, arguments_.max_bytes + 4);
+      const content = await readAt(count, newline + 1 + start);
+      if (content.byteLength !== count) return null;
+      const after = await handle.stat();
+      const current = await fs.lstat(filePath);
+      if (!current.isFile() || current.isSymbolicLink() || current.dev !== stat.dev || current.ino !== stat.ino
+        || after.size !== stat.size || after.mtimeMs !== stat.mtimeMs || after.ctimeMs !== stat.ctimeMs
+        || current.size !== stat.size || current.mtimeMs !== stat.mtimeMs || current.ctimeMs !== stat.ctimeMs) return null;
+      signal?.throwIfAborted();
+      return {
+        output_id: reference.output_id, tool_name: reference.tool_name,
+        total_bytes: reference.total_bytes, original_bytes: reference.original_bytes,
+        retained_bytes: reference.retained_bytes, range_start_bytes: start, bytes: content,
+        read_bytes: readBytes,
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT" || error instanceof SyntaxError) return null;
+      throw error;
+    } finally { await handle?.close(); }
   }
 
   async cleanup(sessionId: string, retainedIds: readonly string[]): Promise<void> {

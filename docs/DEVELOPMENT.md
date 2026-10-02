@@ -77,11 +77,30 @@ pnpm exec tsx --test --test-name-pattern="cancel" tests/unit/agent/react-agent.t
 
 ## 独立测试 CI 与证据范围
 
-[Test workflow](../.github/workflows/test.yml) 在 pull request 和 main push 上分别运行 Windows/Linux 的 Node 22 门禁：安装 pnpm、通过冻结 lockfile 安装平台 ripgrep optional package、类型检查、完整测试、构建、差异检查。CI 不再显式安装系统 `rg`，应用始终通过包内绝对路径运行平台二进制；缺少匹配 optional package 的行为由 resolver fixture 单独覆盖。它独立于 Release workflow，不能为避免发布而跳过测试 CI。
+[Test workflow](../.github/workflows/test.yml) 在 pull request 和 main push 上分别运行 Windows/Linux 的 Node 22 门禁：安装 pnpm、通过冻结 lockfile 安装平台 ripgrep optional package、类型检查、完整测试、构建、差异检查。job 最多 20 分钟，测试 step 最多 10 分钟，进程或管道清理回归不能无限挂起 runner。CI 不再显式安装系统 `rg`，应用始终通过包内绝对路径运行平台二进制；缺少匹配 optional package 的行为由 resolver fixture 单独覆盖。它独立于 Release workflow，不能为避免发布而跳过测试 CI。
 
 [sandbox-boundaries.test.ts](../tests/unit/tools/sandbox-boundaries.test.ts) 的真实 Windows native sandbox 测试在非 Windows 跳过；在 Windows 且 `GITHUB_ACTIONS=true` 时也明确跳过，因为 hosted runner 无法初始化所需嵌套 sandbox。策略、审批与启动失败关闭仍有单测；跳过结果不能当作真实隔离验收通过。
 
+完整测试入口同时覆盖 [MCP 协议 fixture](../tests/unit/mcp/protocol.test.ts)、[stdio 恢复 fixture](../tests/unit/mcp/stdio-recovery.test.ts) 与 [exec 子进程 fixture](../tests/unit/cli/exec-process.test.ts)：MCP 测试实际启动 SDK stdio server 和本地 Streamable HTTP endpoint，并检查中断调用不重放、初始化失败的旧进程退出后才重连；exec 测试使用 fake provider 与真实 stdout/stderr 管道检验慢读、关闭、停滞和清理。这些测试在 Windows/Linux 都运行，不需要 keyring、模型网络调用或额外服务。Linux 使用真实 OS 信号；Windows fixture 通过 IPC 触发已注册的 SIGINT/SIGTERM handler，不能代替真实 Windows Terminal 的 Ctrl+C 验收。现有测试 glob 已纳入这些文件，无需再并行重复整套门禁。
+
 完整测试、定向测试、平台跳过、基础设施失败和手工验收分别报告。单测目录也包含部分真实进程集成测试，不能仅凭目录名把全部检查描述为纯模拟。
+
+## 离线 Windows Terminal 手工验收
+
+[开发专用 TUI fixture](../tests/fixtures/tui-offline.ts) 使用 fake provider，复用生产 Agent、TaskRunner、Session 恢复和分支。它关闭 Memory、MCP、Skills 与 navigation，不读取用户 keyring/config。先在真实 Windows Terminal 的 PowerShell 中，从仓库运行：
+
+```powershell
+pnpm exec tsx tests/fixtures/tui-offline.ts --root "$env:TEMP\everpeace-tui-offline"
+```
+
+`--root` 必须是绝对路径，并指向空目录或本 fixture 已标记的目录；workspace、sessions 和 input-history 都写入该目录。`--help` 不初始化目录。首次启动播种 `Offline debt seed`，按以下顺序保留同一 root 检查：
+
+1. `/resume` 选择 seed，使用 `/status` 检查待验证债务，再执行 `/fork offline-child`。
+2. 退出后以相同 root 重启，`/resume` 选择子会话。使用 `/plan` 检查 Plan 并取消审批，确认分支待继续状态没有被消耗。
+3. coding 输入 `wait`，按 Ctrl+C 取消，再次 coding，检查原有验证债务仍保留。`wait` 会等待最多 60 秒并响应取消，普通输入立即返回离线响应。
+4. 输入 `large` 产生 300 行中文、emoji 和缩进内容，检查 resize、scrollback 和单 prompt；另检查直接 `!` 输出。
+
+fixture 中验证命令仍通过生产原生 sandbox；失败保持 unverified，不回退宿主执行。直接 `!` 是工作目录固定在 fixture workspace 的正常用户 PTY。自动测试不替代这里的终端体验验收；执行后记录终端版本、步骤和结果，未执行时明确标记 pending。
 
 ## 离线评测与真实请求
 

@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 import os from "node:os";
 import path from "node:path";
 import lockfile from "proper-lockfile";
+import { PerformanceTrace } from "../performance/trace.js";
 import { isCommandRecord, type CommandRecord } from "../tools/command-record.js";
 import {
   applyUsageSample,
@@ -21,7 +22,7 @@ import type { LearnedMemoryPolicy } from "../memory/learned-memory.js";
 import { isModelRequestSettings, type ModelRequestSettings } from "../providers/capabilities.js";
 import { normalizeWorkspacePath } from "../memory/learned-memory.js";
 import { cloneTaskProgress, isTaskProgress, type TaskProgress } from "../workflow/task-progress.js";
-import { RETAINED_TOOL_OUTPUTS, type PreparedOutputAttachment } from "../agent/context-limits.js";
+import { RETAINED_TOOL_OUTPUTS, type PreparedOutputAttachment, type ReadToolOutputArguments, type StoredToolOutputRange } from "../agent/context-limits.js";
 import {
   SessionOutputStorage,
   isToolOutputAttachmentReference,
@@ -206,6 +207,7 @@ export interface SessionStoreLike {
   captureSessionBoundary?(sessionId: string): Promise<number>;
   readToolOutput?(sessionId: string, outputId: string): Promise<StoredToolOutput | null>;
   readReferencedToolOutput?(sessionId: string, reference: ToolOutputAttachmentReference, options?: SessionOutputReadOptions): Promise<StoredToolOutput | null>;
+  readReferencedToolOutputPage?(sessionId: string, reference: ToolOutputAttachmentReference, arguments_: ReadToolOutputArguments, options?: SessionOutputReadOptions): Promise<StoredToolOutputRange | null>;
   compactContext(
     sessionId: string,
     items: readonly Record<string, unknown>[],
@@ -353,6 +355,7 @@ export interface SessionStoreOptions {
   directory?: string;
   now?: () => Date;
   createId?: () => string;
+  trace?: PerformanceTrace;
 }
 
 export function defaultSessionDirectory(
@@ -713,57 +716,96 @@ function workflowSnapshot(workflow: WorkflowState): WorkflowState {
   };
 }
 
-function parseSession(contents: string, filePath: string): LoadedSession {
-  const hasIncompleteTail = contents.length > 0 && !contents.endsWith("\n");
-  const rawLines = contents.split("\n");
-  if (rawLines.at(-1) === "") rawLines.pop();
-
-  const events: SessionEvent[] = [];
-  for (let index = 0; index < rawLines.length; index += 1) {
-    const line = rawLines[index]!;
-    if (!line.trim()) continue;
-    try {
-      events.push(parseEvent(JSON.parse(line)));
-    } catch (error) {
-      if (hasIncompleteTail && index === rawLines.length - 1) break;
-      const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`Invalid session JSONL at ${filePath}:${index + 1}: ${reason}`);
+/** Decode complete records only; replay retains one record, not the whole raw log. */
+async function* sessionRecords(filePath: string, trace: PerformanceTrace, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const handle = await fs.open(filePath, "r");
+  let input: ReturnType<typeof createReadStream> | undefined;
+  try {
+    const stat = await handle.stat();
+    if (stat.size === 0) return;
+    input = handle.createReadStream({ start: 0, end: stat.size - 1, highWaterMark: 64 * 1024, autoClose: false, ...(signal ? { signal } : {}) });
+    let pending: Buffer[] = [];
+    let pendingBytes = 0;
+    let number = 0;
+    for await (const value of input) {
+      signal?.throwIfAborted();
+      const chunk = value as Buffer;
+      trace.increment("session_log_read_bytes", chunk.byteLength);
+      let offset = 0;
+      while (offset < chunk.byteLength) {
+        signal?.throwIfAborted();
+        const newline = chunk.indexOf(10, offset);
+        const end = newline < 0 ? chunk.byteLength : newline;
+        const part = chunk.subarray(offset, end);
+        if (part.byteLength) { pending.push(part); pendingBytes += part.byteLength; }
+        trace.observeMax("session_replay_max_record_bytes", pendingBytes);
+        trace.observeMax("session_replay_max_input_buffer_bytes", pendingBytes + chunk.byteLength);
+        if (newline < 0) break;
+        const bytes = pending.length === 1 ? pending[0]! : Buffer.concat(pending, pendingBytes);
+        pending = [];
+        pendingBytes = 0;
+        yield { line: bytes.toString("utf8"), number: ++number, terminated: true };
+        offset = newline + 1;
+      }
     }
+    if (pendingBytes) yield { line: Buffer.concat(pending, pendingBytes).toString("utf8"), number: ++number, terminated: false };
+  } finally {
+    input?.destroy();
+    await handle.close();
   }
+}
 
-  const header = events[0];
-  if (header?.type !== "session_created") {
-    throw new Error(`Session file has no valid header: ${filePath}`);
-  }
-
-  let title = header.title;
-  let titlePending = header.title_pending;
-  let model = header.model;
-  let updatedAt = header.at;
+async function readSession(filePath: string, trace: PerformanceTrace, summaryOnly = false): Promise<LoadedSession> {
+  let header: SessionCreatedEvent | undefined;
+  let title = "";
+  let titlePending = false;
+  let model: SessionModelRef | undefined;
+  let updatedAt = "";
   const timeline: StoredTimelineEntry[] = [];
   let context: Array<Record<string, unknown>> = [];
-  let usage = createEmptySessionUsage(header.usage_tracking);
+  let usage = createEmptySessionUsage();
 
   let goal: SessionGoal | undefined;
   let workflow: WorkflowState | undefined;
   let taskProgress: TaskProgress | undefined;
   let memoryPolicy: LearnedMemoryPolicy | undefined;
-  let lineage = header.lineage === undefined ? undefined : cloneLineage(header.lineage);
+  let lineage: SessionLineage | undefined;
   let forkPendingResume = false;
-  for (const event of events.slice(1)) {
+  for await (const record of sessionRecords(filePath, trace)) {
+    if (!record.line.trim()) continue;
+    let event: SessionEvent;
+    try { event = parseEvent(JSON.parse(record.line)); }
+    catch (error) {
+      if (!record.terminated) break;
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`Invalid session JSONL at ${filePath}:${record.number}: ${reason}`);
+    }
+    trace.increment("session_log_records");
+    if (!header) {
+      if (event.type !== "session_created") throw new Error(`Session file has no valid header: ${filePath}`);
+      header = event;
+      title = header.title;
+      titlePending = header.title_pending;
+      model = header.model;
+      updatedAt = header.at;
+      usage = createEmptySessionUsage(header.usage_tracking);
+      lineage = header.lineage === undefined ? undefined : cloneLineage(header.lineage);
+      continue;
+    }
     updatedAt = event.at;
     if (event.type === "title_updated") {
       title = event.title;
       titlePending = false;
     }
-    if (event.type === "timeline_entry") timeline.push(event.entry);
-    if (event.type === "context_append") context.push(...event.items);
+    if (event.type === "timeline_entry" && !summaryOnly) timeline.push(event.entry);
+    if (event.type === "context_append" && !summaryOnly) context.push(...event.items);
     if (event.type === "context_compacted") {
-      context = event.items.map((item) => ({ ...item }));
+      if (!summaryOnly) context = event.items.map((item) => ({ ...item }));
       usage = applyCompactionUsage(usage, event.usage);
     }
     if (event.type === "context_pruned") {
-      context = event.items.map((item) => ({ ...item }));
+      if (!summaryOnly) context = event.items.map((item) => ({ ...item }));
       // Pruning changes the effective request without adding provider usage.
       // The next response supplies a fresh measured context value.
       usage = { ...usage, context_tokens: null };
@@ -796,6 +838,7 @@ function parseSession(contents: string, filePath: string): LoadedSession {
     if (event.type === "fork_resume_updated") forkPendingResume = event.pending;
   }
 
+  if (!header || !model) throw new Error(`Session file has no valid header: ${filePath}`);
   return {
     summary: {
       id: header.session_id,
@@ -901,25 +944,8 @@ async function recoverSessionTail(filePath: string): Promise<boolean> {
   } finally { await handle.close(); }
 }
 
-async function fileEndsWithNewline(filePath: string, size: number): Promise<boolean> {
-  if (size === 0) return true;
-  const handle = await fs.open(filePath, "r");
-  try {
-    const value = Buffer.alloc(1);
-    await handle.read(value, 0, 1, size - 1);
-    return value[0] === 10;
-  } finally {
-    await handle.close();
-  }
-}
-
-async function readSearchProjection(filePath: string, signal?: AbortSignal): Promise<SessionSearchProjection> {
+async function readSearchProjection(filePath: string, trace: PerformanceTrace, signal?: AbortSignal): Promise<SessionSearchProjection> {
   signal?.throwIfAborted();
-  const stat = await fs.stat(filePath);
-  const terminated = await fileEndsWithNewline(filePath, stat.size);
-  const input = createReadStream(filePath, { encoding: "utf8" });
-  const lines = createInterface({ input, crlfDelay: Infinity });
-  let pending: string | undefined;
   let lineNumber = 0;
   let header: SessionCreatedEvent | undefined;
   let title = "";
@@ -985,16 +1011,9 @@ async function readSearchProjection(filePath: string, signal?: AbortSignal): Pro
     if (event.type === "fork_resume_updated") forkPendingResume = event.pending;
   };
 
-  try {
-    for await (const line of lines) {
-      signal?.throwIfAborted();
-      if (pending !== undefined) processLine(pending, false);
-      pending = line;
-    }
-    if (pending !== undefined) processLine(pending, !terminated);
-  } finally {
-    lines.close();
-    input.destroy();
+  for await (const record of sessionRecords(filePath, trace, signal)) {
+    processLine(record.line, !record.terminated);
+    trace.increment("session_search_records");
   }
   if (!header || !model) throw new Error(`Session file has no valid header: ${filePath}`);
   return {
@@ -1090,6 +1109,7 @@ function sessionHeaderDigest(serialized: string): string {
 }
 
 export class SessionStore implements SessionStoreLike {
+  readonly performanceTrace: PerformanceTrace;
   readonly #directory: string;
   readonly #now: () => Date;
   readonly #createId: () => string;
@@ -1103,10 +1123,11 @@ export class SessionStore implements SessionStoreLike {
   #searchCacheBytes = 0;
 
   constructor(options: SessionStoreOptions = {}) {
+    this.performanceTrace = options.trace ?? new PerformanceTrace();
     this.#directory = options.directory ?? defaultSessionDirectory();
     this.#now = options.now ?? (() => new Date());
     this.#createId = options.createId ?? randomUUID;
-    this.#outputs = new SessionOutputStorage(this.#directory);
+    this.#outputs = new SessionOutputStorage(this.#directory, this.performanceTrace);
   }
 
   get directory(): string {
@@ -1261,6 +1282,27 @@ export class SessionStore implements SessionStoreLike {
       await this.#enqueue(sessionId, async () => {
         if (!(await fs.lstat(this.#filePath(sessionId))).isFile()) return;
         output = await this.#outputs.read(sessionId, reference, options?.signal);
+      }, false, options);
+      return output;
+    } catch (error) {
+      if (this.#deletedSessionIds.has(sessionId) || (error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  async readReferencedToolOutputPage(sessionId: string, reference: ToolOutputAttachmentReference, arguments_: ReadToolOutputArguments, options?: SessionOutputReadOptions): Promise<StoredToolOutputRange | null> {
+    this.#assertSessionId(sessionId);
+    if (!isToolOutputAttachmentReference(reference) || this.#deletedSessionIds.has(sessionId)) return null;
+    let output: StoredToolOutputRange | null = null;
+    try {
+      await this.#enqueue(sessionId, async () => {
+        checkOutputReadBudget(options);
+        const log = await fs.lstat(this.#filePath(sessionId));
+        if (!log.isFile() || log.isSymbolicLink()) return;
+        output = await this.#outputs.readRange(sessionId, reference, arguments_, options?.signal);
+        checkOutputReadBudget(options);
+        const current = await fs.lstat(this.#filePath(sessionId));
+        if (!current.isFile() || current.isSymbolicLink() || current.dev !== log.dev || current.ino !== log.ino) output = null;
       }, false, options);
       return output;
     } catch (error) {
@@ -1565,8 +1607,7 @@ export class SessionStore implements SessionStoreLike {
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
       try {
-        const contents = await fs.readFile(path.join(this.#directory, entry.name), "utf8");
-        sessions.push(parseSession(contents, entry.name).summary);
+        sessions.push((await readSession(path.join(this.#directory, entry.name), this.performanceTrace, true)).summary);
       } catch {
         skipped += 1;
       }
@@ -1673,10 +1714,9 @@ export class SessionStore implements SessionStoreLike {
     await this.#ensureOutputsInitialized();
     const pending = this.#writeQueues.get(sessionId);
     if (pending) await pending;
-    return parseSession(
-      await fs.readFile(this.#filePath(sessionId), "utf8"),
-      this.#filePath(sessionId),
-    );
+    const started = performance.now();
+    try { return await readSession(this.#filePath(sessionId), this.performanceTrace); }
+    finally { this.performanceTrace.record("session_load", performance.now() - started); }
   }
 
   #append(sessionId: string, event: SessionEvent): Promise<void> {
@@ -1854,7 +1894,7 @@ export class SessionStore implements SessionStoreLike {
     const stat = await fs.stat(this.#filePath(sessionId));
     const cached = this.#outputReferences.get(sessionId);
     if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) return cached;
-    const state = { ...await readToolOutputReferences(this.#filePath(sessionId), sessionId, isValidSessionEvent), size: stat.size, mtimeMs: stat.mtimeMs };
+    const state = { ...await readToolOutputReferences(this.#filePath(sessionId), sessionId, isValidSessionEvent, this.performanceTrace), size: stat.size, mtimeMs: stat.mtimeMs };
     this.#outputReferences.set(sessionId, state);
     return state;
   }
@@ -1875,10 +1915,12 @@ export class SessionStore implements SessionStoreLike {
     if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) {
       this.#searchCache.delete(filePath);
       this.#searchCache.set(filePath, cached);
+      this.performanceTrace.increment("session_search_cache_hit");
       return cached.projection;
     }
     if (cached) this.#dropSearchCache(filePath);
-    const projection = await readSearchProjection(filePath, signal);
+    this.performanceTrace.increment("session_search_cache_miss");
+    const projection = await readSearchProjection(filePath, this.performanceTrace, signal);
     signal?.throwIfAborted();
     const finalStat = await fs.stat(filePath);
     const bytes = Buffer.byteLength(JSON.stringify(projection), "utf8");

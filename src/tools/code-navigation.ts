@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { createServer } from "node:net";
+import { connect, createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import type { Readable } from "node:stream";
@@ -63,6 +63,23 @@ export interface CodeNavigationRuntimeLike {
   query(request: CodeNavigationRequest, signal?: AbortSignal): Promise<CodeNavigationResult>;
   describe(): string;
   probeIsolation?(signal?: AbortSignal): Promise<void>;
+  getIsolationEvidence?(): Readonly<LanguageServerIsolationEvidence> | undefined;
+}
+
+export interface LanguageServerIsolationEvidence {
+  outcome: "allowed" | "denied" | "inconclusive";
+  positiveControl: "passed" | "failed" | "not_run";
+  transport: "tcp_ipv4";
+  target: "non_loopback" | "loopback";
+  reason: string;
+  socketError?: string;
+}
+
+export class LanguageServerIsolationError extends Error {
+  constructor(readonly evidence: Readonly<LanguageServerIsolationEvidence>) {
+    super(`Language-server isolation is unavailable: ${evidence.outcome} (${evidence.reason}); ${evidence.outcome === "allowed" ? "direct networking was permitted" : "direct networking was not conclusively denied"}; use lexical search`);
+    this.name = "LanguageServerIsolationError";
+  }
 }
 
 export interface LanguageServerProcess {
@@ -273,6 +290,54 @@ function supportsOperation(initializeResult: unknown, operation: CodeNavigationO
   return value === true || (typeof value === "object" && value !== null);
 }
 
+function validateSynchronization(initializeResult: unknown): void {
+  const capabilities = (initializeResult as { capabilities: Record<string, unknown> }).capabilities;
+  if (capabilities.positionEncoding !== undefined && capabilities.positionEncoding !== "utf-16") {
+    throw new Error("Language server must use UTF-16 position encoding");
+  }
+  const sync = capabilities.textDocumentSync;
+  if (sync !== 1 && sync !== 2 && !(sync && typeof sync === "object" && (sync as Record<string, unknown>).openClose === true)) {
+    throw new Error("Language server does not support transient document open/close synchronization");
+  }
+}
+
+function boundedUtf8(text: string, maxBytes: number): string {
+  const bytes = Buffer.from(text, "utf8");
+  if (bytes.length <= maxBytes) return text;
+  let end = maxBytes;
+  while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end -= 1;
+  return bytes.subarray(0, end).toString("utf8");
+}
+
+async function positiveNetworkControl(host: string, port: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    const socket = connect({ host, port });
+    let settled = false;
+    let received = "";
+    const finish = (error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", aborted);
+      socket.destroy();
+      if (error) reject(error);
+      else resolve();
+    };
+    const aborted = () => finish(signal?.reason ?? new Error("Isolation probe cancelled"));
+    const timer = setTimeout(() => finish(new Error("Host network positive control timed out")), 1_500);
+    socket.on("data", (data: Buffer) => {
+      received += data.toString("utf8");
+      if (received === "everpeace-lsp-probe") finish();
+      else if (!"everpeace-lsp-probe".startsWith(received)) finish(new Error("Invalid positive-control response"));
+    });
+    socket.once("end", () => finish(new Error("Positive-control connection closed before confirmation")));
+    socket.once("error", finish);
+    signal?.addEventListener("abort", aborted, { once: true });
+    if (signal?.aborted) aborted();
+  });
+}
+
 function validatePosition(text: string, request: CodeNavigationRequest): void {
   const line = text.replace(/\r\n/gu, "\n").split("\n")[request.line - 1];
   if (line === undefined || request.column - 1 > line.length) throw new Error("Code navigation position is outside the current UTF-16 document bounds");
@@ -287,6 +352,7 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
   readonly #permissionRevision: (() => string) | undefined;
   readonly #verifyIsolation: boolean;
   #isolationProbe: Promise<void> | undefined;
+  #isolationEvidence: Readonly<LanguageServerIsolationEvidence> | undefined;
   #tail: Promise<void> = Promise.resolve();
 
   constructor(options: {
@@ -309,6 +375,10 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
 
   describe(): string {
     return `${this.#command} ${this.#args.join(" ")} (native read-only sandbox)`.trim();
+  }
+
+  getIsolationEvidence(): Readonly<LanguageServerIsolationEvidence> | undefined {
+    return this.#isolationEvidence;
   }
 
   probeIsolation(signal?: AbortSignal): Promise<void> {
@@ -345,8 +415,13 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
       combined.throwIfAborted();
       if (this.#verifyIsolation) await this.probeIsolation(combined);
       const root = await fs.realpath(this.#workspacePath);
-      const target = await fs.realpath(path.resolve(root, request.path));
+      const deniedRoots = [...this.#policy.deniedRoots, ...await Promise.all(this.#policy.deniedRoots.map((denied) => fs.realpath(denied).catch(() => denied)))];
+      const denied = (target: string) => deniedRoots.some((deniedRoot) => inside(deniedRoot, target));
+      const requestedPath = path.resolve(root, request.path);
+      if (denied(requestedPath)) throw new Error("Code navigation cannot read protected application state or control metadata");
+      const target = await fs.realpath(requestedPath);
       if (!inside(root, target)) throw new Error("Code navigation is limited to the current workspace");
+      if (denied(target)) throw new Error("Code navigation cannot read protected application state or control metadata");
       const stat = await fs.stat(target);
       if (!stat.isFile() || stat.size > MAX_DOCUMENT_BYTES) throw new Error("Code navigation requires a bounded regular file");
       const text = decodeTextFile(await fs.readFile(target)).text;
@@ -356,9 +431,10 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
       const initialized = await rpc.request("initialize", {
         processId: process.pid,
         rootUri: pathToFileURL(root).href,
-        capabilities: { workspace: { applyEdit: false }, textDocument: { definition: {}, references: {}, implementation: {}, hover: {} } },
+        capabilities: { general: { positionEncodings: ["utf-16"] }, workspace: { applyEdit: false }, textDocument: { definition: {}, references: {}, implementation: {}, hover: {} } },
       }, combined);
       if (!supportsOperation(initialized, request.operation)) throw new Error(`Language server does not advertise ${request.operation} support`);
+      validateSynchronization(initialized);
       await rpc.notify("initialized", {});
       await rpc.notify("textDocument/didOpen", { textDocument: { uri, languageId: languageId(target), version: 1, text } });
       openedUri = uri;
@@ -369,7 +445,7 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
       }, combined);
       if (request.operation === "hover") {
         const hover = contentText(raw);
-        return { operation: request.operation, hover: hover ? Buffer.from(hover, "utf8").subarray(0, MAX_HOVER_BYTES).toString("utf8") : null, truncated: Buffer.byteLength(hover, "utf8") > MAX_HOVER_BYTES };
+        return { operation: request.operation, hover: hover ? boundedUtf8(hover, MAX_HOVER_BYTES) : null, truncated: Buffer.byteLength(hover, "utf8") > MAX_HOVER_BYTES };
       }
       const values = raw === null || raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
       const locations: CodeNavigationLocation[] = [];
@@ -380,9 +456,13 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
         const range = (record.range ?? record.targetSelectionRange) as { start?: { line?: unknown; character?: unknown }; end?: { line?: unknown; character?: unknown } } | undefined;
         if (!locationUri || locationUri.slice(0, 5).toLowerCase() !== "file:" || !range?.start || !range.end) continue;
         let locationPath: string;
-        try { locationPath = await fs.realpath(fileURLToPath(locationUri)); }
+        try {
+          const requestedLocation = fileURLToPath(locationUri);
+          if (denied(requestedLocation)) continue;
+          locationPath = await fs.realpath(requestedLocation);
+        }
         catch { continue; }
-        if (!inside(root, locationPath)) continue;
+        if (!inside(root, locationPath) || denied(locationPath)) continue;
         if (![range.start.line, range.start.character, range.end.line, range.end.character].every((coordinate) => Number.isSafeInteger(coordinate) && (coordinate as number) >= 0)) continue;
         locations.push({
           path: path.relative(root, locationPath).split(path.sep).join("/"),
@@ -406,36 +486,50 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
 
   async #probeNetworkIsolation(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
-    const root = await fs.realpath(this.#workspacePath);
+    let evidence: LanguageServerIsolationEvidence = {
+      outcome: "inconclusive", positiveControl: "not_run", transport: "tcp_ipv4", target: "loopback", reason: "probe_not_completed",
+    };
     const listener = createServer();
     const sockets = new Set<import("node:net").Socket>();
+    let acceptedConnections = 0;
     listener.on("connection", (socket) => {
+      acceptedConnections += 1;
       sockets.add(socket);
+      socket.on("error", () => socket.destroy());
       socket.once("close", () => sockets.delete(socket));
-      socket.destroy();
+      socket.end("everpeace-lsp-probe");
     });
-    await new Promise<void>((resolve, reject) => {
-      listener.once("error", reject);
-      listener.listen(0, "0.0.0.0", resolve);
-    });
-    const address = listener.address();
-    if (!address || typeof address === "string") {
-      listener.close();
-      throw new Error("Language-server isolation probe could not create a network listener; use lexical search");
-    }
-    const host = Object.values(os.networkInterfaces()).flat().find((candidate) =>
-      candidate?.family === "IPv4" && !candidate.internal)?.address ?? "127.0.0.1";
-    const script = [
-      "const { connect } = require('node:net');",
-      "let done = false;",
-      "const finish = (value) => { if (done) return; done = true; clearTimeout(timer); socket.destroy(); process.stdout.write(value); };",
-      "const socket = connect({ host: process.argv[1], port: Number(process.argv[2]) });",
-      "socket.once('connect', () => finish('allowed'));",
-      "socket.once('error', () => finish('denied'));",
-      "const timer = setTimeout(() => finish('timeout'), 1500);",
-    ].join("");
     let processHandle: LanguageServerProcess | undefined;
     try {
+      const root = await fs.realpath(this.#workspacePath);
+      await new Promise<void>((resolve, reject) => {
+        listener.once("error", reject);
+        listener.listen(0, "0.0.0.0", resolve);
+      });
+      const address = listener.address();
+      if (!address || typeof address === "string") throw new Error("No network listener address");
+      const host = Object.values(os.networkInterfaces()).flat().find((candidate) =>
+        candidate?.family === "IPv4" && !candidate.internal)?.address ?? "127.0.0.1";
+      evidence.target = host === "127.0.0.1" ? "loopback" : "non_loopback";
+      try {
+        await positiveNetworkControl(host, address.port, signal);
+        evidence.positiveControl = "passed";
+      } catch (error) {
+        evidence.positiveControl = "failed";
+        evidence.reason = "positive_control_failed";
+        throw error;
+      }
+      signal?.throwIfAborted();
+      const baselineConnections = acceptedConnections;
+      const script = [
+        "const { connect } = require('node:net');",
+        "let done = false; let timer;",
+        "const finish = (value) => { if (done) return; done = true; clearTimeout(timer); socket.destroy(); process.stdout.write(JSON.stringify(value)); };",
+        "const socket = connect({ host: process.argv[1], port: Number(process.argv[2]) });",
+        "socket.once('connect', () => finish({ outcome: 'allowed' }));",
+        "socket.once('error', (error) => finish({ outcome: ['EACCES', 'EPERM'].includes(error.code) ? 'denied' : 'inconclusive', code: error.code }));",
+        "timer = setTimeout(() => finish({ outcome: 'inconclusive', code: 'TIMEOUT' }), 1500);",
+      ].join("");
       processHandle = this.#startProcess({
         command: process.execPath,
         args: ["-e", script, host, String(address.port)],
@@ -453,25 +547,44 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
       const timeout = AbortSignal.timeout(5_000);
       const combined = AbortSignal.any([...(signal ? [signal] : []), timeout]);
       combined.throwIfAborted();
+      let rejectAborted!: () => void;
       const aborted = new Promise<never>((_resolve, reject) => {
-        combined.addEventListener("abort", () => reject(combined.reason), { once: true });
+        rejectAborted = () => reject(combined.reason);
+        combined.addEventListener("abort", rejectAborted, { once: true });
       });
-      const result = await Promise.race([processHandle.exit, aborted]);
+      const result = await Promise.race([processHandle.exit, aborted]).finally(() => combined.removeEventListener("abort", rejectAborted));
       const output = Buffer.concat(chunks).toString("utf8").trim();
       if (result && result.exitCode !== 0) {
-        throw new Error(`Language-server isolation probe failed with exit code ${result.exitCode}: ${result.stderr || "no diagnostic output"}`);
+        evidence.reason = "probe_process_failed";
+        throw new Error("Isolation probe process failed");
       }
-      if (output !== "denied") {
-        throw new Error(`Language-server isolation is unavailable because direct networking was ${output === "allowed" ? "permitted" : "not conclusively denied"}; use lexical search`);
+      let parsed: unknown;
+      try { parsed = JSON.parse(output); } catch { /* classified as inconclusive below */ }
+      const record = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
+      const errorCode = typeof record?.code === "string" && /^[A-Z][A-Z0-9_]{0,31}$/u.test(record.code) ? record.code : undefined;
+      if (acceptedConnections > baselineConnections || (bytes <= 4096 && record?.outcome === "allowed")) {
+        evidence = { ...evidence, outcome: "allowed", reason: "connection_succeeded" };
+      } else if (bytes <= 4096 && record?.outcome === "denied" && (errorCode === "EACCES" || errorCode === "EPERM")) {
+        evidence = { ...evidence, outcome: "denied", reason: "socket_permission_denied", socketError: errorCode };
+      } else {
+        evidence = { ...evidence, reason: errorCode === "TIMEOUT" ? "socket_timeout" : record?.outcome === "inconclusive" ? "socket_error_not_denial" : "invalid_probe_output", ...(errorCode ? { socketError: errorCode } : {}) };
       }
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      if (evidence.reason === "probe_not_completed") evidence.reason = "probe_failed";
     } finally {
       try {
-        await processHandle?.terminate();
+        try { await processHandle?.terminate(); }
+        catch {
+          evidence = { ...evidence, outcome: "inconclusive", reason: "probe_cleanup_failed" };
+        }
       } finally {
         for (const socket of sockets) socket.destroy();
-        await new Promise<void>((resolve) => listener.close(() => resolve()));
+        if (listener.listening) await new Promise<void>((resolve) => listener.close(() => resolve()));
+        this.#isolationEvidence = Object.freeze(evidence);
       }
     }
+    if (evidence.outcome !== "denied") throw new LanguageServerIsolationError(this.#isolationEvidence!);
   }
 }
 

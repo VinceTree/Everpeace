@@ -14,6 +14,8 @@ interface FakeTool {
   name: string;
   description?: string;
   inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  execution?: { taskSupport: "optional" | "required" | "forbidden" };
   annotations?: {
     readOnlyHint?: boolean;
     destructiveHint?: boolean;
@@ -85,6 +87,13 @@ class FakeMcpClient {
   }
 
   getInstructions() { return this.instructions; }
+  getServerCapabilities() { return { tools: {} }; }
+
+  async request(request: { method: string; params?: Record<string, unknown> }, _schema: unknown, options?: unknown) {
+    if (request.method === "tools/list") return this.listTools(request.params as { cursor?: string } | undefined);
+    if (request.method === "tools/call") return this.callTool(request.params, undefined, options);
+    throw new Error(`Unexpected request: ${request.method}`);
+  }
 
   async close() {
     this.closeCalls++;
@@ -135,12 +144,13 @@ test("MCP runtime discovers namespaced stdio tools, instructions, and calls", as
   assert.deepEqual(snapshot.tools.map((tool) => tool.name), [
     "mcp__test_server__ping",
     "mcp__test_server__list_resources",
+    "mcp__test_server__list_resource_templates",
     "mcp__test_server__read_resource",
     "mcp__test_server__list_prompts",
     "mcp__test_server__get_prompt",
   ]);
   assert.match(snapshot.instructions, /Use ping/u);
-  assert.match(formatMcpStatus(snapshot), /test_server · stdio · ready · 5 tools/u);
+  assert.match(formatMcpStatus(snapshot), /test_server · stdio · ready · 6 tools/u);
   assert.deepEqual(runtime.toolInfo("mcp__test_server__ping")?.annotations, {
     readOnlyHint: true,
     destructiveHint: false,
@@ -689,6 +699,67 @@ test("MCP discovery enforces page, tool, byte, and duplicate-name limits", async
   }
 });
 
+test("MCP discovery shares one deadline across pages", async (t) => {
+  const clock = new FakeClock();
+  const client = new FakeMcpClient();
+  const timeouts: number[] = [];
+  const originalRequest = client.request.bind(client);
+  client.request = async (request, schema, options) => {
+    timeouts.push((options as { timeout: number }).timeout);
+    return originalRequest(request, schema, options);
+  };
+  client.listToolsImpl = async (cursor) => {
+    clock.advance(60);
+    return { tools: [fakeTool(cursor ?? "first")], nextCursor: cursor ? "third" : "second" };
+  };
+  const runtime = new McpRuntime({
+    workspacePath: process.cwd(), clock,
+    async loadConfig() { return [config({ startup_timeout_sec: 0.1 })]; },
+    async clientFactory() { return client as never; },
+  });
+  t.after(() => runtime.close());
+  const snapshot = await runtime.ensureReady();
+  assert.deepEqual(timeouts, [100, 40]);
+  assert.equal(snapshot.tools.length, 0);
+  assert.match(snapshot.servers[0]?.detail ?? "", /total startup deadline/u);
+});
+
+test("MCP discovery preserves an opaque empty cursor instead of losing the next page", async (t) => {
+  const client = new FakeMcpClient();
+  client.listToolsImpl = async (cursor) => cursor === undefined
+    ? { tools: [fakeTool("first")], nextCursor: "" }
+    : { tools: [fakeTool("second")] };
+  const runtime = new McpRuntime({
+    workspacePath: process.cwd(),
+    async loadConfig() { return [config()]; },
+    async clientFactory() { return client as never; },
+  });
+  t.after(() => runtime.close());
+  const snapshot = await runtime.ensureReady();
+  assert.equal(client.listToolsCalls, 2);
+  assert.deepEqual(snapshot.tools.map((tool) => tool.name), ["mcp__test_server__first", "mcp__test_server__second"]);
+});
+
+test("MCP rejects malformed output schemas before publishing a new directory", async (t) => {
+  for (const outputSchema of [
+    { type: "object", properties: { value: { type: "invalid-json-schema-type" } } },
+    { type: "object", $async: true },
+  ]) {
+    const clock = new FakeClock();
+    const client = new FakeMcpClient([fakeTool("invalid", { outputSchema })]);
+    const runtime = new McpRuntime({
+      workspacePath: process.cwd(), clock,
+      async loadConfig() { return [config()]; },
+      async clientFactory() { return client as never; },
+    });
+    t.after(() => runtime.close());
+    const snapshot = await runtime.ensureReady();
+    assert.equal(snapshot.tools.length, 0);
+    assert.equal(snapshot.servers[0]?.state, "failed");
+    assert.match(snapshot.servers[0]?.detail ?? "", /invalid output schema/u);
+  }
+});
+
 test("MCP close cancels reconnect timers and ignores late callbacks", async () => {
   const clock = new FakeClock();
   const contexts: McpClientFactoryContext[] = [];
@@ -810,4 +881,61 @@ test("MCP disconnect close timeout stops automatic recovery", async () => {
   clock.advance(120_000);
   await flushAsync();
   assert.equal(factories, 1);
+});
+
+test("MCP failed initialization waits for its partial client before reconnecting", async (t) => {
+  const clock = new FakeClock();
+  const partial = new FakeMcpClient();
+  let completeClose!: () => void;
+  partial.closeImpl = () => new Promise<void>((resolve) => { completeClose = resolve; });
+  let factories = 0;
+  const runtime = new McpRuntime({
+    workspacePath: process.cwd(), clock,
+    async loadConfig() { return [config()]; },
+    async clientFactory(_config, context) {
+      factories++;
+      if (factories > 1) return new FakeMcpClient() as never;
+      context.onClientCreated?.(partial as never);
+      throw new Error("Initialization timed out");
+    },
+  });
+  t.after(() => runtime.close());
+  const loading = runtime.ensureReady();
+  await flushAsync();
+  assert.equal(partial.closeCalls, 1);
+  clock.advance(1_000);
+  await flushAsync();
+  assert.equal(factories, 1);
+  completeClose();
+  await loading;
+  clock.advance(500);
+  await flushAsync();
+  assert.equal(factories, 2);
+  assert.equal(runtime.snapshot().servers[0]?.state, "ready");
+});
+
+test("MCP failed initialization cannot retry after partial-client close timeout", async () => {
+  const clock = new FakeClock();
+  const partial = new FakeMcpClient();
+  partial.closeImpl = () => new Promise(() => undefined);
+  let factories = 0;
+  const runtime = new McpRuntime({
+    workspacePath: process.cwd(), clock,
+    async loadConfig() { return [config()]; },
+    async clientFactory(_config, context) {
+      factories++;
+      context.onClientCreated?.(partial as never);
+      throw new Error("Initialization timed out");
+    },
+  });
+  const loading = runtime.ensureReady();
+  await flushAsync();
+  clock.advance(5_000);
+  await loading;
+  assert.equal(runtime.snapshot().servers[0]?.state, "failed");
+  assert.match(runtime.snapshot().servers[0]?.detail ?? "", /did not close within 5 seconds/u);
+  clock.advance(120_000);
+  await flushAsync();
+  assert.equal(factories, 1);
+  await runtime.close();
 });

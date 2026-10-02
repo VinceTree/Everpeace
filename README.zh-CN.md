@@ -75,18 +75,20 @@ everpeace exec [prompt] [-C <directory>] [--model <id-or-name>]
 
 通过启动阶段的每项任务都会创建正常 Session，并使用确定性的 `Exec: ...` 标题，之后可以在 TUI 中查看或恢复。命令会读取现有 learned Memory，但关闭本次捕获。首版没有 CLI resume、Plan 流程或自动批准：权限确认或结构化问题会作为配对工具结果持久化，以 `interaction_required` 报告，并在完成清理后停止。`--token-budget` 覆盖 coding、压缩、重试和修复；`--timeout-ms` 与 `--max-steps` 同样覆盖整个任务，不会在修复轮之间重置。
 
-不带 `--json` 时，stdout 只输出最终 assistant 文本，进度与宿主验证摘要写入 stderr。exec 输出层初始化后，`--json` 输出 UTF-8 JSONL，每行包含 `schema_version: 1`、ISO `timestamp` 和下表白名单字段。事件类型为 `session_started`、`assistant_message`、`tool_started`、`tool_finished`、`workflow_updated`、`interaction_required`，以及清理后唯一的最终 `run_finished`。顶层参数语法或模块启动错误会在 JSONL 开始前写入 stderr 并以 2 退出；stdout 本身已经关闭时也无法补写终态。所有字符串都会移除终端控制序列并接受脱敏和大小限制，不导出 reasoning 正文或原始 provider response，但 usage 可以包含汇总的 `reasoning_tokens`。
+不带 `--json` 时，stdout 只输出最终 assistant 文本，进度与宿主验证摘要写入 stderr。exec 输出层初始化后，`--json` 输出 UTF-8 JSONL，每行包含 `schema_version: 1`、ISO `timestamp` 和下表白名单字段。事件类型为 `session_started`、`assistant_message`、`tool_started`、`tool_finished`、`workflow_updated`、`interaction_required`，以及任务清理后唯一的 `run_finished`。顶层参数语法或模块启动错误会在 JSONL 开始前写入 stderr 并以 2 退出。所有文本先移除终端控制序列并脱敏；不导出 reasoning 正文或原始 provider response，usage 可包含汇总 reasoning/cache 计数。
+
+助手正文脱敏后完整保留，包括超过 64 KiB 的回答；JSONL 用有界块写成一条完整记录，其他事件不会插入其中。其余事件连同 JSON 转义和换行最多 64 KiB，预览缩短时标注 `truncated: true`。待写编码缓冲最多 1 MiB；写入等待消费端，30 秒没有写入进展会取消任务并清理，任一输出管道关闭也会停止。若取消或输出故障打断正在写入的 JSONL 记录，流可能以不完整末行结束且无法补写终态；消费端必须结合进程退出码和完整记录判断结果。
 
 | JSONL `type` | 白名单 payload |
 | --- | --- |
 | `session_started` | `session_id`、`model_id`、`model_name`、`workspace` |
 | `assistant_message` | `text` |
-| `tool_started` / `tool_finished` | `name`、`call_id`；完成事件可带 `status`（`completed`、`failed`、`cancelled` 或 `skipped`） |
+| `tool_started` / `tool_finished` | `name`、`call_id`；完成事件可带 `status`（`completed`、`failed`、`cancelled` 或 `skipped`）和有界 `output` 预览 |
 | `workflow_updated` | `phase`、`task_id`、`changed_paths`、`repair_attempts`、`max_repair_attempts`、`pending_verification`；可选 `result`、`result_reason` |
 | `interaction_required` | `kind`（`approval` 或 `question`）、`tool`、可选 `prompt` |
-| `run_finished` | 可选 `session_id`；`status`（`success`、`runtime_error`、`configuration_error`、`verification_failed`、`limit_reached`、`interaction_required` 或 `cancelled`）；`usage_complete`；可选 `stop_reason`、`workflow_result`，以及含 `input_tokens`、`output_tokens` 和可选 `reasoning_tokens` 的 `usage` |
+| `run_finished` | 可选 `session_id`；`status`（`success`、`runtime_error`、`configuration_error`、`verification_failed`、`limit_reached`、`interaction_required` 或 `cancelled`）；`usage_complete`；可选 `stop_reason`、`workflow_result`，以及含 `input_tokens`、`output_tokens` 和可选 `reasoning_tokens`、`cached_input_tokens`、`cache_write_input_tokens` 的 `usage` |
 
-退出码固定为：`0` 表示宿主结果为 `verified` 或 `no_changes`；`1` 表示运行/清理故障或 stdout 管道关闭；`2` 表示参数或启动配置错误；`3` 表示验证 `failed` 或 `unverified`；`4` 表示 token、usage、step 或 deadline 限制；`5` 表示需要交互；`130`/`143` 分别表示 SIGINT/SIGTERM。stdout 管道关闭时也会取消任务并等待清理。
+退出码固定为：`0` 表示宿主结果为 `verified` 或 `no_changes`；`1` 表示运行/清理故障或输出管道失败、停滞；`2` 表示参数或启动配置错误；`3` 表示验证 `failed` 或 `unverified`；`4` 表示 token、usage、step 或 deadline 限制；`5` 表示需要交互；`130`/`143` 分别表示 SIGINT/SIGTERM。输出故障会在退出前等待任务和 writer 清理。
 
 macOS/Linux 上如果 `bash` 不在 `PATH` 中，可以显式配置：
 
@@ -97,7 +99,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.3.7) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.8) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -180,7 +182,9 @@ TUI 命令：
 
 MCP 复用 Codex 配置，不另建 Everpeace 凭据文件。使用 `pnpm exec codex mcp add ...` 或其他已安装 Codex CLI 配置服务器，再运行 `/mcp`。当前支持 stdio 和 Streamable HTTP tools、resources 与 prompts，以及静态/环境 header 和 bearer-token 环境变量。每个 server 独立维护 `connecting`/`reconnecting` 生命周期：瞬时断连会移除其工具，并以 500 ms–30 s 指数退避最多重试十次；永久配置或认证错误直接停止。连接连续 ready 30 秒才重置重试次数，五秒内无法确认旧连接关闭则停止自动恢复。中断中的工具调用不会重放；业务错误、单次调用超时和取消本身不会触发重连。
 
-工具列表变更通知会合并，完整分页后原子发布；刷新失败保留上一份完整目录，断连则移除。每个逻辑 Agent step 冻结工具定义、审批 annotation，以及绑定连接与定义的 opaque 标识；已删除或变更的工具不能在之后使用旧绑定执行。`/mcp` 会重载配置并重置恢复状态。资源和 prompt 会以 `mcp__server__read_resource` 等 function tool 暴露，并继续使用独立 MCP 审批；尚未暴露 Codex OAuth 凭据复用、header helper、elicitation 和 tasks。
+工具列表变更会完整分页，并与输出校验器一起原子发布；刷新失败保留上一份完整目录及校验规则。每个 Agent step 冻结连接和完整定义的绑定，包括 output schema、execution metadata 与审批 annotation；旧绑定不能再次执行，已经派发的调用仍按原定义验证结果。发现共用一个启动期限，最多 100 页、1,000 个工具和 2 MiB 定义。要求 task-based execution 的工具不向模型广告，`/mcp` 显示 unsupported。HTTP Session 失效（404）会为后续调用重连，不重放失败请求。
+
+只有 resources、prompts 或 instructions 的 server 也可连接。`mcp__server__list_resources`、`list_resource_templates`、`list_prompts` 每次读取一页实时内容；将返回的 `next_cursor` 原样作为下一次 `cursor`。单页超过 1,000 项或 1 MiB 时明确失败，不返回会跳过遗漏条目的续点。`read_resource` 与 `get_prompt` 按需读取当前内容；MCP image/audio/resource-blob 内容块在模型历史中显示类型和大小说明，结构化业务数据及 metadata 保持原值。上述调用继续逐次使用独立 MCP 审批。`/mcp` 重载配置并重置恢复状态；OAuth 凭据复用、header helper、elicitation、sampling、tasks 和按工具持久审批尚未接入。
 
 Skills 从工作区到仓库根的 `.agents/skills`、项目 `.codex/skills`、`$CODEX_HOME/skills`、`~/.agents/skills` 和平台管理员根发现。输入 `$skill-name` 可在当前轮显式激活；否则模型可按 catalog description 匹配并调用 `read_skill`。默认只预载 metadata，命中后才读取完整说明与引用文件。
 
@@ -201,7 +205,7 @@ Skills 从工作区到仓库根的 `.agents/skills`、项目 `.codex/skills`、`
 
 - 权限档位把 sandbox 范围与审批分开：`read-only` 对模型 shell、网页和 MCP 逐项审批，并使用 Codex `:read-only`；`ask` 逐项审批，shell 获批后使用 `:workspace`；`workspace-write` 在 `:workspace` 内免逐条 shell 审批，已开启的公共网页工具也免逐次确认，MCP 仍单独审批；`full-access` 二次明确确认后选择 `:danger-full-access` 并跳过工具审批。
 - 模型可以用 `read_file` 按行分页查看工作区内不超过 16 MiB 的 UTF-8 文件并取得基于原始字节的全文件 SHA-256。`search_files`/`glob_files` 通过绝对路径运行固定版本的随包 ripgrep，并始终传入参数化的 `--no-config`；系统 `PATH` 和用户 ripgrep 配置无法替换或影响它。搜索返回有界结果快照的进程内续读引用（默认每页 100 项，最多 200 项）。搜索续读最多保留 16 个搜索和 8 MiB 序列化 UTF-8 payload，超限时淘汰最旧引用；已完成行与未终止的 ripgrep 记录共同受单次 2 MiB 输入边界约束。`list_directory` 列出最多 500 个目录项。拒绝目录外路径和符号链接越界。超大模型工具结果保持有效 JSON，内联预览最多 32 KiB，并提供 opaque `read_tool_output` 引用。脱敏正文作为 Session 附件持久化，每项保留前 2 MiB、每会话保留最近 16 项，续读每页最多 24 KiB；引用可跨压缩和重启使用，可选 `session_id` 只允许同工作区。淘汰项及旧进程内正文明确不可用，`retention_truncated` 标示保留范围之外的内容。删除 Session 同时清理所属附件。文件正文会进入模型 context 和 Session 文件，请避免读取机密。
-- 将 `EVERPEACE_TYPESCRIPT_LSP` 指向已存在的本地 language server 后，会暴露只读 `code_navigation`，支持 definition、references、implementation 和 hover；可选参数用 `EVERPEACE_TYPESCRIPT_LSP_ARGS` 的 JSON 字符串数组提供，额外只读源码根可用 `EVERPEACE_TYPESCRIPT_LSP_READ_ROOTS` 的 JSON 字符串数组声明。每次查询都在固定 Codex 原生 sandbox 中启动全新的 server 进程，过滤凭据、拒绝 workspace 写入和应用状态访问；协议限制为 8 KiB header、2 MiB frame、8 MiB 总入站流量和 64 KiB stderr。启动配置的 server 前还必须用直接 socket 探针证明后端实际执行了所请求的网络拒绝，否则工具和 `/doctor` 报告 unavailable，并保留 lexical search。当前固定 Windows 后端仍允许该探针，因此 Windows 上的原生 LSP 导航会失败关闭。原生后端仍有平台 ambient read 与临时目录权限。程序不会静默安装 server；请求串行且有界，并拒绝 server 发起的 edit 或 command。
+- 将 `EVERPEACE_TYPESCRIPT_LSP` 指向已存在的本地 language server 后，会暴露只读 `code_navigation`，支持 definition、references、implementation 和 hover；可选参数用 `EVERPEACE_TYPESCRIPT_LSP_ARGS` 的 JSON 字符串数组提供，额外只读源码根可用 `EVERPEACE_TYPESCRIPT_LSP_READ_ROOTS` 的 JSON 字符串数组声明。每次查询都在固定 Codex 原生只读 sandbox 中启动全新进程，过滤凭据、检查保护路径、验证 UTF-16 和文档 open/close 能力，并在有界协议处理后等待清理。宿主先连接探针目标作为正对照，再记录 sandbox 在该 TCP/IPv4 目标上的 `allowed`、`denied` 或 `inconclusive`；只有明确的 socket 权限拒绝才允许启动 language server，拒绝连接和超时不算隔离证据。当前固定 Windows 后端仍允许该探针，因此 Windows 原生 LSP 导航继续 unavailable，并保留 lexical search。程序不自动安装 server，也未启用共享进程池；原生平台 ambient read 和临时目录权限仍然存在。
 - 用户权限保存于平台配置目录，重启后仍会恢复；`/permissions` 也可把项目策略写入 `.everpeace/permissions.json`。项目策略只允许收紧用户策略、关闭模型 shell 网络或公共网页，不能提升权限。shell 网络开关由原生后端执行，不改变 web 或 MCP 权限。切换权限不丢失 context，恢复 JSONL 不会恢复完全访问授权。
 - 模型 shell 通过固定的 `@openai/codex@0.155.1` 原生 OS sandbox 启动，运行时无法启动则失败关闭。Windows 模型命令使用 PowerShell，因为 Git Bash/MSYS 无法在 restricted token 内初始化；macOS/Linux 使用 Bash。模型 shell 默认 120 秒超时，超时会以结构化结果返回；直接 `!` 不进入模型 sandbox，生命周期仍由用户控制。详见 [对标与安全限制](docs/architecture/PERMISSIONS.md)。
 - 每次模型 shell 启动前都会捕获不可变的有效策略，显式遵守后端 managed requirements，并过滤继承的凭据及启动注入变量。workspace/ask 模式使用原生子 profile：`.git`、`.codex`、`.agents` 和由宿主预先创建的 `.everpeace` 控制目录保持只读，模型也不能读取 Everpeace 的全局状态目录。命令输出不能触发 payload 自动重放；full-access 与直接 `!` 保留各自已说明的权限。对比依据与后续路线见 [Sandbox 对比与优化计划](docs/architecture/SANDBOX.md)。

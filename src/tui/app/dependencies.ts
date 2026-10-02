@@ -39,7 +39,7 @@ import { resolveCodexCliPath } from "../../codex/cli.js";
 import { modelErrorGuidance } from "../../agent/response-errors.js";
 import { RequestAttemptLedger } from "../../agent/request-attempt-ledger.js";
 import { RequestExecutor } from "../../agent/request-executor.js";
-import { createCodeNavigationFromEnvironment } from "../../tools/code-navigation.js";
+import { createCodeNavigationFromEnvironment, LanguageServerIsolationError } from "../../tools/code-navigation.js";
 import { resolveBundledRipgrep } from "../../tools/ripgrep.js";
 import { applyUsageSample, createEmptySessionUsage, type TokenUsageSample } from "../../status/model-status.js";
 import {
@@ -303,11 +303,18 @@ export function createDefaultTuiDependencies(
           if (path.isAbsolute(command)) await fs.access(command);
           else await execFileAsync(process.platform === "win32" ? "where.exe" : "which", [command], { timeout: 5_000, windowsHide: true });
           await navigation.probeIsolation(signal);
-          lines.push(`TypeScript navigation: configured (${navigation.describe()}); native network isolation probe passed`);
-          lines.push("TypeScript navigation boundary: writes and application state are denied; direct networking was denied by probe; native platform ambient reads and temp grants still apply");
+          const evidence = navigation.getIsolationEvidence();
+          lines.push(`TypeScript navigation: configured (${navigation.describe()}); native isolation probe ${evidence?.outcome ?? "inconclusive"}`);
+          if (evidence) lines.push(`TypeScript navigation probe: control=${evidence.positiveControl}; transport=${evidence.transport}; target=${evidence.target}; reason=${evidence.reason}`);
+          lines.push("TypeScript navigation boundary: native read-only policy; networking evidence applies only to the tested TCP/IPv4 target; native platform ambient reads and temp grants still apply");
         }
       } catch (error) {
         lines.push(`TypeScript navigation: unavailable (${error instanceof Error ? error.message : String(error)})`);
+        if (error instanceof LanguageServerIsolationError) {
+          const evidence = error.evidence;
+          lines.push(`TypeScript navigation probe: outcome=${evidence.outcome}; control=${evidence.positiveControl}; transport=${evidence.transport}; target=${evidence.target}; reason=${evidence.reason}`);
+          lines.push("TypeScript navigation: fixed native backend; probe evidence covers only the tested TCP/IPv4 target");
+        }
       }
       try {
         const probe = await runBash(process.platform === "win32" ? "Write-Output everpeace-doctor" : "printf everpeace-doctor", {

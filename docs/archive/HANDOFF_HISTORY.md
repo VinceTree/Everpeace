@@ -1,5 +1,12 @@
 > 历史归档：下文保留整理前记录，不代表当前状态或执行授权。当前入口见 [知识库](../README.md)、[HANDOFF](../HANDOFF.md) 和 [PLAN](../PLAN.md)。
 
+## 2026-10-02 后续四项交付快照（下一轮可靠性之前）
+
+- 已交付首期历史/持久附件及后续 MCP 自动恢复、随包 ripgrep、公开 exec、Session fork/relations 与压力裁剪，保持模型默认值、权限和宿主验证。用户随后授权版本更新、提交并推送，最终版本 `0.3.7`、commit `13ef48b04cad0ba69be41331ebca252a16136e0e`，未更新远程 Release。
+- Windows 串行 `pnpm typecheck → pnpm test → pnpm build` 通过；646 项中 643 通过、3 跳过、0 失败、0 取消（33,294.8806 ms）。构建后 CLI 与 exec help 通过，定向 diff-check 和本地 Markdown 链接通过；既有 `.gitignore`、`LICENSE` CRLF 差异保留。
+- 所有功能使用 fake provider／离线 fixture，没有 live 模型性能证据；真实 Windows Terminal 恢复、分支、取消、resize/scrollback 和单 prompt 手工验收未完成。
+- 当时 MCP 分页调用使用 SDK 自身缓存，exec 助手展示最多 64 KiB，Session load/list 存在整份日志及事件重复物化，LSP 原生探针尚缺完整正对照。这些后来另获授权改进；当前结果只看 [HANDOFF](../HANDOFF.md)。
+
 ## 2026-10-02 后续四项功能实施之前的快照
 
 # 当前交接

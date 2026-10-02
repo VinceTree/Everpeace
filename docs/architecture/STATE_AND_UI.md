@@ -36,6 +36,8 @@
 
 每个 Session 使用带格式字段的逐行事件文件，同一文件追加通过本实例队列和 `proper-lockfile` 跨进程 Session 锁串行化；附件提交、续读、淘汰、启动清理与删除复用该事务锁，另一实例不能把尚未追加引用的附件清理为孤儿。`timeline` 是人看到的历史，`context` 是发给 Responses 的输入；两者独立恢复，不能互相推导。
 
+`load`、`list` 与 `/resume` 搜索共用字节流记录读取器，在打开日志时固定 EOF，按 64 KiB 文件块逐条解析，不再同时保留整份原始文本、拆行数组和事件数组。`list` 只累积摘要所需状态；`load` 仍须保留最终 timeline 与有效 context，因此这不表示整个 Session 的内存恒定。重放不会新增拒绝超过 8 MiB 合法旧记录的限制；单条记录仍完整解析，旧 JSONL 与未终止末行的判定保持一致。模型历史工具自身的单行扫描上限保持独立。
+
 | 事件 | 含义 |
 | --- | --- |
 | `session_created` | Session ID、标题、工作目录、无凭据模型引用、标题待生成、usage 跟踪标记，以及分支时的可选 lineage |
@@ -94,6 +96,8 @@
 
 大结果附件每 Session 最多 16 份，每份保留脱敏正文前 2 MiB；JSONL 继续保存最多 32 KiB 的有效预览 envelope。按模型调用顺序执行附件写入、结果引用追加和旧附件淘汰，准备中的有界正文计入并发背压。附件或日志写入失败进入 `PersistenceError`；启动清理未被日志引用的崩溃遗留附件。Agent dispose 仅释放内存，压缩和重启继续复用原 `output_id`。旧进程内引用不能重建正文，明确返回不可用。
 
+附件沿用 v1 文件格式，续页只读取有界 header、目标范围和 UTF-8 对齐余量，并在读取前后核验文件身份、长度和修改信息。`SessionHistoryRuntime` 最多缓存 256 个输出定位 metadata，按最近使用顺序淘汰；缓存键包含规范化工作区、Session 和 output ID，条目绑定日志文件身份、header 摘要及 call/result 位置与摘要，不保存正文。每次命中仍在固定 EOF 下重读结果并核对 call→result 来源区间；读取期间日志变化时再次核验。追加保持有效，删除、替换、改写、来源冲突或损坏使当前读取失败并移除定位。缓存只减少重新发现位置的扫描，不改变工作区、来源、取消或扫描预算约束。
+
 `read_tool_output` 与历史分页的正文最多 24 KiB；`session_event_read` 的完整序列化结果同时限制为 32 KiB，必要时缩小正文页以容纳 JSON 转义和来源元数据，返回实际 continuation。脱敏先于保存、搜索、裁剪和分页，保留正文的换行、缩进和 CRLF。offset 使用脱敏 UTF-8 字节；极小页不能容纳一个字符时返回范围错误。所有历史内容都标记为来源明确的不可信资料，不恢复观察版本、权限、审批、Goal 完成状态或当前验证证据。
 
 ## Usage、Goal 与 Memory
@@ -110,9 +114,13 @@
 
 [exec runtime](../../src/exec/runtime.ts) 不创建 Ink 组件。它通过 [production factory](../../src/runtime/production.ts) 取得与 TUI/benchmark 相同的 provider、历史/附件、Memory 读取、MCP、权限工具和请求账本，再用 `CodingTaskRunner` 完成后台收束、验证与修复。通过启动配置后建立可由 TUI `/resume` 打开的正常 Session；标题根据提示第一条非空行确定，聊天 Memory policy 固定为读取已有内容、关闭本次 capture。
 
-CLI 提示词只能来自一个位置参数或非 TTY stdin。模型解析先匹配注册 ID，再匹配唯一 `model_name`；不指定时仅允许一个凭据可用模型。exec 没有 Plan、resume 或自动批准路径；审批和结构化问题保存标准 function output 后返回 `interaction_required`。可选 token budget、deadline 和 task step 上限覆盖 coding、压缩、重试及所有修复轮。SIGINT/SIGTERM、deadline、stdout EPIPE 和运行失败都先取消任务并等待 Agent/后台资源清理；stdout 仍可写时再发布终态，EPIPE 返回 1 而不能向已关闭管道补写最终行。
+CLI 提示词只能来自一个位置参数或非 TTY stdin。模型解析先匹配注册 ID，再匹配唯一 `model_name`；不指定时仅允许一个凭据可用模型。exec 没有 Plan、resume 或自动批准路径；审批和结构化问题保存标准 function output 后返回 `interaction_required`。可选 token budget、deadline 和 task step 上限覆盖 coding、压缩、重试及所有修复轮。SIGINT/SIGTERM、deadline、stdout/stderr 关闭或写入失败都先取消任务并等待 Agent/后台资源清理；输出失败返回 1，信号保留 130/143。只有输出可写且此前没有半条 JSONL 记录时才尝试发布终态，不能向不完整末行拼接一个伪完整的最终事件。
 
-默认 stdout 只写最终 assistant 文本，stderr 写进度与宿主验证摘要。`--json` 通过 [exec-output](../../src/cli/exec-output.ts) 输出 schema version 1 JSONL：每行含 ISO 时间和白名单字段，可出现 `session_started`、`assistant_message`、`tool_started`、`tool_finished`、`workflow_updated`、`interaction_required`，并在清理后最多一次 `run_finished`。字符串先移除终端控制序列、脱敏并按类型限制大小；不导出 reasoning 正文、原始 provider response 或任意对象展开，终态 usage 可以包含汇总 reasoning tokens。退出码及用户调用格式见双语 README。
+默认 stdout 只写最终 assistant 文本，stderr 写进度与宿主验证摘要。`--json` 通过 [exec-output](../../src/cli/exec-output.ts) 输出 schema version 1 JSONL：每行含 ISO 时间和白名单字段，可出现 `session_started`、`assistant_message`、`tool_started`、`tool_finished`、`workflow_updated`、`interaction_required`，并在任务清理后最多一次 `run_finished`。正文先整体去终端控制序列、脱敏，再分块转义写出；assistant 正文完整保留，其余事件连同换行最多 64 KiB，缩短预览时带 `truncated: true`。不导出 reasoning 正文、原始 provider response 或任意对象展开，usage 可以包含汇总 reasoning/cache 计数。退出码及用户调用格式见双语 README。
+
+workflow 提供路径列表时同时返回 `changed_paths_total` 和 `changed_paths_returned`；后者始终等于实际交付数组长度。截断 `output`、`prompt` 或 `result_reason` 时给出对应的 `*_total_bytes`，计量完整去控制序列、脱敏后且限幅前的 UTF-8 正文。整行因 JSON 转义再次缩减时同步这些字段，保留 Session、身份、状态、usage 和停止原因。助手正文不走截断路径。
+
+[exec-writer](../../src/cli/exec-writer.ts) 每次写入最多 16 KiB，并等待 callback 与必要的 drain；事件锁保证同一 JSONL frame 不被其他事件插入，编码缓冲/队列最多 1 MiB。该上限不包含 Agent 原本持有的正文或 Session context。单块 30 秒没有完成进展即中止输出并取消任务。Windows 的非 TTY 标准管道通过 CLI host 惰性创建的专用 Node writer 子进程写入，固定子程序只接收有界脱敏块并以 IPC 确认完成；正常退出、取消或故障都终止并等待该子进程。Windows TTY 与其他平台继续使用 Writable。取消或故障可能留下半条 JSONL 末行，此时不补写终态；消费端必须同时检查退出码。
 
 ## Inline TUI 与独立命令窗口
 

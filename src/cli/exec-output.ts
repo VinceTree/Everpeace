@@ -1,6 +1,7 @@
 import { stripVTControlCharacters } from "node:util";
 import { redactSecretsPreservingLayout } from "../util/redact-secrets.js";
 import type { WorkflowPhase, WorkflowResultClassification } from "../workflow/types.js";
+import { EXEC_OUTPUT_BUFFER_BYTES, ExecOutputError, outputChunks } from "./exec-writer.js";
 
 export const EXEC_JSONL_SCHEMA_VERSION = 1 as const;
 
@@ -9,6 +10,7 @@ const MAX_MESSAGE_BYTES = 64 * 1024;
 const MAX_TOOL_OUTPUT_BYTES = 32 * 1024;
 const MAX_CHANGED_PATHS = 1_000;
 const TRUNCATED_SUFFIX = "\n[truncated]";
+export const EXEC_JSONL_EVENT_MAX_BYTES = 64 * 1024;
 
 export interface ExecSessionStartedEvent {
   type: "session_started";
@@ -95,7 +97,7 @@ export interface ExecRunFinishedEvent {
 export type ExecJsonlEvent = ExecProgressEvent | ExecRunFinishedEvent;
 
 export interface ExecJsonlEmitterOptions {
-  write(line: string): void;
+  write(chunk: string, signal?: AbortSignal): void | Promise<void>;
   now?: () => Date;
 }
 
@@ -131,10 +133,6 @@ export function sanitizeExecOutput(value: string, maxBytes = MAX_MESSAGE_BYTES):
   return truncateUtf8(redactSecretsPreservingLayout(stripVTControlCharacters(value)), maxBytes);
 }
 
-function identifier(value: string): string {
-  return sanitizeExecOutput(value, MAX_IDENTIFIER_BYTES);
-}
-
 function optionalCount(value: number | undefined): number | undefined {
   return value !== undefined && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
@@ -156,7 +154,20 @@ function serializeUsage(usage: ExecJsonlUsage | undefined): Record<string, numbe
   };
 }
 
-function payload(event: ExecJsonlEvent): Record<string, unknown> {
+interface PayloadTruncation {
+  truncated: boolean;
+  displayTextBytes: Map<string, number>;
+}
+
+function payload(event: ExecJsonlEvent, truncation: PayloadTruncation): Record<string, unknown> {
+  const clipped = (value: string, maximum = MAX_MESSAGE_BYTES, displayField?: string) => {
+    const safe = sanitizeExecOutput(value, Number.MAX_SAFE_INTEGER);
+    const totalBytes = Buffer.byteLength(safe);
+    if (displayField !== undefined) truncation.displayTextBytes.set(displayField, totalBytes);
+    if (totalBytes > maximum) truncation.truncated = true;
+    return truncateUtf8(safe, maximum);
+  };
+  const identifier = (value: string) => clipped(value, MAX_IDENTIFIER_BYTES);
   switch (event.type) {
     case "session_started":
       return {
@@ -166,7 +177,7 @@ function payload(event: ExecJsonlEvent): Record<string, unknown> {
         workspace: identifier(event.workspacePath),
       };
     case "assistant_message":
-      return { text: sanitizeExecOutput(event.text) };
+      return { text: sanitizeExecOutput(event.text, Number.MAX_SAFE_INTEGER) };
     case "tool_started":
       return {
         name: identifier(event.name),
@@ -177,19 +188,27 @@ function payload(event: ExecJsonlEvent): Record<string, unknown> {
         name: identifier(event.name),
         ...(event.callId === undefined ? {} : { call_id: identifier(event.callId) }),
         ...(event.status === undefined ? {} : { status: event.status }),
-        ...(event.output === undefined ? {} : { output: sanitizeExecOutput(event.output, MAX_TOOL_OUTPUT_BYTES) }),
+        ...(event.output === undefined ? {} : { output: clipped(event.output, MAX_TOOL_OUTPUT_BYTES, "output") }),
       };
     case "workflow_updated": {
       const repairAttempts = optionalCount(event.repairAttempts);
       const maxRepairAttempts = optionalCount(event.maxRepairAttempts);
+      const changedPaths: string[] = [];
+      let pathBytes = 0;
+      for (const path of event.changedPaths ?? []) {
+        const safe = identifier(path);
+        pathBytes += Buffer.byteLength(JSON.stringify(safe)) + 1;
+        if (changedPaths.length >= MAX_CHANGED_PATHS || pathBytes > 48 * 1024) { truncation.truncated = true; break; }
+        changedPaths.push(safe);
+      }
       return {
         phase: event.phase,
         ...(event.taskId === undefined ? {} : { task_id: identifier(event.taskId) }),
         ...(event.result === undefined ? {} : { result: event.result }),
-        ...(event.resultReason === undefined ? {} : { result_reason: sanitizeExecOutput(event.resultReason) }),
+        ...(event.resultReason === undefined ? {} : { result_reason: clipped(event.resultReason, MAX_MESSAGE_BYTES, "result_reason") }),
         ...(event.changedPaths === undefined
           ? {}
-          : { changed_paths: event.changedPaths.slice(0, MAX_CHANGED_PATHS).map((path) => identifier(path)) }),
+          : { changed_paths: changedPaths, changed_paths_total: event.changedPaths.length, changed_paths_returned: changedPaths.length }),
         ...(repairAttempts === undefined ? {} : { repair_attempts: repairAttempts }),
         ...(maxRepairAttempts === undefined ? {} : { max_repair_attempts: maxRepairAttempts }),
         ...(event.pendingVerification === undefined ? {} : { pending_verification: event.pendingVerification }),
@@ -200,7 +219,7 @@ function payload(event: ExecJsonlEvent): Record<string, unknown> {
         kind: event.kind,
         ...(event.tool === undefined ? {} : { tool: identifier(event.tool) }),
         ...(event.callId === undefined ? {} : { call_id: identifier(event.callId) }),
-        ...(event.prompt === undefined ? {} : { prompt: sanitizeExecOutput(event.prompt) }),
+        ...(event.prompt === undefined ? {} : { prompt: clipped(event.prompt, MAX_MESSAGE_BYTES, "prompt") }),
       };
     case "run_finished": {
       const usage = serializeUsage(event.usage);
@@ -217,19 +236,53 @@ function payload(event: ExecJsonlEvent): Record<string, unknown> {
 }
 
 export function serializeExecJsonlEvent(event: ExecJsonlEvent, timestamp = new Date()): string {
-  return JSON.stringify({
+  const truncation: PayloadTruncation = { truncated: false, displayTextBytes: new Map() };
+  const fields = payload(event, truncation);
+  const record: Record<string, unknown> = {
     schema_version: EXEC_JSONL_SCHEMA_VERSION,
     type: event.type,
     timestamp: timestamp.toISOString(),
-    ...payload(event),
-  });
+    ...fields,
+    ...(truncation.truncated ? { truncated: true } : {}),
+  };
+  for (const [field, totalBytes] of truncation.displayTextBytes) {
+    if (Buffer.byteLength(String(record[field])) < totalBytes) record[`${field}_total_bytes`] = totalBytes;
+  }
+  let serialized = JSON.stringify(record);
+  if (event.type === "assistant_message") return serialized;
+  while (Buffer.byteLength(serialized) + 1 > EXEC_JSONL_EVENT_MAX_BYTES) {
+    record.truncated = true;
+    // Prefer previews; never omit identity, terminal classifications, usage or truncation metadata.
+    const candidates = ["output", "prompt", "result_reason", "changed_paths"]
+      .filter((key) => Array.isArray(record[key]) ? record[key].length > 0 : typeof record[key] === "string" && Buffer.byteLength(record[key]) > 64)
+      .sort((left, right) => Buffer.byteLength(JSON.stringify(record[right])) - Buffer.byteLength(JSON.stringify(record[left])));
+    const candidate = candidates[0] ?? Object.keys(fields)
+      .filter((key) => typeof record[key] === "string" && Buffer.byteLength(record[key]) > 64 && !["phase", "status", "result", "workflow_result", "kind"].includes(key))
+      .sort((left, right) => Buffer.byteLength(JSON.stringify(record[right])) - Buffer.byteLength(JSON.stringify(record[left])))[0];
+    if (!candidate) throw new ExecOutputError("Exec event metadata exceeds the JSONL limit");
+    const value = record[candidate];
+    if (Array.isArray(value)) {
+      const returned = value.slice(0, Math.floor(value.length / 2));
+      record[candidate] = returned;
+      record.changed_paths_returned = returned.length;
+    } else if (typeof value === "string") {
+      const totalBytes = truncation.displayTextBytes.get(candidate);
+      if (totalBytes !== undefined) record[`${candidate}_total_bytes`] = totalBytes;
+      record[candidate] = truncateUtf8(value, Math.floor(Buffer.byteLength(value) / 2));
+    }
+    serialized = JSON.stringify(record);
+  }
+  return serialized;
 }
 
 /** Writes allowlisted JSONL fields and guarantees that the final event is emitted at most once. */
 export class ExecJsonlEmitter {
-  readonly #write: (line: string) => void;
+  readonly #write: ExecJsonlEmitterOptions["write"];
   readonly #now: () => Date;
   #finished = false;
+  #broken = false;
+  #active = false;
+  readonly #waiters: Array<() => void> = [];
 
   constructor(options: ExecJsonlEmitterOptions) {
     this.#write = options.write;
@@ -240,15 +293,55 @@ export class ExecJsonlEmitter {
     return this.#finished;
   }
 
-  emit(event: ExecProgressEvent): void {
-    if (this.#finished) throw new Error("Cannot emit exec progress after run_finished");
-    this.#write(`${serializeExecJsonlEvent(event, this.#now())}\n`);
+  get broken(): boolean { return this.#broken; }
+
+  async #frame(event: ExecJsonlEvent, signal?: AbortSignal): Promise<void> {
+    // The queue holds only lock waiters. Producers await delivery and retain their own source data.
+    if (this.#waiters.length * EXEC_JSONL_EVENT_MAX_BYTES >= EXEC_OUTPUT_BUFFER_BYTES) {
+      throw new ExecOutputError("Exec output queue exceeded 1 MiB");
+    }
+    if (this.#active) await new Promise<void>((resolve) => this.#waiters.push(resolve));
+    else this.#active = true;
+    let started = false;
+    try {
+      if (this.#broken) throw new ExecOutputError("Exec JSONL frame was interrupted");
+      signal?.throwIfAborted();
+      const timestamp = this.#now();
+      if (event.type === "assistant_message") {
+        const safe = sanitizeExecOutput(event.text, Number.MAX_SAFE_INTEGER);
+        const prefix = JSON.stringify({ schema_version: EXEC_JSONL_SCHEMA_VERSION, type: event.type, timestamp: timestamp.toISOString() }).slice(0, -1);
+        started = true;
+        await this.#write(`${prefix},"text":"`, signal);
+        // JSON string escaping is compositional when chunks never split a surrogate pair.
+        for (const chunk of outputChunks(safe, 2048)) {
+          signal?.throwIfAborted();
+          await this.#write(JSON.stringify(chunk).slice(1, -1), signal);
+        }
+        await this.#write('"}\n', signal);
+      } else {
+        const line = `${serializeExecJsonlEvent(event, timestamp)}\n`;
+        started = true;
+        for (const chunk of outputChunks(line)) await this.#write(chunk, signal);
+      }
+    } catch (error) {
+      if (started) this.#broken = true;
+      throw error;
+    } finally {
+      const next = this.#waiters.shift();
+      if (next) next();
+      else this.#active = false;
+    }
   }
 
-  finish(event: ExecRunFinishedEvent): boolean {
+  async emit(event: ExecProgressEvent, signal?: AbortSignal): Promise<void> {
+    if (this.#finished) throw new Error("Cannot emit exec progress after run_finished");
+    await this.#frame(event, signal);
+  }
+
+  async finish(event: ExecRunFinishedEvent): Promise<boolean> {
     if (this.#finished) return false;
     this.#finished = true;
-    this.#write(`${serializeExecJsonlEvent(event, this.#now())}\n`);
+    await this.#frame(event);
     return true;
   }
 }

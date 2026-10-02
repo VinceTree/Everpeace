@@ -144,14 +144,14 @@ test("exec command emits allowlisted JSONL progress and one final result", async
   const io = host();
   const exit = await runExecCommand(options({ json: true }), registry, io, {
     async run(runtimeOptions) {
-      runtimeOptions.onEvent?.({
+      await runtimeOptions.onEvent?.({
         type: "session_started",
         sessionId: "session-1",
         modelId: "model-1",
         modelName: "offline",
         workspacePath: "C:\\workspace",
       });
-      runtimeOptions.onEvent?.({
+      await runtimeOptions.onEvent?.({
         type: "assistant_message",
         text: "\u001b[31mAuthorization: Bearer abcdefghijklmnop\u001b[0m",
       });
@@ -176,8 +176,8 @@ test("plain exec reserves stdout for the final assistant text", async () => {
   const io = host();
   const exit = await runExecCommand(options(), registry, io, {
     async run(runtimeOptions) {
-      runtimeOptions.onEvent?.({ type: "tool_started", name: "read_file", callId: "call-1" });
-      runtimeOptions.onEvent?.({ type: "assistant_message", text: "intermediate" });
+      await runtimeOptions.onEvent?.({ type: "tool_started", name: "read_file", callId: "call-1" });
+      await runtimeOptions.onEvent?.({ type: "assistant_message", text: "intermediate" });
       return result({ assistantText: "final answer", workflowResult: "no_changes", status: "no_changes" });
     },
   });

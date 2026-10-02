@@ -35,19 +35,23 @@ Windows 的 Codex restricted-token backend 可以运行系统 PowerShell，但 G
 - stdio `command`、`args`、显式环境、继承环境名和工作目录；
 - HTTP 静态 header、环境变量 header 和 bearer-token 环境变量；
 - 启动/调用超时、enabled/disabled tool 过滤、单服务器失败隔离；
-- server instructions、受限分页工具发现与 `notifications/tools/list_changed` 热更新；
+- server instructions、按初始化 capabilities 注册工具/资源/提示入口、受限分页工具发现与 `notifications/tools/list_changed` 热更新；
 - `mcp__<server>__<tool>` 命名空间、参数转发、有界结果和取消；
 - `/mcp` 强制重载配置、重置重试状态，并显示 disabled/connecting/reconnecting/ready/failed 状态。
 
-每个 server 有独立 supervisor。瞬时启动失败或断连使用 500 ms 起步、30 秒封顶的指数退避，最多重试十次；连接连续稳定 30 秒才清零计数。配置不支持、认证不可用、stdio executable 明确缺失等永久错误直接进入 failed。断连先从目录原子移除该 server 的全部 callable，再关闭旧 client；五秒内不能确认关闭时停止自动恢复，不能同时建立替代连接。退出、切换工作区、`/mcp` 主动刷新都会取消旧 generation 的连接和 timer，迟到 callback 不能复活它。默认 TUI 在正常退出和启动失败路径都等待共享 `TuiDependencies.dispose()`；它关闭活动 Memory runtime 与 `McpRuntime`，即使清理失败也继续恢复终端模式。
+每个 server 有独立 supervisor。瞬时启动失败或断连使用 500 ms 起步、30 秒封顶的指数退避，最多重试十次；连接连续稳定 30 秒才清零计数。配置不支持、认证不可用、stdio executable 明确缺失等永久错误直接进入 failed。断连先从目录原子移除该 server 的全部 callable，再关闭旧 client；初始化未完成的 client 也由 supervisor 管理，关闭同时等待 SDK close 完成及 transport 的实际 close 事件。五秒内不能确认关闭时停止自动恢复，不能同时建立替代连接。退出、切换工作区、`/mcp` 主动刷新都会取消旧 generation 的连接和 timer，迟到 callback 不能复活它。默认 TUI 在正常退出和启动失败路径都等待共享 `TuiDependencies.dispose()`；它关闭活动 Memory runtime 与 `McpRuntime`，即使清理失败也继续恢复终端模式。
 
-恢复只影响后续调用。断连时正在进行的 tool call 不自动重放；普通业务错误、单次 tool timeout 和用户取消不会单独触发 reconnect。`tools/list_changed` 通知以 50 ms 合并；每次先完整读取分页结果，再原子替换该 server 的 tool candidates。失败时保持上一份完整目录并在 status 中记录错误，真正断连则立即移除。发现最多 100 页、1,000 个工具和 2 MiB 定义；重复 cursor、重复原始工具名及超限都明确失败。
+恢复只影响后续调用。断连时正在进行的 tool call 不自动重放；普通业务错误、单次 tool timeout 和用户取消不会单独触发 reconnect。Streamable HTTP 已有 session ID 收到 404 时，宿主将该会话视为失效，通过同一关闭/重连流程建立后续连接；SDK 自身的 SSE 流恢复仍由 SDK 管理。`tools/list_changed` 通知以 50 ms 合并；每次先完整读取分页结果，再原子替换该 server 的工具定义和执行校验器。失败时保持上一份完整目录并在 status 中记录错误，真正断连则立即移除。发现最多 100 页、1,000 个工具和 2 MiB 定义，连接、发现及校验器编译共享配置的启动期限；重复 cursor、重复原始工具名及超限都明确失败。
 
-`McpSnapshot` 在同一时刻复制 function definitions、annotations/审批所需 metadata 和 opaque binding。binding 摘要包含随机 connection ID、完整定义/annotations 摘要及最终 callable name。Agent 为每个逻辑 step 冻结该快照，普通网络重试复用；dispatch 同时检查当前连接 generation 和冻结 binding，因此工具在审批等待或下一步前被删除、重连或改定义后，旧调用返回 stale/unavailable，不会转发到新能力。
+`McpSnapshot` 在同一时刻复制 function definitions、annotations/审批所需 metadata 和 opaque binding。binding 摘要包含随机 connection ID、完整原始定义（包括 `outputSchema`、`execution` 和 annotations）及最终 callable name。Agent 为每个逻辑 step 冻结该快照，普通网络重试复用；dispatch 同时检查当前连接 generation 和冻结 binding，因此工具在审批等待或下一步前被删除、重连或改定义后，旧调用返回 stale/unavailable，不会转发到新能力。
+
+发现与调用使用 SDK 公共 `request` 和对应 result schema，不依赖其按页覆盖的工具 metadata cache。已发布定义分别编译 output validator，远端重复使用相同 `$id` 不会复用另一工具或旧定义的校验器。进行中的调用按派发时捕获的定义验证 `structuredContent`；刷新失败不改变旧校验器。无效或异步 output schema 拒绝整次目录更新。要求 task-based execution 的工具不向模型广告，`/mcp` 明确显示 unsupported；optional-task 工具仍可普通调用。
 
 除 `full-access` 外，每次 MCP tool call 都走独立审批；它不受内置 web 开关替代或放行。工具调用及结果和其他 function call 一样进入可恢复 Responses context；配置 header、bearer token 和 stdio 环境值只在连接时使用，不写入 session、transcript 或模型 instructions。
 
-除标准 tools 外，当前也把 MCP resources/prompts 映射为受审批的合成 function call：`list_resources`、`read_resource`、`list_prompts` 和 `get_prompt`。这些能力按 MCP 分页读取并沿用同一超时、取消、结果大小和 context 持久化边界；当前 list-changed 通知只刷新标准 tool candidates，resources/prompts 仍在连接建立时探测。Codex OAuth 凭据复用、`http_headers_helper`、elicitation、sampling、tasks 和按工具持久审批策略尚未接入。OAuth/header-helper server 会以明确失败状态显示；不得声称与完整 Codex MCP runtime 等价。
+除标准 tools 外，宿主按初始化 capabilities 注册受审批的 `list_resources`、`list_resource_templates`、`read_resource`、`list_prompts` 和 `get_prompt`。只有 resources、prompts 或 instructions 的 server 也能进入 ready，不需要成功发现标准 tools。三个 list 接口接收可选 `cursor`，每次实时读取一页，并原样返回服务器游标为 `next_cursor`；空页也保留续点，返回与请求相同的非空游标则拒绝。空字符串游标仍原样转发；若服务器持续返回相同空游标而不前进，应重新列举，宿主不猜测替代游标。单页最多 1,000 项且完整序列化结果最多 1 MiB；超限返回 `incomplete` 与 `range_error`，不返回会跳过遗漏条目的续点。read/get 同样按需读取，不缓存目录、不自动订阅资源更新。
+
+MCP 文本投影保留文本、URI 和 MIME；只处理协议明确的 tool `content[]`、prompt `messages[].content`、resource `contents[]` 及其中嵌入的 resource 内容块，将 image/audio/blob 的 base64 替换为类型与大小说明。`structuredContent`、各层 `_meta` 和列表 metadata 不递归改写，业务字段即使名为 `blob` 或形如 image 也保持原值。普通结果连同截断 envelope 保持有效 JSON 且最多 1 MiB。Codex OAuth 凭据复用、`http_headers_helper`、elicitation、sampling、tasks 和按工具持久审批策略尚未接入。OAuth/header-helper server 会以明确失败状态显示；不得声称与完整 Codex MCP runtime 等价。
 
 模型文件编辑通过兼容的 `apply_patch` function tool 接入，支持有界 unified diff；生产 update/delete 强制匹配宿主读版本，审批绑定 preview hash 与权限 revision。更新逐文件原子替换，创建排他执行；批量失败仅回滚仍匹配本次 post-image 的已写文件，冲突或回滚错误明确报告，不保证整个批次原子成功。详见 [TOOLS](TOOLS.md)；它不是完整 Codex 原生 `apply_patch_call` wire protocol。
 

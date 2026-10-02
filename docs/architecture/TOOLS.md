@@ -84,6 +84,8 @@ README、HANDOFF 等按任务需要读取；规则链并不意味着自动装入
 
 `has_more` 只表示还有已保留页面；`incomplete` 表示搜索达到时间/字节限制，需缩小 query 才能继续获得未收集结果。两者不能混为“下一页会涵盖所有匹配”。每个 continuation 消费后生成下一引用，最后一页会立即释放对应搜索；数量或 UTF-8 字节超限时按创建顺序淘汰最旧搜索并使其所有引用过期。未知/已消费/已淘汰引用都要求重新搜索，Session 恢复与 Agent dispose 不保留引用内容。
 
+上述搜索 continuation 与持久 `read_tool_output` 引用不同。附件续页读取 v1 文件的目标范围，不必每页加载整份保留正文；最多 256 项的进程内输出定位缓存仍逐次核验日志身份和真实 call/result 来源。缓存及并发改写检查见 [STATE_AND_UI](STATE_AND_UI.md#模型历史与输出附件恢复)。
+
 搜索结果行列来自 ripgrep，其中 column 是字节偏移加一；LSP column 则是 UTF-16 位置，中文行中不能直接等同。
 
 大输出返回 `status: truncated`、`output_id`、首尾预览、原始/保留字节数和续读入口，不能直接截断原 JSON。超过保留上限的内容明确 `retention_truncated`，此时也不能宣称续读可取回全部正文。引用对应 Session 目录内的脱敏输出附件，模型不接收宿主路径；提交、读取、淘汰、清理和删除在 Session 跨进程事务锁内协调；压缩、Agent dispose 和重启不删除已提交附件。`read_tool_output` 的可选 `session_id` 默认当前会话，跨会话读取重新校验完全相同的规范化工作区；淘汰、删除或旧进程内正文明确不可用。正文先脱敏再截断、保存和分页，offset 以脱敏 UTF-8 字节计算；容不下一个完整字符的页明确返回范围错误。
@@ -132,13 +134,13 @@ README、HANDOFF 等按任务需要读取；规则链并不意味着自动装入
 
 支持 definition、references、implementation、hover。输入位置为一基 UTF-16 行列；查询按工作区串行，每次读取当前目标文档、启动服务器并 `didOpen`，请求结束后 `didClose` 和关闭进程。因此文件修改后下次查询读取新内容，不依赖旧编辑器缓冲。
 
-单次请求上限 30 秒，文档上限 16 MiB，位置最多 100 项，hover 文本最多 64 KiB。JSON-RPC header 最多 8 KiB，单 frame 最多 2 MiB，单查询总入站流量最多 8 MiB，stderr 只保留前 64 KiB。输入的 UTF-16 位置先对当前文本验证；初始化返回的 capability 必须支持请求操作。目标路径校验工作区真实路径；返回位置只保留工作区内的 file URI。
+单次请求上限 30 秒，文档上限 16 MiB，位置最多 100 项，hover 文本最多 64 KiB，并在完整 UTF-8 字符边界截断。JSON-RPC header 最多 8 KiB，单 frame 最多 2 MiB，单查询总入站流量最多 8 MiB，stderr 只保留前 64 KiB。输入的 UTF-16 位置先对当前文本验证；初始化必须支持请求操作、UTF-16 编码与临时文档 open/close 同步。目标和返回位置都同时检查原始路径与 realpath，拒绝工作区外及策略保护的控制目录/应用状态路径。
 
 宿主拒绝所有 server 发起的请求，包括 applyEdit 和 executeCommand。导航结果不写入文件观察记录，不授权随后 patch；修改前仍需 `read_file`。
 
-每次查询通过 pinned Codex backend 的 duplex 接口直接启动 executable/argv，不经过 shell wrapper，也不回退宿主执行。专用 `:read-only` 子策略拒绝 workspace 写入与应用全局状态，并请求 native network denial；该隔离不受用户选择 full access 影响。配置的 language server 启动前，宿主先在相同策略中运行直接 socket 探针；只在真实连接被拒绝时继续，否则工具返回 unavailable 并要求使用 lexical search。传输保持 raw stdout、处理 stdin backpressure、持续 drain 有界 stderr，并等待进程清理后才推进队列或结算成功。任务取消或权限 revision 变化会取消查询。
+每次查询通过 pinned Codex backend 的 duplex 接口直接启动 executable/argv，不经过 shell wrapper，也不回退宿主执行。专用 `:read-only` 子策略拒绝 workspace 写入与应用全局状态，并请求 native network denial；该隔离不受用户选择 full access 影响。配置的 language server 启动前，宿主先用同一监听目标完成宿主连接正对照，再在相同策略中运行直接 socket 探针。只有明确的 `EACCES`/`EPERM` 才记为 denied；连接成功记为 allowed，拒绝连接、超时、无效输出或清理失败记为 inconclusive。只有 denied 可继续，其余均返回 unavailable。证据仅描述本次 TCP/IPv4 及 loopback/non-loopback 目标，不证明其他网络协议或地址都被隔离。传输保持 raw stdout、处理 stdin backpressure、持续 drain 有界 stderr，并等待进程清理后才推进队列或结算成功。任务取消或权限 revision 变化会取消查询。
 
-`:read-only` 的平台 ambient system read 与临时目录能力仍然存在；额外源码根用于明确记录所需依赖，并不表示其余 ambient reads 被移除。Windows 上的固定 `@openai/codex@0.155.1` 已实测拒绝 workspace 写入与 Everpeace 应用状态读取，但仍允许直接网络探针，因此当前 Windows 原生 LSP 导航会失败关闭。原生可用性必须按平台验收，不能从 profile 名称或 CLI 参数推断。
+`:read-only` 的平台 ambient system read 与临时目录能力仍然存在；额外源码根用于明确记录所需依赖，并不表示其余 ambient reads 被移除。Windows 上的固定 `@openai/codex@0.155.1` 已实测拒绝 workspace 写入与 Everpeace 应用状态读取，但仍允许直接网络探针，因此当前 Windows 原生 LSP 导航会失败关闭。原生可用性必须按平台验收，不能从 profile 名称或 CLI 参数推断；通用 language-server registry 和进程池尚未启用。
 
 ## 外部工具与修改检查表
 
