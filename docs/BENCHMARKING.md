@@ -44,7 +44,7 @@ export const task: BenchmarkTask = {
 
 ## Production and external adapters
 
-TUI 与 benchmark 共用 `CodingTaskRunner`。`createProductionBenchmarkAdapter()` 在无 Ink 环境中构造生产 `ReactAgent`、SessionStore、权限、原生 sandbox、workflow 和 runner；同一个 Agent/Session 内完成工具循环、最多三轮诊断、完整最终验证、Goal 及 Memory 结算。adapter 标记 `managesRepairs`，因此 evaluator 只运行独立 acceptance，不会叠加另一套自动修复循环。
+TUI、公开 `everpeace exec` 与 benchmark 通过 `src/runtime/production.ts` 共用生产 Agent/命令 factory 和 `CodingTaskRunner`。`createProductionBenchmarkAdapter()` 在无 Ink 环境中显式覆盖评测参数与批准策略，并构造 Session、权限、原生 sandbox、workflow 和 runner；同一个 Agent/Session 内完成工具循环、最多三轮诊断、完整最终验证、Goal 及 Memory 结算。adapter 标记 `managesRepairs`，因此 evaluator 只运行独立 acceptance，不会叠加另一套自动修复循环。公开 exec 使用正常模型注册/keyring 和交互停止语义，不直接暴露此 benchmark adapter 或 evaluator contract。
 
 ```ts
 import {

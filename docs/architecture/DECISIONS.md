@@ -62,9 +62,17 @@ benchmark 结果不是 Session 事件，不写入 JSONL，也不进入模型 con
 
 Provider capability profile 只记录已观察的模型能力和 context window。未知兼容端点保持保守默认值，第一阶段不自动路由或切换模型，避免把未验证的 provider 假设变成运行时策略。
 
+## 生产 runtime 与公开 exec
+
+真实运行依赖由 `src/runtime/production.ts` 统一装配：provider、ReactAgent、Session 历史/附件、Skills、MCP、learned Memory、Goal、代码导航及原生 sandbox command executor 不再由 TUI 和 benchmark 分别拼装。Ink 只提供交互与显示回调；公开 `everpeace exec` 通过同一 factory 和 `CodingTaskRunner` 运行，内部 benchmark 只保留 reviewed 参数与批准策略覆盖。这样共享的是生产行为，不把 benchmark adapter 暴露为公共 API。
+
+exec 采用 CLI + JSONL，而非本期新增 TypeScript SDK。每次调用创建正常可恢复 Session，模型先按注册 ID、再按唯一名称解析；提示词只来自位置参数或非 TTY stdin。首版没有非交互 resume、Plan 或自动批准，所有需要用户的审批/结构化问题先保存配对结果，再以 `interaction_required` 结算。可选 token budget、deadline 和 step 上限覆盖完整 runner/repair 生命周期。默认 stdout 只保留最终正文，JSON 模式只输出脱敏白名单事件，并在清理完成后发布唯一终态；帮助解析不得提前加载 keyring、MCP 或 TUI。
+
 ## Context compaction
 
 `/compact`、阈值压缩和 context-limit 恢复共用供应商能力选择：官方 OpenAI 走声明的 native compact，DeepSeek/compatible 使用普通模型请求生成 summary。native 输出原样保留 retained/opaque item；summary 按完整 assistant/tool-result 边界压缩，保留最近两个完整单元与未闭合链，拒绝 incomplete、空白或未缩短结果。可见 timeline 不裁剪，context 仅在持久化成功后替换；失败或取消保留原 context。
+
+自动阈值和 context-limit recovery 在模型压缩前先尝试一次 deterministic pruning。候选限定为早期、闭合、超过 8,192 Unicode 码点，并能在本 step 固定 EOF 下用 call ID、工具来源和脱敏正文摘要唯一解析的 tool result；最近两个单元、open chain、非工具/reasoning/opaque、Memory 和历史/续读结果保护。替代 JSON 保留 4,096 码点头部、1,024 尾部与稳定 `session_event_read` 引用，最多 32 KiB；不能唯一恢复的项跳过。该阶段要求持久 Session 历史服务；`context_pruned` 必须先落盘再替换有效 context，原始 append/timeline/附件不变，累计 usage 不变，只有当前 `context_tokens` 改为 unknown。裁剪后重新估算完整请求，足够小则省去 summary/native 请求，否则继续上述压缩。低压力、手动 `/compact` 和普通网络 retry 不触发该阶段。
 
 阈值取 `min(窗口 × 80%, 窗口 − 实际输出预算 − 安全余量)`，安全余量为窗口 5%、最多 32K；未知窗口不自动按阈值触发。`context_compacted` 保留现有持久化渠道，压缩用量计入消耗但压缩后占用设为未知。明确 context-limit 的恢复每个 `runTurn` 最多一次，失败不转为普通采样重试。SSE 只有收到 `response.completed` 才算成功；首个事件之前明确拒绝 streaming 才允许 buffered fallback，半截结果不得启动工具。
 
@@ -90,7 +98,7 @@ Agent Loop 的正常 follow-up sampling step 使用独立预算，默认每个 t
 
 ## Codex Sandbox、MCP 与 Skills
 
-完整边界见 [CODEX_CAPABILITIES.md](./CODEX_CAPABILITIES.md)。sandbox 复用 `@openai/codex@0.155.1` 的平台后端而非复制 Rust 实现；Windows 模型 shell 固定用 PowerShell，其他平台用 Bash。MCP 复用 `codex mcp` 配置，以官方 TypeScript SDK 连接 stdio/Streamable HTTP，非 full-access 的 tools、resources、prompts 调用逐次审批。主机 Skills 扫描 Codex 项目/用户/admin/system 根，只把无名称冲突的 metadata catalog 预载到 instructions，显式 `$name` 在本轮完整注入，隐式匹配通过受路径约束的 `read_skill` 渐进读取。`/mcp` 是 transient 状态窗口；`/skills` 是不进入 session timeline/context 的多步管理向导，可在每次操作中选择项目或用户作用域，AI 创建单个 `SKILL.md`，或从公开 HTTPS GitHub/Git/SKILL.md/ZIP 来源先暂存、校验和预览，再明确确认安装。创建/安装不得覆盖任一发现根的同名 Skill，重复名称在解决前不得自动或显式调用。三者均不改变 JSONL schema；当前不包含完整 Plugin、OAuth、远端 Skill provider 或 managed-policy runtime，Skill 管理也不包含私有认证、更新或删除。
+完整边界见 [CODEX_CAPABILITIES.md](./CODEX_CAPABILITIES.md)。sandbox 复用 `@openai/codex@0.155.1` 的平台后端而非复制 Rust 实现；Windows 模型 shell 固定用 PowerShell，其他平台用 Bash。MCP 复用 `codex mcp` 配置，以官方 TypeScript SDK 连接 stdio/Streamable HTTP，非 full-access 的 tools、resources、prompts 调用逐次审批。每个 server 独立监督断连、退避和关闭；断连立即撤下工具且不重放中断调用。list-changed 只有完整分页发现成功后才原子替换目录，step snapshot 通过 connection/definition binding 防止旧批准调用新能力；`/mcp` 重载配置并重置 supervisor。主机 Skills 扫描 Codex 项目/用户/admin/system 根，只把无名称冲突的 metadata catalog 预载到 instructions，显式 `$name` 在本轮完整注入，隐式匹配通过受路径约束的 `read_skill` 渐进读取。`/mcp` 是 transient 状态窗口；`/skills` 是不进入 session timeline/context 的多步管理向导，可在每次操作中选择项目或用户作用域，AI 创建单个 `SKILL.md`，或从公开 HTTPS GitHub/Git/SKILL.md/ZIP 来源先暂存、校验和预览，再明确确认安装。创建/安装不得覆盖任一发现根的同名 Skill，重复名称在解决前不得自动或显式调用。三者均不改变 JSONL schema；当前不包含完整 Plugin、OAuth、远端 Skill provider 或 managed-policy runtime，Skill 管理也不包含私有认证、更新或删除。
 
 Git Skill 来源采用 shallow、no-checkout 克隆：先读取有界 Git tree 和候选 `SKILL.md` metadata，同名打包副本按规范 `skills/<name>` 路径优先去重，预检候选文件类型、数量和字节数后才 sparse checkout。原始 `SKILL.md` 清单数与去重后的不同 Skill 候选数使用独立上限，100 个候选限制只对去重结果生效，避免同一仓库中的 Codex/评审镜像副本在实际候选未超限时被提前拒绝。该顺序避免 Windows 在无关深层路径上提前失败，也防止为了一个 Skill 展开整个仓库工作树；它不改变公开 HTTPS、无认证、超时、无覆盖和显式确认边界。
 
@@ -99,8 +107,14 @@ Git Skill 来源采用 shallow、no-checkout 克隆：先读取有界 Git tree �
 `/resume` 的批量删除是文件级永久操作：SessionStore 校验 ID、等待该 Session 的串行写入队列完成后删除 JSONL，不写入删除事件或回收站。当前活动 Session 被删除后由 TUI 清理内存状态并解除会话；未选中的 Session 与当前聊天不受影响。
 - 每个 session 使用一个版本化 JSONL 文件，存放于平台应用状态目录；API Key 仍只进入系统 keyring。
 - 可见 timeline 与 Responses API context 分开记录，保证恢复界面完整，同时不把直接 `!` 命令错误加入模型上下文。
-- 写入按 session 串行追加；不完整末行可忽略，其他损坏只隔离对应文件。
+- 写入按 session 串行追加；不完整末行可忽略，其他损坏只隔离对应文件。追加和当前 step EOF 捕获先在事务锁内恢复末行：完整有效的旧无 LF 事件补换行，无效 partial 截回上一 LF；超过 8 MiB 保留原文件并失败关闭。完整事件的原始字节和引用摘要不改变。
 - `session_created` 保存模型引用、工作目录及 usage tracking 能力；`model_selected` 表达模型变化及是否重置 context；`usage_recorded` 保存每次主 Agent 响应的 token 增量。
+
+## Session 分支与 lineage
+
+`/fork` 只接受当前空闲、源模型仍可用的本地 Session 已提交末尾。父 Session 锁内固定 EOF，内容和最多 16 份保留附件先复制到隐藏 staging，子输出目录准备后最后原子发布 JSONL；父子沿用相同 `output_id`，但持有独立文件。lineage 记录父 ID、fork 时间、源 EOF 与源 header 摘要，历史关系查询重新核验这些字段，父被删除时只把关系标记 unavailable，不使子副本失效。
+
+分支不是运行状态克隆。子会话生成新 task ID，清零 usage/repair，清除 Goal、审批、undo、观察版本和旧验证成功；保留模型、context/timeline、聊天 Memory policy、标注继承的 TaskProgress、changed paths 与未验证债务。持久 `fork_pending_resume` 使首次及失败后的 coding 保持 `session_resume` 语义，直到宿主结算 `verified/no_changes`；Plan、查看、取消和失败不消耗它，也不触发父 Goal 续跑。
 
 ## Learned 经验记忆
 
@@ -179,6 +193,16 @@ Responses usage 中的 `input_tokens_details.cached_tokens` 与 `cache_write_tok
 - 网页内容是提示注入边界之外的不可信数据；系统指令要求模型不得执行网页中的指令，并在最终回答中列出实际采用的来源 URL。
 - 搜索和页面读取无需 Bash 确认，简短工具动作写入可恢复 timeline；完整 function call/output 继续按既有规则写入 Responses context。
 
+## 长任务历史与输出恢复
+
+- 原始 `context_append` 保留可追溯历史，四个只读 Session 工具按需搜索当前及同工作区旧会话/直接父子关系，并查找仍保留的输出附件。普通 coding 与 Plan 均可使用；learned Memory 开关独立，不将旧全文自动注入主请求。
+- 投影包含用户/助手正文和工具调用/结果，排除 reasoning、加密内容、developer 快照、Memory 结果、历史工具及续读自身结果。直接 `!` 属于 timeline，不能成为模型可查历史。历史只是不可信资料，不恢复文件观察、审批、Goal 或验证权。
+- 当前会话边界按逻辑 step 固定且网络重试复用；旧会话在查询开始固定。引用绑定 Session、JSONL 字节位置、条目序号和内容摘要，追加不失效，删除或改写不可用。同工作区比较兼容 Windows 盘符与分隔符，不扩展父子目录和符号链接别名。
+- 搜索流式有界：50 个结果、16 KiB 返回、30 秒、64 MiB 扫描、8 MiB 单条缓冲；达到限制或遇损坏记录明确 `incomplete`。不引入数据库或旧 JSONL 迁移。
+- 输出正文先脱敏再保留和分页，版式脱敏与 Memory 共享凭据规则；Memory 的空白清理和字段裁剪保持原义。输出附件每份前 2 MiB、每会话最新 16 份，`session_event_read` 在 24 KiB 正文页之外还限制完整 JSON 为 32 KiB，必要时缩小正文页；工具预览 32 KiB、续读正文 24 KiB，超出保留范围标记 `retention_truncated`。旧进程内正文不重建。
+- 并行阶段仅准备有界正文并计入背压；附件写入、结果引用追加、淘汰依模型调用顺序进行，并与续读、清理和删除共用 Session 跨进程事务锁。失败走 `PersistenceError`，dispose 保留已提交附件，删除 Session 清理所属附件，启动清理未被日志引用的崩溃遗留。
+- 文件搜索、glob、Composer 和 rg 诊断 probe 统一惰性解析固定 `@vscode/ripgrep@1.18.0` 平台 optional package，通过绝对路径和 `--no-config` 运行；不采用系统 `PATH`，缺包或不支持的平台明确 unavailable。供应商参数、权限和验证门槛沿用现有契约。
+
 ## 任务取消与输入输出
 
 - 模型轮次运行时保留一个可编辑 guidance composer。用户提交的普通消息立即写入可恢复 transcript；真实 Agent 支持时会中止当前 sampling，并在已持久化上下文的安全检查点应用 guidance，工具执行中的消息等待当前工具结果落盘后生效，未启动调用补齐 `steered` output。Ctrl+C 取消时先将待处理 guidance 写入模型 context，避免遗留给未来轮次。旧 AgentSession 替身仍按 FIFO 下一轮兼容。模型 Bash 的非交互输出不会夺取输入焦点。直接 `!` 运行时仍将 stdin 独占给 PTY，Ctrl+C 取消当前命令。
@@ -205,7 +229,7 @@ Responses usage 中的 `input_tokens_details.cached_tokens` 与 `cache_write_tok
 
 并发能力已从工具名白名单迁移到显式 `read_only`、`idempotent`、`parallel_safe` 和资源键；未声明工具串行，MCP 元数据不单独授予本地并发权限。结果按模型顺序持久化，取消、steering、stop 和持久化失败不得留下未配对 function output。
 
-benchmark 只作为协议变更证据，不是自动路由或近期重构理由。hooks、完整 MCP lifecycle、Plugin/远端 provider、多 Agent 和外部 app-server 维持明确未实现边界，不用 no-op 或伪造成功暴露。
+benchmark 只作为协议变更证据，不是自动路由或近期重构理由。hooks、MCP OAuth/elicitation/tasks、Plugin/远端 provider、多 Agent、TypeScript SDK 和外部 app-server 维持明确未实现边界，不用 no-op 或伪造成功暴露。
 
 ## 维护约束
 
@@ -236,7 +260,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 
 - 已知窗口的自动阈值取 `min(80%, window-outputBudget-headroom)`；headroom 为窗口 5%、最多 32K。真实 usage 与请求估算不混写为同一观测；阈值压缩在同一 history revision 上只执行一次。
 - 官方 OpenAI 使用声明的 native compact；DeepSeek/compatible 使用模型摘要，最多 8K 输出，保留最近两个完整 assistant/tool-result 交互单元，不依赖用户消息数量。摘要明确区分宿主验证证据与模型自述，取消、失败或持久化失败不会替换原 context。明确 context-limit 每轮只恢复一次。
-- 进入模型 context 的单项工具结果限制为 32 KiB；超限时返回含首尾、总字节数和进程内续读 ID 的有效 JSON，终端保留输出不因此缩小。
+- 进入模型 context 的单项工具结果限制为 32 KiB；超限时返回含首尾、总字节数和持久 Session 附件的续读 ID 的有效 JSON，终端保留输出不因此缩小。
 - Usage 独立累计输入、输出、reasoning、cache hit、cache write 和带缓存统计的输入分母。缺少 write 不抹掉 hit；缺失样本使完整性保持 partial。DeepSeek cache miss 不伪装成 cache write。
 - `/reasoning` 只在任务间改变下一轮快照并随 Session 保存；`/doctor` 默认仅检查本地 Node、shell、sandbox 和配置，只有 `--live` 发出一次有界模型请求。`/status` 展示实际协议、压缩策略、推理档位及独立 usage。
 
@@ -252,7 +276,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 - 多文件 patch 失败时只逆序回滚已经成功写入的项目，并先验证当前内容仍为宿主写入的 post-image。用户或其他进程随后改动的文件列入 rollback conflict，不得覆盖；`rolledBack` 只在所有已写文件确实恢复时为 true。
 - Session 恢复重建进程内 tracker，但不调用新任务初始化。修复次数、blocked phase、changed paths 与 pending verification 保持；新用户任务可获得新预算，同时保留 prior-unverified 元数据。只有覆盖当前 workspace 的新完整验证可以清除这项债务。
 - `/verify` 与自动 suite 使用相同的串行、取消、权限 revision 和 workspace revision 语义。无参数可结算完整 suite；显式单命令永远是 supplemental。无法把结果绑定到 Git 完整快照或当前结构化 checkpoint 时，状态为 unavailable。
-- `read_file` 按行分页并返回全文件 SHA-256；搜索和 glob 直接参数化启动 ripgrep。超大 tool result 使用进程内不透明 ID 续读，Session 仅保存有界 envelope。后台 shell 仍走现有 sandbox/权限，最多两个、默认十分钟、无交互 stdin，也不跨 Session 恢复。
+- `read_file` 按行分页并返回全文件 SHA-256；搜索和 glob 直接参数化启动 ripgrep。超大 tool result 使用不透明 ID 读取 Session 持久附件，JSONL 仅保存有界 envelope；附件脱敏后每份最多 2 MiB、每会话最多 16 份。后台 shell 仍走现有 sandbox/权限，最多两个、默认十分钟、无交互 stdin，也不跨 Session 恢复。
 
 ## DeepSeek 请求 attempt 与压缩终态
 
@@ -268,7 +292,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 
 ## 性能计量与生产闭环
 
-- TUI 和 benchmark 共用 `CodingTaskRunner` 作为 coding 生命周期的唯一编排层。runner 负责 Agent turn、后台任务收束、最终验证、诊断轮、Goal 完成和 learned-memory outcome；benchmark adapter 标记 `managesRepairs`，评测器不再叠加第二套自动修复循环。
+- TUI、公开 exec 和 benchmark 共用生产 factory 与 `CodingTaskRunner` 作为 coding 生命周期的唯一编排层。runner 负责 Agent turn、后台任务收束、最终验证、诊断轮、Goal 完成和 learned-memory outcome；benchmark adapter 标记 `managesRepairs`，评测器不再叠加第二套自动修复循环。
 - Live 计量使用进程内 `RequestAttemptLedger`，边界是实际 provider attempt，而不是一次 Agent turn。coding、stream recovery、缓存能力降级和 summary 分开记录；reasoning 作为 output 的明细展示，不重复计入预算。任何已经发出但 usage 不可靠的 attempt 永久把当前账本标为 incomplete，后续成功不能清除，也不能继续发起模型请求。
 - `RequestSnapshot` 是实际发送参数、输入估算、输出预留和 request/stable/dynamic 指纹的共同来源。快照在构建时深复制，避免后续输入变化污染测量，同时允许 SDK 在自己的请求对象上做兼容处理；DeepSeek 的固定指令和工具顺序位于历史前，动态权限及项目上下文位于历史后。摘要重放相同固定前缀和工具定义，但以 `tool_choice: none` 禁止工具执行。
 - 宿主只读并发不依赖供应商 `parallel_tool_calls`。生产最多四项，只运行明确声明 read-only、idempotent、parallel-safe 且资源不冲突的调用；任一完成即可补位，尚未有序持久化的结果受数量和 4 MiB 总量约束。写入、shell、MCP、审批和未知能力保持串行。

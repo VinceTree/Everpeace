@@ -6,6 +6,7 @@ import lockfile from "proper-lockfile";
 import type { ResponsesClientLike } from "../agent/react-agent.js";
 import type { TokenUsageSample } from "../status/model-status.js";
 import { assertCompletedModelResponse } from "../providers/capabilities.js";
+import { redactSecretsPreservingLayout } from "../util/redact-secrets.js";
 
 export type LearnedScope = "project" | "user";
 export type LearnedKind = "preference" | "convention" | "procedure" | "constraint" | "summary";
@@ -152,11 +153,7 @@ function cleanText(value: string): string {
 }
 
 export function redactSecrets(value: string, maximum = MAX_FIELD_CHARS): string {
-  return cleanText(value)
-    .replace(/-----BEGIN [^-]+-----[\s\S]*?(?:-----END [^-]+-----|$)/giu, "[private key redacted]")
-    .replace(/\b(?:sk-[A-Za-z0-9]{16,}|sk-proj-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9_]{16,}|xox[baprs]-[A-Za-z0-9-]{16,}|AKIA[0-9A-Z]{16})\b/gu, "[secret redacted]")
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/giu, "Bearer [secret redacted]")
-    .replace(/(["']?(?:api[_ -]?key|access[_ -]?token|auth[_ -]?token|password|passwd|secret|private[_ -]?key)["']?\s*[:=]\s*)["']?[^\s,;"'}]+["']?/giu, "$1[secret redacted]")
+  return redactSecretsPreservingLayout(cleanText(value), false)
     .slice(0, maximum)
     .trim();
 }

@@ -7,7 +7,7 @@
 - Node.js 22+，使用仓库指定的 `pnpm@10.22.0`；版本要求和脚本以 [package.json](../package.json) 为准。
 - TypeScript + ESM，采用 NodeNext 模块解析。源码内本地导入保留 `.js` 扩展；配置见 [tsconfig.json](../tsconfig.json) 和 [tsconfig.build.json](../tsconfig.build.json)。
 - `tsx` 运行开发入口与 Node test runner；`tsc` 输出到 `dist/`，构建会先清理该生成目录。
-- Git 用于工作区跟踪，ripgrep 用于模型 search/glob；Windows 使用系统 PowerShell，macOS/Linux 模型 shell 使用 Bash。
+- Git 用于工作区跟踪；模型 search/glob、Composer `@` 候选和 doctor 使用固定的 `@vscode/ripgrep@1.18.0` 平台 optional dependency，并通过绝对路径运行。Windows 使用系统 PowerShell，macOS/Linux 模型 shell 使用 Bash。
 - 只运行离线测试、类型检查和构建不需要模型凭据。交互登录通过系统 keyring 保存 Key；不要把凭据加入文件、命令记录或测试快照。
 
 在全新 checkout 中安装和启动：
@@ -15,11 +15,12 @@
 ```powershell
 node --version
 pnpm --version
-rg --version
 git --version
 pnpm install --frozen-lockfile
 pnpm dev
 ```
+
+不要以 `--no-optional` 安装：随包 ripgrep 当前覆盖 Windows x64/arm64/ia32、macOS x64/arm64，以及 Linux x64/arm64/arm/ia32/ppc64/riscv64/s390x。其他系统/架构或缺少匹配 optional package 时，搜索、`@` 候选和 doctor 会明确报告 unavailable；程序不会回退到系统 `PATH` 中的 `rg`。所有应用内调用继续传 `--no-config`，用户 `RIPGREP_CONFIG_PATH` 不会改变行为。
 
 已有工作区先检查差异，不要为了安装成功删除用户目录、重置 lockfile 或重新生成无关依赖。确需修改依赖时，同步审查 manifest、lockfile 和相关补丁。
 
@@ -44,6 +45,7 @@ Windows TUI 手工验收仍需真实 Windows Terminal。通过 WSL 调用 Node �
 | 命令 | 用途 |
 | --- | --- |
 | `pnpm dev` | 用 tsx 启动开发 CLI/TUI |
+| `pnpm dev -- exec <prompt> ...` | 用 tsx 运行公开非交互 CLI 路径 |
 | `pnpm typecheck` | 检查项目 TypeScript 类型 |
 | `pnpm test` | 执行全部测试，文件并发度固定为 4 |
 | `pnpm build` | 清理并重新生成构建产物 |
@@ -67,13 +69,15 @@ pnpm exec tsx --test --test-name-pattern="cancel" tests/unit/agent/react-agent.t
 | Responses 能力与请求参数 | [provider tests](../tests/unit/providers/) |
 | 文件保护、后台命令、搜索、LSP | [tool tests](../tests/unit/tools/) |
 | Session schema 与恢复 | [session-store.test.ts](../tests/unit/storage/session-store.test.ts)、[app.test.tsx](../tests/unit/tui/app.test.tsx) |
+| 历史、附件、分支与裁剪 | [session-history.test.ts](../tests/unit/storage/session-history.test.ts)、[session-outputs.test.ts](../tests/unit/storage/session-outputs.test.ts)、[react-agent.test.ts](../tests/unit/agent/react-agent.test.ts) |
+| `everpeace exec` 参数、JSONL 与生产运行 | [CLI tests](../tests/unit/cli/)、[exec tests](../tests/unit/exec/)、[runtime factory tests](../tests/unit/runtime/) |
 | 终端布局、输入、slash 窗口 | [TUI tests](../tests/unit/tui/) |
 | Memory、Skills、MCP | [memory](../tests/unit/memory/)、[skills](../tests/unit/skills/)、[mcp](../tests/unit/mcp/) |
 | 评测预算、fixture、独立评分 | [benchmark tests](../tests/unit/benchmark/) |
 
 ## 独立测试 CI 与证据范围
 
-[Test workflow](../.github/workflows/test.yml) 在 pull request 和 main push 上分别运行 Windows/Linux 的 Node 22 门禁：安装 pnpm 与 ripgrep、冻结安装依赖、类型检查、完整测试、构建、差异检查。它独立于 Release workflow，不能为避免发布而跳过测试 CI。
+[Test workflow](../.github/workflows/test.yml) 在 pull request 和 main push 上分别运行 Windows/Linux 的 Node 22 门禁：安装 pnpm、通过冻结 lockfile 安装平台 ripgrep optional package、类型检查、完整测试、构建、差异检查。CI 不再显式安装系统 `rg`，应用始终通过包内绝对路径运行平台二进制；缺少匹配 optional package 的行为由 resolver fixture 单独覆盖。它独立于 Release workflow，不能为避免发布而跳过测试 CI。
 
 [sandbox-boundaries.test.ts](../tests/unit/tools/sandbox-boundaries.test.ts) 的真实 Windows native sandbox 测试在非 Windows 跳过；在 Windows 且 `GITHUB_ACTIONS=true` 时也明确跳过，因为 hosted runner 无法初始化所需嵌套 sandbox。策略、审批与启动失败关闭仍有单测；跳过结果不能当作真实隔离验收通过。
 

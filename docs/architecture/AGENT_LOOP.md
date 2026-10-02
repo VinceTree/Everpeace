@@ -35,7 +35,7 @@ Apache-2.0 许可证与改动归属位于 `third_party/codex/`，随构建包包
 
 当前路线按正确性优先：守住 `response.completed` 后整批执行的 durable-record 不变量，使用能力声明和有界批次控制并发，最后在真实 provider 证据充分时评估 output-item 执行。item-level 执行只有在 provider 明确保证 `output_item.done` 顺序、durable record 和可恢复 cursor 时启用；未知端点继续整批路径。step snapshot 已通过 `prepareStep` 落地：采样重试复用当前 snapshot，工具 follow-up 重新捕获 MCP/Skill 状态；dispatch 仍重新检查当前权限。
 
-benchmark 只用于协议变更前建立证据，不是当前实现的替代品。hooks、多 Agent、完整 MCP lifecycle、Plugin/远端 provider 和外部 app-server 不属于首轮 loop 优化，也不能用 no-op 或伪造成功暴露。并发已采用保守能力声明和共享资源键冲突检查；写操作作为串行屏障，不跨写操作重排，也不声称已实现通用读写锁调度器。
+benchmark 只用于协议变更前建立证据，不是当前实现的替代品。hooks、多 Agent、MCP OAuth/elicitation/tasks、Plugin/远端 provider 和外部 app-server 不属于首轮 loop 优化，也不能用 no-op 或伪造成功暴露。并发已采用保守能力声明和共享资源键冲突检查；写操作作为串行屏障，不跨写操作重排，也不声称已实现通用读写锁调度器。
 
 ## 工具能力与并发准入
 
@@ -61,16 +61,18 @@ P0 协议基线已完成：`LoopEvent` 可报告 `response_rejected`；incomplet
 
 ## 交叉边界与停止结果
 
-每个逻辑 step 深复制 MCP/Skill metadata 与工具 definitions，并冻结广告工具集合；请求重试复用该集合，dispatch 拒绝未提供的工具并重新检查当前权限。Plan 的只读限制在 dispatch 生效，不依赖模型遵守工具列表。guidance 中的显式 Skill 引用参与下一个 step 的准备。
+每个逻辑 step 深复制 MCP/Skill metadata 与工具 definitions，并冻结广告工具集合；MCP snapshot 同时包含 annotations 和绑定 connection/definition 的 opaque capability ID。请求重试复用该集合，dispatch 拒绝未提供的工具、过期 MCP binding，并重新检查当前权限。工具列表通知只影响完整刷新后的下一 step；审批等待期间发生断连或定义变化时，旧调用不得落到新连接。Plan 的只读限制在 dispatch 生效，不依赖模型遵守工具列表。guidance 中的显式 Skill 引用参与下一个 step 的准备。
 
 Steering 使用独立的 `hasPendingSteering` 查看接口和 `applySteering` 提交接口。先按顺序持久化工具结果及未启动调用的 `steered` output，再保存用户消息；消息保存成功才移出队列。新 guidance 刷新 step 并消耗正常步数，完成前再次检查 pending input。取消或正常错误收尾保留已接收 guidance；持久化失败立即停止，不在同一次失败处理中自动重试存储。
 
-`runAgentLoop` 返回 `AgentLoopResult`，`AgentTurnResult.stopReason` 可为 `budget_limited` 或 `usage_limited`。本轮关联 Goal 的状态在采样/重试前、usage 更新后及工具检查点检查；触达限额后保留已收到响应，为未执行调用补齐带原因的 `skipped`，发出 `stopped` phase，不发出伪 `completed`。TUI 显示停止原因并跳过 workflow 自动验证修复及 Goal 自动续跑。预算基于已返回 usage，正在进行的单次请求可能越过剩余预算；已知消耗仍如实累计。预算停止不触发 learned-memory 成功提炼。
+`runAgentLoop` 返回 `AgentLoopResult`，`AgentTurnResult.stopReason` 可为 `budget_limited` 或 `usage_limited`。本轮关联 Goal 的状态在采样/重试前、usage 更新后及工具检查点检查；触达限额后保留已收到响应，为未执行调用补齐带原因的 `skipped`，发出 `stopped` phase，不发出伪 `completed`。TUI 显示停止原因并跳过 workflow 自动验证修复及 Goal 自动续跑。公开 exec 同样把 task step、deadline 与 request ledger 放在整个 runner 外层，repair 不会重置它们。预算基于已返回 usage，正在进行的单次请求可能越过剩余预算；已知消耗仍如实累计。预算停止不触发 learned-memory 成功提炼。
 
 `PersistenceError` 区分 context、usage、Goal 和 workflow 存储失败；不会进入模型请求重试，也不会被转换成普通工具失败继续执行。真正的工具错误仍返回 function output。并发池按原顺序持续落盘连续就绪结果；取消后停止补充调用并等待已启动调用收束。所有步数、重试及并发配置必须是合法有限整数。
 
 ## 压缩与流缓存
 
-阈值自动压缩在 step 准备阶段运行，不因普通采样网络重试重复执行；明确 context-limit 恢复保留独立预算。compaction 的 usage 只表示本次消耗，不能作为压缩后 context 大小：Agent、TUI 和 Session 重放均将压缩后占用设为未知，下一次正常 response usage 到达后再更新。沿用已有 `context_compacted` 和 usage 事件，无 schema 迁移。
+阈值自动压缩在 step 准备阶段运行，不因普通采样网络重试重复执行；明确 context-limit 恢复保留独立预算。两条压力路径都会先固定历史 EOF，并至多尝试一次 deterministic tool-result pruning：仅替换能由 call ID、工具名和脱敏摘要唯一解析回原 `context_append` 的早期闭合大结果，保留最近两个单元/open chain 及非工具、reasoning/opaque、Memory、历史与续读结果。替代 JSON 保留 4,096 码点头部、1,024 尾部和 `session_event_read` 引用，最多 32 KiB。
+
+`context_pruned` 先持久化完整新 context，再发布内存状态；原始事件、timeline 和附件继续可查。裁剪不改变累计 provider usage，只把当前 `context_tokens` 设为未知；重新估算后仍有压力才进入 summary/native compact。没有持久 Session 历史服务、来源歧义或扫描不完整时跳过候选，低压力、手动 `/compact` 与普通网络 retry 不裁剪。compaction 的 usage 只表示本次消耗，不能作为压缩后 context 大小：Agent、TUI 和 Session 重放均将压缩后占用设为未知，下一次正常 response usage 到达后再更新。
 
 实际新采样请求发送 `sampling_started`，清除 UI 上一请求的临时状态。未配置 recovery adapter 时不保存完整 SSE event log；配置后恢复缓存默认 8 MiB，可通过 `recoveryCacheMaxBytes` 调整。超过上限释放缓存并禁用本响应的 cursor recovery；完整流继续正常消费，断流则使用原有有界整请求重试。该上限不裁剪最终模型内容或工具参数。

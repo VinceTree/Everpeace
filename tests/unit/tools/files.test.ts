@@ -4,7 +4,82 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { FileSearchSession, fileSearchLimits, runFileTool } from "../../../src/tools/files.js";
+
+test("bundled search works without PATH and ignores RIPGREP_CONFIG_PATH", async () => {
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-files-rg-config-"));
+  const root = path.join(parent, "中文 空格 workspace");
+  try {
+    await fs.mkdir(root);
+    await fs.writeFile(path.join(root, "expected.txt"), "needle\n", "utf8");
+    const config = path.join(parent, "rg-config");
+    await fs.writeFile(config, "--glob=!*.txt\n--ignore-case\n", "utf8");
+    const source = [
+      'const { runFileTool } = await import("./src/tools/files.ts");',
+      "const root = process.argv[1];",
+      'const search = await runFileTool("search_files", JSON.stringify({ query: "needle", glob: "*.txt" }), root);',
+      'const mismatchedCase = await runFileTool("search_files", JSON.stringify({ query: "NEEDLE", glob: "*.txt" }), root);',
+      'const glob = await runFileTool("glob_files", JSON.stringify({ pattern: "*.txt" }), root);',
+      "process.stdout.write(JSON.stringify({ search, mismatchedCase, glob }));",
+    ].join("\n");
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLocaleLowerCase() !== "path"));
+    const { stdout } = await promisify(execFile)(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", source, root], {
+      cwd: process.cwd(),
+      env: { ...env, PATH: "", RIPGREP_CONFIG_PATH: config },
+      windowsHide: true,
+      timeout: 15_000,
+    });
+    const result = JSON.parse(stdout) as { search: { matches: Array<{ path: string }> }; mismatchedCase: { matches: unknown[] }; glob: { files: string[] } };
+    assert.deepEqual(result.search.matches.map((match) => path.posix.normalize(match.path)), ["expected.txt"]);
+    assert.deepEqual(result.mismatchedCase.matches, []);
+    assert.deepEqual(result.glob.files.map((value) => path.posix.normalize(value)), ["expected.txt"]);
+  } finally {
+    await fs.rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("search surfaces an injected bundled ripgrep availability error", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-files-rg-missing-"));
+  try {
+    const missing = async () => { throw new Error("Bundled ripgrep fixture is unavailable"); };
+    await assert.rejects(
+      runFileTool("search_files", JSON.stringify({ query: "needle" }), root, undefined, undefined, missing),
+      /Bundled ripgrep fixture is unavailable/iu,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("search cancellation while resolving bundled ripgrep prevents process launch", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-files-rg-cancel-"));
+  try {
+    let markResolving!: () => void;
+    let releaseResolver!: (value: string) => void;
+    const resolving = new Promise<void>((resolve) => { markResolving = resolve; });
+    const executable = new Promise<string>((resolve) => { releaseResolver = resolve; });
+    const controller = new AbortController();
+    const pending = runFileTool(
+      "search_files",
+      JSON.stringify({ query: "needle" }),
+      root,
+      controller.signal,
+      undefined,
+      () => {
+        markResolving();
+        return executable;
+      },
+    );
+    await resolving;
+    controller.abort(new Error("cancel bundled search"));
+    releaseResolver(process.execPath);
+    await assert.rejects(pending, /cancel bundled search/u);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
 
 test("file tools read and list within the workspace and reject escapes and unsupported content", async () => {
   const parent = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-files-"));

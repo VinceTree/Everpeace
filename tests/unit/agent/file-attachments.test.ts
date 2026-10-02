@@ -3,12 +3,74 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import {
   attachmentInputText,
+  listFileReferenceSuggestions,
   parseFileReferences,
   resolveFileAttachments,
   userMessageWithAttachments,
 } from "../../../src/agent/file-attachments.js";
+
+test("bundled composer file discovery works without PATH and ignores RIPGREP_CONFIG_PATH", async () => {
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-attachments-rg-config-"));
+  const root = path.join(parent, "中文 空格 workspace");
+  try {
+    await fs.mkdir(root);
+    await fs.writeFile(path.join(root, "expected.txt"), "file\n", "utf8");
+    const config = path.join(parent, "rg-config");
+    await fs.writeFile(config, "--glob=!*.txt\n", "utf8");
+    const source = [
+      'const { listFileReferenceSuggestions } = await import("./src/agent/file-attachments.ts");',
+      'process.stdout.write(JSON.stringify(await listFileReferenceSuggestions(process.argv[1], "expected")));',
+    ].join("\n");
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLocaleLowerCase() !== "path"));
+    const { stdout } = await promisify(execFile)(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", source, root], {
+      cwd: process.cwd(),
+      env: { ...env, PATH: "", RIPGREP_CONFIG_PATH: config },
+      windowsHide: true,
+      timeout: 15_000,
+    });
+    assert.deepEqual((JSON.parse(stdout) as string[]).map((value) => path.posix.normalize(value)), ["expected.txt"]);
+  } finally {
+    await fs.rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("composer file discovery surfaces an injected bundled ripgrep availability error", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-attachments-rg-missing-"));
+  try {
+    const missing = async () => { throw new Error("Bundled ripgrep fixture is unavailable"); };
+    await assert.rejects(
+      listFileReferenceSuggestions(root, "", undefined, missing),
+      /Bundled ripgrep fixture is unavailable/iu,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("composer discovery cancellation while resolving bundled ripgrep prevents process launch", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-attachments-rg-cancel-"));
+  try {
+    let markResolving!: () => void;
+    let releaseResolver!: (value: string) => void;
+    const resolving = new Promise<void>((resolve) => { markResolving = resolve; });
+    const executable = new Promise<string>((resolve) => { releaseResolver = resolve; });
+    const controller = new AbortController();
+    const pending = listFileReferenceSuggestions(root, "", controller.signal, () => {
+      markResolving();
+      return executable;
+    });
+    await resolving;
+    controller.abort(new Error("cancel composer discovery"));
+    releaseResolver(process.execPath);
+    await assert.rejects(pending, /cancel composer discovery/u);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
 
 test("file references parse quoted Unicode paths and ignore Markdown code", () => {
   const input = [

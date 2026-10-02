@@ -3,24 +3,16 @@ import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import {
-  ReactAgent,
-  type AgentIO,
-  type ResponseStreamLike,
-  type ResponsesClientLike,
-} from "../../agent/react-agent.js";
+import type { AgentIO } from "../../agent/react-agent.js";
 import {
   createProviderClient,
   createProviderRuntime,
-  createSessionPromptCacheKey,
-  isOfficialOpenAiBaseUrl,
   listOfficialModelIds,
-  supportsPromptCacheOptions,
 } from "../../providers/openai-compatible.js";
 import type { RegisteredModel } from "../../storage/model-registry.js";
 import { SessionStore } from "../../storage/session-store.js";
 import { InputHistory } from "../../storage/input-history.js";
-import { DEFAULT_MODEL_BASH_TIMEOUT_MS, runBash } from "../../tools/bash.js";
+import { runBash } from "../../tools/bash.js";
 import { createEffectiveSandboxPolicy } from "../../tools/sandbox-policy.js";
 import { runTerminalCommand } from "../../tools/terminal.js";
 import type { TuiDependencies, TuiModelRegistry } from "./types.js";
@@ -43,12 +35,12 @@ import {
   LearnedMemoryRuntime,
   LearnedMemoryStore,
 } from "../../memory/learned-memory.js";
-import { GoalRuntime } from "../../goal/runtime.js";
 import { resolveCodexCliPath } from "../../codex/cli.js";
 import { modelErrorGuidance } from "../../agent/response-errors.js";
 import { RequestAttemptLedger } from "../../agent/request-attempt-ledger.js";
 import { RequestExecutor } from "../../agent/request-executor.js";
 import { createCodeNavigationFromEnvironment } from "../../tools/code-navigation.js";
+import { resolveBundledRipgrep } from "../../tools/ripgrep.js";
 import { applyUsageSample, createEmptySessionUsage, type TokenUsageSample } from "../../status/model-status.js";
 import {
   assertCompletedModelResponse,
@@ -58,6 +50,10 @@ import {
   resolveProviderCapabilities,
   type ModelRequestPurpose,
 } from "../../providers/capabilities.js";
+import {
+  createProductionAgent,
+  createProductionCommandExecutor,
+} from "../../runtime/production.js";
 
 const require = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
@@ -167,51 +163,6 @@ export function createDefaultTuiDependencies(
       return listOfficialModelIds(createProviderClient(baseUrl, apiKey), signal);
     },
     createAgent(model: RegisteredModel, io: AgentIO, restore) {
-      const providerRuntime = createProviderRuntime(
-        model.base_url,
-        model.api_key,
-        model.request_settings,
-        model.model_name,
-      );
-      const client: ResponsesClientLike = {
-        responses: {
-          create(params, options) {
-            return providerRuntime.responses.create(params, options as never);
-          },
-          async stream(params, options) {
-            return await providerRuntime.responses.stream(params, options as never) as ResponseStreamLike;
-          },
-        },
-      };
-      if (providerRuntime.responses.compact) {
-        client.responses.compact = (params, options) =>
-          providerRuntime.responses.compact!(params, options as never);
-      }
-      const learnedMemory = new LearnedMemoryRuntime({
-        store: learnedMemoryStore,
-        client: {
-          responses: {
-            create(params, options) {
-              return runAuxiliary("memory", () => providerRuntime.responses.create(params, options as never));
-            },
-          },
-        },
-        model: model.model_name,
-        idleDelayMs: 5 * 60 * 1000,
-        minTranscriptChars: 200,
-        sessionId: () => io.getSessionId?.(),
-      });
-      void activeLearnedMemory?.dispose();
-      activeLearnedMemory = learnedMemory;
-      const goalRuntime = io.getGoal && io.setGoal
-        ? new GoalRuntime({ getGoal: io.getGoal, setGoal: io.setGoal })
-        : undefined;
-      const questionInteraction = io.requestUserInput
-        ? { requestInput: io.requestUserInput }
-        : undefined;
-      const planInteraction = io.requestUserInput && io.reviewPlan
-        ? { requestInput: io.requestUserInput, reviewPlan: io.reviewPlan }
-        : undefined;
       let codeNavigation;
       try {
         codeNavigation = createCodeNavigationFromEnvironment(process.cwd(), {
@@ -219,61 +170,37 @@ export function createDefaultTuiDependencies(
         });
       }
       catch { codeNavigation = undefined; }
-      return new ReactAgent({
+      const handle = createProductionAgent({
+        model,
         workspacePath: process.cwd(),
-        client,
-        model: model.model_name,
-        parallelReadTools: true,
         io,
-        providerCapabilities: providerRuntime.capabilities,
-        requestSettings: providerRuntime.settings,
+        sessionStore,
+        sessionId: () => io.getSessionId?.(),
+        version,
+        skills,
+        mcp,
+        learnedMemoryStore,
+        memoryIdleDelayMs: 5 * 60 * 1000,
+        memoryMinTranscriptChars: 200,
+        runMemoryRequest: (run) => runAuxiliary("memory", run),
         requestAttemptLedger: new RequestAttemptLedger(),
         ...(codeNavigation ? { codeNavigation } : {}),
-        ...(isOfficialOpenAiBaseUrl(model.base_url)
-          ? {
-              promptCacheKey: () => {
-                const sessionId = io.getSessionId?.();
-                return sessionId === undefined ? undefined : createSessionPromptCacheKey(sessionId);
-              },
-              ...(supportsPromptCacheOptions(model.model_name)
-                ? { promptCacheOptions: { mode: "implicit" as const, ttl: "30m" as const } }
-                : {}),
-            }
-          : {}),
-        mcp,
-        skills,
-        learnedMemory,
-        ...(goalRuntime ? { goalRuntime } : {}),
-        ...(questionInteraction ? { questionInteraction } : {}),
-        ...(planInteraction ? { planInteraction } : {}),
-        ...(restore?.initialTaskProgress === undefined
-          ? {}
-          : { initialTaskProgress: restore.initialTaskProgress }),
-        ...(restore?.initialContext === undefined
-          ? {}
-          : { initialHistory: restore.initialContext }),
-        ...(restore?.onContextAppend === undefined
-          ? {}
-          : { onHistoryAppend: restore.onContextAppend }),
-        ...(restore?.onContextCompacted === undefined
-          ? {}
-          : { onContextCompacted: restore.onContextCompacted }),
-        ...(restore?.contextWindow === undefined
-          ? {}
-          : { contextWindow: restore.contextWindow }),
-        ...(restore?.initialContextTokens === undefined
-          ? {}
-          : { initialContextTokens: restore.initialContextTokens }),
-        ...(restore?.onUsage === undefined
-          ? {}
-          : { onUsage: restore.onUsage }),
-        ...(restore?.onPhase === undefined
-          ? {}
-          : { onPhase: restore.onPhase }),
-        ...(restore?.onEvent === undefined
-          ? {}
-          : { onEvent: restore.onEvent }),
+        restore: {
+          ...(restore?.initialContext === undefined ? {} : { initialHistory: restore.initialContext }),
+          ...(restore?.initialTaskProgress === undefined ? {} : { initialTaskProgress: restore.initialTaskProgress }),
+          ...(restore?.contextWindow === undefined ? {} : { contextWindow: restore.contextWindow }),
+          ...(restore?.initialContextTokens === undefined ? {} : { initialContextTokens: restore.initialContextTokens }),
+          ...(restore?.onContextAppend === undefined ? {} : { onHistoryAppend: restore.onContextAppend }),
+          ...(restore?.onContextCompacted === undefined ? {} : { onContextCompacted: restore.onContextCompacted }),
+          ...(restore?.onContextPruned === undefined ? {} : { onContextPruned: restore.onContextPruned }),
+          ...(restore?.onUsage === undefined ? {} : { onUsage: restore.onUsage }),
+          ...(restore?.onPhase === undefined ? {} : { onPhase: restore.onPhase }),
+          ...(restore?.onEvent === undefined ? {} : { onEvent: restore.onEvent }),
+        },
       });
+      void activeLearnedMemory?.dispose();
+      activeLearnedMemory = handle.learnedMemory as LearnedMemoryRuntime | undefined;
+      return handle.agent;
     },
     async getMemoryStatus(workspacePath) {
       return activeLearnedMemory?.status(workspacePath) ?? learnedMemoryStore.status(workspacePath);
@@ -354,13 +281,18 @@ export function createDefaultTuiDependencies(
       } catch (error) {
         lines.push(`Sandbox executable: unavailable (${error instanceof Error ? error.message : String(error)})`);
       }
-      for (const executable of ["git", "rg"] as const) {
-        try {
-          await execFileAsync(executable, ["--version"], { timeout: 5_000, windowsHide: true });
-          lines.push(`${executable}: probe passed`);
-        } catch (error) {
-          lines.push(`${executable}: unavailable (${error instanceof Error ? error.message : String(error)})`);
-        }
+      try {
+        await execFileAsync("git", ["--version"], { timeout: 5_000, windowsHide: true });
+        lines.push("git: probe passed");
+      } catch (error) {
+        lines.push(`git: unavailable (${error instanceof Error ? error.message : String(error)})`);
+      }
+      try {
+        const ripgrep = await resolveBundledRipgrep();
+        await execFileAsync(ripgrep, ["--no-config", "--version"], { timeout: 5_000, windowsHide: true });
+        lines.push("ripgrep: bundled probe passed");
+      } catch (error) {
+        lines.push(`ripgrep: unavailable (${error instanceof Error ? error.message : String(error)})`);
       }
       try {
         const navigation = createCodeNavigationFromEnvironment(process.cwd());
@@ -433,17 +365,11 @@ export function createDefaultTuiDependencies(
     },
     runBash(command, policy: PermissionPolicy, signal, onOutput, timeoutMs) {
       const cwd = process.cwd();
-      const sandboxPolicy = createEffectiveSandboxPolicy(policy, cwd, skills.readableRoots());
-      return runBash(command, {
-        cwd,
-        streamOutput: false,
-        timeoutMs: timeoutMs ?? DEFAULT_MODEL_BASH_TIMEOUT_MS,
-        sandbox: {
-          policy: sandboxPolicy,
-        },
-        ...(signal ? { signal } : {}),
-        ...(onOutput ? { onOutput } : {}),
-      });
+      return createProductionCommandExecutor({
+        workspacePath: cwd,
+        policy,
+        readableRoots: () => skills.readableRoots(),
+      })(command, signal, timeoutMs, onOutput);
     },
     async getMcpStatus() {
       return formatMcpStatus(await mcp.refresh());
@@ -476,6 +402,18 @@ export function createDefaultTuiDependencies(
         ...(onInputReady ? { onInputReady } : {}),
         ...(onOutput === undefined ? {} : { onOutput }),
       });
+    },
+    async dispose() {
+      const results = await Promise.allSettled([
+        activeLearnedMemory?.dispose() ?? Promise.resolve(),
+        mcp.close(),
+      ]);
+      const failures = results
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => result.reason);
+      if (failures.length > 0) {
+        throw new AggregateError(failures, "Failed to dispose TUI services");
+      }
     },
   };
 }

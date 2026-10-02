@@ -31,9 +31,9 @@ import {
   type StatusSnapshot,
 } from "../../status/model-status.js";
 import type { BashOutputPreview, BashResult } from "../../tools/bash.js";
-import { previewApplyPatch, runApplyPatch, type ApplyPatchOperation, type ApplyPatchResult } from "../../tools/apply-patch.js";
 import { CodingWorkflowRuntime } from "../../workflow/runtime.js";
 import { CodingTaskRunner } from "../../workflow/task-runner.js";
+import { createProductionWorkflowAgentIO } from "../../runtime/production.js";
 import type { WorkflowState, WorkflowTaskSource } from "../../workflow/types.js";
 import { discoverVerificationCommands, selectVerificationCommands } from "../../workflow/verifier.js";
 import {
@@ -328,6 +328,7 @@ export function EverpeaceApp({
   const activeSessionId = useRef<string | undefined>(undefined);
   const workflowRuntime = useRef<CodingWorkflowRuntime | undefined>(undefined);
   const sessionTitlePending = useRef(false);
+  const forkResumePending = useRef(false);
   const [timeline, setTimeline] = useState(initialTimeline);
   const [timelineEpoch, setTimelineEpoch] = useState(0);
   const [terminalColumns, setTerminalColumns] = useState(() => Math.max(1, stdout.columns ?? 80));
@@ -774,98 +775,75 @@ export function EverpeaceApp({
   );
 
   const agentIo = useMemo<AgentIO>(
-    () => ({
-      getSessionId: () => activeSessionId.current,
-      getPermissions: () => ({ ...permissions.current }),
-      isToolExecutionBlocked: () => ensureWorkflow().state.phase === "blocked",
-      confirmBash: requestBashConfirmation,
-      confirmPatch: requestPatchConfirmation,
-      confirmWeb: requestWebConfirmation,
-      confirmMcp: requestMcpConfirmation,
-      confirmGoal: requestGoalConfirmation,
-      requestUserInput,
-      reviewPlan,
-      async getGoal() {
-        return activeSessionId.current ? activeGoalProjection.current : undefined;
+    () => createProductionWorkflowAgentIO({
+      workspacePath,
+      policy: () => permissions.current,
+      workflow: ensureWorkflow,
+      execute: (command, signal, timeoutMs) => executeBash(command, signal, timeoutMs),
+      executeBackground: (command, signal, timeoutMs, onOutput) =>
+        dependencies.runBash(command, permissions.current, signal, onOutput, timeoutMs),
+      executeVerification: (command, signal, timeoutMs) => executeVerification(command, signal, timeoutMs),
+      session: {
+        getId: () => activeSessionId.current,
+        async getGoal() {
+          return activeSessionId.current ? activeGoalProjection.current : undefined;
+        },
+        async setGoal(goal) {
+          const sessionId = activeSessionId.current;
+          if (!sessionId) throw new Error("Goals require an active session");
+          await dependencies.sessionStore.setGoal(sessionId, goal);
+          activeGoalProjection.current = goal;
+          setActiveGoal(goal);
+        },
+        getTaskProgress() {
+          return activeTaskProgressProjection.current === undefined
+            ? undefined
+            : cloneTaskProgress(activeTaskProgressProjection.current);
+        },
+        async setTaskProgress(progress) {
+          const sessionId = activeSessionId.current;
+          if (!sessionId) throw new Error("Task progress requires an active session");
+          if (!dependencies.sessionStore.setTaskProgress) throw new Error("Task progress persistence is unavailable");
+          await dependencies.sessionStore.setTaskProgress(sessionId, progress);
+          const next = cloneTaskProgress(progress);
+          activeTaskProgressProjection.current = next;
+          setActiveTaskProgress(next);
+        },
       },
-      async setGoal(goal) {
-        const sessionId = activeSessionId.current;
-        if (!sessionId) throw new Error("Goals require an active session");
-        await dependencies.sessionStore.setGoal(sessionId, goal);
-        activeGoalProjection.current = goal;
-        setActiveGoal(goal);
+      interaction: {
+        confirm(_kind, tool, prompt) {
+          if (tool === "bash") return requestBashConfirmation(prompt);
+          if (tool === "patch") return requestPatchConfirmation(prompt);
+          if (tool === "web") return requestWebConfirmation(prompt);
+          if (tool === "mcp") return requestMcpConfirmation(prompt);
+          return requestGoalConfirmation(prompt);
+        },
+        requestUserInput,
+        reviewPlan,
       },
-      getTaskProgress() {
-        return activeTaskProgressProjection.current === undefined
-          ? undefined
-          : cloneTaskProgress(activeTaskProgressProjection.current);
-      },
-      async setTaskProgress(progress) {
-        const sessionId = activeSessionId.current;
-        if (!sessionId) throw new Error("Task progress requires an active session");
-        if (!dependencies.sessionStore.setTaskProgress) throw new Error("Task progress persistence is unavailable");
-        await dependencies.sessionStore.setTaskProgress(sessionId, progress);
-        const next = cloneTaskProgress(progress);
-        activeTaskProgressProjection.current = next;
-        setActiveTaskProgress(next);
-      },
-      async previewPatch(operations: readonly ApplyPatchOperation[]) {
-        return previewApplyPatch(operations, workspacePath, { allowProtectedPaths: permissions.current.mode === "full-access" });
-      },
-      async runApplyPatch(operations: readonly ApplyPatchOperation[], signal?: AbortSignal) {
-        const workflow = ensureWorkflow();
-        await workflow.capturePatch(operations);
-        signal?.throwIfAborted();
-        if (permissions.current.mode === "read-only") return { status: "rejected", files: [], error: "The read-only profile does not allow file edits" };
-        return runApplyPatch(operations, workspacePath, { allowProtectedPaths: permissions.current.mode === "full-access" });
-      },
-      async afterPatchApplied(operations: readonly ApplyPatchOperation[], result: ApplyPatchResult, signal?: AbortSignal) {
-        return ensureWorkflow().afterPatch(operations, result, executeVerification, signal);
-      },
-      async runBash(command: string, signal?: AbortSignal) {
-        if (ensureWorkflow().state.phase === "blocked") {
-          return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "The coding workflow reached its repair limit" };
-        }
-        try {
-          return await executeBash(command, signal);
-        } finally {
-          await ensureWorkflow().observeShellExecution();
-        }
-      },
-      async runBackgroundBash(command: string, signal?: AbortSignal, timeoutMs?: number, onOutput?: (output: BashOutputPreview) => void) {
-        if (ensureWorkflow().state.phase === "blocked") {
-          return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "The coding workflow reached its repair limit" };
-        }
-        const policy = permissions.current;
-        try {
-          return await dependencies.runBash(command, policy, signal, onOutput, timeoutMs);
-        } finally {
-          await ensureWorkflow().observeShellExecution();
-        }
-      },
-      writeAssistant(text) {
-        clearLiveAssistant();
-        append("assistant", text);
-      },
-      writeAssistantDelta(text) {
-        queueAssistantDelta(text);
-      },
-      writeTool(text) {
-        setLiveToolStatus(text);
-        append("tool", text);
-      },
-            onToolProgress(event) {
-              const detail = event.detail?.replace(/\s+/g, " ").trim();
-              const suffix = detail ? ` ${truncateEnd(detail, 160)}` : "";
-              if (event.phase === "approval") {
-                setLiveToolStatus(`Waiting for approval: ${event.name}${suffix}`);
-              } else if (event.phase === "streaming") {
-                setLiveToolStatus(`Preparing ${event.name}${suffix}`);
-              } else if (event.phase === "started") {
-                setLiveToolStatus(`${event.name}${detail ? `: ${truncateEnd(detail, 160)}` : ""}`);
-        } else if (event.phase === "finished") {
-          setLiveToolStatus(`${event.name} finished`);
-        }
+      output: {
+        assistant(text) {
+          clearLiveAssistant();
+          append("assistant", text);
+        },
+        assistantDelta: queueAssistantDelta,
+        tool(text) {
+          setLiveToolStatus(text);
+          append("tool", text);
+        },
+        toolProgress(event) {
+          const detail = event.detail?.replace(/\s+/g, " ").trim();
+          const suffix = detail ? ` ${truncateEnd(detail, 160)}` : "";
+          if (event.phase === "approval") {
+            setLiveToolStatus(`Waiting for approval: ${event.name}${suffix}`);
+          } else if (event.phase === "streaming") {
+            setLiveToolStatus(`Preparing ${event.name}${suffix}`);
+          } else if (event.phase === "started") {
+            setLiveToolStatus(`${event.name}${detail ? `: ${truncateEnd(detail, 160)}` : ""}`);
+          } else if (event.phase === "finished") {
+            setLiveToolStatus(`${event.name} finished`);
+          }
+        },
       },
     }),
     [append, clearLiveAssistant, dependencies.sessionStore, ensureWorkflow, executeBash, executeVerification, queueAssistantDelta, requestBashConfirmation, requestGoalConfirmation, requestMcpConfirmation, requestPatchConfirmation, requestUserInput, requestWebConfirmation, reviewPlan, workspacePath],
@@ -894,6 +872,14 @@ export function EverpeaceApp({
               if (sessionId === undefined) throw new Error("Context compaction requires an active session");
               await dependencies.sessionStore.compactContext(sessionId, items, automatic, usage);
               setSessionUsage((current) => applyCompactionUsage(current, usage));
+            },
+            async onContextPruned(items, metadata) {
+              const sessionId = activeSessionId.current;
+              if (sessionId === undefined || !dependencies.sessionStore.pruneContext) {
+                throw new Error("Context pruning requires an active persistent session");
+              }
+              await dependencies.sessionStore.pruneContext(sessionId, items, metadata);
+              setSessionUsage((current) => ({ ...current, context_tokens: null }));
             },
             async onUsage(usage) {
               const sessionId = activeSessionId.current;
@@ -1230,6 +1216,7 @@ export function EverpeaceApp({
       const previousWorkspace = workspacePath;
       let changedWorkspace = false;
       try {
+        const pendingForkResume = loaded.forkPendingResume ?? loaded.summary.fork_pending_resume ?? false;
         if (
           replacementModel &&
           !canReuseOpaqueProviderContext(loaded.summary.model.base_url, model.base_url) &&
@@ -1279,8 +1266,9 @@ export function EverpeaceApp({
         workflowRuntime.current = undefined;
         ensureWorkflow(loaded.workflow, restoredWorkspace);
         sessionTitlePending.current = loaded.summary.title_pending;
+        forkResumePending.current = pendingForkResume;
         nextId.current = restoredTimeline.length;
-        resumeGoalPending.current = loaded.goal?.status === "active" && loaded.workflow?.phase !== "blocked";
+        resumeGoalPending.current = !pendingForkResume && loaded.goal?.status === "active" && loaded.workflow?.phase !== "blocked";
         onReplayOutput(() => {
           setTimeline(restoredTimeline);
           setResumedInputHistory(loaded.timeline.flatMap((entry) => {
@@ -1474,6 +1462,7 @@ export function EverpeaceApp({
       activeSessionId.current = session.id;
       workflowRuntime.current = undefined;
       sessionTitlePending.current = true;
+      forkResumePending.current = false;
       resumeGoalPending.current = false;
       nextId.current = 2;
       onReplayOutput(() => {
@@ -1516,6 +1505,7 @@ export function EverpeaceApp({
     activeSessionId.current = undefined;
     workflowRuntime.current = undefined;
     sessionTitlePending.current = false;
+    forkResumePending.current = false;
     setSessionContext([]);
     setSessionUsage(createEmptySessionUsage());
     resumeGoalPending.current = false;
@@ -1540,6 +1530,108 @@ export function EverpeaceApp({
       setInputKey((current) => current + 1);
     });
   }, [activeModel, clearQueuedGuidance, onReplayOutput]);
+
+  const forkCurrentSession = useCallback(async (requestedTitle: string) => {
+    if (
+      abortController.current ||
+      directController.current ||
+      confirmationRef.current ||
+      terminalCommandRunning.current ||
+      attachmentController.current
+    ) {
+      openInfo(
+        "/fork · Busy",
+        "Wait for the active task, approval, command, or cleanup to finish before forking.",
+        "error",
+      );
+      return;
+    }
+    const sourceSessionId = activeSessionId.current;
+    if (!sourceSessionId) {
+      openInfo(
+        "/fork · No active session",
+        "Start or resume a local session before forking it.",
+        "error",
+      );
+      return;
+    }
+    if (!dependencies.sessionStore.fork) {
+      openInfo(
+        "/fork · Unavailable",
+        "This session store does not support forking.",
+        "error",
+      );
+      return;
+    }
+
+    const controller = new AbortController();
+    directController.current = controller;
+    const cancel = () => {
+      controller.abort(new Error("Session fork cancelled"));
+      if (directController.current === controller) directController.current = undefined;
+      returnToChat();
+    };
+    let operation = startCommandLoad(
+      "/fork · Fork session",
+      "Preparing an independent session copy",
+      true,
+      true,
+      cancel,
+    );
+    try {
+      const [source, resolved] = await Promise.all([
+        dependencies.sessionStore.load(sourceSessionId),
+        dependencies.registry.resolveAll(),
+      ]);
+      controller.signal.throwIfAborted();
+      if (!isCurrentCommandOperation(operation) || activeSessionId.current !== sourceSessionId) return;
+      const sourceModel = resolved.available.find(
+        (candidate) =>
+          candidate.id === source.summary.model.id ||
+          (candidate.model_name === source.summary.model.model_name &&
+            candidate.base_url === source.summary.model.base_url),
+      );
+      if (!sourceModel) {
+        throw new Error(`The session model ${source.summary.model.model_name} is unavailable. Register it before forking.`);
+      }
+
+      const title = requestedTitle.trim();
+      const child = await dependencies.sessionStore.fork(sourceSessionId, {
+        ...(title ? { title } : {}),
+        signal: controller.signal,
+      });
+      controller.signal.throwIfAborted();
+      if (!isCurrentCommandOperation(operation) || activeSessionId.current !== sourceSessionId) return;
+      const loaded = await dependencies.sessionStore.load(child.id);
+      controller.signal.throwIfAborted();
+      if (!isCurrentCommandOperation(operation) || activeSessionId.current !== sourceSessionId) return;
+
+      operation = startCommandLoad(
+        "/fork · Fork session",
+        "Entering the forked session",
+        false,
+        false,
+      );
+      if (directController.current === controller) directController.current = undefined;
+      await completeResume(loaded, sourceModel, false);
+      if (!isCurrentCommandOperation(operation)) return;
+      appendTransient("system", `Forked session created: ${child.title}`);
+    } catch (error) {
+      if (controller.signal.aborted) {
+        if (isCurrentCommandOperation(operation)) returnToChat();
+        return;
+      }
+      if (isCurrentCommandOperation(operation)) {
+        replaceCommandView(infoView(
+          "/fork · Could not fork",
+          error instanceof Error ? error.message : String(error),
+          "error",
+        ));
+      }
+    } finally {
+      if (directController.current === controller) directController.current = undefined;
+    }
+  }, [appendTransient, completeResume, dependencies.registry, dependencies.sessionStore, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad]);
 
   const deleteSessions = useCallback(async (sessionIds: string[]): Promise<void> => {
     if (abortController.current || directController.current) {
@@ -1854,6 +1946,9 @@ export function EverpeaceApp({
       setLiveToolStatus(undefined);
       let approvedPlan = false;
       try {
+        const effectiveTaskSource = mode === "default" && forkResumePending.current
+          ? "session_resume"
+          : taskSource;
         const runner = new CodingTaskRunner({
           agent,
           workflow: ensureWorkflow(),
@@ -1881,10 +1976,24 @@ export function EverpeaceApp({
         const result = await runner.run({
           text,
           mode,
-          source: taskSource,
+          source: effectiveTaskSource,
           signal: controller.signal,
           ...(attachments.length === 0 ? {} : { attachments }),
         });
+        const forkResumeSettled =
+          mode === "default" &&
+          forkResumePending.current &&
+          result.disposition === "completed" &&
+          (result.workflowResult?.state.result === "verified" ||
+            result.workflowResult?.state.result === "no_changes");
+        if (forkResumeSettled) {
+          const sessionId = activeSessionId.current;
+          if (!sessionId || !dependencies.sessionStore.setForkPendingResume) {
+            throw new Error("Fork continuation state could not be persisted");
+          }
+          await dependencies.sessionStore.setForkPendingResume(sessionId, false);
+          if (activeSessionId.current === sessionId) forkResumePending.current = false;
+        }
         if (result.disposition === "plan_approved") {
           approvedPlan = true;
           setAgentMode("default");
@@ -2155,6 +2264,7 @@ export function EverpeaceApp({
         if (parsed.command === "/history") enterCommandView({ kind: "input-history" });
         if (parsed.command === "/terminal-setup") enterCommandView({ kind: "terminal-setup" });
         if (parsed.command === "/new") void createNewSession();
+        if (parsed.command === "/fork") void forkCurrentSession(parsed.args ?? "");
         if (parsed.command === "/resume") void openResume(parsed.args ?? "");
         if (parsed.command === "/logout") void openLogout();
         if (parsed.command === "/clear") clearConversation();
@@ -2192,6 +2302,7 @@ export function EverpeaceApp({
     [
       clearConversation,
       createNewSession,
+      forkCurrentSession,
       enterCommandView,
       exit,
       appendTransient,

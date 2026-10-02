@@ -115,6 +115,14 @@ export class CodingTaskRunner {
         ...(nextAttachments === undefined ? {} : { attachments: nextAttachments }),
       }) ?? {};
       nextAttachments = undefined;
+      if (lastAgentResult.interactionRequired) {
+        await this.#agent.cancelBackgroundJobs?.(new Error("Task stopped for host interaction"));
+        await this.#agent.finalizePendingGoalCompletion?.(false);
+        await this.#agent.finishMemoryTurn?.("stopped");
+        this.#host.resetAssistant?.();
+        this.#host.onSystemMessage?.(`Host interaction is required for ${lastAgentResult.interactionRequired.tool}.`);
+        return taskResult("stopped", lastAgentResult, lastWorkflowResult);
+      }
       if (lastAgentResult.stopReason) {
         await this.#agent.cancelBackgroundJobs?.(new Error(`Task stopped: ${lastAgentResult.stopReason}`));
         await this.#agent.finalizePendingGoalCompletion?.(false);

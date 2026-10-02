@@ -8,7 +8,7 @@ import type {
   ResolvedModels,
   StoredModelRegistration,
 } from "../../storage/model-registry.js";
-import type { SessionStoreLike } from "../../storage/session-store.js";
+import type { ContextPruneMetadata, SessionStoreLike } from "../../storage/session-store.js";
 import type { BashOutputPreview, BashResult } from "../../tools/bash.js";
 import type { PermissionPolicy } from "../../permissions/policy.js";
 import type { SkillManagerLike } from "../../skills/manager.js";
@@ -53,6 +53,7 @@ export interface AgentRestoreOptions {
   initialContext?: readonly Record<string, unknown>[];
   onContextAppend?(items: readonly Record<string, unknown>[]): Promise<void>;
   onContextCompacted?(items: readonly Record<string, unknown>[], automatic: boolean, usage: TokenUsageSample | null): Promise<void>;
+  onContextPruned?(items: readonly Record<string, unknown>[], metadata: ContextPruneMetadata): Promise<void>;
   contextWindow?: number | null;
   initialContextTokens?: number | null;
   initialTaskProgress?: TaskProgress;
@@ -129,6 +130,8 @@ export interface TuiDependencies {
     signal?: AbortSignal,
     onInputReady?: (write: ((input: string) => void) | undefined) => void,
   ): Promise<BashResult>;
+  /** Release workspace-scoped services after Ink has fully exited. */
+  dispose?(): Promise<void>;
 }
 
 export type HistoryKind =

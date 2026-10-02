@@ -174,6 +174,84 @@ function createMemorySessionStore(): MemorySessionStore {
       session.summary.task_progress = cloneTaskProgress(progress);
       session.summary.updated_at = timestamp();
     },
+    async setGoal(sessionId, goal) {
+      const session = requireSession(sessionId);
+      session.goal = { ...goal };
+      session.summary.goal = { ...goal };
+      session.summary.updated_at = timestamp();
+    },
+    async updateGoal(sessionId, patch) {
+      const session = requireSession(sessionId);
+      assert.ok(session.goal);
+      session.goal = { ...session.goal, ...patch };
+      session.summary.goal = { ...session.goal };
+      session.summary.updated_at = timestamp();
+    },
+    async setWorkflow(sessionId, workflow) {
+      const session = requireSession(sessionId);
+      session.workflow = structuredClone(workflow);
+      session.summary.workflow = structuredClone(workflow);
+      session.summary.updated_at = timestamp();
+    },
+    async setMemoryPolicy(sessionId, policy) {
+      const session = requireSession(sessionId);
+      session.memoryPolicy = { ...policy };
+      session.summary.memory_policy = { ...policy };
+      session.summary.updated_at = timestamp();
+    },
+    async fork(sessionId, input = {}) {
+      input.signal?.throwIfAborted();
+      const parent = requireSession(sessionId);
+      const at = timestamp();
+      const id = `session-${++nextSessionId}`;
+      const lineage = {
+        parent_session_id: sessionId,
+        forked_at: at,
+        source_boundary_bytes: parent.timeline.length,
+        source_header_sha256: `header-${sessionId}`,
+      };
+      const title = input.title?.trim() || `${parent.summary.title} (fork)`;
+      const summary: SessionSummary = {
+        id,
+        title,
+        title_pending: false,
+        created_at: at,
+        updated_at: at,
+        workspace_path: parent.summary.workspace_path,
+        model: { ...parent.summary.model },
+        ...(parent.workflow ? { workflow: structuredClone(parent.workflow) } : {}),
+        ...(parent.taskProgress ? {
+          task_progress: {
+            ...cloneTaskProgress(parent.taskProgress),
+            inherited_from_session_id: sessionId,
+          },
+        } : {}),
+        ...(parent.memoryPolicy ? { memory_policy: { ...parent.memoryPolicy } } : {}),
+        lineage,
+        fork_pending_resume: true,
+      };
+      const taskProgress = summary.task_progress === undefined
+        ? undefined
+        : cloneTaskProgress(summary.task_progress);
+      sessions.set(id, {
+        summary,
+        timeline: parent.timeline.map((entry) => ({ ...entry })),
+        context: parent.context.map((item) => ({ ...item })),
+        usage: createEmptySessionUsage(),
+        ...(parent.workflow ? { workflow: structuredClone(parent.workflow) } : {}),
+        ...(taskProgress ? { taskProgress } : {}),
+        ...(parent.memoryPolicy ? { memoryPolicy: { ...parent.memoryPolicy } } : {}),
+        lineage,
+        forkPendingResume: true,
+      });
+      return { ...summary, model: { ...summary.model } };
+    },
+    async setForkPendingResume(sessionId, pending) {
+      const session = requireSession(sessionId);
+      session.forkPendingResume = pending;
+      session.summary.fork_pending_resume = pending;
+      session.summary.updated_at = timestamp();
+    },
     async list() {
       return {
         sessions: [...sessions.values()]
@@ -196,7 +274,12 @@ function createMemorySessionStore(): MemorySessionStore {
         timeline: session.timeline.map((entry) => ({ ...entry })),
         context: session.context.map((item) => ({ ...item })),
         usage: { ...session.usage },
+        ...(session.goal ? { goal: { ...session.goal } } : {}),
+        ...(session.workflow ? { workflow: structuredClone(session.workflow) } : {}),
         ...(session.taskProgress ? { taskProgress: cloneTaskProgress(session.taskProgress) } : {}),
+        ...(session.memoryPolicy ? { memoryPolicy: { ...session.memoryPolicy } } : {}),
+        ...(session.lineage ? { lineage: { ...session.lineage } } : {}),
+        ...(session.forkPendingResume === undefined ? {} : { forkPendingResume: session.forkPendingResume }),
       };
     },
   };
@@ -1977,6 +2060,210 @@ test("/new leaves the previous session intact and writes subsequent chat only to
     /new conversation/,
   );
   view.unmount();
+});
+
+test("/fork creates and enters an independent child with the requested title", async () => {
+  const model: RegisteredModel = {
+    id: "fork-model",
+    model_name: "deepseek-flash",
+    base_url: "https://api.deepseek.com",
+    api_key: "secret",
+  };
+  const fixture = createFixture({ initial: [model] });
+  const view = render(
+    <EverpeaceApp
+      dependencies={fixture.dependencies}
+      initialModels={{ available: [model], missing: [] }}
+      onReplayOutput={(update) => update()}
+    />,
+  );
+  try {
+    await tick();
+    view.stdin.write("parent message");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("echo: parent message"));
+    const parent = [...fixture.sessionStore.sessions.values()][0];
+    assert.ok(parent);
+
+    view.stdin.write("/fork Review branch");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Forked session created: Review branch"));
+    assert.equal(fixture.sessionStore.sessions.size, 2);
+    const child = [...fixture.sessionStore.sessions.values()].find((session) => session.lineage?.parent_session_id === parent.summary.id);
+    assert.ok(child);
+    assert.equal(child.summary.title, "Review branch");
+    assert.equal(child.forkPendingResume, true);
+    assert.deepEqual(child.context, parent.context);
+
+    view.stdin.write("child-only message");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("echo: child-only message"));
+    assert.doesNotMatch(parent.timeline.map((entry) => entry.text).join("\n"), /child-only message/u);
+    assert.match(child.timeline.map((entry) => entry.text).join("\n"), /child-only message/u);
+    assert.equal(child.forkPendingResume, false);
+  } finally {
+    view.unmount();
+  }
+});
+
+test("/fork refuses while a model task is active", async () => {
+  const model: RegisteredModel = { id: "fork-busy", model_name: "test", base_url: "https://example.com/v1", api_key: "secret" };
+  let release: (() => void) | undefined;
+  const fixture = createFixture({
+    initial: [model],
+    createAgent: (_model, io) => ({
+      async runTurn(input) {
+        if (input === "hold task") await new Promise<void>((resolve) => { release = resolve; });
+        io.writeAssistant(`done: ${input}`);
+      },
+    }),
+  });
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await tick();
+    view.stdin.write("seed session");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("done: seed session"));
+    view.stdin.write("hold task");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => release !== undefined);
+    view.stdin.write("/fork Must not exist");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Wait for the active task"));
+    assert.equal(fixture.sessionStore.sessions.size, 1);
+  } finally {
+    release?.();
+    view.unmount();
+  }
+});
+
+test("cancelling /fork keeps the parent session active", async () => {
+  const model: RegisteredModel = { id: "fork-cancel", model_name: "test", base_url: "https://example.com/v1", api_key: "secret" };
+  const fixture = createFixture({ initial: [model] });
+  const originalFork = fixture.sessionStore.fork!.bind(fixture.sessionStore);
+  fixture.sessionStore.fork = async (sessionId, input = {}) => {
+    await new Promise<void>((_resolve, reject) => {
+      const cancel = () => reject(input.signal?.reason ?? new Error("cancelled"));
+      if (input.signal?.aborted) cancel();
+      else input.signal?.addEventListener("abort", cancel, { once: true });
+    });
+    return originalFork(sessionId, input);
+  };
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await tick();
+    view.stdin.write("parent remains");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("echo: parent remains"));
+    view.stdin.write("/fork Cancelled branch");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Preparing an independent session copy"));
+    view.stdin.write("\u0003");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
+    assert.match(view.lastFrame() ?? "", /parent remains/u);
+    assert.equal(fixture.sessionStore.sessions.size, 1);
+  } finally {
+    view.unmount();
+  }
+});
+
+test("a restarted fork keeps resume semantics through planning and cancellation until coding settles", async () => {
+  const model: RegisteredModel = { id: "fork-resume", model_name: "test", base_url: "https://example.com/v1", api_key: "secret" };
+  const taskStarts: Array<{ mode: string; source: string }> = [];
+  const fixture = createFixture({
+    initial: [model],
+    createAgent: (_model, io) => ({
+      beginTask(options) {
+        taskStarts.push({ mode: options.mode, source: options.source });
+      },
+      async runTurn(input, signal, options) {
+        if (options.mode === "plan") {
+          io.writeAssistant(`planned: ${input}`);
+          return {};
+        }
+        if (input === "cancel this continuation") {
+          await new Promise<void>((_resolve, reject) => {
+            const cancel = () => reject(signal?.reason ?? new Error("cancelled"));
+            if (signal?.aborted) cancel();
+            else signal?.addEventListener("abort", cancel, { once: true });
+          });
+        }
+        io.writeAssistant(`continued: ${input}`);
+        return {};
+      },
+    }),
+  });
+  const parent = await fixture.sessionStore.create({
+    title: "Parent before restart",
+    titlePending: false,
+    workspacePath: "C:\\workspace",
+    model: toSessionModelForTest(model),
+  });
+  await fixture.sessionStore.setTaskProgress?.(parent.id, {
+    plan: [{ step: "Inherited work", status: "in_progress" }],
+    updated_at: "2026-10-01T00:00:00.000Z",
+  });
+  const child = await fixture.sessionStore.fork?.(parent.id, { title: "Restarted child" });
+  assert.ok(child);
+
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await tick();
+    view.stdin.write("/resume");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Scope: This workspace"));
+    view.stdin.write("\r");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await waitFor(() => (view.lastFrame() ?? "").includes("Restarted child"));
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
+
+    view.stdin.write("/plan inspect only");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("planned: inspect only"));
+    assert.equal((await fixture.sessionStore.load(child.id)).forkPendingResume, true);
+    view.stdin.write("/plan exit");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Plan mode disabled"));
+
+    view.stdin.write("cancel this continuation");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => taskStarts.some((item) => item.mode === "default"));
+    view.stdin.write("\u0003");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Model request cancelled"));
+    assert.equal((await fixture.sessionStore.load(child.id)).forkPendingResume, true);
+
+    view.stdin.write("settle continuation");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("continued: settle continuation"));
+    await waitFor(() => fixture.sessionStore.sessions.get(child.id)?.forkPendingResume === false);
+    view.stdin.write("ordinary next task");
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("continued: ordinary next task"));
+
+    assert.deepEqual(taskStarts, [
+      { mode: "plan", source: "user" },
+      { mode: "default", source: "session_resume" },
+      { mode: "default", source: "session_resume" },
+      { mode: "default", source: "user" },
+    ]);
+  } finally {
+    view.unmount();
+  }
 });
 
 test("a pending session resumed before its first question is named without duplication", async () => {

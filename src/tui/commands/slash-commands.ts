@@ -19,6 +19,7 @@ export const SLASH_COMMANDS = [
   "/reasoning",
   "/doctor",
   "/new",
+  "/fork",
   "/resume",
   "/logout",
   "/clear",
@@ -90,6 +91,7 @@ export const TUI_HELP = `Slash commands
   /reasoning Set off, low, high, or max for the next turn
   /doctor  Check the local runtime; add --live for one bounded model request
   /new     Create and enter a new session
+  /fork    Fork the current idle session, optionally with a new title
   /resume  Find, resume, or permanently batch-delete local sessions
   /logout  Remove models and system credentials
   /clear   End this conversation; the next message starts a session

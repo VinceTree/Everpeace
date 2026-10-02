@@ -1,5 +1,97 @@
 > 历史归档：下文保留整理前记录，不代表当前状态或执行授权。当前入口见 [知识库](../README.md)、[HANDOFF](../HANDOFF.md) 和 [PLAN](../PLAN.md)。
 
+## 2026-10-02 后续四项功能实施计划（已完成）
+
+在首期历史与输出恢复之后，用户明确授权按以下顺序实施，保持 Windows 优先、单 Agent、Node/TypeScript、inline TUI 及原有模型默认值、权限和宿主验证：
+
+1. MCP 每 server 独立恢复、工具目录热更新和 step binding；断连不重放中断调用。固定 `@vscode/ripgrep@1.18.0`，所有应用内搜索从包内绝对路径以 `--no-config` 运行。
+2. 公开 `everpeace exec`，使用 CLI + JSONL、可选 task token budget、deadline 和 step 上限；TUI、exec、benchmark 共用生产 Agent factory 与 `CodingTaskRunner`。
+3. 增加空闲本地 Session 的独立 `/fork [title]`、lineage、持久待继续状态及同工作区 `session_relations`。
+4. 在自动压缩压力或 context-limit recovery 时，先尝试有持久历史恢复引用的确定性工具结果裁剪；不足时继续既有 provider 压缩。
+
+实施验收要求覆盖 MCP stdio/HTTP 重连、关闭竞态、通知分页和旧 binding；无系统 rg 与缺平台包；exec 修改→验证失败→修复、参数/模型/交互/预算/信号/EPIPE/JSONL；分支父子独立、重启/淘汰/删除、pending resume；裁剪 Unicode/CRLF/幂等/缺失正文/持久失败/重启恢复。最终串行门禁和真实 Windows Terminal 手工验收分别记录，离线 fixture 不作为真实模型性能结论。
+
+这四项的最终机制已写入当前架构文档；本节只保留当时范围，不代表后续授权或验收状态。
+
+## 2026-10-02 后续四项功能实施之前的快照
+
+# 当前开发计划
+
+产品保持 DeepSeek 优先、Windows 优先、单 Agent、Node/TypeScript、Responses 与 inline TUI。当前提交、版本和执行证据见 [HANDOFF](../HANDOFF.md)；过去阶段完整保存在本文件。
+
+## 本轮：长任务历史与输出恢复
+
+比较基线为本轮开始的 Everpeace checkout 与本地固定的 DeepSeek Harness 官方 checkout，具体 revision 见 HANDOFF。目标是压缩或重启后按需找回当前及同工作区旧会话中的决策、操作和保留输出，并继续宿主验证。本轮不改变模型默认参数、权限、压缩策略或宿主验证规则。
+
+- [x] 每会话独立的输出附件，保留 opaque ID；32 KiB 内联预览、最多 24 KiB 续读正文、前 2 MiB 保留、最近 16 份附件。超出保留范围显示 `retention_truncated`。
+- [x] 并行阶段只准备有界正文和预览，计入背压；按模型顺序执行附件写入 → 日志引用追加 → 淘汰。保存失败复用 `PersistenceError`，跨进程事务锁保护提交、清理和删除；dispose 不删附件。
+- [x] 提供 `session_search`、`session_event_search`、`session_event_read`，从原始 `context_append` 流式建立只读投影并检索仍保留的附件。旧 JSONL 不迁移，不建立数据库。
+- [x] 同工作区精确作用域，Windows 盘符和分隔符等价；不扩展到父子目录或符号链接别名。当前 step 固定已落盘 EOF，普通重试复用；旧会话固定查询开始时的 EOF。
+- [x] 排除 reasoning、加密内容、developer 快照、Memory、历史检索/续读自身结果和直接 `!` 输出；历史不能恢复观察版本、审批、Goal 完成或验证成功事实。
+- [x] 引用绑定会话、日志位置、条目序号及摘要；追加保持有效，删除、改写及篡改返回不可用。扫描限制为 50 个结果、16 KiB 搜索响应、30 秒、64 MiB 扫描、8 MiB 单条缓冲；不完整须提示收窄查询。
+- [x] 生产 TUI 与内部 benchmark runner 注入历史和附件服务，coding 与 Plan 都可只读使用。保持 Learned Memory 独立；不自动注入整段旧历史。
+- [x] 保存、搜索和分页前使用保留换行/缩进的脱敏；修复 UTF-8 极小页不前进，并约束转义后的完整分页响应不超过内联上限。所有应用内 ripgrep 调用增加 `--no-config`。
+- [x] 同步双语 README、架构与交接，补 fake-provider 恢复链路、作用域、旧日志、持久失败、并行/取消、淘汰/竞争、脱敏和扫描边界回归。
+- [x] 最终串行 `typecheck → test → build`、本轮差异检查；结果见当时 HANDOFF。
+- [ ] 真实 Windows Terminal 验收恢复、取消、resize/scrollback 与单 prompt；自动化不替代此项。
+
+旧会话仍能打开。早期进程内 output ID 已丢失的正文明确不可用；日志本身留有的旧大正文仍可按需读取，但不会凭空重建已失正文。验收不用付费模型；本轮未授权改版本、提交、推送或发布。
+
+## 当时记录的后续顺序
+
+1. MCP 自动恢复、工具快照更新及随包交付 ripgrep。
+2. 公开 `everpeace exec`，复用生产 runner、预算、验证与清理。
+3. 空闲会话分支，然后扩展历史关系查询。
+4. 取得离线证据后的压缩前无模型裁剪。
+5. Windows LSP 原生隔离作为独立问题处理。
+
+上述前四项后来在同日获授权并实施；当前状态只看 [PLAN](../PLAN.md) 与 [HANDOFF](../HANDOFF.md)。
+
+## 2026-10-02 首期历史与输出恢复之前的快照
+
+# 当前开发计划
+
+产品目标是 DeepSeek 优先、Windows 优先的个人编码 CLI，以可验证完成率和日常使用效率为首要目标。当前版本、提交和实测结果只见 [HANDOFF](../HANDOFF.md)；机制见 [知识库](../README.md)。旧阶段计划完整归档至 [PLAN_HISTORY](../archive/PLAN_HISTORY.md)，不再作为当前待办。
+
+## 本轮：Daily coding reliability
+
+- [x] 普通 coding 与 Plan 共用阻塞式 `request_user_input`，分别保持活动任务取消和规划取消语义；回答按标准工具结果持久化，不能授予权限。
+- [x] 增加 Session 持久化的 `TaskProgress` / `update_plan`、请求动态上下文、状态栏摘要和只读 `/tasks`；repair、Goal continuation 与显式 resume 保留，新用户任务清空，验证权仍归宿主。
+- [x] 后台 job 终态以 task generation 隔离并在下一 step 持久送达；运行项和未送达通知合计最多 20，取消先关闭通知准入，正文继续通过 poll 获取。
+- [x] 搜索 continuation 最多保留 16 个搜索和 8 MiB 序列化 payload；读完、淘汰和 dispose 释放，未终止超长记录也受单次 2 MiB 输入边界约束。
+- [x] 完成本轮串行 `typecheck → test → build`、本轮文件定向空白检查和差异审阅；全局 CRLF 差异及真实 Windows Terminal 验收在 HANDOFF 单独记录。
+
+用户随后明确授权更新版本、提交并推送；交付使用 `[skip publish]`，仅推送分支，不更新 tag/Release。无需依赖升级或付费评测；功能验证使用确定性的 fake provider/process fixture，不发 live 模型请求。
+
+## 已实现的能力里程碑
+
+正确性与长任务机制已接入生产：任务所有的后台进程、统一 runner 结算、attempt 级请求与 usage、超时流关闭、有序有界读取池、原始字节文件版本、nested AGENTS、分页搜索、可选 TypeScript 导航。新的日常能力复用这些边界：附件不授予写权限，人工 diff 不改变模型工具，Session 搜索不创建持久索引，请求检查不从历史伪造快照。具体机制按 [RUNTIME](../architecture/RUNTIME.md)、[TOOLS](../architecture/TOOLS.md) 和 [STATE_AND_UI](../architecture/STATE_AND_UI.md) 理解。
+
+内部评测具有生产 factory、固定 fixtures、seed/reference proof、隔离评分、随机运行计划、固定 dsh instrumentation 和数值预算准入。详见 [BENCHMARKING](../BENCHMARKING.md)。不得用本地模拟或命令退出零宣称模型比较胜出。
+
+## 后续优先顺序
+
+| 顺序 | 工作 | 完成判据 / 前提 |
+| --- | --- | --- |
+| 1 | 真实 Windows Terminal 验收 | `/tasks`、coding 问题、resize、scrollback、Esc/Ctrl+C、一个 prompt、后台完成通知与 Session 恢复 |
+| 2 | 模型可访问的压缩后历史检索 | 先定义不泄露权限/凭据且不让旧历史覆盖当前投影的范围、索引和引用失效契约 |
+| 3 | 公开 headless execution | 复用 `CodingTaskRunner`、验证权、预算和清理，不把内部 benchmark adapter 直接当公共 API |
+| 4 | Session conversation branching | 定义 timeline/context/Goal/workflow/TaskProgress 的分支所有权及 JSONL 兼容迁移 |
+| 5 | 取得可用的 LSP 原生网络隔离 | Windows 固定 backend 仍允许直接 socket，运行时失败关闭；后续 backend/platform 必须通过相同探针 |
+
+这些待办用于规划，不授权付费请求、安装任意扩展、提交或发布。当前保持单 Agent、Responses、inline TUI、现有权限、high/32K 默认和完整最终验证。
+
+持久 undo 是独立恢复项目。LSP pooling/更多 semantic operation、模糊编辑和模型速度/token 调优作为后续工作；固定 dsh preflight 已完成，真实模型比较仍需对应环境及单独预算授权。图片附件、多 Agent、Web/Desktop、完整插件化、自研 sandbox 和新协议继续后置。output-item 提前执行工具仅在供应商和持久化/恢复证据充分时单独评估，当前仍等待完整响应。
+
+## 验收门槛
+
+修改前根据 [PROJECT_MAP](../architecture/PROJECT_MAP.md) 确认对应回归；尤其不得回退文件并发保护、取消清理、验证债务、unknown usage、工具配对和 Session 兼容。交付按 `typecheck → test → build` 串行执行，再运行 `git diff --check`；仓库当前没有 lint script。把无法执行、真实 Windows Terminal 未验收和已有无关差异单独报告。
+
+真实性能实验必须先没有正确性回归，固定样本的独立验收通过次数不低于当前基线；速度/token 实验还需测得双方均成功任务耗时或每成功任务 token 至少 15% 改善才考虑默认开启。campaign 未完成不排名，不把未知缓存状态称为冷缓存。
+
+计划只维护当前目标和验收标准；本轮进展与新证据写 HANDOFF，长期机制更新相应专题，已确定契约变更同步 [DECISIONS](../architecture/DECISIONS.md)。
+
+
 # Everpeace Current Plan
 
 ## DeepSeek Harness capability milestone

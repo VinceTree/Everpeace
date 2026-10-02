@@ -6,11 +6,12 @@
 
 | 能力 | 主要实现 | 回归入口 |
 |---|---|---|
-| 读取、目录、搜索、glob | [files.ts](../../src/tools/files.ts) | [files.test.ts](../../tests/unit/tools/files.test.ts) |
+| 读取、目录、随包搜索、glob | [files.ts](../../src/tools/files.ts)、[ripgrep.ts](../../src/tools/ripgrep.ts) | [files.test.ts](../../tests/unit/tools/files.test.ts)、[ripgrep.test.ts](../../tests/unit/tools/ripgrep.test.ts) |
 | Composer 文件引用 | [file-attachments.ts](../../src/agent/file-attachments.ts)、[prompt.tsx](../../src/tui/composer/prompt.tsx) | [file-attachments.test.ts](../../tests/unit/agent/file-attachments.test.ts)、[prompt-history.test.tsx](../../tests/unit/tui/prompt-history.test.tsx) |
 | 文件版本与结构化编辑 | [file-version.ts](../../src/tools/file-version.ts)、[apply-patch.ts](../../src/tools/apply-patch.ts) | [apply-patch.test.ts](../../tests/unit/tools/apply-patch.test.ts)、[ReactAgent tests](../../tests/unit/agent/react-agent.test.ts) |
 | 项目规则链 | [project-context.ts](../../src/agent/project-context.ts) | [project-context.test.ts](../../tests/unit/agent/project-context.test.ts) |
-| 结果截断与续读 | [context-limits.ts](../../src/agent/context-limits.ts) | [context-limits.test.ts](../../tests/unit/agent/context-limits.test.ts) |
+| 结果截断与附件续读 | [context-limits.ts](../../src/agent/context-limits.ts)、[session-outputs.ts](../../src/storage/session-outputs.ts) | [context-limits.test.ts](../../tests/unit/agent/context-limits.test.ts)、[session-outputs.test.ts](../../tests/unit/storage/session-outputs.test.ts) |
+| 模型历史检索 | [session-history.ts](../../src/storage/session-history.ts) | [session-history.test.ts](../../tests/unit/storage/session-history.test.ts) |
 | 模型命令与后台任务 | [bash.ts](../../src/tools/bash.ts)、[background-jobs.ts](../../src/tools/background-jobs.ts) | [bash.test.ts](../../tests/unit/tools/bash.test.ts)、[background-jobs.test.ts](../../tests/unit/tools/background-jobs.test.ts) |
 | TypeScript 导航 | [code-navigation.ts](../../src/tools/code-navigation.ts)、[cli.ts](../../src/codex/cli.ts) | [code-navigation.test.ts](../../tests/unit/tools/code-navigation.test.ts)、[cli.test.ts](../../tests/unit/codex/cli.test.ts) |
 | 模型 Git 工具与变更审阅 | [workspace.ts](../../src/tools/workspace.ts)、[workspace-review.ts](../../src/tools/workspace-review.ts) | [workspace.test.ts](../../tests/unit/tools/workspace.test.ts)、[workspace-review.test.ts](../../tests/unit/tools/workspace-review.test.ts) |
@@ -33,7 +34,7 @@
 
 ## Composer 文件引用
 
-输入区的 `@` 候选用参数数组启动有界、可取消的 `rg --files`，按路径筛选并显示最多八项。只有 Markdown 行内/围栏代码之外完整的 `@"path"` 或 `@"path"#L10-L40` 会扩展；邮箱、包名和普通 `@` 文本保持原样。提交前重新读取所有引用，任一引用失败都会保留原草稿并返回可操作错误。
+输入区的 `@` 候选用参数数组启动有界、可取消的随包 `rg --no-config --files`，按路径筛选并显示最多八项。只有 Markdown 行内/围栏代码之外完整的 `@"path"` 或 `@"path"#L10-L40` 会扩展；邮箱、包名和普通 `@` 文本保持原样。提交前重新读取所有引用，任一引用失败都会保留原草稿并返回可操作错误。
 
 摘录复用 `read_file` 的工作区包含、真实路径、UTF-8 与二进制保护。未写范围时从第一行读取 200 行；显式范围最多 1,000 行。每条消息最多八个不同的路径/范围，单个摘录最多 32 KiB，总计最多 64 KiB；达到字节限制时拒绝整条提交，不静默丢弃内容。标签记录实际起止行、总行数、完整文件原始字节 SHA-256 和是否省略其他行。
 
@@ -67,7 +68,9 @@ README、HANDOFF 等按任务需要读取；规则链并不意味着自动装入
 
 ## 可遍历搜索与工具输出
 
-`glob_files`、`search_files` 使用参数数组启动 ripgrep，不拼接 shell。路径限定当前工作区，遵守 rg ignore 规则；包含 hidden 文件不等于忽略 `.gitignore`。搜索默认 fixed string，只有显式 `regex` 才启用正则。
+`glob_files`、`search_files` 惰性解析 `@vscode/ripgrep@1.18.0` 当前平台 optional package 的绝对可执行路径，再使用含 `--no-config` 的参数数组启动，不拼接 shell，也不查询系统 `PATH`；Composer 文件候选和诊断 probe 复用同一 resolver。路径限定当前工作区，遵守 rg ignore 规则；包含 hidden 文件不等于忽略 `.gitignore`。搜索默认 fixed string，只有显式 `regex` 才启用正则。
+
+当前依赖发布 Windows x64/arm64/ia32、macOS x64/arm64，以及 Linux x64/arm64/arm/ia32/ppc64/riscv64/s390x 二进制。安装时禁用 optional dependencies、缺少匹配包或使用其他平台/架构时，resolver 返回包含平台信息的 unavailable 错误；文件搜索、`@` 候选和 doctor 不回退到用户安装的 `rg`。CI 不再单独安装系统 ripgrep；resolver 回归覆盖成功、恶意 config 隔离和缺包错误。
 
 | 范围 | 当前上限/行为 |
 |---|---|
@@ -76,16 +79,30 @@ README、HANDOFF 等按任务需要读取；规则链并不意味着自动装入
 | 后续页面 | `read_search_results` 使用 opaque continuation |
 | 搜索续读保留 | 最多 16 个搜索、序列化 UTF-8 payload 合计 8 MiB |
 | 模型单项工具结果 | 默认最多 32 KiB，保持有效 JSON envelope |
-| 大结果存储 | 进程内最多 16 项，每项保留前 2 MiB |
+| 大结果存储 | 每 Session 持久化最近 16 项，每项保留脱敏正文前 2 MiB |
 | 工具结果续读页 | `read_tool_output` 最多 24 KiB，按 UTF-8 边界切片 |
 
 `has_more` 只表示还有已保留页面；`incomplete` 表示搜索达到时间/字节限制，需缩小 query 才能继续获得未收集结果。两者不能混为“下一页会涵盖所有匹配”。每个 continuation 消费后生成下一引用，最后一页会立即释放对应搜索；数量或 UTF-8 字节超限时按创建顺序淘汰最旧搜索并使其所有引用过期。未知/已消费/已淘汰引用都要求重新搜索，Session 恢复与 Agent dispose 不保留引用内容。
 
 搜索结果行列来自 ripgrep，其中 column 是字节偏移加一；LSP column 则是 UTF-16 位置，中文行中不能直接等同。
 
-大输出返回 `status: truncated`、`output_id`、首尾预览、原始/保留字节数和续读入口，不能直接截断原 JSON。超过保留上限的内容明确 `retention_truncated`，此时也不能宣称续读可取回全部正文。引用内容只在进程内保存，不新增磁盘敏感输出日志。
+大输出返回 `status: truncated`、`output_id`、首尾预览、原始/保留字节数和续读入口，不能直接截断原 JSON。超过保留上限的内容明确 `retention_truncated`，此时也不能宣称续读可取回全部正文。引用对应 Session 目录内的脱敏输出附件，模型不接收宿主路径；提交、读取、淘汰、清理和删除在 Session 跨进程事务锁内协调；压缩、Agent dispose 和重启不删除已提交附件。`read_tool_output` 的可选 `session_id` 默认当前会话，跨会话读取重新校验完全相同的规范化工作区；淘汰、删除或旧进程内正文明确不可用。正文先脱敏再截断、保存和分页，offset 以脱敏 UTF-8 字节计算；容不下一个完整字符的页明确返回范围错误。
 
 终端展示与模型上下文限制分离；模型结果压缩不能悄悄缩小已有 `/outputs` 或 scrollback 的保留语义。命令输出实现还需查看 [command-record](../../src/tools/command-record.ts) 和 [bash-output-preview](../../src/tools/bash-output-preview.ts)。
+
+## 模型历史检索
+
+`session_search(query)` 在标题和可检索正文中发现同工作区旧会话；查询采用脱敏后、去除首尾空白的不区分大小写字面量匹配，非空且最多 1,024 个字符。`session_event_search(query, session_id?)` 搜索指定会话，默认当前会话；`session_event_read(event_id, session_id?, offset_bytes?, max_bytes?)` 按引用分页读取，最多 24 KiB。`session_relations(session_id?)` 返回目标会话的直接 parent/children；默认当前会话，仍只允许完全相同工作区，并与其他历史查询共享 50 项、30 秒、64 MiB 扫描上限。父记录被删除、替换或短于分支边界时关系仍以 `available: false` 返回；子关系必须重新验证 lineage/header/boundary，不能靠 Session ID 字符串推断。
+
+这些工具是普通 coding 与 Plan 的只读能力，与 learned Memory 开关独立，不自动注入整段历史。`session_event_read` 分页读取稳定的日志正文；大结果历史条目同时给出 `output_id`，保留正文继续通过 `read_tool_output` 读取。历史正文页最多 24 KiB，完整 JSON 结果最多 32 KiB；遇转义或元数据扩张时缩小正文页，并使用实际字节 continuation。
+
+投影来自原始 `context_append` 的用户/助手文本、工具调用及结果，并搜索仍保留的输出附件。reasoning、加密内容、developer 规则快照、Memory 结果、历史检索与续读工具自身结果不进入投影；用户直接 `!` 的 timeline 不进入模型历史。每条历史都标记来源和时间；不能恢复文件观察、审批、Goal 完成或验证成功事实。
+
+当前会话读取边界在每个逻辑 step 固定且由普通网络重试复用；旧会话在查询开始固定文件边界。引用绑定 Session、JSONL 字节位置、条目序号和内容摘要，追加不使引用失效，删除或改写则不可用。工作区规范化兼容 Windows 盘符大小写和分隔符，但不扩大到父子目录或符号链接别名。
+
+检索采用有界流式扫描，不建数据库、不迁移旧日志。最多 50 条命中、16 KiB 返回、30 秒和 64 MiB 扫描量，单条日志缓冲最多 8 MiB；达到限制或遇损坏记录明确 `incomplete` 并要求缩小查询。
+
+同一 runtime 还向宿主提供内部批量 tool-result 解析，用于压力裁剪而不向模型增加另一项工具。它只在当前 step 固定 EOF 内接受 call ID、原工具名和脱敏 inline 正文 SHA-256；只有这个三元组在完整扫描中恰好对应一个有效 call/output 配对，才返回绑定 Session/日志位置的 `session_event_read` 引用。之后复用同一个 call ID 但正文摘要不同，不会让已经唯一的三元组失效；相同三元组重复、来源歧义、日志损坏、记录或扫描限制都会使候选跳过。Memory、历史/关系查询及 `read_tool_output` 结果继续排除，不能凭相似文本制造恢复引用。
 
 ## 工作区变更审阅
 

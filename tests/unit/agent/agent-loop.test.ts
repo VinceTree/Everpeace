@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { classifySamplingError, runAgentLoop, type AgentLoopOptions, type LoopPhase } from "../../../src/agent/agent-loop.js";
+import { prepareToolOutput } from "../../../src/agent/context-limits.js";
 
 const call = (id: string) => ({ type: "function_call", call_id: id, name: "test", arguments: "{}" });
 
@@ -27,6 +28,44 @@ function fixture(overrides: Partial<AgentLoopOptions> = {}) {
   };
   return { options, records, phases };
 }
+
+test("throwing tool errors are sanitized before ordered durable persistence", async () => {
+  let samples = 0;
+  const committed: string[] = [];
+  const f = fixture({
+    async sample() { return ++samples === 1 ? { output: [call("failure")], output_text: "" } : { output: [], output_text: "done" }; },
+    async dispatch() { throw new Error("api_key=secret-credential\n  diagnostic"); },
+    prepareToolOutput: (output, tool) => prepareToolOutput(output, tool.name),
+    async recordToolResult(item, prepared) {
+      assert.equal(item.output, prepared.output);
+      committed.push(String(item.output));
+    },
+  });
+  await runAgentLoop(f.options);
+  assert.equal(committed.length, 1);
+  assert.doesNotMatch(committed[0]!, /secret-credential/u);
+  assert.match(committed[0]!, /secret redacted/u);
+  assert.match(JSON.parse(committed[0]!).error, /\n  diagnostic/u);
+  assert.ok(!f.records.some((item) => item.type === "function_call_output"));
+});
+
+test("parallel output preparation failure stops the batch without publishing a result", async () => {
+  let samples = 0;
+  let committed = 0;
+  const f = fixture({
+    async sample() { samples++; return { output: [call("first"), call("second")], output_text: "" }; },
+    toolCapabilities: () => ({ readOnly: true, idempotent: true, parallelSafe: true, resourceKeys: [] }),
+    prepareToolOutput(output, tool) {
+      if (tool.call_id === "first") throw new RangeError("invalid output metadata");
+      return prepareToolOutput(output, tool.name);
+    },
+    async recordToolResult() { committed++; },
+  });
+  await assert.rejects(runAgentLoop(f.options), /invalid output metadata/u);
+  assert.equal(samples, 1);
+  assert.equal(committed, 0);
+  assert.ok(!f.records.some((item) => item.type === "function_call_output"));
+});
 
 test("Codex follow-up flow checkpoints tools and honors explicit end_turn=false", async () => {
   let samples = 0;

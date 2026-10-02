@@ -76,6 +76,42 @@ test("agent rejects overlapping turns and releases the guard after cancellation"
   await agent.runTurn("next");
 });
 
+test("an explicit step limit is shared by every repair turn in one host task", async () => {
+  let requests = 0;
+  const agent = new ReactAgent({
+    model: "task-step-budget",
+    maxSteps: 3,
+    client: { responses: { async create() {
+      requests += 1;
+      if (requests === 1 || requests === 3) {
+        return {
+          id: `tool-${requests}`,
+          output_text: "",
+          output: [{ type: "function_call", name: "bash", call_id: `bash-${requests}`, arguments: '{"command":"check"}' }],
+        };
+      }
+      if (requests === 2) return { id: "first-done", output_text: "first done", output: [] };
+      throw new Error("The task-wide step budget allowed an extra provider request");
+    } } },
+    io: {
+      getPermissions: () => ({ mode: "full-access", web: false }),
+      async confirmBash() { return true; },
+      async runBash() { return bashResult("ok"); },
+      writeAssistant() {},
+    },
+  });
+  await agent.beginTask({ mode: "default", source: "user" });
+  try {
+    const first = await agent.runTurn("initial work");
+    assert.equal(first.stopReason, undefined);
+    const repair = await agent.runTurn("repair after verification");
+    assert.equal(repair.stopReason, "step_limit");
+    assert.equal(requests, 3);
+  } finally {
+    agent.endTask();
+  }
+});
+
 test("background commands inherit cancellation while the agent is sampling", async () => {
   const controller = new AbortController();
   let requests = 0;
@@ -594,10 +630,23 @@ test("agent returns a final answer without running Bash", async () => {
 
 test("plan mode exposes only read-only and planning tools", async () => {
   let request: Record<string, unknown> | undefined;
+  let mcpPreparations = 0;
   const agent = new ReactAgent({
     client: { responses: { async create(params) { request = params; return { id: "plan", output_text: "planned", output: [] }; } } },
     model: "test",
     io: { async confirmBash() { throw new Error("not allowed"); }, async runBash() { throw new Error("not allowed"); }, writeAssistant() {} },
+    mcp: {
+      async ensureReady() {
+        mcpPreparations += 1;
+        return {
+          tools: [{ type: "function", name: "mcp__private__mutate", description: "mutate", parameters: { type: "object" } }],
+          instructions: "MCP instructions must not enter Plan mode.",
+          servers: [],
+        };
+      },
+      toolInfo(name) { return { callableName: name, serverName: "private", toolName: "mutate" }; },
+      async call() { throw new Error("MCP must not run in Plan mode"); },
+    },
     questionInteraction: { async requestInput() { return {}; } },
     planInteraction: { async requestInput() { return {}; }, async reviewPlan() { return "continue"; } },
   });
@@ -608,6 +657,9 @@ test("plan mode exposes only read-only and planning tools", async () => {
   assert.ok(names.includes("submit_plan"));
   assert.ok(!names.includes("bash"));
   assert.ok(!names.includes("get_goal"));
+  assert.ok(!names.includes("mcp__private__mutate"));
+  assert.doesNotMatch(String(request?.instructions), /MCP instructions must not enter Plan mode/u);
+  assert.equal(mcpPreparations, 0);
 });
 
 test("plan questions use the shared interaction and persist answers before follow-up", async () => {
@@ -1289,16 +1341,16 @@ test("agent exposes MCP tools, keeps approval separate, and returns MCP output",
       async ensureReady() {
         return {
           tools: [{ type: "function", name: "mcp__calendar__list", description: "List events", parameters: { type: "object" } }],
+          toolInfo: [{ callableName: "mcp__calendar__list", serverName: "calendar", toolName: "list", binding: "calendar-binding-v1" }],
           instructions: "Calendar MCP instructions.",
           servers: [],
         };
       },
-      toolInfo(name) {
-        return name === "mcp__calendar__list"
-          ? { callableName: name, serverName: "calendar", toolName: "list" }
-          : undefined;
+      toolInfo() {
+        throw new Error("ReactAgent must use the atomic snapshot metadata");
       },
-      async call(name, args) {
+      async call(name, args, bindingOrSignal?: string | AbortSignal) {
+        assert.equal(bindingOrSignal, "calendar-binding-v1");
         calls.push(`${name}:${args}`);
         return JSON.stringify({ content: [{ type: "text", text: "meeting" }] });
       },
@@ -1321,6 +1373,130 @@ test("agent exposes MCP tools, keeps approval separate, and returns MCP output",
   const tools = requests[0]?.tools as Array<{ name: string }>;
   assert.ok(tools.some((tool) => tool.name === "mcp__calendar__list"));
   assert.match(JSON.stringify(requests[1]?.input), /meeting/u);
+});
+
+test("agent freezes MCP definitions and bindings across sampling retries and refreshes the next step", async () => {
+  const name = "mcp__calendar__list";
+  let catalogVersion = 1;
+  let preparations = 0;
+  let requests = 0;
+  const dispatchedBindings: string[] = [];
+  const snapshot = (version: number) => ({
+    tools: [{ type: "function" as const, name, description: `Calendar v${version}`, parameters: { type: "object" } }],
+    toolInfo: [{ callableName: name, serverName: "calendar", toolName: "list", description: `Calendar v${version}`, binding: `binding-v${version}` }],
+    instructions: `Calendar instructions v${version}`,
+    servers: [],
+  });
+  const agent = new ReactAgent({
+    model: "test",
+    samplingRetryBudget: 1,
+    client: { responses: { async create(params) {
+      requests += 1;
+      const advertised = (params.tools as Array<{ name: string; description: string }>).find((tool) => tool.name === name);
+      assert.ok(advertised);
+      if (requests === 1) {
+        assert.equal(advertised.description, "Calendar v1");
+        assert.match(String(params.instructions), /Calendar instructions v1/u);
+        catalogVersion = 2;
+        throw Object.assign(new Error("temporary network failure"), { status: 503 });
+      }
+      if (requests === 2) {
+        assert.equal(advertised.description, "Calendar v1");
+        assert.match(String(params.instructions), /Calendar instructions v1/u);
+        return { id: "retry-complete", output_text: "", output: [{ type: "function_call", name, arguments: "{}", call_id: "mcp-retry" }] };
+      }
+      assert.equal(advertised.description, "Calendar v2");
+      assert.match(String(params.instructions), /Calendar instructions v2/u);
+      return { id: "done", output_text: "done", output: [] };
+    } } },
+    mcp: {
+      async ensureReady() {
+        preparations += 1;
+        return snapshot(catalogVersion);
+      },
+      toolInfo() { throw new Error("Live MCP metadata lookup is not allowed"); },
+      async call(_name, _args, bindingOrSignal?: string | AbortSignal) {
+        assert.equal(typeof bindingOrSignal, "string");
+        dispatchedBindings.push(bindingOrSignal as string);
+        return JSON.stringify({ status: "ok" });
+      },
+    },
+    io: {
+      getPermissions: () => ({ mode: "full-access", web: false }),
+      async confirmBash() { return false; },
+      async runBash() { return bashResult(""); },
+      writeAssistant() {},
+    },
+  });
+
+  await agent.runTurn("list meetings");
+  assert.equal(requests, 3);
+  assert.equal(preparations, 2);
+  assert.deepEqual(dispatchedBindings, ["binding-v1"]);
+});
+
+test("agent presents frozen MCP approval details and rejects a binding changed while approval waits", async () => {
+  const name = "mcp__calendar__delete";
+  let catalogVersion = 1;
+  let requests = 0;
+  let serverExecutions = 0;
+  const approvals: string[] = [];
+  const dispatchedBindings: string[] = [];
+  const snapshot = (version: number) => ({
+    tools: [{ type: "function" as const, name, description: `Delete calendar event v${version}`, parameters: { type: "object" } }],
+    toolInfo: [{
+      callableName: name,
+      serverName: `calendar-v${version}`,
+      toolName: "delete",
+      annotations: { destructiveHint: true },
+      binding: `binding-v${version}`,
+    }],
+    instructions: "",
+    servers: [],
+  });
+  const agent = new ReactAgent({
+    model: "test",
+    client: { responses: { async create(params) {
+      requests += 1;
+      if (requests === 1) {
+        assert.equal((params.tools as Array<{ name: string; description: string }>).find((tool) => tool.name === name)?.description, "Delete calendar event v1");
+        return { id: "delete", output_text: "", output: [{ type: "function_call", name, arguments: '{"id":"meeting-1"}', call_id: "mcp-delete" }] };
+      }
+      assert.equal((params.tools as Array<{ name: string; description: string }>).find((tool) => tool.name === name)?.description, "Delete calendar event v2");
+      assert.match(JSON.stringify(params.input), /binding is stale/u);
+      return { id: "done", output_text: "done", output: [] };
+    } } },
+    mcp: {
+      async ensureReady() { return snapshot(catalogVersion); },
+      toolInfo() { throw new Error("Live MCP metadata lookup is not allowed"); },
+      async call(_name, _args, bindingOrSignal?: string | AbortSignal) {
+        assert.equal(typeof bindingOrSignal, "string");
+        const binding = bindingOrSignal as string;
+        dispatchedBindings.push(binding);
+        if (binding !== `binding-v${catalogVersion}`) {
+          return JSON.stringify({ status: "error", error: "MCP tool binding is stale" });
+        }
+        serverExecutions += 1;
+        return JSON.stringify({ status: "ok" });
+      },
+    },
+    io: {
+      getPermissions: () => ({ mode: "workspace-write", web: false }),
+      async confirmMcp(detail) {
+        approvals.push(detail);
+        catalogVersion = 2;
+        return true;
+      },
+      async confirmBash() { return false; },
+      async runBash() { return bashResult(""); },
+      writeAssistant() {},
+    },
+  });
+
+  await agent.runTurn("delete a meeting");
+  assert.deepEqual(approvals, ['calendar-v1/delete {"id":"meeting-1"}']);
+  assert.deepEqual(dispatchedBindings, ["binding-v1"]);
+  assert.equal(serverExecutions, 0);
 });
 
 test("agent progressively loads matching skills and injects explicit skill instructions for one turn", async () => {

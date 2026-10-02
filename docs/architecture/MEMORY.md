@@ -24,7 +24,7 @@ revision + loadedAt + entryIds + injected text
 
 主 prompt 注入的是带 ID 的短索引，并明确标记为不可信背景。`memory_lookup` 是受 scope 和读取策略限制的只读工具，可按 ID 返回脱敏详情及证据；Plan 模式允许读取。当前聊天关闭 `readExisting` 后，下一 step 不再广告该工具，dispatch 也会拒绝读取。`/memory view` 展示最近一次实际发送的 snapshot，而不是重新读取磁盘形成一个不同视图。
 
-全局开关同时控制读取和自动学习。聊天级 `readExisting` / `captureFuture` 通过 `memory_policy_updated` Session 事件保存；`/new` 使用默认策略，`/resume` 恢复原 Session 策略，旧 Session 使用默认值。
+全局开关同时控制 learned Memory 的读取和自动学习；聊天级策略也仅影响 learned Memory。`session_search`、`session_event_search`、`session_event_read`、`session_relations` 和同工作区 `read_tool_output` 属于独立的只读历史能力，关闭 Memory 不会关闭它们；历史记录也不会因此自动成为长期经验。聊天级 `readExisting` / `captureFuture` 通过 `memory_policy_updated` Session 事件保存；`/new` 使用默认策略，`/resume` 恢复原 Session 策略，旧 Session 使用默认值。Session 分支继承该策略；公开 exec 固定读取已有 Memory、关闭本次 capture，不在任务清理后产生提取请求。
 
 ## 后台生命周期
 
@@ -43,7 +43,7 @@ revision + loadedAt + entryIds + injected text
 
 第二阶段先做确定性去重和冲突检查。与 active 条目或同批候选在相同适用条件下冲突的内容进入 review，不注入 prompt。只有同批存在多条非冲突候选时才额外调用普通模型提出合并结果；模型没有工具或文件写权限，程序重新解析、脱敏、限制数量并提交。模型失败时保留原有长期记忆和持久任务状态。
 
-所有输入先脱敏再裁剪，模型输出在保存前再次脱敏。规则覆盖 JSON/配置形式的 key、token、password、Bearer、常见 token 前缀，以及完整或被截断的 PEM。Memory 请求 usage 单独累计；provider 未返回 usage 时显示 unknown，不计入前台 context 占用、Session 主 usage 或 Goal 预算。
+所有输入先脱敏再裁剪，模型输出在保存前再次脱敏。凭据匹配规则通过 [redact-secrets](../../src/util/redact-secrets.ts) 与历史/附件共享，覆盖 JSON/配置形式的 key、token、password、Bearer、常见 token 前缀，以及完整或被截断的 PEM。Memory 保留原有空白清理、标签清理和字段裁剪；历史/附件使用保留换行、缩进与 CRLF 的脱敏函数，再按 UTF-8 字节分页。Memory 请求 usage 单独累计；provider 未返回 usage 时显示 unknown，不计入前台 context 占用、Session 主 usage 或 Goal 预算。
 
 ## 安全与兼容边界
 

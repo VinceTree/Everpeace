@@ -4,6 +4,7 @@ import { constants, promises as fs } from "node:fs";
 import path from "node:path";
 import { stopProcessTree } from "./process-cancel.js";
 import { decodeTextFile } from "./file-version.js";
+import { resolveBundledRipgrep, type RipgrepPathResolver } from "./ripgrep.js";
 
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const DEFAULT_READ_LINES = 200;
@@ -191,10 +192,18 @@ async function resolveWorkspaceTarget(workspace: string, requestedPath: string, 
   return { root, lexical: target, relative };
 }
 
-function runRipgrep(args: string[], cwd: string, signal?: AbortSignal): Promise<{ lines: string[]; exitCode: number | null; incomplete: boolean }> {
+async function runRipgrep(
+  args: string[],
+  cwd: string,
+  signal?: AbortSignal,
+  resolveRipgrep: RipgrepPathResolver = resolveBundledRipgrep,
+): Promise<{ lines: string[]; exitCode: number | null; incomplete: boolean }> {
+  signal?.throwIfAborted();
+  const executable = await resolveRipgrep();
+  signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(signal.reason ?? new Error("Cancelled")); return; }
-    const child = spawn("rg", args, { cwd, windowsHide: true, shell: false, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+    const child = spawn(executable, ["--no-config", ...args], { cwd, windowsHide: true, shell: false, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
     const lines: string[] = [];
     let pending = "";
     let retainedBytes = 0;
@@ -264,7 +273,14 @@ export const fileSearchLimits = {
   maxRetainedSearchBytes: MAX_RETAINED_SEARCH_BYTES,
 } as const;
 
-export async function runFileTool(name: string, argumentsJson: string, workspace: string, signal?: AbortSignal, searches?: FileSearchSession): Promise<unknown> {
+export async function runFileTool(
+  name: string,
+  argumentsJson: string,
+  workspace: string,
+  signal?: AbortSignal,
+  searches?: FileSearchSession,
+  resolveRipgrep: RipgrepPathResolver = resolveBundledRipgrep,
+): Promise<unknown> {
   const args: unknown = JSON.parse(argumentsJson);
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     throw new Error("Invalid file tool arguments");
@@ -303,7 +319,7 @@ export async function runFileTool(name: string, argumentsJson: string, workspace
     const maximum = integer(record.max_results, DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS);
     const stat = await fs.stat(target);
     if (!stat.isDirectory()) throw new Error("glob_files path must be a directory");
-    const result = await runRipgrep(["--files", "--hidden", "--glob", record.pattern, "--", "."], target, signal);
+    const result = await runRipgrep(["--files", "--hidden", "--glob", record.pattern, "--", "."], target, signal, resolveRipgrep);
     const files = result.lines.map((value) => path.relative(root, path.resolve(target, value)).split(path.sep).join("/"));
     const page = searches?.page("files", files, maximum, result.incomplete);
     const first = page?.items ?? files.slice(0, maximum);
@@ -316,7 +332,7 @@ export async function runFileTool(name: string, argumentsJson: string, workspace
     if (record.glob !== undefined && record.glob !== null && (typeof record.glob !== "string" || !record.glob || record.glob.includes("\0"))) throw new Error("Invalid file tool arguments");
     const maximum = integer(record.max_results, DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS);
     const rgArgs = ["--json", "--hidden", "--line-number", "--column", ...(record.regex === true ? [] : ["--fixed-strings"]), ...(typeof record.glob === "string" ? ["--glob", record.glob] : []), "--", record.query, targetInfo.relative || "."];
-    const result = await runRipgrep(rgArgs, root, signal);
+    const result = await runRipgrep(rgArgs, root, signal, resolveRipgrep);
     const matches: Array<{ path: string; line: number; column: number; text: string }> = [];
     for (const line of result.lines) {
       if (!line) continue;

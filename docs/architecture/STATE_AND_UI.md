@@ -15,7 +15,9 @@
 | Goal | [GoalRuntime](../../src/goal/runtime.ts)，Session 绑定 | 无宿主验证的编码完成状态 |
 | Learned memory | [LearnedMemoryRuntime/Store](../../src/memory/learned-memory.ts)，独立平台目录 | 原始凭据、未经验证的成功事实 |
 | 权限 | [PermissionPolicy](../../src/permissions/policy.ts)，当前用户策略与项目限制交集 | JSONL 中历史授权、项目自提权 |
-| 文件观察、undo、工具输出续读、后台进程 | 当前进程内工具与 workflow runtime | 恢复后凭历史文本重新获得写权限或假装进程仍活着 |
+| 文件观察、undo、后台进程 | 当前进程内工具与 workflow runtime | 恢复后凭历史文本重新获得写权限或假装进程仍活着 |
+| 大工具输出附件 | [SessionOutputStorage](../../src/storage/session-outputs.ts)，Session 目录内每会话的脱敏附件、opaque ID | 模型可见宿主路径、超出保留范围的正文、恢复写权限 |
+| Session lineage / 分支待继续 | [SessionStore](../../src/storage/session-store.ts) 的 header 与 additive 事件 | 父 Session 的运行中状态、旧 Goal、审批、undo、观察版本或验证成功证据 |
 | Session 搜索投影、最近 coding 请求快照 | [SessionStore](../../src/storage/session-store.ts)、当前 [ReactAgent](../../src/agent/react-agent.ts) 的进程内缓存 | 持久索引、JSONL schema、重启后猜测请求快照 |
 
 模型 `model_name` 保留服务端原始 ID；应用内部注册 `id` 不等于模型名称。可选 `request_settings` 同时存在于模型注册和 Session 模型引用中，旧记录使用供应商默认设置。切换设置在任务边界应用，不能在同一任务内悄悄改变请求预算。
@@ -32,25 +34,28 @@
 
 ## JSONL 契约
 
-每个 Session 使用带格式字段的逐行事件文件，同一文件追加串行化。`timeline` 是人看到的历史，`context` 是发给 Responses 的输入；两者独立恢复，不能互相推导。
+每个 Session 使用带格式字段的逐行事件文件，同一文件追加通过本实例队列和 `proper-lockfile` 跨进程 Session 锁串行化；附件提交、续读、淘汰、启动清理与删除复用该事务锁，另一实例不能把尚未追加引用的附件清理为孤儿。`timeline` 是人看到的历史，`context` 是发给 Responses 的输入；两者独立恢复，不能互相推导。
 
 | 事件 | 含义 |
 | --- | --- |
-| `session_created` | Session ID、标题、工作目录、无凭据模型引用、标题待生成与 usage 跟踪标记 |
+| `session_created` | Session ID、标题、工作目录、无凭据模型引用、标题待生成、usage 跟踪标记，以及分支时的可选 lineage |
 | `title_updated` | 修改标题并清除待生成标记 |
 | `timeline_entry` | 用户/助手/工具/输出等可见记录；兼容旧 status 快照 |
-| `context_append` | 追加模型交互项，保持工具调用与结果配对 |
+| `context_append` | 追加模型交互项，保持工具调用与结果配对；大结果可附带可选 `tool_output_attachment` 引用 |
 | `context_compacted` | 替换有效 context，保留是否自动压缩标记及 usage；不改写可见历史 |
+| `context_pruned` | 在 provider 压缩前以可恢复引用替换早期工具正文；先落盘再替换有效 context，只把当前 `context_tokens` 设为 unknown，累计 usage 不变 |
 | `model_selected` | 模型引用及是否保留 context |
 | `usage_recorded` | 主请求的 usage 或明确 unknown |
 | `goal_updated` | Session Goal 状态、预算及已用量 |
 | `workflow_updated` | 修改路径、任务来源、验证债务、检查状态与文件 revision 等元数据 |
 | `task_progress_updated` | model-authored coding 清单的完整替换投影；空列表表示明确清除 |
 | `memory_policy_updated` | 当前聊天的 `readExisting` 与 `captureFuture` |
+| `fork_boundary` | 新子 Session 的父 ID、固定源 EOF/header 摘要、继承后的 workflow/TaskProgress/Memory policy 与待继续状态 |
+| `fork_resume_updated` | 持久更新子 Session 是否仍需用恢复语义继续 coding |
 
 `workflow_updated` 序列化会清空验证输出并去掉错误正文；这不代表普通 `timeline/context` 不保存用户消息或工具交互。不要将新的请求正文、文件快照或凭据塞入诊断元数据。压缩内容继续使用既有 context 通道。
 
-旧记录缺少 `title_pending` 按 false；缺少 usage、workflow 或新字段不能补推“统计完整”“已验证”。只允许忽略损坏且没有换行终止的最后一行，其余 JSONL 错误按文件隔离，列表跳过坏文件而不是吞掉中间事件。持久化失败走 `PersistenceError`，不能当网络错误重试模型或继续成功结算。
+旧记录缺少 `title_pending` 按 false；缺少 usage、workflow 或新字段不能补推“统计完整”“已验证”。只允许忽略损坏且没有换行终止的最后一行，其余 JSONL 错误按文件隔离，列表跳过坏文件而不是吞掉中间事件。追加及当前 step 捕获 EOF 前，在 Session 锁内有界恢复尾部：完整有效的旧无 LF 事件补换行并保留原字节，未完成或无效尾部截回上一完整行；超过 8 MiB 无法判定时保留原文件并停止写入。旧条目的字节位置及摘要保持不变。持久化失败走 `PersistenceError`，不能当网络错误重试模型或继续成功结算。
 
 ## 创建、切换与恢复
 
@@ -61,8 +66,9 @@
 | 第一条新 Session 问题 | 先生成可靠回退标题，再异步命名；不能阻塞回答 |
 | `/clear` | 清屏并解除当前 Session，保留模型；下一条普通消息才创建新 Session |
 | `/resume [query]` | 默认搜索当前工作区，可明确切换全部工作区；预览后仍通过原恢复路径加载 timeline、context、模型、工作目录、Goal、workflow、TaskProgress 和聊天 Memory 策略，继续原文件 |
+| `/fork [title]` | 仅当前本地 Session 完全空闲且源模型仍可用时固定已提交 EOF，生成独立子副本，成功发布后切换；失败或取消保持父会话 |
 | 模型切换 | 保留累计 usage，重置或标记未知的新模型 context 占用 |
-| Session 删除 | 使用选择/确认流程；任务或直接命令运行期间不得删除 |
+| Session 删除 | 使用选择/确认流程，同时清理所属输出附件；任务或直接命令运行期间不得删除 |
 
 恢复前先检查工作目录；目录不存在时保持当前会话不变。原模型缺失可选择替代，但含供应商专属加密/不透明 context 时不得跨供应商静默迁移。旧“新 Session”标题只在显示层翻译。
 
@@ -74,6 +80,22 @@
 
 搜索投影只存在进程内，采用 16 MiB LRU 上限；Session 追加和删除使对应条目失效，读取后再次核对文件元数据，避免缓存并发变化。搜索不创建持久索引或 schema migration；损坏 Session 单独跳过，未完成末行沿用现有兼容规则。删除仍使用原确认流程和 Session 写队列，搜索结果不改变恢复语义。
 
+### Session 分支
+
+`SessionStore.fork` 在父 Session 队列与跨进程事务锁中固定源 EOF，流式校验并复制 timeline、原始 context append、已有 compaction/pruning context 和模型选择事件。它把父会话最近最多 16 份仍保留的附件复制到隐藏 staging，保留原 `output_id`，但子目录独立拥有正文；父子之后的追加、淘汰和删除互不影响。附件准备完成后先发布子输出目录，最后原子 rename 子 JSONL，使列表和 `/resume` 看不到半成品。失败或取消清理 staging；启动 orphan 清理会识别仍持锁的分支事务。
+
+子 Session 生成新 ID 和 task ID，usage 清零并清除 Goal、repair 次数、审批、undo、文件观察和此前验证成功证据。模型及请求设置、聊天 Memory policy、timeline/context、相关 changed paths 与未验证债务被继承；TaskProgress 带 `inherited_from_session_id` 标记。lineage 绑定父 ID、fork 时间、源 header SHA-256 和源 EOF，父记录后续追加不改变该边界。`session_relations` 只返回同工作区直接父子，并重新核验这些字段；父被删除或替换后，子仍可用且父关系显示 `available: false`。复制过程不改写正文中已有的父历史引用；在子 Session 重新查询历史时生成绑定子日志位置的新引用，旧父引用在父删除后按原作用域失效。
+
+新子会话持久保存 `fork_pending_resume`。首个及未结算后的普通 coding 输入以 `session_resume` 来源进入 runner，保留继承的清单和验证债务；只有任务完成且宿主结果为 `verified` 或 `no_changes` 后，才先持久清除此标记。Plan、查看命令、取消、异常、限制停止、failed/unverified 结果都不消耗它。分支会清除 Goal，恢复子会话也不会据此自动续跑父 Goal。
+
+## 模型历史与输出附件恢复
+
+模型历史通过原始 `context_append` 建立只读、按需投影，与 `/resume` 的对话搜索和有效 context 恢复分开。`session_search`、`session_event_search`、`session_event_read` 和 `session_relations` 只允许完全相同的规范化工作区，兼容 Windows 盘符和分隔符，但不将父子目录或符号链接别名视为同一工作区。当前会话在逻辑 step 开始固定已落盘边界，普通网络重试复用；旧会话查询在开始时固定边界。引用绑定 Session、日志字节位置、条目序号和内容摘要，追加后仍有效，删除或改写后不可用。遇损坏记录的检索标记 `incomplete`，不改变正常 Session 恢复的损坏隔离契约。
+
+大结果附件每 Session 最多 16 份，每份保留脱敏正文前 2 MiB；JSONL 继续保存最多 32 KiB 的有效预览 envelope。按模型调用顺序执行附件写入、结果引用追加和旧附件淘汰，准备中的有界正文计入并发背压。附件或日志写入失败进入 `PersistenceError`；启动清理未被日志引用的崩溃遗留附件。Agent dispose 仅释放内存，压缩和重启继续复用原 `output_id`。旧进程内引用不能重建正文，明确返回不可用。
+
+`read_tool_output` 与历史分页的正文最多 24 KiB；`session_event_read` 的完整序列化结果同时限制为 32 KiB，必要时缩小正文页以容纳 JSON 转义和来源元数据，返回实际 continuation。脱敏先于保存、搜索、裁剪和分页，保留正文的换行、缩进和 CRLF。offset 使用脱敏 UTF-8 字节；极小页不能容纳一个字符时返回范围错误。所有历史内容都标记为来源明确的不可信资料，不恢复观察版本、权限、审批、Goal 完成状态或当前验证证据。
+
 ## Usage、Goal 与 Memory
 
 - [model-status](../../src/status/model-status.ts) 分别累计 input、output、reasoning、cache hit 与 cache write；reasoning 不重复加到已经包含它的 output 上。
@@ -82,7 +104,15 @@
 - Goal 仅按用户明确意图建立，预算仅在明确指定时设置。`paused`、`blocked`、`complete` 与预算/usage 停止各有独立语义；停止条件不得被 UI 的“本轮结束”覆盖。
 - 编码完成意图先暂存，由 [CodingTaskRunner](../../src/workflow/task-runner.ts) 在完整、未过期验证通过并再次检查取消后结算。取消、预算停止、无检查和修复耗尽均不提交成功 Memory。
 - 新指令可开启新任务预算，但旧未验证事实仍须保留；Goal 续跑不构成新任务授权。
-- Memory 是不可信背景，低于用户指令和项目规则；全局开关控制读写，聊天策略随 Session 恢复。成功学习、明确长期偏好、候选审核及后台队列的完整边界见 [MEMORY](MEMORY.md)。
+- Memory 是不可信背景，低于用户指令和项目规则；全局开关控制 learned Memory 读写，聊天策略随 Session 恢复，均不控制只读 Session 历史检索。成功学习、明确长期偏好、候选审核及后台队列的完整边界见 [MEMORY](MEMORY.md)。
+
+## 非交互 exec
+
+[exec runtime](../../src/exec/runtime.ts) 不创建 Ink 组件。它通过 [production factory](../../src/runtime/production.ts) 取得与 TUI/benchmark 相同的 provider、历史/附件、Memory 读取、MCP、权限工具和请求账本，再用 `CodingTaskRunner` 完成后台收束、验证与修复。通过启动配置后建立可由 TUI `/resume` 打开的正常 Session；标题根据提示第一条非空行确定，聊天 Memory policy 固定为读取已有内容、关闭本次 capture。
+
+CLI 提示词只能来自一个位置参数或非 TTY stdin。模型解析先匹配注册 ID，再匹配唯一 `model_name`；不指定时仅允许一个凭据可用模型。exec 没有 Plan、resume 或自动批准路径；审批和结构化问题保存标准 function output 后返回 `interaction_required`。可选 token budget、deadline 和 task step 上限覆盖 coding、压缩、重试及所有修复轮。SIGINT/SIGTERM、deadline、stdout EPIPE 和运行失败都先取消任务并等待 Agent/后台资源清理；stdout 仍可写时再发布终态，EPIPE 返回 1 而不能向已关闭管道补写最终行。
+
+默认 stdout 只写最终 assistant 文本，stderr 写进度与宿主验证摘要。`--json` 通过 [exec-output](../../src/cli/exec-output.ts) 输出 schema version 1 JSONL：每行含 ISO 时间和白名单字段，可出现 `session_started`、`assistant_message`、`tool_started`、`tool_finished`、`workflow_updated`、`interaction_required`，并在清理后最多一次 `run_finished`。字符串先移除终端控制序列、脱敏并按类型限制大小；不导出 reasoning 正文、原始 provider response 或任意对象展开，终态 usage 可以包含汇总 reasoning tokens。退出码及用户调用格式见双语 README。
 
 ## Inline TUI 与独立命令窗口
 
@@ -91,6 +121,7 @@
 - 宿主界面英文；模型正文按其原始语言展示。Markdown、代码、shell 和严格 unified diff 分层高亮，超大或未知内容安全退回纯文本。
 - 等待状态包含 provider、耗时与 Ctrl+C 提示；`/status` 显示模型、供应商、实际协议、压缩/推理设置、context 占用和累计 token/cache，缺失数据明确显示未知或不完整。
 - `/status`、`/outputs`、`/history`、`/terminal-setup`、信息窗口及 picker/wizard 使用独立命令窗口；`/new`、`/clear`、`/exit` 是立即动作。
+- `/fork` 使用可取消 loading/结果窗口；任务、审批、直接命令或其他 command load 活动时拒绝。只有子日志原子发布并加载成功后才重放并切换 UI。
 - Composer 中 `@` 候选最多显示八项，Esc 只关闭候选；提交文件引用时异步读取，失败保留草稿。摘录只进入该 user context item，不复制进可见历史或标题请求。
 - `/diff` 先显示 staged/unstaged/untracked 文件列表，Enter 惰性加载分页详情；Esc 从详情回列表、再回聊天。`/resume` 搜索和预览保持八行列表与 50 项分页，并提供当前/全部工作区开关。
 - `/context` 展示当前 Agent 在已准入 provider-call 边界捕获的 “Last submitted coding request”。打开和刷新只读取不可变内存快照，不刷新文件、不压缩 context、也不发送模型请求；进程重启、Agent 替换或首次 coding 请求前显示明确空状态。

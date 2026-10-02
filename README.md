@@ -5,7 +5,7 @@ The terminal transcript mirrors Codex's resize-reflow row caps. Source-backed re
 
 **English** | [简体中文](./README.zh-CN.md)
 
-Everpeace is a DeepSeek-first, Windows-first personal development CLI with an interactive inline TUI. It also supports OpenAI and custom OpenAI-compatible Responses endpoints. The selected model can use a Codex-sandboxed shell, inspect and edit a workspace, run the project's complete verification suite, search the web, call configured MCP tools, and load local Codex skills. You can also run a local command directly with `!<command>`.
+Everpeace is a DeepSeek-first, Windows-first personal development CLI with an interactive inline TUI and a non-interactive `exec` command. It also supports OpenAI and custom OpenAI-compatible Responses endpoints. The selected model can use a Codex-sandboxed shell, inspect and edit a workspace, run the project's complete verification suite, search the web, call configured MCP tools, and load local Codex skills. In the TUI, you can also run a local command directly with `!<command>`.
 
 Model API keys are never read from environment variables or written to the project or configuration JSON. Everpeace stores them in the operating system credential store. Its local model registry contains only the model name, base URL, and credential reference. Separately, user-configured MCP servers may reference bearer tokens or headers through environment-variable names, following Codex MCP configuration.
 
@@ -16,6 +16,8 @@ Model API keys are never read from environment variables or written to the proje
 - Bash on macOS/Linux; Windows model commands use the system PowerShell inside the Codex sandbox
 - An API key for DeepSeek, OpenAI, or a compatible service
 - Outbound HTTPS access to Bing or DuckDuckGo and any public pages the agent reads
+
+`pnpm install` installs Everpeace's pinned `@vscode/ripgrep@1.18.0` binary for the current platform; a system `rg` is neither required nor used. Do not disable optional dependencies: when the matching platform package is absent, workspace search, the `@` file picker, and `/doctor` report that bundled ripgrep is unavailable and ask you to reinstall. That release provides packages for Windows x64/arm64/ia32, macOS x64/arm64, and Linux x64/arm64/arm/ia32/ppc64/riscv64/s390x; other operating-system and architecture pairs have no bundled search binary.
 
 ## Run in development
 
@@ -59,6 +61,33 @@ pnpm dev -- models
 pnpm dev -- logout
 ```
 
+## Non-interactive execution
+
+`everpeace exec` runs the same production Agent, Session persistence, permissions, sandbox tools, verification/repair loop, history attachments, and cleanup without mounting Ink:
+
+```text
+everpeace exec [prompt] [-C <directory>] [--model <id-or-name>]
+               [--json] [--token-budget <n>]
+               [--timeout-ms <n>] [--max-steps <n>]
+```
+
+Pass the prompt as one positional argument or through non-TTY stdin; using both is an error, and an interactive terminal with neither exits immediately. Piped input is limited to 8 MiB. During development, use the same interface through `pnpm dev -- exec ...`. `-C` defaults to the current directory. Model selection first matches a registered ID, then a unique model name; omitting `--model` works only when exactly one credential-backed model is available. `everpeace exec --help` returns before loading the model registry, credential store, MCP, or TUI.
+
+Every task that passes startup creates a normal Session with a deterministic `Exec: ...` title, so it can later be inspected or resumed in the TUI. The command reads existing learned Memory but disables capture for that run. It has no CLI resume or Plan flow and cannot auto-approve: a permission prompt or structured question is persisted as a paired tool result, reported as `interaction_required`, and stops after cleanup. `--token-budget` covers coding, compaction, retries, and repair; `--timeout-ms` and `--max-steps` also apply across the complete task rather than resetting for repair rounds.
+
+Without `--json`, stdout contains only the final assistant text; progress and host-verification summaries go to stderr. Once the exec output layer initializes, `--json` emits UTF-8 JSONL with `schema_version: 1`, an ISO `timestamp`, and the allowlisted fields below. Event types are `session_started`, `assistant_message`, `tool_started`, `tool_finished`, `workflow_updated`, `interaction_required`, and one final `run_finished` after cleanup. A top-level syntax or module-startup error is reported on stderr with exit 2 before JSONL starts; a final event is also impossible when stdout itself has closed. All strings have terminal controls removed and are redacted and bounded; reasoning content and raw provider responses are never exported, while aggregate `reasoning_tokens` may appear in usage.
+
+| JSONL `type` | Allowlisted payload |
+| --- | --- |
+| `session_started` | `session_id`, `model_id`, `model_name`, `workspace` |
+| `assistant_message` | `text` |
+| `tool_started` / `tool_finished` | `name`, `call_id`; finished events may include `status` (`completed`, `failed`, `cancelled`, or `skipped`) |
+| `workflow_updated` | `phase`, `task_id`, `changed_paths`, `repair_attempts`, `max_repair_attempts`, `pending_verification`; optional `result`, `result_reason` |
+| `interaction_required` | `kind` (`approval` or `question`), `tool`, optional `prompt` |
+| `run_finished` | optional `session_id`; `status` (`success`, `runtime_error`, `configuration_error`, `verification_failed`, `limit_reached`, `interaction_required`, or `cancelled`); `usage_complete`; optional `stop_reason`, `workflow_result`, and `usage` with `input_tokens`, `output_tokens`, and optional `reasoning_tokens` |
+
+Exit codes are fixed: `0` for host `verified` or `no_changes`; `1` for a runtime/cleanup failure or closed stdout pipe; `2` for argument/startup configuration errors; `3` for `failed` or `unverified` verification; `4` for token, usage, step, or deadline limits; `5` for required interaction; and `130`/`143` for SIGINT/SIGTERM. A closed stdout pipe cancels the task and waits for cleanup.
+
 On macOS/Linux, if `bash` is not in `PATH`, configure it explicitly:
 
 ```powershell
@@ -68,7 +97,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.3.6) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.7) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -131,16 +160,17 @@ TUI commands:
 - `/permissions`: Select read-only, ask-for-approval, workspace-write, or full-access mode; control public web and model-shell networking separately; and persist user/project command policy.
 - `/mcp`: Reload Codex MCP configuration, connect enabled servers, and inspect server/tool/resource/prompt status.
 - `/skills`: Create, install, inspect, and explicitly invoke local Skills.
-- `/memory`: View learned experience and separate Memory-model usage, globally enable or disable both reading and learning, control reading/capture for the current chat, inspect the last snapshot actually injected with `/memory view`, archive or clear entries, or run `/memory remember <preference>` to save a lasting user preference. Chat policy is restored with its Session.
+- `/memory`: View learned experience and separate Memory-model usage, globally enable or disable both reading and learning, control reading/capture for the current chat, inspect the last snapshot actually injected with `/memory view`, archive or clear entries, or run `/memory remember <preference>` to save a lasting user preference. Chat policy is restored with its Session; these settings govern learned Memory, independently of on-demand Session history.
 - `/plan`: Enter strict read-only planning mode, answer structured strategy questions, and approve a plan before execution. The same blocking question surface is available during coding when the model needs clarification; coding cancellation stops the active task. Dispatch rejects tools not offered in a Plan step, including editing and Goal mutations.
 - `/goal <objective> [--tokens N]`: Create, inspect, pause, resume, and automatically continue a persistent session goal. Once returned usage reaches the budget or cannot be measured reliably, further tools, model requests, and automatic verification/repair stop with an explanation. An in-flight request can exceed the remaining budget.
 - `/compact`: Compact model context while keeping the full visible transcript. Official OpenAI uses native Responses compaction; DeepSeek and conservative compatible endpoints use an 8K-token summary that retains the latest two complete interaction units and open tool chains. Automatic compaction reserves output and safety headroom, and a confirmed context overflow can recover once without replaying tools.
 - `/reasoning off|low|high|max`: Set the reasoning level captured by the next task. The default is `high`; official DeepSeek receives `max` unchanged.
-- `/doctor [--live]`: Inspect Node, platform, actual shell, sandbox backend/profile, network mode, Git/ripgrep, optional TypeScript LSP configuration, and a real sandbox execution probe. The default is local-only; `--live` sends one bounded connectivity request.
+- `/doctor [--live]`: Inspect Node, platform, actual shell, sandbox backend/profile, network mode, Git/bundled ripgrep, optional TypeScript LSP configuration, and a real sandbox execution probe. The default is local-only; `--live` sends one bounded connectivity request.
 - `/outputs`: Browse retained command output with paged details, highlighted commands, and unified-diff rendering.
 - `/history`: Browse or explicitly clear global input history (not sessions).
 - `/terminal-setup`: Preview and optionally configure Shift+Enter in stable Windows Terminal; confirmation creates a settings backup before applying a global key binding.
 - `/new`: Immediately create and enter a new local session.
+- `/fork [title]`: Copy the committed end of the current idle local Session into an independent child and enter it; an optional title replaces the default fork title, and the source model must still be available.
 - `/resume [query]`: Search titles and user/assistant messages in this workspace or all workspaces, preview, resume, or permanently batch-delete local JSONL sessions.
 - After `/resume`, Up/Down browse that session's saved user prompts and direct commands with source metadata; Down past the newest entry returns to an empty draft. Recalled slash commands do not open the command menu until edited. `/history` still shows global input history.
 - `/logout`: Select and remove models with their operating system credentials.
@@ -148,7 +178,9 @@ TUI commands:
 - `/help`, `/exit`: Show help or exit Everpeace.
 - `!<command>`: Run a command directly in the native system shell (PowerShell on Windows, Bash on macOS/Linux) without confirmation. PTY-formatted output streams into the TUI history without suspending or refreshing the whole interface.
 
-MCP uses the same Codex configuration rather than an Everpeace-specific credential file. Configure servers with `pnpm exec codex mcp add ...` or an equivalent installed Codex CLI, then run `/mcp`. This release supports stdio and Streamable HTTP tools, resources, and prompts, including static/environment headers and bearer-token environment variables. Resource and prompt callables use names such as `mcp__server__read_resource` and remain behind the independent MCP approval surface. Codex OAuth credential reuse, header helpers, elicitation, and tasks are not yet exposed.
+MCP uses the same Codex configuration rather than an Everpeace-specific credential file. Configure servers with `pnpm exec codex mcp add ...` or an equivalent installed Codex CLI, then run `/mcp`. This release supports stdio and Streamable HTTP tools, resources, and prompts, including static/environment headers and bearer-token environment variables. Each server has an independent `connecting`/`reconnecting` lifecycle: transient disconnects remove its tools and retry up to ten times with 500 ms–30 s exponential backoff, while permanent configuration/authentication failures stop immediately. A connection must stay ready for 30 seconds before its retry count resets, and failure to confirm close within five seconds stops automatic recovery. In-flight tool calls are never replayed; business errors, one-call timeouts, and cancellation do not themselves reconnect.
+
+Tool-list change notifications are coalesced, fully paginated, and published atomically. A refresh failure keeps the last complete catalog while a disconnect removes it. Each logical Agent step freezes tool definitions, approval annotations, and an opaque connection/definition binding; a removed or changed tool cannot use the stale binding on a later dispatch. `/mcp` reloads configuration and resets recovery state. Resource and prompt callables use names such as `mcp__server__read_resource` and remain behind the independent MCP approval surface. Codex OAuth credential reuse, header helpers, elicitation, and tasks are not yet exposed.
 
 Skills are discovered from `.agents/skills` between the workspace and repository root, the project `.codex/skills`, `$CODEX_HOME/skills`, `~/.agents/skills`, and the platform admin root. Mention `$skill-name` to activate one explicitly for the current turn; otherwise the model can match catalog descriptions and call `read_skill`. Skill metadata is preloaded, while complete instructions and referenced files are read only when needed.
 
@@ -160,12 +192,15 @@ Skills are discovered from `.agents/skills` between the workspace and repository
 
 Project installs go to the repository root's `.agents/skills`; user installs go to `$CODEX_HOME/skills` (normally `~/.codex/skills`). Existing names are never overwritten, and duplicate names across discovered roots are marked as conflicts and withheld from automatic or explicit activation until resolved. URL installation is public-only, accepts no embedded credentials, validates every redirect against local/private addresses, applies download/extraction/file limits, rejects path traversal and symbolic links, and installs through a temporary directory. Private repositories, authenticated downloads, updates, and deletion are outside the current flow. See [Codex capability mapping](docs/architecture/CODEX_CAPABILITIES.md).
 
+The model can retrieve current and older same-workspace history on demand with `session_search`, `session_event_search`, and `session_event_read`, including records removed from active context by compaction. `session_relations(session_id?)` lists direct parent and child forks in the same exact workspace and marks a deleted or replaced parent unavailable. Results identify their Session and time and remain historical, untrusted material: they grant no file-write authority or current verification status. These read-only tools also work in Plan mode and remain available when learned Memory is disabled. Direct `!` output, reasoning, encrypted items, old developer snapshots, Memory results, and the history tools' own results are excluded.
+
 Behavior notes:
 
 - The core turn loop adapts Codex's sampling/tool/follow-up flow in TypeScript, with per-tool result persistence, cancellable request retries, strict stream completion, and one-shot context-limit recovery. It is not the complete Codex runtime; see [source mapping and scope](docs/architecture/AGENT_LOOP.md).
+- At automatic-compaction pressure or during the one context-limit recovery, Everpeace first tries one persisted, deterministic pruning pass when durable Session history is available. Old closed tool results must resolve uniquely against the fixed history boundary; results longer than 8,192 Unicode code points keep the first 4,096, last 1,024, and a `session_event_read` recovery reference in valid JSON no larger than 32 KiB. The latest two complete interaction units, open tool chains, user/assistant/developer/reasoning/opaque items, Memory, and history/continuation-tool results remain intact. `context_pruned` is persisted before the effective context is replaced; original history and attachments remain available, cumulative usage is unchanged, and only the current `context_tokens` estimate becomes unknown. If the full request is then small enough, no summary model call is made; otherwise normal provider compaction continues. Low-pressure requests and ordinary network retries do not prune.
 
 - Permission profiles keep sandbox scope separate from approvals: `read-only` asks before model shell, web, and MCP calls and uses Codex `:read-only`; `ask` asks before each call and uses `:workspace` after shell approval; `workspace-write` runs model shell in `:workspace` without per-command prompts, allows enabled public web tools without per-request prompts, and keeps MCP approval separate; `full-access` selects `:danger-full-access` after a second explicit confirmation.
-- `read_file` pages workspace UTF-8 files up to 16 MiB by line and returns a raw-byte whole-file SHA-256. `search_files` and `glob_files` invoke ripgrep with parameterized arguments and return process-local continuation references over bounded snapshots (100 results by default, 200 maximum). Search pagination retains at most 16 searches and 8 MiB of serialized UTF-8 payload, evicting the oldest references; completed and unterminated ripgrep records share the 2 MiB per-search input bound. `list_directory` lists up to 500 entries. Outside paths and resolved symlink escapes are rejected. Oversized model-facing tool results remain valid JSON and expose a process-local `read_tool_output` continuation. File contents enter model context and persisted session data; avoid reading secrets.
+- `read_file` pages workspace UTF-8 files up to 16 MiB by line and returns a raw-byte whole-file SHA-256. `search_files` and `glob_files` invoke the pinned bundled ripgrep through its absolute path with parameterized `--no-config` arguments; the system `PATH` and user ripgrep configuration cannot replace or alter it. Searches return process-local continuation references over bounded snapshots (100 results by default, 200 maximum). Search pagination retains at most 16 searches and 8 MiB of serialized UTF-8 payload, evicting the oldest references; completed and unterminated ripgrep records share the 2 MiB per-search input bound. `list_directory` lists up to 500 entries. Outside paths and resolved symlink escapes are rejected. Oversized model-facing tool results remain valid JSON with a 32 KiB inline preview and an opaque `read_tool_output` reference. Redacted bodies persist as Session attachments, up to the first 2 MiB of each of the latest 16 outputs; reads return up to 24 KiB per page. References survive compaction and restart; optional `session_id` allows only the same workspace. Evicted or legacy process-only bodies are unavailable, and `retention_truncated` identifies content beyond the retention limit. Deleting a Session also deletes its attachments. File contents enter model context and persisted session data; avoid reading secrets.
 - Set `EVERPEACE_TYPESCRIPT_LSP` to an existing local language-server executable to expose `code_navigation` for definitions, references, implementations, and hover. Optional arguments and external dependency roots use JSON string arrays in `EVERPEACE_TYPESCRIPT_LSP_ARGS` and `EVERPEACE_TYPESCRIPT_LSP_READ_ROOTS`. Each query starts a fresh server behind the pinned native read-only sandbox, with filtered credentials, application-state denial, capability/UTF-16 validation, bounded protocol traffic, and awaited cleanup. A direct-socket probe must prove the backend's requested network denial before the configured server can start; otherwise the tool and `/doctor` report unavailable and lexical search remains available. The pinned Windows backend currently permits that probe, so native LSP navigation fails closed there. No server is installed automatically; native platform ambient read and temporary-directory grants still apply.
 - User permissions persist in the platform configuration directory and survive restart; `/permissions` can also save a project policy under `.everpeace/permissions.json`. Project policy is fail-closed: it may restrict the user policy, disable model-shell networking, or disable public web, but cannot elevate access. The shell-network switch is enforced by the native backend and does not alter web or MCP access. Changing permissions preserves context; JSONL never restores full access.
 - Model shell commands are launched through the pinned `@openai/codex@0.155.1` native OS sandbox and fail closed if that runtime cannot start. Windows model commands use PowerShell because Git Bash/MSYS cannot initialize inside the restricted token; macOS/Linux use Bash. Model shell calls have a 120-second default timeout and return a structured timeout result; direct `!` commands remain outside the model sandbox and keep user-controlled lifetime. See [design and limits](docs/architecture/PERMISSIONS.md).
@@ -176,6 +211,7 @@ Behavior notes:
 - The host can run up to four explicitly safe read-only tools concurrently while preserving model-order results. This scheduling is independent from a provider's parallel-tool hint; writes, shell, MCP, approvals, cancellation, and conflicting resources remain serial barriers. Requests use one measured snapshot with the real output reserve, while incremental command buffers and 40 ms streamed-text batching keep long turns responsive.
 - Git status is parsed as NUL-delimited structured data and changed-file fingerprints are compared with the dirty state captured at task start. This lets model shell edits, repeated edits to an already-dirty file, untracked files, and non-ASCII paths enter the same verification workflow. `list_workspace_changes` and `read_workspace_change` give the model the same bounded staged/unstaged/untracked details used by `/diff`, through process-local captured references; review establishes neither ownership nor write authority. Tracking limits, non-Git shell changes, rejected checks, and exhausted repairs cannot be reported as verified. Legacy `workspace_status` and `workspace_diff` remain read-only; `/undo` still covers only structured edits whose files have not changed again.
 - Workflow completion is separate from model response completion. The host displays the observed paths and verification suite result, only verified coding turns can feed successful learned-memory capture, and an active Goal's completion request remains pending until the host accepts final verification. Workflow result metadata is recoverable in Session JSONL without command output, errors, file contents, or undo checkpoints.
+- `/fork` is available only while the current local Session is idle and its model remains available. It freezes the source EOF, copies context, timeline, model, chat Memory policy, inherited TaskProgress, and up to 16 retained output attachments under the same opaque IDs, then atomically publishes an independent child. Usage, Goal, repair counters, approvals, undo/file observations, and prior verification success are reset; changed paths and pending verification debt remain. The child persists `fork_pending_resume`, so its first and any unsettled later coding input uses Session-resume semantics until a task settles as `verified` or `no_changes`; Plan, viewing commands, cancellation, errors, limits, and failed/unverified results do not consume it or auto-resume a Goal.
 - Up to two non-interactive model commands may run in the background through the same sandbox and permission policy. Jobs expose bounded running previews, can be polled or stopped, default to ten minutes, and are owned by the current coding task. Terminal status metadata is durably surfaced to the model at the next ordinary step; output remains available through polling. Running jobs and undelivered notices share 20 task-local slots. Cancellation, permission tightening, budget stop, failure, final verification, and Agent disposal terminate and await process trees, discard pending notices, and ignore late callbacks. Jobs remain process-local and are not restored with a Session.
 - Maintainers can run a credential-free executor/profile startup gate, prove the ten pinned Node fixtures, or run an authorized comparison with `pnpm benchmark:campaign -- --config <campaign.json> --preflight|--prove-fixtures|--live`; see [benchmarking](docs/BENCHMARKING.md). Named baseline/candidate checkouts run through the same fresh Node worker and are bound to revision plus source/build digests. The fixed dsh adapter validates usage at its provider boundary; preflight intercepts that boundary with a synthetic response and blocks sockets. Live mode separately requires authorization, a registered model, and numeric per-task and campaign budgets.
 - `read-only` and `ask` require approval before each web request during normal chat; `workspace-write` and `full-access` skip that prompt. Plan mode also treats enabled public web access as read-only research and skips the per-request prompt, while disabling web still denies it. Search queries are sent to Bing, with DuckDuckGo as a fallback; opening a result sends a request to that site.
@@ -198,13 +234,15 @@ For development, start with [AGENTS.md](AGENTS.md), the [current handoff](docs/H
 
 ```text
 src/
-├─ cli/          # CLI entry point and login/models/logout/run commands
+├─ cli/          # CLI entry point, argument parsing, and output formats
 ├─ agent/        # ReAct loop and session state
 ├─ codex/        # Pinned Codex CLI launcher
+├─ exec/         # Public non-interactive task runner and result contract
 ├─ mcp/          # Codex-configured MCP client runtime
 ├─ providers/    # DeepSeek, OpenAI, and compatible endpoint adapters
+├─ runtime/      # UI-independent production Agent and command factories
 ├─ skills/       # Codex host skill discovery and progressive reads
-├─ storage/      # Operating system credentials and model registry
+├─ storage/      # Credentials, model registry, Sessions, history, and outputs
 ├─ tui/          # Ink views, state machine, login wizard, and composer
 └─ tools/        # Agent tool definitions and executors
 

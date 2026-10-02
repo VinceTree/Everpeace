@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { runFileTool } from "../tools/files.js";
+import { resolveBundledRipgrep, type RipgrepPathResolver } from "../tools/ripgrep.js";
 
 export const MAX_FILE_ATTACHMENTS = 8;
 export const MAX_ATTACHMENT_BYTES = 32 * 1024;
@@ -261,9 +262,12 @@ export async function listFileReferenceSuggestions(
   workspacePath: string,
   query: string,
   signal?: AbortSignal,
+  resolveRipgrep: RipgrepPathResolver = resolveBundledRipgrep,
 ): Promise<string[]> {
   signal?.throwIfAborted();
-  const child = spawn("rg", ["--files", "--hidden", "--glob", "!.git", "--", "."], {
+  const executable = await resolveRipgrep();
+  signal?.throwIfAborted();
+  const child = spawn(executable, ["--no-config", "--files", "--hidden", "--glob", "!.git", "--", "."], {
     cwd: workspacePath,
     shell: false,
     windowsHide: true,

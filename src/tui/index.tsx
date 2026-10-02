@@ -29,6 +29,23 @@ export function clearTerminal(output: TerminalOutput = process.stdout): void {
   output.write(TERMINAL_RESET_SEQUENCE);
 }
 
+/** Keep workspace services and terminal restoration paired on every exit path. */
+export async function settleTuiLifecycle<T>(
+  dependencies: Pick<TuiDependencies, "dispose">,
+  run: () => Promise<T>,
+  reset: () => void = resetTerminalModes,
+): Promise<T> {
+  try {
+    return await run();
+  } finally {
+    try {
+      await dependencies.dispose?.();
+    } finally {
+      reset();
+    }
+  }
+}
+
 export async function runTui({ registry, dependencies }: RunTuiOptions): Promise<number> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error("Everpeace TUI requires an interactive terminal");
@@ -40,9 +57,9 @@ export async function runTui({ registry, dependencies }: RunTuiOptions): Promise
 
   const resolvedDependencies =
     dependencies ?? createDefaultTuiDependencies(registry);
-  const initialModels = await resolvedDependencies.registry.resolveAll();
 
-  try {
+  return settleTuiLifecycle(resolvedDependencies, async () => {
+    const initialModels = await resolvedDependencies.registry.resolveAll();
     let replayOutput: (update: () => void) => void = (update) => update();
     const instance = render(
       <EverpeaceApp
@@ -75,7 +92,5 @@ export async function runTui({ registry, dependencies }: RunTuiOptions): Promise
 
     const result = await instance.waitUntilExit();
     return typeof result === "number" ? result : 0;
-  } finally {
-    resetTerminalModes();
-  }
+  });
 }

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseArgs } from "../../../src/cli/args.js";
+import {
+  CliArgumentError,
+  parseArgs,
+  resolveExecPrompt,
+  type ExecCliOptions,
+} from "../../../src/cli/args.js";
 
 test("parseArgs starts the agent by default", () => {
   assert.deepEqual(parseArgs([]), { command: "run", help: false });
@@ -16,4 +21,89 @@ test("parseArgs recognizes help and rejects unsupported arguments", () => {
   assert.equal(parseArgs(["--help"]).help, true);
   assert.throws(() => parseArgs(["--model", "anything"]), /Unknown argument/);
   assert.throws(() => parseArgs(["login", "models"]), /Unknown argument/);
+});
+
+test("parseArgs accepts the complete exec command surface", () => {
+  assert.deepEqual(
+    parseArgs([
+      "exec",
+      "repair the fixture",
+      "-C",
+      "C:\\work tree",
+      "--model",
+      "registered-model",
+      "--json",
+      "--token-budget",
+      "12000",
+      "--timeout-ms",
+      "60000",
+      "--max-steps",
+      "24",
+    ]),
+    {
+      command: "exec",
+      help: false,
+      prompt: "repair the fixture",
+      directory: "C:\\work tree",
+      model: "registered-model",
+      json: true,
+      tokenBudget: 12000,
+      timeoutMs: 60000,
+      maxSteps: 24,
+    },
+  );
+});
+
+test("parseArgs keeps exec prompt optional for stdin and supports option termination", () => {
+  assert.deepEqual(parseArgs(["exec", "--json"]), {
+    command: "exec",
+    help: false,
+    json: true,
+  });
+  assert.deepEqual(parseArgs(["--help", "exec"]), {
+    command: "exec",
+    help: true,
+    json: false,
+  });
+  assert.equal((parseArgs(["exec", "--", "-prompt"]) as ExecCliOptions).prompt, "-prompt");
+});
+
+test("parseArgs rejects invalid and unsafe exec integer values", () => {
+  for (const value of ["0", "-1", "1.5", "01", "+1", "9007199254740992"]) {
+    assert.throws(
+      () => parseArgs(["exec", "prompt", "--token-budget", value]),
+      (error) => error instanceof CliArgumentError && /positive integer/.test(error.message),
+    );
+  }
+  assert.throws(() => parseArgs(["exec", "prompt", "--max-steps", "0"]), /positive integer/);
+  assert.throws(() => parseArgs(["exec", "prompt", "--timeout-ms", "NaN"]), /positive integer/);
+});
+
+test("parseArgs rejects missing, repeated, and unknown exec arguments", () => {
+  assert.throws(() => parseArgs(["exec", "--model"]), /Missing value for --model/);
+  assert.throws(() => parseArgs(["exec", "--model", ""]), /Missing value for --model/);
+  assert.throws(() => parseArgs(["exec", "--model", "--json"]), /Missing value for --model/);
+  assert.throws(() => parseArgs(["exec", "one", "two"]), /only one positional prompt/);
+  assert.throws(() => parseArgs(["exec", "prompt", "--json", "--json"]), /only be specified once/);
+  assert.throws(() => parseArgs(["exec", "prompt", "-C", "one", "-C", "two"]), /only be specified once/);
+  assert.throws(() => parseArgs(["exec", "prompt", "--model", "one", "--model", "two"]), /only be specified once/);
+  assert.throws(() => parseArgs(["exec", "prompt", "--max-steps", "1", "--max-steps", "2"]), /only be specified once/);
+  assert.throws(() => parseArgs(["exec", "prompt", "--unknown"]), /Unknown argument/);
+});
+
+test("resolveExecPrompt enforces one positional or piped source", () => {
+  const positional = parseArgs(["exec", "argument prompt"]) as ExecCliOptions;
+  const piped = parseArgs(["exec"]) as ExecCliOptions;
+
+  assert.equal(resolveExecPrompt(positional, { stdinIsTTY: true }), "argument prompt");
+  assert.equal(resolveExecPrompt(positional, { stdinIsTTY: false, stdinText: "" }), "argument prompt");
+  assert.equal(resolveExecPrompt(piped, { stdinIsTTY: false, stdinText: "piped\nprompt\n" }), "piped\nprompt\n");
+  assert.throws(
+    () => resolveExecPrompt(positional, { stdinIsTTY: false, stdinText: "also piped" }),
+    /either an argument or stdin/,
+  );
+  assert.throws(() => resolveExecPrompt(piped, { stdinIsTTY: true }), /Missing exec prompt/);
+  assert.throws(() => resolveExecPrompt(piped, { stdinIsTTY: false, stdinText: "" }), /did not contain/);
+  assert.throws(() => resolveExecPrompt({ ...positional, prompt: " \r\n\t " }, { stdinIsTTY: true }), /cannot be blank/);
+  assert.throws(() => resolveExecPrompt(piped, { stdinIsTTY: false, stdinText: " \r\n\t " }), /non-blank/);
 });

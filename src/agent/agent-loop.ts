@@ -3,7 +3,7 @@
 // Copyright 2025 OpenAI. Licensed under Apache-2.0; see third_party/codex/LICENSE.
 import { setTimeout as delay } from "node:timers/promises";
 import { PersistenceError } from "../storage/persistence-error.js";
-import { boundModelToolOutput } from "./context-limits.js";
+import { boundModelToolOutput, type PreparedToolOutput } from "./context-limits.js";
 import type { TokenUsageSample } from "../status/model-status.js";
 const MAX_PENDING_PARALLEL_TOOL_BYTES = 4 * 1024 * 1024;
 export interface LoopResponse {
@@ -110,6 +110,10 @@ export interface AgentLoopOptions {
   toolCapabilities?(call: ToolCall): ToolCapabilities | undefined;
   canRunInParallel?(call: ToolCall): boolean;
   boundToolOutput?(output: string): string;
+  /** Prepare bounded results without publishing retained output references. */
+  prepareToolOutput?(output: string, call: ToolCall): PreparedToolOutput;
+  /** Commit retained bytes and their reference in model call order. */
+  recordToolResult?(item: Record<string, unknown>, prepared: PreparedToolOutput): Promise<void>;
 }
 
 export function classifySamplingError(error: unknown): SamplingErrorCategory {
@@ -193,6 +197,9 @@ async function sample(
 
 /** Keep transport, tool permissions, and durable history outside turn control. */
 export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoopResult> {
+  if ((options.prepareToolOutput === undefined) !== (options.recordToolResult === undefined)) {
+    throw new Error("Prepared tool output requires both preparation and ordered persistence callbacks");
+  }
   const startedAt = performance.now();
   const externalSignal = options.signal;
   const retries = integerBudget("sampling retry budget", options.retryBudgets?.sampling ?? options.maxRetries, 2);
@@ -342,29 +349,36 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         const executionSignal = signal
           ? AbortSignal.any([signal, segmentController.signal])
           : segmentController.signal;
-        type ToolRun = { call: ToolCall; output?: string; stop?: boolean; fatal?: PersistenceError; executionMs: number };
+        type ToolRun = { call: ToolCall; output?: string; prepared?: PreparedToolOutput; stop?: boolean; fatal?: Error; executionMs: number };
         const execute = async (call: ToolCall): Promise<ToolRun> => {
-          let output: string;
+          let rawOutput: string;
           let stop = false;
           const executionStarted = performance.now();
           try {
             executionSignal.throwIfAborted();
             options.onEvent?.({ type: "tool_started", call });
             const dispatched = await options.dispatch(call, executionSignal);
-            const rawOutput = typeof dispatched === "string" ? dispatched : dispatched.output;
-            output = options.boundToolOutput?.(rawOutput) ?? boundModelToolOutput(rawOutput);
+            rawOutput = typeof dispatched === "string" ? dispatched : dispatched.output;
             stop = typeof dispatched === "object" && dispatched.stop === true;
           } catch (error) {
             if (error instanceof PersistenceError) return { call, fatal: error, executionMs: performance.now() - executionStarted };
-            output = JSON.stringify(executionSignal.aborted ? { status: "cancelled" }
+            rawOutput = JSON.stringify(executionSignal.aborted ? { status: "cancelled" }
               : { status: "error", error: error instanceof Error ? error.message : String(error) });
           }
-          return { call, output, stop, executionMs: performance.now() - executionStarted };
+          try {
+            const prepared = options.prepareToolOutput?.(rawOutput, call);
+            const output = prepared?.output ?? options.boundToolOutput?.(rawOutput) ?? boundModelToolOutput(rawOutput);
+            return { call, output, ...(prepared ? { prepared } : {}), stop, executionMs: performance.now() - executionStarted };
+          } catch (error) {
+            return { call, fatal: error instanceof Error ? error : new Error(String(error)), executionMs: performance.now() - executionStarted };
+          }
         };
         const results: ToolRun[] = [];
         const persistToolResult = async (item: ToolRun): Promise<void> => {
           if (item.fatal) throw item.fatal;
-          await options.record([{ type: "function_call_output", call_id: item.call.call_id, output: item.output! }]);
+          const record = { type: "function_call_output", call_id: item.call.call_id, output: item.output! };
+          if (item.prepared && options.recordToolResult) await options.recordToolResult(record, item.prepared);
+          else await options.record([record]);
           options.onEvent?.({ type: "tool_finished", call: item.call, output: item.output! });
           options.onEvent?.({ type: "timing_recorded", operation: "tool_execution", durationMs: item.executionMs });
           stopAfterTools ||= item.stop === true;
@@ -384,7 +398,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
             const ready = completed.get(committed);
             if (ready) {
               completed.delete(committed);
-              completedBytes -= Buffer.byteLength(ready.output ?? "");
+              completedBytes -= Buffer.byteLength(ready.output ?? "") + (ready.prepared?.attachment?.bytes.byteLength ?? 0);
               try {
                 await persistToolResult(ready);
               } catch (error) {
@@ -413,7 +427,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
               const pending = execute(segment[localIndex]!)
                 .then((result) => {
                   completed.set(localIndex, result);
-                  completedBytes += Buffer.byteLength(result.output ?? "");
+                  completedBytes += Buffer.byteLength(result.output ?? "") + (result.prepared?.attachment?.bytes.byteLength ?? 0);
                 })
                 .finally(() => {
                   inFlight.delete(localIndex);

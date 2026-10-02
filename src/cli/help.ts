@@ -1,10 +1,31 @@
+export const EXEC_HELP = `Non-interactive execution:
+  everpeace exec [prompt] [-C <directory>] [--model <id-or-name>]
+               [--json] [--token-budget <n>]
+               [--timeout-ms <n>] [--max-steps <n>]
+
+  Supply the prompt as one positional argument or through piped stdin.
+  --json writes versioned JSONL events to stdout.
+
+Exec exit codes:
+  0   Verified changes or no changes
+  1   Runtime failure
+  2   Invalid arguments or startup configuration
+  3   Failed or unverified host verification
+  4   Token, usage, step, or deadline limit
+  5   Approval or structured input required
+  130 Interrupted by SIGINT
+  143 Terminated by SIGTERM`;
+
 export const HELP = `Everpeace - a minimal ReAct coding agent
 
 Usage:
   everpeace                 Open the interactive TUI
+  everpeace exec [prompt]   Run one non-interactive task (or pipe the prompt)
   everpeace login           Register one or more models securely
   everpeace models          List registered models (API Keys are never shown)
   everpeace logout          Remove registered models and their credentials
+
+${EXEC_HELP}
 
 Commands inside the agent:
   !<command>                Run a native shell command directly
@@ -22,6 +43,7 @@ Commands inside the agent:
   /goal                     Create, inspect, pause, or resume a session goal
   /compact                  Compact the model context
   /new                      Create and enter a new session
+  /fork [title]             Fork the current idle session and enter the child
   /resume                   List, resume, or permanently batch-delete local sessions
   /logout                   Remove models and credentials
   /clear                    Start a fresh session on the next prompt

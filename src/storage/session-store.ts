@@ -1,8 +1,9 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, promises as fs } from "node:fs";
 import { createInterface } from "node:readline";
 import os from "node:os";
 import path from "node:path";
+import lockfile from "proper-lockfile";
 import { isCommandRecord, type CommandRecord } from "../tools/command-record.js";
 import {
   applyUsageSample,
@@ -15,11 +16,58 @@ import {
   type StatusSnapshot,
   type TokenUsageSample,
 } from "../status/model-status.js";
-import type { VerificationSuiteResult, WorkflowPhase, WorkflowState, VerificationResult } from "../workflow/types.js";
+import { createWorkflowState, type VerificationSuiteResult, type WorkflowPhase, type WorkflowState, type VerificationResult } from "../workflow/types.js";
 import type { LearnedMemoryPolicy } from "../memory/learned-memory.js";
 import { isModelRequestSettings, type ModelRequestSettings } from "../providers/capabilities.js";
 import { normalizeWorkspacePath } from "../memory/learned-memory.js";
 import { cloneTaskProgress, isTaskProgress, type TaskProgress } from "../workflow/task-progress.js";
+import { RETAINED_TOOL_OUTPUTS, type PreparedOutputAttachment } from "../agent/context-limits.js";
+import {
+  SessionOutputStorage,
+  isToolOutputAttachmentReference,
+  readToolOutputReferences,
+  toolOutputAttachmentReference,
+  type StoredToolOutput,
+  type ToolOutputAttachmentReference,
+} from "./session-outputs.js";
+
+export type { StoredToolOutput } from "./session-outputs.js";
+
+export interface SessionOutputReadOptions {
+  signal?: AbortSignal;
+  /** Absolute Date.now() deadline, supplied by the caller's bounded history scan. */
+  deadline?: number;
+}
+
+function checkOutputReadBudget(options?: SessionOutputReadOptions): void {
+  options?.signal?.throwIfAborted();
+  if (options?.deadline !== undefined && Date.now() >= options.deadline) {
+    const error = new Error("Historical output read deadline exceeded");
+    error.name = "TimeoutError";
+    throw error;
+  }
+}
+
+function withinOutputReadBudget<T>(pending: Promise<T>, options?: SessionOutputReadOptions): Promise<T> {
+  if (!options) return pending;
+  try { checkOutputReadBudget(options); } catch (error) { return Promise.reject(error); }
+  return new Promise<T>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      options.signal?.removeEventListener("abort", aborted);
+    };
+    const aborted = () => { cleanup(); reject(options.signal?.reason ?? new DOMException("Aborted", "AbortError")); };
+    options.signal?.addEventListener("abort", aborted, { once: true });
+    if (options.deadline !== undefined) timer = setTimeout(() => {
+      cleanup();
+      const error = new Error("Historical output read deadline exceeded");
+      error.name = "TimeoutError";
+      reject(error);
+    }, Math.max(0, options.deadline - Date.now()));
+    pending.then((value) => { cleanup(); resolve(value); }, (error) => { cleanup(); reject(error); });
+  });
+}
 
 const SESSION_FORMAT_VERSION = 1;
 
@@ -81,6 +129,15 @@ export interface SessionSummary {
   workflow?: WorkflowState;
   task_progress?: TaskProgress;
   memory_policy?: LearnedMemoryPolicy;
+  lineage?: SessionLineage;
+  fork_pending_resume?: boolean;
+}
+
+export interface SessionLineage {
+  parent_session_id: string;
+  forked_at: string;
+  source_boundary_bytes: number;
+  source_header_sha256: string;
 }
 
 export interface LoadedSession {
@@ -92,6 +149,8 @@ export interface LoadedSession {
   workflow?: WorkflowState;
   taskProgress?: TaskProgress;
   memoryPolicy?: LearnedMemoryPolicy;
+  lineage?: SessionLineage;
+  forkPendingResume?: boolean;
 }
 
 export interface SessionListResult {
@@ -130,6 +189,11 @@ export interface CreateSessionInput {
   model: SessionModelRef;
 }
 
+export interface ForkSessionInput {
+  title?: string;
+  signal?: AbortSignal;
+}
+
 export interface SessionStoreLike {
   create(input: CreateSessionInput): Promise<SessionSummary>;
   updateTitle(sessionId: string, title: string): Promise<void>;
@@ -138,11 +202,20 @@ export interface SessionStoreLike {
     sessionId: string,
     items: readonly Record<string, unknown>[],
   ): Promise<void>;
+  commitToolResult?(sessionId: string, item: Record<string, unknown>, attachment?: PreparedOutputAttachment): Promise<void>;
+  captureSessionBoundary?(sessionId: string): Promise<number>;
+  readToolOutput?(sessionId: string, outputId: string): Promise<StoredToolOutput | null>;
+  readReferencedToolOutput?(sessionId: string, reference: ToolOutputAttachmentReference, options?: SessionOutputReadOptions): Promise<StoredToolOutput | null>;
   compactContext(
     sessionId: string,
     items: readonly Record<string, unknown>[],
     automatic: boolean,
     usage: TokenUsageSample | null,
+  ): Promise<void>;
+  pruneContext?(
+    sessionId: string,
+    items: readonly Record<string, unknown>[],
+    metadata: ContextPruneMetadata,
   ): Promise<void>;
   appendUsage(
     sessionId: string,
@@ -162,6 +235,8 @@ export interface SessionStoreLike {
   setWorkflow?(sessionId: string, workflow: WorkflowState): Promise<void>;
   setTaskProgress?(sessionId: string, progress: TaskProgress): Promise<void>;
   setMemoryPolicy?(sessionId: string, policy: LearnedMemoryPolicy): Promise<void>;
+  fork?(sessionId: string, input?: ForkSessionInput): Promise<SessionSummary>;
+  setForkPendingResume?(sessionId: string, pending: boolean): Promise<void>;
 }
 
 interface EventBase {
@@ -177,6 +252,7 @@ interface SessionCreatedEvent extends EventBase {
   workspace_path: string;
   model: SessionModelRef;
   usage_tracking: boolean;
+  lineage?: SessionLineage;
 }
 
 interface TitleUpdatedEvent extends EventBase {
@@ -192,6 +268,7 @@ interface TimelineEntryEvent extends EventBase {
 interface ContextAppendEvent extends EventBase {
   type: "context_append";
   items: Array<Record<string, unknown>>;
+  tool_output_attachment?: ToolOutputAttachmentReference;
 }
 
 interface ContextCompactedEvent extends EventBase {
@@ -199,6 +276,17 @@ interface ContextCompactedEvent extends EventBase {
   items: Array<Record<string, unknown>>;
   automatic: boolean;
   usage: TokenUsageSample | null;
+}
+
+export interface ContextPruneMetadata {
+  original_bytes: number;
+  pruned_bytes: number;
+  pruned_results: number;
+}
+
+interface ContextPrunedEvent extends EventBase, ContextPruneMetadata {
+  type: "context_pruned";
+  items: Array<Record<string, unknown>>;
 }
 
 interface ModelSelectedEvent extends EventBase {
@@ -232,18 +320,34 @@ interface MemoryPolicyUpdatedEvent extends EventBase {
   policy: LearnedMemoryPolicy;
 }
 
+interface ForkBoundaryEvent extends EventBase {
+  type: "fork_boundary";
+  lineage: SessionLineage;
+  workflow?: WorkflowState;
+  task_progress?: TaskProgress;
+  memory_policy?: LearnedMemoryPolicy;
+}
+
+interface ForkResumeUpdatedEvent extends EventBase {
+  type: "fork_resume_updated";
+  pending: boolean;
+}
+
 type SessionEvent =
   | SessionCreatedEvent
   | TitleUpdatedEvent
   | TimelineEntryEvent
   | ContextAppendEvent
   | ContextCompactedEvent
+  | ContextPrunedEvent
   | ModelSelectedEvent
   | UsageRecordedEvent
   | GoalUpdatedEvent
   | WorkflowUpdatedEvent
   | TaskProgressUpdatedEvent
-  | MemoryPolicyUpdatedEvent;
+  | MemoryPolicyUpdatedEvent
+  | ForkBoundaryEvent
+  | ForkResumeUpdatedEvent;
 
 export interface SessionStoreOptions {
   directory?: string;
@@ -285,6 +389,22 @@ function isModelRef(value: unknown): value is SessionModelRef {
     isNonEmptyString(value.base_url)
     && (value.request_settings === undefined || isModelRequestSettings(value.request_settings))
   );
+}
+
+function isSessionLineage(value: unknown): value is SessionLineage {
+  if (!isRecord(value)) return false;
+  return isNonEmptyString(value.parent_session_id)
+    && /^[A-Za-z0-9_-]+$/u.test(value.parent_session_id)
+    && isNonEmptyString(value.forked_at)
+    && typeof value.source_boundary_bytes === "number"
+    && Number.isSafeInteger(value.source_boundary_bytes)
+    && value.source_boundary_bytes > 0
+    && typeof value.source_header_sha256 === "string"
+    && /^[0-9a-f]{64}$/u.test(value.source_header_sha256);
+}
+
+function cloneLineage(lineage: SessionLineage): SessionLineage {
+  return { ...lineage };
 }
 
 function isTimelineKind(value: unknown): value is SessionTimelineKind {
@@ -330,6 +450,9 @@ function parseEvent(value: unknown): SessionEvent {
     ) {
       throw new Error("Session header is invalid");
     }
+    if (value.lineage !== undefined && !isSessionLineage(value.lineage)) {
+      throw new Error("Session lineage is invalid");
+    }
     return {
       ...base,
       type: "session_created",
@@ -341,6 +464,7 @@ function parseEvent(value: unknown): SessionEvent {
       model: value.model,
       usage_tracking:
         typeof value.usage_tracking === "boolean" ? value.usage_tracking : false,
+      ...(value.lineage === undefined ? {} : { lineage: cloneLineage(value.lineage) }),
     };
   }
 
@@ -358,7 +482,13 @@ function parseEvent(value: unknown): SessionEvent {
     if (!Array.isArray(value.items) || !value.items.every(isRecord)) {
       throw new Error("Session context is invalid");
     }
-    return { ...base, type: "context_append", items: value.items };
+    if (value.tool_output_attachment !== undefined && !isToolOutputAttachmentReference(value.tool_output_attachment)) {
+      throw new Error("Session tool output attachment is invalid");
+    }
+    return {
+      ...base, type: "context_append", items: value.items,
+      ...(value.tool_output_attachment === undefined ? {} : { tool_output_attachment: value.tool_output_attachment }),
+    };
   }
 
   if (value.type === "context_compacted") {
@@ -376,6 +506,30 @@ function parseEvent(value: unknown): SessionEvent {
       items: value.items,
       automatic: value.automatic,
       usage: value.usage,
+    };
+  }
+
+  if (value.type === "context_pruned") {
+    if (
+      !Array.isArray(value.items) ||
+      !value.items.every(isRecord) ||
+      !Number.isSafeInteger(value.original_bytes) ||
+      Number(value.original_bytes) < 0 ||
+      !Number.isSafeInteger(value.pruned_bytes) ||
+      Number(value.pruned_bytes) < 0 ||
+      Number(value.pruned_bytes) >= Number(value.original_bytes) ||
+      !Number.isSafeInteger(value.pruned_results) ||
+      Number(value.pruned_results) < 1
+    ) {
+      throw new Error("Session context pruning event is invalid");
+    }
+    return {
+      ...base,
+      type: "context_pruned",
+      items: value.items,
+      original_bytes: Number(value.original_bytes),
+      pruned_bytes: Number(value.pruned_bytes),
+      pruned_results: Number(value.pruned_results),
     };
   }
 
@@ -428,11 +582,43 @@ function parseEvent(value: unknown): SessionEvent {
     return { ...base, type: "memory_policy_updated", policy: { readExisting: value.policy.readExisting, captureFuture: value.policy.captureFuture } };
   }
 
+  if (value.type === "fork_boundary") {
+    if (!isSessionLineage(value.lineage)
+      || (value.workflow !== undefined && !isWorkflow(value.workflow))
+      || (value.task_progress !== undefined && !isTaskProgress(value.task_progress))
+      || (value.memory_policy !== undefined && (!isRecord(value.memory_policy)
+        || typeof value.memory_policy.readExisting !== "boolean"
+        || typeof value.memory_policy.captureFuture !== "boolean"))) {
+      throw new Error("Session fork boundary is invalid");
+    }
+    return {
+      ...base,
+      type: "fork_boundary",
+      lineage: cloneLineage(value.lineage),
+      ...(value.workflow === undefined ? {} : { workflow: workflowSnapshot(value.workflow) }),
+      ...(value.task_progress === undefined ? {} : { task_progress: cloneTaskProgress(value.task_progress) }),
+      ...(value.memory_policy === undefined ? {} : { memory_policy: {
+        readExisting: value.memory_policy.readExisting as boolean,
+        captureFuture: value.memory_policy.captureFuture as boolean,
+      } }),
+    };
+  }
+
+  if (value.type === "fork_resume_updated") {
+    if (typeof value.pending !== "boolean") throw new Error("Session fork resume state is invalid");
+    return { ...base, type: "fork_resume_updated", pending: value.pending };
+  }
+
   throw new Error(`Unsupported session event type: ${value.type}`);
 }
 
 function isGoalStatus(value: unknown): value is GoalStatus {
   return value === "active" || value === "paused" || value === "blocked" || value === "complete" || value === "budget_limited" || value === "usage_limited";
+}
+
+/** The legacy reader preserves a valid final event even when its newline was lost. */
+export function isValidSessionEvent(value: unknown): boolean {
+  try { parseEvent(value); return true; } catch { return false; }
 }
 
 function isGoal(value: unknown): value is SessionGoal {
@@ -475,7 +661,7 @@ function isWorkflow(value: unknown): value is WorkflowState {
   if (!isRecord(value)) return false;
   const phases: WorkflowPhase[] = ["understand", "plan", "implement", "verify_fast", "diagnose", "verify_full", "review", "done", "blocked"];
   return typeof value.task_id === "string" && phases.includes(value.phase as WorkflowPhase) &&
-    (value.task_source === undefined || value.task_source === "user" || value.task_source === "goal_continuation" || value.task_source === "session_resume" || value.task_source === "benchmark") &&
+    (value.task_source === undefined || value.task_source === "user" || value.task_source === "goal_continuation" || value.task_source === "session_resume" || value.task_source === "benchmark" || value.task_source === "exec") &&
     typeof value.repair_attempts === "number" && Number.isSafeInteger(value.repair_attempts) && value.repair_attempts >= 0 &&
     typeof value.max_repair_attempts === "number" && Number.isSafeInteger(value.max_repair_attempts) && value.max_repair_attempts >= 0 &&
     Array.isArray(value.changed_paths) && value.changed_paths.every((item) => typeof item === "string") &&
@@ -562,6 +748,8 @@ function parseSession(contents: string, filePath: string): LoadedSession {
   let workflow: WorkflowState | undefined;
   let taskProgress: TaskProgress | undefined;
   let memoryPolicy: LearnedMemoryPolicy | undefined;
+  let lineage = header.lineage === undefined ? undefined : cloneLineage(header.lineage);
+  let forkPendingResume = false;
   for (const event of events.slice(1)) {
     updatedAt = event.at;
     if (event.type === "title_updated") {
@@ -573,6 +761,12 @@ function parseSession(contents: string, filePath: string): LoadedSession {
     if (event.type === "context_compacted") {
       context = event.items.map((item) => ({ ...item }));
       usage = applyCompactionUsage(usage, event.usage);
+    }
+    if (event.type === "context_pruned") {
+      context = event.items.map((item) => ({ ...item }));
+      // Pruning changes the effective request without adding provider usage.
+      // The next response supplies a fresh measured context value.
+      usage = { ...usage, context_tokens: null };
     }
     if (event.type === "model_selected") {
       model = event.model;
@@ -586,6 +780,20 @@ function parseSession(contents: string, filePath: string): LoadedSession {
     if (event.type === "workflow_updated") workflow = { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
     if (event.type === "task_progress_updated") taskProgress = cloneTaskProgress(event.progress);
     if (event.type === "memory_policy_updated") memoryPolicy = { ...event.policy };
+    if (event.type === "fork_boundary") {
+      lineage = cloneLineage(event.lineage);
+      usage = createEmptySessionUsage(header.usage_tracking);
+      goal = undefined;
+      workflow = event.workflow === undefined
+        ? undefined
+        : { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
+      taskProgress = event.task_progress === undefined
+        ? undefined
+        : cloneTaskProgress(event.task_progress);
+      memoryPolicy = event.memory_policy === undefined ? undefined : { ...event.memory_policy };
+      forkPendingResume = true;
+    }
+    if (event.type === "fork_resume_updated") forkPendingResume = event.pending;
   }
 
   return {
@@ -601,6 +809,8 @@ function parseSession(contents: string, filePath: string): LoadedSession {
       ...(workflow ? { workflow } : {}),
       ...(taskProgress ? { task_progress: cloneTaskProgress(taskProgress) } : {}),
       ...(memoryPolicy ? { memory_policy: memoryPolicy } : {}),
+      ...(lineage ? { lineage: cloneLineage(lineage) } : {}),
+      ...(lineage ? { fork_pending_resume: forkPendingResume } : {}),
     },
     timeline,
     context,
@@ -609,6 +819,7 @@ function parseSession(contents: string, filePath: string): LoadedSession {
     ...(workflow ? { workflow } : {}),
     ...(taskProgress ? { taskProgress: cloneTaskProgress(taskProgress) } : {}),
     ...(memoryPolicy ? { memoryPolicy } : {}),
+    ...(lineage ? { lineage: cloneLineage(lineage), forkPendingResume } : {}),
   };
 }
 
@@ -633,7 +844,62 @@ interface CachedSearchProjection {
   projection: SessionSearchProjection;
 }
 
+interface OutputReferenceState {
+  references: ToolOutputAttachmentReference[];
+  safeToClean: boolean;
+  size: number;
+  mtimeMs: number;
+}
+
 const MAX_SEARCH_CACHE_BYTES = 16 * 1024 * 1024;
+const MAX_RECOVERY_TAIL_BYTES = 8 * 1024 * 1024;
+const RECOVERY_CHUNK_BYTES = 64 * 1024;
+
+/** Preserve complete legacy events; discard only the invalid, unterminated crash tail. */
+async function recoverSessionTail(filePath: string): Promise<boolean> {
+  const before = await fs.lstat(filePath);
+  if (!before.isFile() || before.isSymbolicLink()) throw new Error("Session log is not a regular file");
+  const handle = await fs.open(filePath, "r+");
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.dev !== before.dev || stat.ino !== before.ino) throw new Error("Session log changed while opening");
+    if (stat.size === 0) return false;
+    const last = Buffer.alloc(1);
+    await handle.read(last, 0, 1, stat.size - 1);
+    if (last[0] === 10) return false;
+    let position = stat.size;
+    let tailStart = 0;
+    let scanned = 0;
+    const chunks: Buffer[] = [];
+    while (position > 0) {
+      const count = Math.min(RECOVERY_CHUNK_BYTES, position, MAX_RECOVERY_TAIL_BYTES + 1 - scanned);
+      if (count <= 0) throw new Error("Session trailing record exceeds the 8 MiB recovery limit; original log was preserved");
+      const bytes = Buffer.allocUnsafe(count);
+      const offset = position - count;
+      const read = await handle.read(bytes, 0, count, offset);
+      if (read.bytesRead !== count) throw new Error("Session log changed during tail recovery");
+      const newline = bytes.lastIndexOf(10);
+      scanned += count;
+      if (newline >= 0) {
+        tailStart = offset + newline + 1;
+        chunks.unshift(bytes.subarray(newline + 1));
+        break;
+      }
+      chunks.unshift(bytes);
+      position = offset;
+    }
+    const tailBytes = stat.size - tailStart;
+    if (tailBytes > MAX_RECOVERY_TAIL_BYTES) throw new Error("Session trailing record exceeds the 8 MiB recovery limit; original log was preserved");
+    const tail = Buffer.concat(chunks, tailBytes).toString("utf8");
+    let preserve = !tail.trim();
+    try { preserve ||= isValidSessionEvent(JSON.parse(tail)); } catch { /* Invalid unfinished record. */ }
+    const current = await handle.stat();
+    if (current.size !== stat.size || current.mtimeMs !== stat.mtimeMs) throw new Error("Session log changed during tail recovery");
+    if (preserve) await handle.write(Buffer.from("\n"), 0, 1, stat.size);
+    else await handle.truncate(tailStart);
+    return true;
+  } finally { await handle.close(); }
+}
 
 async function fileEndsWithNewline(filePath: string, size: number): Promise<boolean> {
   if (size === 0) return true;
@@ -664,6 +930,8 @@ async function readSearchProjection(filePath: string, signal?: AbortSignal): Pro
   let workflow: WorkflowState | undefined;
   let taskProgress: TaskProgress | undefined;
   let memoryPolicy: LearnedMemoryPolicy | undefined;
+  let lineage: SessionLineage | undefined;
+  let forkPendingResume = false;
   let timelineIndex = 0;
   const messages: SessionSearchProjection["messages"] = [];
 
@@ -685,6 +953,7 @@ async function readSearchProjection(filePath: string, signal?: AbortSignal): Pro
       titlePending = event.title_pending;
       model = event.model;
       updatedAt = event.at;
+      lineage = event.lineage === undefined ? undefined : cloneLineage(event.lineage);
       return;
     }
     updatedAt = event.at;
@@ -703,6 +972,17 @@ async function readSearchProjection(filePath: string, signal?: AbortSignal): Pro
     if (event.type === "workflow_updated") workflow = { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
     if (event.type === "task_progress_updated") taskProgress = cloneTaskProgress(event.progress);
     if (event.type === "memory_policy_updated") memoryPolicy = { ...event.policy };
+    if (event.type === "fork_boundary") {
+      lineage = cloneLineage(event.lineage);
+      goal = undefined;
+      workflow = event.workflow === undefined
+        ? undefined
+        : { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
+      taskProgress = event.task_progress === undefined ? undefined : cloneTaskProgress(event.task_progress);
+      memoryPolicy = event.memory_policy === undefined ? undefined : { ...event.memory_policy };
+      forkPendingResume = true;
+    }
+    if (event.type === "fork_resume_updated") forkPendingResume = event.pending;
   };
 
   try {
@@ -730,6 +1010,7 @@ async function readSearchProjection(filePath: string, signal?: AbortSignal): Pro
       ...(workflow ? { workflow } : {}),
       ...(taskProgress ? { task_progress: cloneTaskProgress(taskProgress) } : {}),
       ...(memoryPolicy ? { memory_policy: memoryPolicy } : {}),
+      ...(lineage ? { lineage: cloneLineage(lineage), fork_pending_resume: forkPendingResume } : {}),
     },
     messages,
   };
@@ -744,11 +1025,68 @@ function searchSnippet(text: string, normalizedQuery: string): string {
   return `${start > 0 ? "…" : ""}${normalizedText.slice(start, end)}${end < normalizedText.length ? "…" : ""}`;
 }
 
-function normalizeSessionWorkspacePath(value: string): string {
+export function normalizeSessionWorkspacePath(value: string): string {
   if (/^(?:[A-Za-z]:[\\/]|[\\/]{2})/u.test(value)) {
     return path.win32.normalize(value).replace(/[\\/]+$/u, "").toLowerCase();
   }
   return normalizeWorkspacePath(value);
+}
+
+function forkWorkflowState(
+  parent: WorkflowState | undefined,
+  now: string,
+): WorkflowState {
+  const state = createWorkflowState(randomUUID(), now, "session_resume");
+  if (!parent) return state;
+  const changedPaths = [...parent.changed_paths];
+  const currentTaskNeedsRevalidation = parent.pending_verification === true
+    || parent.result === "failed"
+    || parent.result === "unverified"
+    || parent.tracking_limited === true
+    || parent.checkpoint_available
+    || changedPaths.length > 0
+    || (parent.phase !== "understand" && parent.phase !== "plan" && parent.phase !== "done");
+  const priorUnverified = currentTaskNeedsRevalidation
+    ? {
+        task_id: parent.task_id,
+        result: parent.result === "failed" ? "failed" as const : "unverified" as const,
+        reason: parent.result_reason ?? "Forked sessions must revalidate inherited workspace changes",
+      }
+    : parent.prior_unverified === undefined
+      ? undefined
+      : { ...parent.prior_unverified };
+  return {
+    ...state,
+    changed_paths: changedPaths,
+    ...(priorUnverified === undefined ? {} : {
+      pending_verification: true,
+      prior_unverified: priorUnverified,
+    }),
+  };
+}
+
+function forkTaskProgress(
+  parent: TaskProgress | undefined,
+  parentSessionId: string,
+): TaskProgress | undefined {
+  return parent === undefined
+    ? undefined
+    : {
+        ...cloneTaskProgress(parent),
+        inherited_from_session_id: parentSessionId,
+      };
+}
+
+const FORK_COPY_EVENT_TYPES = new Set<SessionEvent["type"]>([
+  "timeline_entry",
+  "context_append",
+  "context_compacted",
+  "context_pruned",
+  "model_selected",
+]);
+
+function sessionHeaderDigest(serialized: string): string {
+  return createHash("sha256").update(Buffer.from(serialized, "utf8")).digest("hex");
 }
 
 export class SessionStore implements SessionStoreLike {
@@ -758,12 +1096,17 @@ export class SessionStore implements SessionStoreLike {
   readonly #writeQueues = new Map<string, Promise<void>>();
   readonly #deletedSessionIds = new Set<string>();
   readonly #searchCache = new Map<string, CachedSearchProjection>();
+  readonly #outputs: SessionOutputStorage;
+  readonly #outputReferences = new Map<string, OutputReferenceState>();
+  #outputStartup: Promise<void> | undefined;
+  #forkStartup: Promise<void> | undefined;
   #searchCacheBytes = 0;
 
   constructor(options: SessionStoreOptions = {}) {
     this.#directory = options.directory ?? defaultSessionDirectory();
     this.#now = options.now ?? (() => new Date());
     this.#createId = options.createId ?? randomUUID;
+    this.#outputs = new SessionOutputStorage(this.#directory);
   }
 
   get directory(): string {
@@ -771,6 +1114,7 @@ export class SessionStore implements SessionStoreLike {
   }
 
   async create(input: CreateSessionInput): Promise<SessionSummary> {
+    await this.#ensureOutputsInitialized();
     await fs.mkdir(this.#directory, { recursive: true, mode: 0o700 });
     const at = this.#now().toISOString();
 
@@ -844,6 +1188,87 @@ export class SessionStore implements SessionStoreLike {
     });
   }
 
+  commitToolResult(sessionId: string, item: Record<string, unknown>, attachment?: PreparedOutputAttachment): Promise<void> {
+    const reference = attachment === undefined ? undefined : toolOutputAttachmentReference(attachment);
+    const event: ContextAppendEvent = {
+      version: SESSION_FORMAT_VERSION,
+      type: "context_append",
+      at: this.#now().toISOString(),
+      items: [{ ...item }],
+      ...(reference === undefined ? {} : { tool_output_attachment: reference }),
+    };
+    const serialized = `${JSON.stringify(event)}\n`;
+    this.#dropSearchCache(this.#filePath(sessionId));
+    return this.#enqueue(sessionId, async () => {
+      await this.#recoverTail(sessionId);
+      const state = await this.#references(sessionId);
+      if (attachment) await this.#outputs.write(sessionId, attachment);
+      // A failed reference append leaves an orphan; it cannot evict earlier committed outputs.
+      try {
+        await fs.appendFile(this.#filePath(sessionId), serialized, { encoding: "utf8", mode: 0o600 });
+      } catch (error) {
+        if (attachment) {
+          // Keep every prior committed attachment; remove only this failed commit if possible.
+          await this.#outputs.remove(sessionId, attachment.output_id).catch(() => undefined);
+        }
+        throw error;
+      }
+      if (reference) {
+        state.references.push(reference);
+        state.references = state.references.slice(-RETAINED_TOOL_OUTPUTS);
+        if (state.safeToClean) await this.#outputs.cleanup(sessionId, state.references.map((entry) => entry.output_id));
+      }
+      const stat = await fs.stat(this.#filePath(sessionId));
+      state.size = stat.size;
+      state.mtimeMs = stat.mtimeMs;
+    });
+  }
+
+  captureSessionBoundary(sessionId: string): Promise<number> {
+    let boundary = 0;
+    return this.#enqueue(sessionId, async () => {
+      // Capture the committed prefix, so a later repaired append cannot enter an older step's EOF.
+      await this.#recoverTail(sessionId);
+      const state = await this.#references(sessionId);
+      if (state.safeToClean) await this.#outputs.cleanup(sessionId, state.references.map((entry) => entry.output_id));
+      boundary = (await fs.stat(this.#filePath(sessionId))).size;
+    }).then(() => boundary);
+  }
+
+  async readToolOutput(sessionId: string, outputId: string): Promise<StoredToolOutput | null> {
+    this.#assertSessionId(sessionId);
+    if (!/^[A-Za-z0-9_-]+$/u.test(outputId) || this.#deletedSessionIds.has(sessionId)) return null;
+    let output: StoredToolOutput | null = null;
+    try {
+      await this.#enqueue(sessionId, async () => {
+        const state = await this.#references(sessionId);
+        const reference = state.references.find((candidate) => candidate.output_id === outputId);
+        if (reference) output = await this.#outputs.read(sessionId, reference);
+      });
+      return output;
+    } catch (error) {
+      if (this.#deletedSessionIds.has(sessionId) || (error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  /** The caller supplies an authoritative reference from its own bounded session-log scan. */
+  async readReferencedToolOutput(sessionId: string, reference: ToolOutputAttachmentReference, options?: SessionOutputReadOptions): Promise<StoredToolOutput | null> {
+    this.#assertSessionId(sessionId);
+    if (!isToolOutputAttachmentReference(reference) || this.#deletedSessionIds.has(sessionId)) return null;
+    let output: StoredToolOutput | null = null;
+    try {
+      await this.#enqueue(sessionId, async () => {
+        if (!(await fs.lstat(this.#filePath(sessionId))).isFile()) return;
+        output = await this.#outputs.read(sessionId, reference, options?.signal);
+      }, false, options);
+      return output;
+    } catch (error) {
+      if (this.#deletedSessionIds.has(sessionId) || (error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
   compactContext(
     sessionId: string,
     items: readonly Record<string, unknown>[],
@@ -857,6 +1282,26 @@ export class SessionStore implements SessionStoreLike {
       items: items.map((item) => ({ ...item })),
       automatic,
       usage: usage === null ? null : { ...usage },
+    });
+  }
+
+  pruneContext(
+    sessionId: string,
+    items: readonly Record<string, unknown>[],
+    metadata: ContextPruneMetadata,
+  ): Promise<void> {
+    if (
+      !Number.isSafeInteger(metadata.original_bytes) || metadata.original_bytes < 0 ||
+      !Number.isSafeInteger(metadata.pruned_bytes) || metadata.pruned_bytes < 0 ||
+      metadata.pruned_bytes >= metadata.original_bytes ||
+      !Number.isSafeInteger(metadata.pruned_results) || metadata.pruned_results < 1
+    ) throw new Error("Invalid context pruning metadata");
+    return this.#append(sessionId, {
+      version: SESSION_FORMAT_VERSION,
+      type: "context_pruned",
+      at: this.#now().toISOString(),
+      items: items.map((item) => ({ ...item })),
+      ...metadata,
     });
   }
 
@@ -924,7 +1369,184 @@ export class SessionStore implements SessionStoreLike {
     });
   }
 
+  async fork(sessionId: string, input: ForkSessionInput = {}): Promise<SessionSummary> {
+    this.#assertSessionId(sessionId);
+    input.signal?.throwIfAborted();
+    await this.#ensureOutputsInitialized();
+    let created: SessionSummary | undefined;
+    await this.#enqueue(sessionId, async () => {
+      input.signal?.throwIfAborted();
+      await this.#recoverTail(sessionId);
+      const sourcePath = this.#filePath(sessionId);
+      const boundary = (await fs.stat(sourcePath)).size;
+      if (boundary <= 0) throw new Error("Cannot fork an empty Session log");
+      const references = (await this.#references(sessionId)).references.slice(-RETAINED_TOOL_OUTPUTS);
+      const transaction = await this.#createForkTransaction(sessionId);
+      let outputsPublished = false;
+      let logPublished = false;
+      try {
+        const copiedPath = path.join(transaction.directory, "copied-events.jsonl");
+        const copiedHandle = await fs.open(copiedPath, "wx", 0o600);
+        let header: SessionCreatedEvent | undefined;
+        let sourceTitle = "";
+        let sourceModel: SessionModelRef | undefined;
+        let sourceWorkflow: WorkflowState | undefined;
+        let sourceTaskProgress: TaskProgress | undefined;
+        let sourceMemoryPolicy: LearnedMemoryPolicy | undefined;
+        let sourceHeaderSha256 = "";
+        let lineNumber = 0;
+        const stream = createReadStream(sourcePath, {
+          encoding: "utf8",
+          start: 0,
+          end: boundary - 1,
+        });
+        const lines = createInterface({ input: stream, crlfDelay: Infinity });
+        try {
+          for await (const line of lines) {
+            input.signal?.throwIfAborted();
+            lineNumber += 1;
+            if (!line.trim()) continue;
+            let event: SessionEvent;
+            try {
+              event = parseEvent(JSON.parse(line));
+            } catch (error) {
+              const reason = error instanceof Error ? error.message : String(error);
+              throw new Error(`Invalid session JSONL at ${sourcePath}:${lineNumber}: ${reason}`);
+            }
+            if (!header) {
+              if (event.type !== "session_created" || event.session_id !== sessionId) {
+                throw new Error(`Session file has no valid header: ${sourcePath}`);
+              }
+              header = event;
+              sourceTitle = event.title;
+              sourceModel = modelRef(event.model);
+              sourceHeaderSha256 = sessionHeaderDigest(line);
+              continue;
+            }
+            if (event.type === "title_updated") sourceTitle = event.title;
+            if (event.type === "model_selected") sourceModel = modelRef(event.model);
+            if (event.type === "workflow_updated") sourceWorkflow = workflowSnapshot(event.workflow);
+            if (event.type === "task_progress_updated") sourceTaskProgress = cloneTaskProgress(event.progress);
+            if (event.type === "memory_policy_updated") sourceMemoryPolicy = { ...event.policy };
+            if (event.type === "fork_boundary") {
+              sourceWorkflow = event.workflow === undefined ? undefined : workflowSnapshot(event.workflow);
+              sourceTaskProgress = event.task_progress === undefined ? undefined : cloneTaskProgress(event.task_progress);
+              sourceMemoryPolicy = event.memory_policy === undefined ? undefined : { ...event.memory_policy };
+            }
+            if (FORK_COPY_EVENT_TYPES.has(event.type)) {
+              await copiedHandle.writeFile(`${line}\n`, "utf8");
+            }
+          }
+          await copiedHandle.sync();
+        } finally {
+          lines.close();
+          stream.destroy();
+          await copiedHandle.close();
+        }
+        if (!header || !sourceModel || !sourceHeaderSha256) {
+          throw new Error(`Session file has no valid header: ${sourcePath}`);
+        }
+
+        const at = this.#now().toISOString();
+        const requestedTitle = input.title?.trim();
+        if (input.title !== undefined && !requestedTitle) throw new Error("Fork title must not be empty");
+        const title = requestedTitle ?? `${sourceTitle} (fork)`;
+        const lineage: SessionLineage = {
+          parent_session_id: sessionId,
+          forked_at: at,
+          source_boundary_bytes: boundary,
+          source_header_sha256: sourceHeaderSha256,
+        };
+        const workflow = forkWorkflowState(sourceWorkflow, at);
+        const taskProgress = forkTaskProgress(sourceTaskProgress, sessionId);
+        const childHeader: SessionCreatedEvent = {
+          version: SESSION_FORMAT_VERSION,
+          type: "session_created",
+          at,
+          session_id: transaction.sessionId,
+          title,
+          title_pending: false,
+          workspace_path: header.workspace_path,
+          model: modelRef(sourceModel),
+          usage_tracking: true,
+          lineage,
+        };
+        const boundaryEvent: ForkBoundaryEvent = {
+          version: SESSION_FORMAT_VERSION,
+          type: "fork_boundary",
+          at,
+          lineage,
+          workflow,
+          ...(taskProgress === undefined ? {} : { task_progress: taskProgress }),
+          ...(sourceMemoryPolicy === undefined ? {} : { memory_policy: { ...sourceMemoryPolicy } }),
+        };
+        const stagedLogPath = path.join(transaction.directory, "session.jsonl");
+        const stagedLog = await fs.open(stagedLogPath, "wx", 0o600);
+        try {
+          await stagedLog.writeFile(`${JSON.stringify(childHeader)}\n`, "utf8");
+          const copiedStream = createReadStream(copiedPath);
+          try {
+            for await (const chunk of copiedStream) {
+              input.signal?.throwIfAborted();
+              await stagedLog.write(chunk as Buffer);
+            }
+          } finally {
+            copiedStream.destroy();
+          }
+          await stagedLog.writeFile(`${JSON.stringify(boundaryEvent)}\n`, "utf8");
+          await stagedLog.sync();
+        } finally {
+          await stagedLog.close();
+        }
+
+        const stagedOutputs = path.join(transaction.directory, "outputs");
+        await this.#outputs.stageFork(sessionId, stagedOutputs, references, input.signal);
+        input.signal?.throwIfAborted();
+        await this.#outputs.publishFork(transaction.sessionId, stagedOutputs);
+        outputsPublished = true;
+        input.signal?.throwIfAborted();
+        await fs.rename(stagedLogPath, this.#filePath(transaction.sessionId));
+        logPublished = true;
+        this.#deletedSessionIds.delete(transaction.sessionId);
+        created = {
+          id: transaction.sessionId,
+          title,
+          title_pending: false,
+          created_at: at,
+          updated_at: at,
+          workspace_path: header.workspace_path,
+          model: modelRef(sourceModel),
+          workflow: workflowSnapshot(workflow),
+          ...(taskProgress === undefined ? {} : { task_progress: cloneTaskProgress(taskProgress) }),
+          ...(sourceMemoryPolicy === undefined ? {} : { memory_policy: { ...sourceMemoryPolicy } }),
+          lineage: cloneLineage(lineage),
+          fork_pending_resume: true,
+        };
+      } catch (error) {
+        if (outputsPublished && !logPublished) {
+          await this.#outputs.deleteSession(transaction.sessionId).catch(() => undefined);
+        }
+        throw error;
+      } finally {
+        await transaction.release().catch(() => undefined);
+        await fs.rm(transaction.directory, { recursive: true, force: true }).catch(() => undefined);
+      }
+    });
+    if (!created) throw new Error("Session fork did not publish a child Session");
+    return created;
+  }
+
+  setForkPendingResume(sessionId: string, pending: boolean): Promise<void> {
+    return this.#append(sessionId, {
+      version: SESSION_FORMAT_VERSION,
+      type: "fork_resume_updated",
+      at: this.#now().toISOString(),
+      pending,
+    });
+  }
+
   async list(): Promise<SessionListResult> {
+    await this.#ensureOutputsInitialized();
     await Promise.all(
       [...this.#writeQueues.values()].map((pending) => pending.catch(() => undefined)),
     );
@@ -955,6 +1577,7 @@ export class SessionStore implements SessionStoreLike {
   }
 
   async search(options: SessionSearchOptions): Promise<SessionSearchResult> {
+    await this.#ensureOutputsInitialized();
     await Promise.all(
       [...this.#writeQueues.values()].map((pending) => pending.catch(() => undefined)),
     );
@@ -1029,7 +1652,14 @@ export class SessionStore implements SessionStoreLike {
       const previous = this.#writeQueues.get(sessionId) ?? Promise.resolve();
       const next = previous
         .catch(() => undefined)
-        .then(() => fs.rm(this.#filePath(sessionId), { force: true }));
+        .then(async () => {
+          await this.#ensureOutputsInitialized();
+          await this.#withSessionLock(sessionId, async () => {
+            await this.#outputs.deleteSession(sessionId);
+            await fs.rm(this.#filePath(sessionId), { force: true });
+            this.#outputReferences.delete(sessionId);
+          });
+        });
       this.#writeQueues.set(sessionId, next);
       void next.finally(() => {
         if (this.#writeQueues.get(sessionId) === next) this.#writeQueues.delete(sessionId);
@@ -1040,6 +1670,7 @@ export class SessionStore implements SessionStoreLike {
 
   async load(sessionId: string): Promise<LoadedSession> {
     this.#assertSessionId(sessionId);
+    await this.#ensureOutputsInitialized();
     const pending = this.#writeQueues.get(sessionId);
     if (pending) await pending;
     return parseSession(
@@ -1049,24 +1680,189 @@ export class SessionStore implements SessionStoreLike {
   }
 
   #append(sessionId: string, event: SessionEvent): Promise<void> {
-    this.#assertSessionId(sessionId);
-    if (this.#deletedSessionIds.has(sessionId)) {
-      return Promise.reject(new Error("Session has been deleted"));
-    }
     const serialized = `${JSON.stringify(event)}\n`;
     this.#dropSearchCache(this.#filePath(sessionId));
+    return this.#enqueue(sessionId, async () => {
+      await this.#recoverTail(sessionId);
+      const cached = this.#outputReferences.get(sessionId);
+      const before = await fs.stat(this.#filePath(sessionId));
+      await fs.appendFile(this.#filePath(sessionId), serialized, { encoding: "utf8", mode: 0o600 });
+      // Ordinary events cannot change attachment refs. Avoid rescanning the entire long task
+      // after each usage/timeline append; an external writer still invalidates this cache.
+      if (cached && before.size === cached.size && before.mtimeMs === cached.mtimeMs) {
+        const after = await fs.stat(this.#filePath(sessionId));
+        cached.size = after.size;
+        cached.mtimeMs = after.mtimeMs;
+      }
+    });
+  }
+
+  #enqueue(sessionId: string, operation: () => Promise<void>, initializeOutputs = true, readOptions?: SessionOutputReadOptions): Promise<void> {
+    this.#assertSessionId(sessionId);
+    if (this.#deletedSessionIds.has(sessionId)) return Promise.reject(new Error("Session has been deleted"));
     const previous = this.#writeQueues.get(sessionId) ?? Promise.resolve();
     const next = previous
       .catch(() => undefined)
-      .then(() => fs.appendFile(this.#filePath(sessionId), serialized, {
-        encoding: "utf8",
-        mode: 0o600,
-      }));
+      .then(async () => {
+        if (initializeOutputs) await this.#ensureOutputsInitialized();
+        await this.#withSessionLock(sessionId, operation, readOptions);
+      });
     this.#writeQueues.set(sessionId, next);
     void next.finally(() => {
       if (this.#writeQueues.get(sessionId) === next) this.#writeQueues.delete(sessionId);
     }).catch(() => undefined);
-    return next;
+    return withinOutputReadBudget(next, readOptions);
+  }
+
+  async #withSessionLock(sessionId: string, operation: () => Promise<void>, readOptions?: SessionOutputReadOptions): Promise<void> {
+    checkOutputReadBudget(readOptions);
+    let release: () => Promise<void>;
+    while (true) {
+      checkOutputReadBudget(readOptions);
+      try {
+        release = await lockfile.lock(this.#filePath(sessionId), {
+          realpath: false,
+          retries: readOptions ? 0 : { retries: 100, minTimeout: 20, maxTimeout: 100 },
+        });
+        break;
+      } catch (error) {
+        if (!readOptions || (error as NodeJS.ErrnoException).code !== "ELOCKED") throw error;
+        await withinOutputReadBudget(new Promise<void>((resolve) => setTimeout(resolve, 20)), readOptions);
+      }
+    }
+    try {
+      checkOutputReadBudget(readOptions);
+      await operation();
+      checkOutputReadBudget(readOptions);
+    } finally {
+      await release();
+    }
+  }
+
+  async #createForkTransaction(sourceSessionId: string): Promise<{
+    sessionId: string;
+    directory: string;
+    release: () => Promise<void>;
+  }> {
+    await this.#ensureForkStagingInitialized();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const sessionId = this.#createId();
+      this.#assertSessionId(sessionId);
+      if (sessionId === sourceSessionId) continue;
+      try {
+        await fs.access(this.#filePath(sessionId));
+        continue;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      const directory = path.join(this.#forkStagingDirectory(), sessionId);
+      try {
+        await fs.mkdir(directory, { recursive: false, mode: 0o700 });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
+        throw error;
+      }
+      const leasePath = path.join(directory, "lease");
+      try {
+        const lease = await fs.open(leasePath, "wx", 0o600);
+        await lease.close();
+        const release = await lockfile.lock(leasePath, { realpath: false, retries: 0 });
+        return { sessionId, directory, release };
+      } catch (error) {
+        await fs.rm(directory, { recursive: true, force: true }).catch(() => undefined);
+        throw error;
+      }
+    }
+    throw new Error("Could not allocate a unique fork Session ID");
+  }
+
+  #forkStagingDirectory(): string {
+    return path.join(this.#directory, ".fork-staging");
+  }
+
+  #ensureForkStagingInitialized(): Promise<void> {
+    this.#forkStartup ??= (async () => {
+      await fs.mkdir(this.#directory, { recursive: true, mode: 0o700 });
+      const root = this.#forkStagingDirectory();
+      await fs.mkdir(root, { recursive: true, mode: 0o700 });
+      const rootStat = await fs.lstat(root);
+      if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+        throw new Error("Session fork staging is not a regular directory");
+      }
+      const entries = await fs.readdir(root, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isSymbolicLink()) throw new Error("Session fork staging cannot contain symbolic links");
+        const directory = path.join(root, entry.name);
+        if (!entry.isDirectory()) {
+          await fs.rm(directory, { force: true });
+          continue;
+        }
+        const leasePath = path.join(directory, "lease");
+        let release: (() => Promise<void>) | undefined;
+        try {
+          await fs.access(leasePath);
+          release = await lockfile.lock(leasePath, { realpath: false, retries: 0 });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ELOCKED") continue;
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        await release?.().catch(() => undefined);
+        await fs.rm(directory, { recursive: true, force: true });
+      }
+    })();
+    return this.#forkStartup;
+  }
+
+  async #forkTransactionActive(sessionId: string): Promise<boolean> {
+    const leasePath = path.join(this.#forkStagingDirectory(), sessionId, "lease");
+    let release: (() => Promise<void>) | undefined;
+    try {
+      await fs.access(leasePath);
+      release = await lockfile.lock(leasePath, { realpath: false, retries: 0 });
+      return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      if ((error as NodeJS.ErrnoException).code === "ELOCKED") return true;
+      throw error;
+    } finally {
+      await release?.().catch(() => undefined);
+    }
+  }
+
+  #ensureOutputsInitialized(): Promise<void> {
+    this.#outputStartup ??= (async () => {
+      await this.#ensureForkStagingInitialized();
+      for (const sessionId of await this.#outputs.sessions()) {
+        if (await this.#forkTransactionActive(sessionId)) continue;
+        await this.#withSessionLock(sessionId, async () => {
+          let state: OutputReferenceState;
+          try {
+            state = await this.#references(sessionId);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+            await this.#outputs.deleteSession(sessionId);
+            return;
+          }
+          if (state.safeToClean) await this.#outputs.cleanup(sessionId, state.references.map((entry) => entry.output_id));
+        });
+      }
+    })();
+    return this.#outputStartup;
+  }
+
+  async #references(sessionId: string): Promise<OutputReferenceState> {
+    const stat = await fs.stat(this.#filePath(sessionId));
+    const cached = this.#outputReferences.get(sessionId);
+    if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) return cached;
+    const state = { ...await readToolOutputReferences(this.#filePath(sessionId), sessionId, isValidSessionEvent), size: stat.size, mtimeMs: stat.mtimeMs };
+    this.#outputReferences.set(sessionId, state);
+    return state;
+  }
+
+  async #recoverTail(sessionId: string): Promise<void> {
+    if (!await recoverSessionTail(this.#filePath(sessionId))) return;
+    this.#outputReferences.delete(sessionId);
+    this.#dropSearchCache(this.#filePath(sessionId));
   }
 
   #filePath(sessionId: string): string {

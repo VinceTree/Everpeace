@@ -1,0 +1,509 @@
+import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+import type { AgentResponse } from "../../../src/agent/react-agent.js";
+import { deterministicExecTitle, runExec, selectExecModel } from "../../../src/exec/runtime.js";
+import type { ExecDependencies, ExecEvent } from "../../../src/exec/types.js";
+import type { PermissionPolicy } from "../../../src/permissions/policy.js";
+import { defaultModelRequestSettings, resolveProviderCapabilities } from "../../../src/providers/capabilities.js";
+import type { ProviderRuntime } from "../../../src/providers/openai-compatible.js";
+import { createProductionAgent } from "../../../src/runtime/production.js";
+import { SessionStore } from "../../../src/storage/session-store.js";
+import type { BashResult } from "../../../src/tools/bash.js";
+
+const model = {
+  id: "registration-1",
+  model_name: "offline-model",
+  base_url: "https://compatible.invalid/v1",
+  api_key: "fixture-key",
+};
+
+function response(
+  id: string,
+  output: Array<Record<string, unknown> & { type: string }> = [],
+  outputText = "",
+  usage: Record<string, number> | undefined = { input_tokens: 2, output_tokens: 1, total_tokens: 3 },
+): AgentResponse {
+  return {
+    id,
+    status: "completed",
+    output,
+    output_text: outputText,
+    ...(usage === undefined ? {} : { usage }),
+  };
+}
+
+function assistant(id: string, text: string, usage?: Record<string, number>): AgentResponse {
+  return response(id, [{ type: "message", role: "assistant", content: [{ type: "output_text", text }] }], text, usage);
+}
+
+function fakeProvider(
+  next: (params: Record<string, unknown>, signal: AbortSignal | undefined, call: number) => Promise<AgentResponse> | AgentResponse,
+): ProviderRuntime & { calls: number } {
+  const capabilities = resolveProviderCapabilities(model.base_url, model.model_name);
+  const runtime: ProviderRuntime & { calls: number } = {
+    calls: 0,
+    sdk: {} as ProviderRuntime["sdk"],
+    capabilities,
+    settings: defaultModelRequestSettings(capabilities),
+    responses: {
+      async create() { throw new Error("The buffered provider path must not run"); },
+      async stream(params, options) {
+        runtime.calls += 1;
+        const signal = options?.signal instanceof AbortSignal ? options.signal : undefined;
+        const completed = await next(params, signal, runtime.calls);
+        return (async function* () {
+          yield { type: "response.completed", response: completed };
+        })();
+      },
+    },
+  };
+  return runtime;
+}
+
+async function fixture(provider: ProviderRuntime, policy: PermissionPolicy = { mode: "workspace-write", web: false }) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-exec-"));
+  const workspacePath = path.join(root, "workspace");
+  await fs.mkdir(workspacePath);
+  const sessionStore = new SessionStore({ directory: path.join(root, "sessions") });
+  let observedPolicy: unknown;
+  let observedMaxSteps: number | undefined;
+  const dependencies: ExecDependencies = {
+    registry: { async resolveAll() { return { available: [model], missing: [] }; } },
+    sessionStore,
+    async loadPermissionPolicy() { return policy; },
+    createAgent(options: Parameters<typeof createProductionAgent>[0]) {
+      observedPolicy = options.learnedMemoryPolicy;
+      observedMaxSteps = options.maxSteps;
+      return createProductionAgent({
+        ...options,
+        providerRuntime: provider,
+        skills: null,
+        mcp: null,
+        learnedMemoryStore: null,
+        codeNavigation: null,
+      });
+    },
+  };
+  return {
+    root,
+    workspacePath,
+    sessionStore,
+    dependencies,
+    observed: () => ({ policy: observedPolicy, maxSteps: observedMaxSteps }),
+    cleanup: () => fs.rm(root, { recursive: true, force: true }),
+  };
+}
+
+function verificationResult(passed: boolean): BashResult {
+  return {
+    stdout: passed ? "verification passed\n" : "expected fixed content\n",
+    stderr: "",
+    exitCode: passed ? 0 : 1,
+    signal: null,
+  };
+}
+
+test("exec selects registration IDs before unique model names and rejects ambiguous defaults", () => {
+  const first = { ...model, id: "same", model_name: "shared" };
+  const second = { ...model, id: "other", model_name: "shared" };
+  const missing = {
+    id: "missing-id",
+    model_name: "shared-with-missing",
+    base_url: model.base_url,
+    auth_ref: "model:missing-id",
+    created_at: "2026-10-02T00:00:00.000Z",
+    updated_at: "2026-10-02T00:00:00.000Z",
+  };
+  const namedLikeMissingId = { ...model, id: "available-id", model_name: "missing-id" };
+  const namedLikeMissingName = { ...model, id: "available-name", model_name: "shared-with-missing" };
+  assert.equal(selectExecModel({ available: [first, second], missing: [] }, "same").model.id, "same");
+  assert.throws(() => selectExecModel({ available: [first, second], missing: [] }, "shared"), /ambiguous/u);
+  assert.throws(() => selectExecModel({ available: [first, second], missing: [] }), /Multiple models/u);
+  assert.equal(selectExecModel({ available: [first], missing: [] }).selector, "only");
+  assert.throws(
+    () => selectExecModel({ available: [namedLikeMissingId], missing: [missing] }, "missing-id"),
+    /no available credential/u,
+  );
+  assert.throws(
+    () => selectExecModel({ available: [namedLikeMissingName], missing: [missing] }, "shared-with-missing"),
+    /ambiguous/u,
+  );
+  assert.equal(deterministicExecTitle("  Fix the build\nwith details"), "Exec: Fix the build");
+});
+
+test("exec distinguishes startup configuration errors from Session persistence failures", async (t) => {
+  await t.test("provider startup", async () => {
+    const provider = fakeProvider(() => assistant("unused", "unused"));
+    const testFixture = await fixture(provider);
+    testFixture.dependencies.createAgent = () => { throw new Error("invalid provider configuration"); };
+    try {
+      const run = await runExec({ prompt: "work", workspacePath: testFixture.workspacePath }, testFixture.dependencies);
+      assert.equal(run.exitCode, 2);
+      assert.equal(run.classification, "configuration_error");
+      assert.match(run.error ?? "", /invalid provider configuration/u);
+    } finally { await testFixture.cleanup(); }
+  });
+
+  await t.test("Session create", async () => {
+    const provider = fakeProvider(() => assistant("unused", "unused"));
+    const testFixture = await fixture(provider);
+    testFixture.sessionStore.create = async () => { throw new Error("session disk unavailable"); };
+    try {
+      const run = await runExec({ prompt: "work", workspacePath: testFixture.workspacePath }, testFixture.dependencies);
+      assert.equal(run.exitCode, 1);
+      assert.equal(run.classification, "runtime_error");
+      assert.match(run.error ?? "", /session disk unavailable/u);
+    } finally { await testFixture.cleanup(); }
+  });
+});
+
+test("exec persists a normal Session and shares one workflow across verification repair", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const provider = fakeProvider((params, _signal, call) => {
+    requests.push(params);
+    if (call === 1) return response("create-broken", [{
+      type: "function_call",
+      name: "apply_patch",
+      call_id: "patch-broken",
+      arguments: JSON.stringify({ operations: [{ path: "result.txt", action: "create", content: "broken\n" }] }),
+    }]);
+    if (call === 2) return assistant("initial", "Initial implementation complete.");
+    if (call === 3) return response("repair", [{
+      type: "function_call",
+      name: "apply_patch",
+      call_id: "patch-fixed",
+      arguments: JSON.stringify({ operations: [{ path: "result.txt", action: "update", content: "fixed\n" }] }),
+    }]);
+    if (call === 4) return assistant("fixed", "Repair verified.");
+    throw new Error(`Unexpected provider call ${call}`);
+  });
+  const testFixture = await fixture(provider);
+  const events: ExecEvent[] = [];
+  let verifications = 0;
+  testFixture.dependencies.createCommandExecutor = () => async () => {
+    verifications += 1;
+    const contents = await fs.readFile(path.join(testFixture.workspacePath, "result.txt"), "utf8");
+    return verificationResult(contents === "fixed\n");
+  };
+  await fs.writeFile(path.join(testFixture.workspacePath, "package.json"), JSON.stringify({ scripts: { test: "node verify.mjs" } }), "utf8");
+  try {
+    const result = await runExec({
+      prompt: "Fix result.txt and verify it",
+      workspacePath: testFixture.workspacePath,
+      maxSteps: 6,
+      onEvent(event) { events.push(event); },
+    }, testFixture.dependencies);
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.classification, "success");
+    assert.equal(result.workflowResult, "verified");
+    assert.equal(result.assistantText, "Repair verified.");
+    assert.equal(result.usage?.inputTokens, 8);
+    assert.equal(result.usage?.outputTokens, 4);
+    assert.equal(verifications, 2);
+    assert.equal(provider.calls, 4);
+    assert.match(JSON.stringify(requests[2]?.input), /Verification failed/u);
+    assert.deepEqual(testFixture.observed(), {
+      policy: { readExisting: true, captureFuture: false },
+      maxSteps: 6,
+    });
+    assert.equal(await fs.readFile(path.join(testFixture.workspacePath, "result.txt"), "utf8"), "fixed\n");
+    assert.ok(result.sessionId);
+    const loaded = await testFixture.sessionStore.load(result.sessionId);
+    assert.equal(loaded.summary.title, "Exec: Fix result.txt and verify it");
+    assert.deepEqual(loaded.memoryPolicy, { readExisting: true, captureFuture: false });
+    assert.equal(loaded.workflow?.result, "verified");
+    assert.equal(loaded.workflow?.task_source, "exec");
+    assert.match(JSON.stringify(loaded.context), /expected fixed content/u);
+    assert.ok(events.findIndex((event) => event.type === "session_started") < events.findIndex((event) => event.type === "tool_started"));
+    const workflowEvent = [...events].reverse().find((event) => event.type === "workflow_updated");
+    assert.equal(workflowEvent?.type, "workflow_updated");
+    if (workflowEvent?.type === "workflow_updated") {
+      assert.equal(workflowEvent.result, "verified");
+      assert.equal(workflowEvent.repairAttempts, 1);
+      assert.equal(workflowEvent.maxRepairAttempts, 3);
+      assert.equal(workflowEvent.pendingVerification, false);
+      assert.deepEqual(workflowEvent.changedPaths, ["result.txt"]);
+      assert.ok(workflowEvent.taskId);
+    }
+  } finally {
+    await testFixture.cleanup();
+  }
+});
+
+test("an explicit step limit is shared with automatic repair rounds", async () => {
+  const provider = fakeProvider((_params, _signal, call) => {
+    if (call === 1) return response("create-broken", [{
+      type: "function_call",
+      name: "apply_patch",
+      call_id: "patch-broken",
+      arguments: JSON.stringify({ operations: [{ path: "result.txt", action: "create", content: "broken\n" }] }),
+    }]);
+    if (call === 2) return assistant("initial", "Initial implementation complete.", {
+      input_tokens: 1,
+      output_tokens: 1,
+      total_tokens: 2,
+    });
+    throw new Error(`The repair round exceeded the shared step limit at provider call ${call}`);
+  });
+  const testFixture = await fixture(provider);
+  let verifications = 0;
+  testFixture.dependencies.createCommandExecutor = () => async () => {
+    verifications += 1;
+    return verificationResult(false);
+  };
+  await fs.writeFile(path.join(testFixture.workspacePath, "package.json"), JSON.stringify({ scripts: { test: "node verify.mjs" } }), "utf8");
+  try {
+    const result = await runExec({
+      prompt: "Fix result.txt",
+      workspacePath: testFixture.workspacePath,
+      maxSteps: 2,
+    }, testFixture.dependencies);
+    assert.equal(result.exitCode, 4);
+    assert.equal(result.stopReason, "step_limit");
+    assert.equal(provider.calls, 2);
+    assert.equal(verifications, 1);
+  } finally {
+    await testFixture.cleanup();
+  }
+});
+
+test("changed work without a bindable verification result exits 3 as unverified", async () => {
+  const provider = fakeProvider((_params, _signal, call) => {
+    if (call === 1) return response("create-file", [{
+      type: "function_call",
+      name: "apply_patch",
+      call_id: "patch-file",
+      arguments: JSON.stringify({ operations: [{ path: "result.txt", action: "create", content: "done\n" }] }),
+    }]);
+    if (call === 2) return assistant("finished", "Implementation complete.");
+    throw new Error(`Unexpected provider call ${call}`);
+  });
+  const testFixture = await fixture(provider);
+  try {
+    const result = await runExec({ prompt: "Create result.txt", workspacePath: testFixture.workspacePath }, testFixture.dependencies);
+    assert.equal(result.exitCode, 3);
+    assert.equal(result.classification, "verification_failed");
+    assert.equal(result.workflowResult, "unverified");
+    assert.ok(result.sessionId);
+    assert.equal((await testFixture.sessionStore.load(result.sessionId)).workflow?.pending_verification, true);
+  } finally {
+    await testFixture.cleanup();
+  }
+});
+
+test("structured questions and approvals persist interaction_required outputs before exit 5", async (t) => {
+  await t.test("question", async () => {
+    const provider = fakeProvider((_params, _signal, call) => {
+      if (call > 1) throw new Error("Exec must stop before another provider request");
+      return response("question", [{
+        type: "function_call",
+        name: "request_user_input",
+        call_id: "question-1",
+        arguments: JSON.stringify({ questions: [{ id: "scope", header: "Scope", question: "Which scope?", options: [{ label: "Small", description: "Small" }, { label: "Large", description: "Large" }] }] }),
+      }]);
+    });
+    const testFixture = await fixture(provider);
+    try {
+      const result = await runExec({ prompt: "Ask me", workspacePath: testFixture.workspacePath }, testFixture.dependencies);
+      assert.equal(result.exitCode, 5);
+      assert.equal(result.classification, "interaction_required");
+      assert.deepEqual(result.interaction, { kind: "question", tool: "request_user_input", prompt: "Which scope?" });
+      assert.ok(result.sessionId);
+      const loaded = await testFixture.sessionStore.load(result.sessionId);
+      assert.match(JSON.stringify(loaded.context), /interaction_required/u);
+      assert.match(JSON.stringify(loaded.context), /question-1/u);
+      assert.equal(provider.calls, 1);
+    } finally {
+      await testFixture.cleanup();
+    }
+  });
+
+  await t.test("approval", async () => {
+    const provider = fakeProvider(() => response("approval", [{
+      type: "function_call",
+      name: "bash",
+      call_id: "bash-1",
+      arguments: JSON.stringify({ command: "git clean -fd" }),
+    }]));
+    const testFixture = await fixture(provider, { mode: "ask", web: false });
+    let executions = 0;
+    testFixture.dependencies.createCommandExecutor = () => async () => {
+      executions += 1;
+      return verificationResult(true);
+    };
+    try {
+      const result = await runExec({ prompt: "Clean generated files", workspacePath: testFixture.workspacePath }, testFixture.dependencies);
+      assert.equal(result.exitCode, 5);
+      assert.equal(result.interaction?.kind, "approval");
+      assert.equal(result.interaction?.tool, "bash");
+      assert.equal(executions, 0);
+      assert.ok(result.sessionId);
+      assert.match(JSON.stringify((await testFixture.sessionStore.load(result.sessionId)).context), /interaction_required/u);
+    } finally {
+      await testFixture.cleanup();
+    }
+  });
+});
+
+test("exec reports token, unknown-usage, step, and deadline stops with exit 4", async (t) => {
+  await t.test("token budget", async () => {
+    const provider = fakeProvider(() => assistant("budget", "too expensive"));
+    const testFixture = await fixture(provider);
+    try {
+      const result = await runExec({ prompt: "work", workspacePath: testFixture.workspacePath, tokenBudget: 1 }, testFixture.dependencies);
+      assert.equal(result.exitCode, 4);
+      assert.equal(result.stopReason, "budget_limited");
+    } finally { await testFixture.cleanup(); }
+  });
+
+  await t.test("unknown usage", async () => {
+    const provider = fakeProvider(() => {
+      const value = assistant("unknown", "unknown");
+      delete value.usage;
+      return value;
+    });
+    const testFixture = await fixture(provider);
+    try {
+      const result = await runExec({ prompt: "work", workspacePath: testFixture.workspacePath }, testFixture.dependencies);
+      assert.equal(result.exitCode, 4);
+      assert.equal(result.stopReason, "usage_limited");
+      assert.equal(result.usageComplete, false);
+    } finally { await testFixture.cleanup(); }
+  });
+
+  await t.test("step budget", async () => {
+    const provider = fakeProvider(() => response("step", [{ type: "function_call", name: "list_directory", call_id: "list", arguments: '{"path":"."}' }]));
+    const testFixture = await fixture(provider);
+    try {
+      const result = await runExec({ prompt: "inspect", workspacePath: testFixture.workspacePath, maxSteps: 1 }, testFixture.dependencies);
+      assert.equal(result.exitCode, 4);
+      assert.equal(result.stopReason, "step_limit");
+      assert.equal(provider.calls, 1);
+    } finally { await testFixture.cleanup(); }
+  });
+
+  await t.test("task deadline", async () => {
+    const provider = fakeProvider(async (_params, signal) => {
+      await new Promise<void>((_resolve, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }));
+      throw new Error("unreachable");
+    });
+    const testFixture = await fixture(provider);
+    try {
+      const result = await runExec({ prompt: "wait", workspacePath: testFixture.workspacePath, timeoutMs: 20 }, testFixture.dependencies);
+      assert.equal(result.exitCode, 4);
+      assert.equal(result.stopReason, "deadline_exceeded");
+    } finally { await testFixture.cleanup(); }
+  });
+
+  await t.test("task deadline while credentials are stalled", async () => {
+    const provider = fakeProvider(() => assistant("unexpected", "must not run"));
+    const testFixture = await fixture(provider);
+    testFixture.dependencies.registry = {
+      async resolveAll() { return new Promise<never>(() => {}); },
+    };
+    try {
+      const result = await runExec({ prompt: "wait", workspacePath: testFixture.workspacePath, timeoutMs: 20 }, testFixture.dependencies);
+      assert.equal(result.exitCode, 4);
+      assert.equal(result.stopReason, "deadline_exceeded");
+      assert.equal(result.sessionId, undefined);
+      assert.equal(provider.calls, 0);
+    } finally { await testFixture.cleanup(); }
+  });
+});
+
+test("an EPIPE event sink cancels execution and still disposes the production handle", async () => {
+  const provider = fakeProvider(() => assistant("unexpected", "must not run"));
+  const testFixture = await fixture(provider);
+  const createAgent = testFixture.dependencies.createAgent!;
+  let disposed = 0;
+  testFixture.dependencies.createAgent = (options) => {
+    const handle = createAgent(options);
+    const dispose = handle.dispose.bind(handle);
+    return {
+      ...handle,
+      async dispose() {
+        disposed += 1;
+        await dispose();
+      },
+    };
+  };
+  try {
+    const result = await runExec({
+      prompt: "work",
+      workspacePath: testFixture.workspacePath,
+      onEvent(event) {
+        if (event.type === "session_started") throw Object.assign(new Error("pipe closed"), { code: "EPIPE" });
+      },
+    }, testFixture.dependencies);
+    assert.equal(result.classification, "cancelled");
+    assert.equal(result.stopReason, "output_closed");
+    assert.equal(provider.calls, 0);
+    assert.equal(disposed, 1);
+  } finally {
+    await testFixture.cleanup();
+  }
+});
+
+test("context persistence and cleanup failures return runtime failure after disposing resources", async (t) => {
+  await t.test("context persistence", async () => {
+    const provider = fakeProvider(() => assistant("unexpected", "must not run"));
+    const testFixture = await fixture(provider);
+    const createAgent = testFixture.dependencies.createAgent!;
+    let disposed = 0;
+    testFixture.dependencies.createAgent = (options) => {
+      const handle = createAgent(options);
+      const dispose = handle.dispose.bind(handle);
+      return {
+        ...handle,
+        async dispose() {
+          disposed += 1;
+          await dispose();
+        },
+      };
+    };
+    testFixture.sessionStore.appendContext = async () => { throw new Error("context disk unavailable"); };
+    try {
+      const result = await runExec({ prompt: "work", workspacePath: testFixture.workspacePath }, testFixture.dependencies);
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.classification, "runtime_error");
+      assert.match(result.error ?? "", /Context persistence failed/u);
+      assert.ok(result.sessionId);
+      assert.equal(provider.calls, 0);
+      assert.equal(disposed, 1);
+    } finally {
+      await testFixture.cleanup();
+    }
+  });
+
+  await t.test("resource cleanup", async () => {
+    const provider = fakeProvider(() => assistant("complete", "done"));
+    const testFixture = await fixture(provider);
+    const createAgent = testFixture.dependencies.createAgent!;
+    let disposed = 0;
+    testFixture.dependencies.createAgent = (options) => {
+      const handle = createAgent(options);
+      const dispose = handle.dispose.bind(handle);
+      return {
+        ...handle,
+        async dispose() {
+          disposed += 1;
+          await dispose();
+          throw new Error("cleanup fixture failure");
+        },
+      };
+    };
+    try {
+      const result = await runExec({ prompt: "work", workspacePath: testFixture.workspacePath }, testFixture.dependencies);
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.status, "cleanup_failed");
+      assert.match(result.error ?? "", /cleanup fixture failure/u);
+      assert.ok(result.sessionId);
+      assert.equal(disposed, 1);
+    } finally {
+      await testFixture.cleanup();
+    }
+  });
+});

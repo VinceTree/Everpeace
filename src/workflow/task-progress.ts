@@ -8,6 +8,8 @@ export interface TaskProgressItem {
 export interface TaskProgress {
   plan: TaskProgressItem[];
   updated_at: string;
+  /** Present only on a fork until the model replaces the inherited checklist. */
+  inherited_from_session_id?: string;
 }
 
 export const taskProgressLimits = {
@@ -25,6 +27,9 @@ function isTaskStepStatus(value: unknown): value is TaskStepStatus {
 
 export function isTaskProgress(value: unknown): value is TaskProgress {
   if (!isRecord(value) || typeof value.updated_at !== "string" || !Array.isArray(value.plan)) return false;
+  if (value.inherited_from_session_id !== undefined
+    && (typeof value.inherited_from_session_id !== "string"
+      || !/^[A-Za-z0-9_-]+$/u.test(value.inherited_from_session_id))) return false;
   if (value.plan.length > taskProgressLimits.maxItems) return false;
   const steps = new Set<string>();
   let active = 0;
@@ -43,6 +48,9 @@ export function cloneTaskProgress(progress: TaskProgress): TaskProgress {
   return {
     plan: progress.plan.map((item) => ({ ...item })),
     updated_at: progress.updated_at,
+    ...(progress.inherited_from_session_id === undefined
+      ? {}
+      : { inherited_from_session_id: progress.inherited_from_session_id }),
   };
 }
 
@@ -85,7 +93,7 @@ export function parseTaskProgressArguments(argumentsJson: string, now = new Date
 export function formatTaskProgress(progress: TaskProgress): string {
   if (progress.plan.length === 0) return "Current task checklist: empty.";
   return [
-    "Current task checklist (model-authored, host-persisted; it does not determine verification):",
+    `Current task checklist (model-authored, host-persisted${progress.inherited_from_session_id ? `; inherited from Session ${progress.inherited_from_session_id}` : ""}; it does not determine verification):`,
     ...progress.plan.map((item, index) => `${index + 1}. [${item.status}] ${item.step}`),
   ].join("\n");
 }
