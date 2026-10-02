@@ -74,6 +74,38 @@ test("dsh instrumentation records cache-aware usage at the stream attempt bounda
   assert.ok(saved.length >= 2);
 });
 
+test("dsh preflight emits a valid stream text chunk and complete usage", async () => {
+  const { createInstrumentation } = await instrumentationModule();
+  const previous = process.env.EVERPEACE_DSH_PREFLIGHT;
+  process.env.EVERPEACE_DSH_PREFLIGHT = "1";
+  try {
+    const instrumentation = createInstrumentation(EXPECTED);
+    const chunks: Record<string, unknown>[] = [];
+    for await (const chunk of instrumentation.wrap({
+      provider: EXPECTED.provider,
+      model: EXPECTED.model,
+      reasoningEffort: EXPECTED.reasoning,
+      maxTokens: EXPECTED.maxOutputTokens,
+    }, async function* () {})) {
+      chunks.push(chunk);
+    }
+    assert.deepEqual(chunks[0], { type: "text-delta", index: 0, text: "Preflight complete." });
+    assert.deepEqual(chunks[1], {
+      type: "usage",
+      usage: { inputTokens: 0, outputTokens: 1, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    });
+    assert.deepEqual(instrumentation.snapshot().attempts, [{
+      id: 1,
+      purpose: "coding",
+      status: "completed",
+      usage: { inputTokens: 0, outputTokens: 1, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    }]);
+  } finally {
+    if (previous === undefined) delete process.env.EVERPEACE_DSH_PREFLIGHT;
+    else process.env.EVERPEACE_DSH_PREFLIGHT = previous;
+  }
+});
+
 test("dsh instrumentation keeps unknown usage sticky and rejects another provider call", async () => {
   const { createInstrumentation } = await instrumentationModule();
   const instrumentation = createInstrumentation(EXPECTED);

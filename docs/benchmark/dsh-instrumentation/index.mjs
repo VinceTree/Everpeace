@@ -95,7 +95,7 @@ export function createInstrumentation(expected, persist = () => {}) {
       let status = 'failed';
       try {
         if (process.env.EVERPEACE_DSH_PREFLIGHT === '1') {
-          yield { type: 'text-delta', delta: 'Preflight complete.' };
+          yield { type: 'text-delta', index: 0, text: 'Preflight complete.' };
           yield { type: 'usage', usage: { inputTokens: 0, outputTokens: 1, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } };
           yield { type: 'finish', reason: { kind: 'stop' } };
           usage = { inputTokens: 0, outputTokens: 1, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };

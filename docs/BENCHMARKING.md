@@ -78,7 +78,9 @@ pnpm benchmark:campaign -- --config .\campaign.json --live
 
 配置包含 `campaignId`、catalog/fixture/run/artifact/session 目录、已注册的 `modelId`、随机 `seed`、`repetitions`、`taskTokenBudget`、`campaignTokenBudget`、可选有序 `taskIds` 和名称唯一的 harness 列表。可从 [示例配置](benchmark/CAMPAIGN_CONFIG.example.json) 开始。`everpeace-checkout` 分别命名 baseline/candidate 并指定 source/build identity；`dsh` 使用固定源码与内置 instrumentation；既有单个 `everpeace` 和 `instrumented-process` 配置继续兼容。通用外部参数模板支持 `${PROMPT}`、`${WORKSPACE}` 和 `${TOKEN_BUDGET}`，以 argv 传递而非 shell 拼接。
 
-`--preflight` 不读取系统 credential storage，也不发送模型请求。它实际启动每个 checkout fresh worker、导入 production entry 并在真实 provider request boundary 注入合成 response；dsh 同样启动固定 CLI/profile，在 `llm/stream` boundary 注入合成响应。两者传入 dummy credential，在 Node socket guard 下要求 30 秒内完成。结果把 entry/profile loading、request-boundary interception、effective settings、checkout identity、usage ledger 与失败写入 `preflight-result.json`。这是 startup/admission 证据，不是 scored result，也不证明操作系统级断网。无 digest 的旧 `everpeace` 与未定义无凭据预检契约的通用 `instrumented-process` 在该模式失败关闭，live 兼容性不变。
+`--preflight` 不读取系统 credential storage，也不发送模型请求。它实际启动每个 checkout fresh worker、导入 production entry 并在真实 provider request boundary 注入合成 response；dsh 同样启动固定 CLI/profile，在 `llm/stream` boundary 注入合成响应。两者传入 dummy credential，在 Node socket guard 下要求完成；Windows 上 dsh 启动 deadline 为 60 秒，其他平台为 30 秒，以覆盖冷启动 profile composition。结果把 entry/profile loading、request-boundary interception、effective settings、checkout identity、usage ledger 与失败写入 `preflight-result.json`。这是 startup/admission 证据，不是 scored result，也不证明操作系统级断网。无 digest 的旧 `everpeace` 与未定义无凭据预检契约的通用 `instrumented-process` 在该模式失败关闭，live 兼容性不变。
+
+Windows 上 benchmark verification 保持 `shell: false`；manifest 中的 `npm` 命令通过当前 Node 安装的 `npm-cli.js` 直接启动，不经过不可直接 spawn 的 `npm.cmd` batch shim。fixture 准备失败时删除临时 checkout 使用有界重试，避免 Windows 文件句柄短暂占用覆盖原始失败原因。
 
 live 入口在任何请求前写入 `campaign-plan.json`，随后随机交错 harness 顺序；结果写入 `campaign-result.json`，包含完整 planned、executed、skipped、unknown usage 和 stop reason。每个 skipped 项保留 adapter、task 和 repetition。准备失败作为执行结果保存，不算有效 seed，也不会消费模型预算。
 
@@ -116,4 +118,4 @@ Performance trace 记录 context preparation、request snapshot、sampling、ret
 
 三组固定模型原始 ID、`high` 推理、32K 产品输出预算、十五分钟任务时限和最多三轮诊断。报告独立通过次数、首次通过、人工介入、双方均成功任务的配对耗时、总 token/成功任务、缓存统计完整性，以及协议、sandbox、工具差异。
 
-十项离线 proof、命名 checkout worker、无凭据 preflight 路径和固定 dsh instrumentation 代码已完成；当前机器没有可供验收的 pinned dsh checkout，因此实际 CLI/profile preflight 仍未执行。真实 API smoke、九十次对比及 Windows Terminal 验收也均未执行。真实调用需要另行显式授权，并同时给出 task 与 campaign token 预算；在此之前不能发布排名、冷缓存结论或相对 dsh 的性能优势声明。
+十项离线 proof、命名 checkout worker、无凭据 preflight 路径和固定 dsh instrumentation 代码已完成；2026-10-02 已在 Windows Node 22 上安装并构建 pinned dsh checkout，Everpeace 与 dsh 的 preflight 均通过，十项 fixture 也全部证明 seed fail → reference pass。真实 API smoke、九十次对比及 Windows Terminal 验收仍未执行。真实调用需要另行显式授权，并同时给出 task 与 campaign token 预算；在此之前不能发布排名、冷缓存结论或相对 dsh 的性能优势声明。

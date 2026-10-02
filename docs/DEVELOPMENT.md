@@ -88,7 +88,7 @@ pnpm benchmark:campaign -- --config .\campaign.json --preflight
 pnpm benchmark:campaign -- --config .\campaign.json --prove-fixtures
 ```
 
-`--preflight` 不读取 keyring 或发出真实 provider 请求。它启动命名 checkout 的 fresh worker，并通过合成 provider 响应启动固定 dsh CLI/profile；30 秒 deadline、dummy credential、socket guard、请求边界与 checkout digest 结果写入 `preflight-result.json`。这项结果与 scored benchmark 分开；它不替代 fixture proof，也不构成操作系统级断网证明。
+`--preflight` 不读取 keyring 或发出真实 provider 请求。它启动命名 checkout 的 fresh worker，并通过合成 provider 响应启动固定 dsh CLI/profile；dsh 在 Windows 上使用 60 秒 cold-start deadline，其他平台为 30 秒，dummy credential、socket guard、请求边界与 checkout digest 结果写入 `preflight-result.json`。这项结果与 scored benchmark 分开；它不替代 fixture proof，也不构成操作系统级断网证明。
 
 `--prove-fixtures` 不请求付费模型，但会克隆固定源码、下载并安装锁定依赖，所以“离线 proof”不等于完全断网。必须证明 pristine pass → 指定 seed assertion fail → reference repair pass；超时、缺依赖和进程启动失败不能作为 seed 有效的证据。
 

@@ -247,6 +247,8 @@ interface PreflightHarnessResult {
   error?: string;
 }
 
+const DSH_PREFLIGHT_TIMEOUT_MS = process.platform === "win32" ? 60_000 : 30_000;
+
 export async function preflight(config: CampaignConfig): Promise<void> {
   const results: PreflightHarnessResult[] = [];
   for (const harness of config.harnesses) {
@@ -264,7 +266,7 @@ export async function preflight(config: CampaignConfig): Promise<void> {
       const root = await mkdtemp(join(tmpdir(), "everpeace-dsh-preflight-"));
       try {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(new Error("dsh preflight exceeded 30000ms")), 30_000);
+        const timer = setTimeout(() => controller.abort(new Error(`dsh preflight exceeded ${DSH_PREFLIGHT_TIMEOUT_MS}ms`)), DSH_PREFLIGHT_TIMEOUT_MS);
         timer.unref?.();
         const artifacts: Record<string, string> = {};
         try {

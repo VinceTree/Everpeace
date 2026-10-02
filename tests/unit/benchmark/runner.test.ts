@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createFileBenchmarkArtifactSink } from "../../../src/benchmark/artifacts.js";
-import { runBenchmarkSuite, runBenchmarkTask } from "../../../src/benchmark/runner.js";
+import { resolveBenchmarkProcess, runBenchmarkSuite, runBenchmarkTask } from "../../../src/benchmark/runner.js";
 import type { BenchmarkHarnessAdapter, BenchmarkTask } from "../../../src/benchmark/types.js";
 
 const task = (overrides: Partial<BenchmarkTask> = {}): BenchmarkTask => ({
@@ -12,6 +12,18 @@ const task = (overrides: Partial<BenchmarkTask> = {}): BenchmarkTask => ({
   prompt: "make the fixture pass",
   workspacePath: process.cwd(),
   ...overrides,
+});
+
+test("benchmark command resolution makes the Windows npm shim spawnable without a shell", () => {
+  if (process.platform !== "win32") return;
+  const invocation = resolveBenchmarkProcess("npm", ["--version"]);
+  assert.equal(invocation.command, process.execPath);
+  assert.match(invocation.args[0] ?? "", /node_modules[\\/]npm[\\/]bin[\\/]npm-cli\.js$/u);
+  assert.deepEqual(invocation.args.slice(1), ["--version"]);
+  assert.deepEqual(resolveBenchmarkProcess(process.execPath, ["--version"]), {
+    command: process.execPath,
+    args: ["--version"],
+  });
 });
 
 test("benchmark task runs a harness and verifies its result", async () => {

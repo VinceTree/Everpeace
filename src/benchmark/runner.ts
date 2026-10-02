@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type {
   BenchmarkArtifactSink,
   BenchmarkHarnessAdapter,
@@ -21,6 +23,23 @@ import { RequestAttemptLedger } from "../agent/request-attempt-ledger.js";
 const DEFAULT_TASK_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_VERIFICATION_TIMEOUT_MS = 2 * 60 * 1000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
+export interface BenchmarkProcessInvocation {
+  command: string;
+  args: string[];
+}
+
+/** Invoke npm through Node on Windows; npm.cmd is a batch shim and cannot use shell:false. */
+export function resolveBenchmarkProcess(command: string, args: readonly string[] = []): BenchmarkProcessInvocation {
+  if (process.platform !== "win32") return { command, args: [...args] };
+  const normalized = command.replaceAll("\\", "/").toLowerCase();
+  const basename = normalized.slice(normalized.lastIndexOf("/") + 1);
+  if (basename === "npm" || basename === "npm.cmd") {
+    const npmCli = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+    if (!existsSync(npmCli)) throw new Error(`Cannot locate the npm CLI beside Node: ${npmCli}`);
+    return { command: process.execPath, args: [npmCli, ...args] };
+  }
+  return { command, args: [...args] };
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -63,7 +82,8 @@ export function runBenchmarkVerification(spec: BenchmarkVerification, workspaceP
 
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(spec.command, [...(spec.args ?? [])], {
+      const invocation = resolveBenchmarkProcess(spec.command, spec.args ?? []);
+      child = spawn(invocation.command, invocation.args, {
         cwd: spec.cwd ?? workspacePath,
         env: { ...process.env, ...spec.env },
         detached: process.platform !== "win32",

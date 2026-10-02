@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import type { BenchmarkTask, BenchmarkVerificationResult } from "./types.js";
-import { runBenchmarkVerification } from "./runner.js";
+import { resolveBenchmarkProcess, runBenchmarkVerification } from "./runner.js";
 import { stopProcessTree } from "../tools/process-cancel.js";
 import { BoundedOutputBuffer } from "../tools/command-record.js";
 
@@ -18,7 +18,8 @@ function run(command: string, args: readonly string[], cwd: string | undefined, 
   return new Promise((resolveResult, reject) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(command, [...args], {
+      const invocation = resolveBenchmarkProcess(command, args);
+      child = spawn(invocation.command, invocation.args, {
         ...(cwd === undefined ? {} : { cwd }),
         detached: process.platform !== "win32",
         shell: false,
@@ -171,7 +172,7 @@ export async function prepareBenchmarkFixture(
     return preparedTask;
   } catch (error) {
     // The destination was proven absent above and belongs exclusively to this preparation attempt.
-    await rm(destination, { recursive: true, force: true });
+    await rm(destination, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
     throw error;
   }
 }

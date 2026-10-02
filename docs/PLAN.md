@@ -30,7 +30,7 @@
 
 这些待办用于规划，不授权付费请求、安装任意扩展、提交或发布。当前保持单 Agent、Responses、inline TUI、现有权限、high/32K 默认和完整最终验证。
 
-持久 undo 是独立恢复项目。LSP pooling/更多 semantic operation、模糊编辑和模型速度/token 调优作为后续工作；固定 dsh preflight 与真实模型比较仍需对应环境及单独预算授权。图片附件、多 Agent、Web/Desktop、完整插件化、自研 sandbox 和新协议继续后置。output-item 提前执行工具仅在供应商和持久化/恢复证据充分时单独评估，当前仍等待完整响应。
+持久 undo 是独立恢复项目。LSP pooling/更多 semantic operation、模糊编辑和模型速度/token 调优作为后续工作；固定 dsh preflight 已完成，真实模型比较仍需对应环境及单独预算授权。图片附件、多 Agent、Web/Desktop、完整插件化、自研 sandbox 和新协议继续后置。output-item 提前执行工具仅在供应商和持久化/恢复证据充分时单独评估，当前仍等待完整响应。
 
 ## 验收门槛
 

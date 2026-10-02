@@ -1,11 +1,11 @@
 # 当前交接
 
-更新日期：2026-10-01。新 Session 先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 选择当前任务专题；本文件只保存最新状态。旧记录位于 [历史交接](archive/HANDOFF_HISTORY.md)。
+更新日期：2026-10-02。新 Session 先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 选择当前任务专题；本文件只保存最新状态。旧记录位于 [历史交接](archive/HANDOFF_HISTORY.md)。
 
 ## 当前基线
 
 - 产品保持 DeepSeek 优先、Windows 优先、单 Agent、Node/TypeScript 单包、Responses 与 inline TUI。
-- 本轮开发起点为 `25105bf48683b88dafda1be4812ac44abbc2961d`；用户随后明确授权更新版本、提交并推送，包版本与双语 README 已同步为 `0.3.5`。交付 commit 以当前 Git `HEAD` 为准。
+- 本轮开发起点为 `25105bf48683b88dafda1be4812ac44abbc2961d`；用户随后明确授权更新版本、提交并推送，包版本与双语 README 已同步为 `0.3.6`。交付 commit 以当前 Git `HEAD` 为准。
 - 交付使用 `[skip publish]` 标记，仅推送 `main`，不推送 tag 或更新 GitHub Release；已核对 Release workflow 的分支 push 跳过条件与独立 Test workflow。本轮没有升级依赖、运行 live benchmark 或发送付费模型请求。
 
 ## 本次完成：Daily coding reliability
@@ -34,6 +34,15 @@
 - `FileSearchSession` 最多保留 16 个搜索和 8 MiB 序列化 UTF-8 payload，超限按创建顺序淘汰并使所有旧 continuation 过期；读完最后一页和 Agent dispose 都释放状态。
 - 单次 ripgrep 2 MiB 上限同时计算已完成行、pending 文本和新 chunk，超长未终止记录不能绕过边界。`has_more` 仍只表示已保留后页，`incomplete` 表示搜索收集不完整。
 
+## 本次完成：DeepSeek Harness preflight 与 Windows benchmark 可执行性
+
+- 在仓库外准备并固定 checkout DeepSeek Harness `639ed015397290b3745d163aafe02ffee4aa3f84`，完成 `pnpm install --frozen-lockfile` 与 `pnpm build`；生成的 `apps/cli/lib/bin.js` 可由 benchmark adapter 直接启动。
+- 修正 dsh preflight 合成 stream chunk，使其符合 `text-delta` 的 `index/text` 契约；新增回归覆盖 preflight chunk、usage 和 completed attempt。
+- 真实 Windows cold start 暴露 dsh profile composition 会超过原 30 秒 deadline；改为 Windows 60 秒、其他平台 30 秒，并在本机重新通过完整 preflight。
+- Windows benchmark verification 与 fixture preparation 不再直接 spawn `npm.cmd`；通过 Node 安装内的 `npm-cli.js` 保持 `shell: false`，并为临时 checkout 清理增加有限 EBUSY/EPERM 重试；新增 Windows command resolution 回归。
+- 当前 Everpeace checkout 与 pinned dsh 的 credential-free preflight 均通过，未读取 keyring、未发送 provider 请求；证据位于本地 `.everpeace-benchmark/artifacts/preflight-result.json`。
+- 十项 Chalk、Commander、Day.js fixture 已在本机重新完成 pristine pass → seed fail → reference pass；campaign 输出位于本地 `.everpeace-benchmark/runs/deepseek-fixtures-2026-10-02/`。
+
 ## 主要实现与回归入口
 
 | 领域 | 实现 | 回归 |
@@ -42,6 +51,7 @@
 | Session / runner scope | [session-store.ts](../src/storage/session-store.ts)、[task-runner.ts](../src/workflow/task-runner.ts) | [session-store.test.ts](../tests/unit/storage/session-store.test.ts)、[task-runner.test.ts](../tests/unit/workflow/task-runner.test.ts) |
 | background notices | [background-jobs.ts](../src/tools/background-jobs.ts)、[react-agent.ts](../src/agent/react-agent.ts) | [background-jobs.test.ts](../tests/unit/tools/background-jobs.test.ts)、[react-agent.test.ts](../tests/unit/agent/react-agent.test.ts) |
 | search retention | [files.ts](../src/tools/files.ts) | [files.test.ts](../tests/unit/tools/files.test.ts) |
+| benchmark / dsh | [campaign-cli.ts](../src/benchmark/campaign-cli.ts)、[runner.ts](../src/benchmark/runner.ts)、[preparation.ts](../src/benchmark/preparation.ts)、[dsh instrumentation](../docs/benchmark/dsh-instrumentation/index.mjs) | [runner.test.ts](../tests/unit/benchmark/runner.test.ts)、[dsh.test.ts](../tests/unit/benchmark/dsh.test.ts) |
 | TUI | [App](../src/tui/app/app.tsx)、[task surface](../src/tui/components/screens/task-progress-surface.tsx)、[question surface](../src/tui/components/screens/plan-surface.tsx) | [app.test.tsx](../tests/unit/tui/app.test.tsx)、[daily-use-surfaces.test.tsx](../tests/unit/tui/daily-use-surfaces.test.tsx) |
 
 中英文 README、OVERVIEW、PLAN、PROJECT_MAP、RUNTIME、TOOLS、STATE_AND_UI 和 DECISIONS 已同步；OVERVIEW 中“LSP 直接运行于宿主”的旧说明已改为当前 native sandbox + probe fail-closed 契约。
@@ -52,9 +62,11 @@
 
 - `pnpm typecheck`：通过。
 - lint：`package.json` 没有 lint script，未运行。
-- `pnpm test`：480 项，478 通过、2 跳过、0 失败/取消。计数包含工作区现有未跟踪测试，不能作为 clean checkout 固定数量。
+- `pnpm test`：482 项，480 通过、2 跳过、0 失败/取消。计数包含本轮新增 benchmark 回归和工作区现有未跟踪测试，不能作为 clean checkout 固定数量。
 - `pnpm build`：通过。
-- 本轮 tracked 文件定向 `git diff --check -- . ':(exclude).gitignore' ':(exclude)LICENSE'`：通过；三个本轮 untracked 新文件的 trailing-whitespace `rg` 扫描无匹配。
+- `pnpm benchmark:campaign -- --config .\\.everpeace-benchmark\\compare-2026-10-02.json --preflight`：Everpeace checkout 与 pinned dsh 均通过，provider boundary 均被观察，network calls 为 0，usage complete 为 true。
+- `pnpm benchmark:campaign -- --config .\\.everpeace-benchmark\\full-proof-2026-10-02.json --prove-fixtures`：十项 fixture 全部 `seed=1 reference=0`；首次执行暴露 Windows `npm` shim 和短暂文件锁问题，修复后全量通过。
+- 本轮 tracked 文件定向 `git diff --check -- . ':(exclude).gitignore' ':(exclude)LICENSE'`：通过；本轮修改文件的 trailing-whitespace `rg` 扫描无匹配。
 - 全局 `git diff --check`：退出 2，只报告任务开始前已有 `.gitignore` 与 `LICENSE` CRLF 差异；两文件分别显示 143/143 与 201/201 行替换，本轮未修改或规范化它们。
 
 定向 fixture 覆盖两种 question mode、缺少 host interaction、回答配对、Esc/Ctrl+C 既有任务取消链、already-aborted/迟到响应防护、同批后续调用；TaskProgress schema/恢复/清空/repair/Goal/compaction/持久失败与验证权；后台四种终态、顺序送达、失败重试去重、队列饱和、取消与 observer 隔离；搜索数量/UTF-8 字节淘汰、消费 cursor 和超长未终止记录。没有运行真实模型或付费调用。
@@ -63,8 +75,9 @@
 
 1. 在真实 Windows Terminal 中验收 `/tasks`、coding question、resize、scrollback、Esc、Ctrl+C、一个 prompt、后台完成通知及 Session resume；自动 Ink fixture 不能替代真实终端行为。
 2. 后台 job 若在最终回答期间才完成，按设计不会触发额外请求，通知可能在 task end 被丢弃；runner 仍等待进程并执行最终验证。
-3. 后续候选依次为模型可访问的压缩后历史检索、公开 headless execution 和 conversation branching。持久 undo 是独立恢复项目。
-4. Windows TypeScript LSP 仍取决于能通过现有 write/state/network isolation probes 的 native backend；当前固定 backend 因 socket probe 失败而保持 unavailable。
+3. 真实 API smoke、九十次正式 dsh 比较和配对性能/token 统计仍未执行；没有 task/campaign token budget 与明确付费授权前不得启动 `--live`。
+4. 后续候选依次为模型可访问的压缩后历史检索、公开 headless execution 和 conversation branching。持久 undo 是独立恢复项目。
+5. Windows TypeScript LSP 仍取决于能通过现有 write/state/network isolation probes 的 native backend；当前固定 backend 因 socket probe 失败而保持 unavailable。
 
 ## 用户已有差异
 
