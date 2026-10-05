@@ -13,6 +13,7 @@ export function formatContextInspection(snapshot: ContextInspectionSnapshot): st
     `Provider: ${snapshot.provider}`,
     `Runtime agent: ${snapshot.runtimeIdentity.agent}`,
     `Protocol: ${snapshot.runtimeIdentity.protocol}`,
+    `Identity source: ${snapshot.runtimeIdentity.source}`,
     `Workspace (cwd): ${snapshot.runtimeIdentity.workspacePath}`,
     `Submitted: ${snapshot.submittedAt}`,
     `Context revision: ${snapshot.contextRevision}`,

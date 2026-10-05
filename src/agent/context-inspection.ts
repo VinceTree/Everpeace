@@ -24,6 +24,7 @@ export interface ContextInspectionSnapshot {
   runtimeIdentity: {
     agent: "Everpeace";
     protocol: "Responses";
+    source: "host";
     workspacePath: string;
   };
   submittedAt: string;
@@ -183,6 +184,7 @@ export function createContextInspectionSnapshot(options: {
     runtimeIdentity: {
       agent: "Everpeace",
       protocol: "Responses",
+      source: "host",
       workspacePath: options.workspacePath,
     },
     submittedAt: options.submittedAt ?? new Date().toISOString(),

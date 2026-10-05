@@ -62,7 +62,7 @@ test("context surface has an explicit empty state and refreshes the latest in-me
     snapshot = {
       model: "deepseek-chat",
       provider: "deepseek",
-      runtimeIdentity: { agent: "Everpeace", protocol: "Responses", workspacePath: "C:\\repo" },
+      runtimeIdentity: { agent: "Everpeace", protocol: "Responses", source: "host", workspacePath: "C:\\repo" },
       submittedAt: "2026-10-01T00:00:00.000Z",
       contextRevision: 4,
       requestFingerprint: "a".repeat(64),
@@ -85,6 +85,7 @@ test("context surface has an explicit empty state and refreshes the latest in-me
     await waitFor(() => (view.lastFrame() ?? "").includes("Model: deepseek-chat"));
     assert.match(view.lastFrame() ?? "", /Model: deepseek-chat/u);
     assert.match(view.lastFrame() ?? "", /Runtime agent: Everpeace/u);
+    assert.match(view.lastFrame() ?? "", /Identity source: host/u);
     assert.match(view.lastFrame() ?? "", /Workspace \(cwd\): C:\\repo/u);
     assert.match(view.lastFrame() ?? "", /Estimated input: 123 tokens/u);
   } finally {
