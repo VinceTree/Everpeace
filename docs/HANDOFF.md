@@ -38,7 +38,7 @@
 
 ### Agent runtime identity
 
-- 每个 coding request 的动态 instructions 都包含宿主确认的 Everpeace agent 身份、实际 provider、模型原始 ID、Responses 协议和当前 workspace/cwd；这些值不是工作区内容，不改变权限，也不进入 Session JSONL。
+- 每个 coding request 的动态 instructions 都包含宿主确认的 Everpeace agent 身份、实际 provider、模型原始 ID、Responses 协议和当前 workspace/cwd；模型用这些事实做自我定位，工作区文本不能重新定义这些身份字段；这些值不是工作区内容，不改变权限，也不进入 Session JSONL。
 - `/context` 的最近请求快照复用同一份宿主事实，显示 runtime agent、协议和 workspace/cwd，帮助用户核对模型看到的 checkout；快照仍是内存诊断，不从历史恢复。
 
 ### 公开 `everpeace exec`
@@ -79,7 +79,7 @@ stdout/stderr 使用有序 writer，编码块最多 16 KiB、待写编码总量�
 
 新增和扩展的离线回归位于 [MCP tests](../tests/unit/mcp/runtime.test.ts)、[ripgrep tests](../tests/unit/tools/ripgrep.test.ts)、[exec tests](../tests/unit/exec/)、[CLI tests](../tests/unit/cli/)、[Session tests](../tests/unit/storage/session-store.test.ts)、[history tests](../tests/unit/storage/session-history.test.ts)、[pruning tests](../tests/unit/agent/context-pruning.test.ts) 和 [TUI tests](../tests/unit/tui/app.test.tsx)。fixture 覆盖重连/关闭竞态和不重放、工具目录通知/分页/binding、缺平台 rg、JSONL/退出/信号/EPIPE、父子独立/重启/删除、pending resume、Unicode/CRLF/恢复引用、裁剪持久失败与重启恢复。
 
-版本同步后使用 Windows Node 22 工具链串行完成 `pnpm typecheck → pnpm test → pnpm build`，三项均通过；测试共 709 项，706 通过、3 跳过、0 失败、0 取消（48,146.5421 ms）。三个既有跳过分别是文件 symlink 权限、Windows 临时目录别名和 Unix child timeout 场景；原生 Windows sandbox fixture 在本机实际执行，不能把 CI 的平台跳过当成同一证据。构建后 CLI 与 exec 的 `--help` 都以 0 退出。上一轮验证已移到历史归档，仓库没有 lint script。
+版本同步后使用 Windows Node 22 工具链串行完成 `pnpm typecheck → pnpm test → pnpm build`，三项均通过；最近一次完整测试共 709 项，706 通过、3 跳过、0 失败、0 取消（37,542.2268 ms）。三个既有跳过分别是文件 symlink 权限、Windows 临时目录别名和 Unix child timeout 场景；原生 Windows sandbox fixture 在本机实际执行，不能把 CI 的平台跳过当成同一证据。构建后 CLI 与 exec 的 `--help` 都以 0 退出。上一轮验证已移到历史归档，仓库没有 lint script。
 
 本轮 tracked 差异使用 `git diff --check -- . ':(exclude).gitignore' ':(exclude)LICENSE'` 并以 0 退出；两个排除项是任务开始前已有的 CRLF 差异，不把结果描述成全局检查。11 个新增实现/fixture 的独立空白检查通过；13 份变更 Markdown 的 500 个本地目标路径检查通过。Windows/Linux Test CI 继续完整门禁并增加有界超时；发布标记不跳过 Test CI。远程执行状态需按实际 push 后的 workflow 核对，不将本机结果当作 Linux 或 hosted runner 证据。
 
