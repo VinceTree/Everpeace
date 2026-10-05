@@ -5,7 +5,7 @@
 ## 当前基线与范围
 
 - 产品保持 DeepSeek 优先、Windows 优先、单 Agent、Node/TypeScript、Responses 与 inline TUI，包版本为 `0.3.8`。
-- 当前已交付的 `main` 基线为 commit `330df90ea9d9468a7460b2114771815970deabb8`；比较参考仍固定为本地 DeepSeek Harness 官方 checkout `639ed015397290b3745d163aafe02ffee4aa3f84`。实验调度与 Agent Teams 不在本轮基线。
+- 当前已交付的 `main` 基线为 commit `a0a48dc113d3ad892d8acb398e6fef43e7fbeb55`；比较参考仍固定为本地 DeepSeek Harness 官方 checkout `639ed015397290b3745d163aafe02ffee4aa3f84`。实验调度与 Agent Teams 不在本轮基线。
 - 用户授权本轮可靠性、MCP 资源访问、Windows LSP 原生门禁与长会话成本优化；既有历史/附件、exec、分支、重连和压力裁剪继续复用。模型默认参数、权限和宿主验证规则保持不变。
 - 用户随后明确授权更新版本、提交并推送，包与双语 README 同步为 `0.3.8`，依赖版本未变。交付 commit 以 Git `HEAD` 为准；仅推送 `main`，提交使用 `[skip publish]`，不创建或推送 tag、不创建或更新远程 Release。已核对 Release workflow 的分支跳过条件及独立 Test CI；未读取模型凭据或发送 live 模型请求。
 - 本轮继续按用户授权自动提交并推送；新增的 agent runtime identity 优化只改变动态请求 instructions，不改变权限、Session schema 或模型注册。真实 dsh coding-task 比较仍未执行，不能据此宣称质量领先。
@@ -83,7 +83,7 @@ stdout/stderr 使用有序 writer，编码块最多 16 KiB、待写编码总量�
 
 版本同步后使用 Windows Node 22 工具链串行完成 `pnpm typecheck → pnpm test → pnpm build`，三项均通过；最近一次完整测试共 710 项，707 通过、3 跳过、0 失败、0 取消（38,459.7974 ms）。三个既有跳过分别是文件 symlink 权限、Windows 临时目录别名和 Unix child timeout 场景；原生 Windows sandbox fixture 在本机实际执行，不能把 CI 的平台跳过当成同一证据。构建后 CLI 与 exec 的 `--help` 都以 0 退出。上一轮验证已移到历史归档，仓库没有 lint script。
 
-2026-10-05 在 Windows Node 22 上以提交 `330df90ea9d9468a7460b2114771815970deabb8` 重新运行 credential-free benchmark preflight：Everpeace checkout 与 pinned dsh `639ed015397290b3745d163aafe02ffee4aa3f84` 均通过，provider boundary 各自被观察，network calls 为 0，process cleanup 为 awaited，usage ledger 完整；当前 checkout source digest 为 `6a8f627672430a2d3666323b9afc18a3961774eaf466265a4125c307ad51c84d`。这只是启动、装配和请求边界证据，不是 coding-task 质量比较。
+2026-10-05 在 Windows Node 22 上以提交 `a0a48dc113d3ad892d8acb398e6fef43e7fbeb55` 重新运行 credential-free benchmark preflight：Everpeace checkout 与 pinned dsh `639ed015397290b3745d163aafe02ffee4aa3f84` 均通过，provider boundary 各自被观察，network calls 为 0，process cleanup 为 awaited，usage ledger 完整；当前 checkout source digest 为 `cec1da8f35882d3d7ee49315c4d7d2879089bce7b6ac408dca32c42eff1e1bea`。这只是启动、装配和请求边界证据，不是 coding-task 质量比较。
 
 本轮 tracked 差异使用 `git diff --check -- . ':(exclude).gitignore' ':(exclude)LICENSE'` 并以 0 退出；两个排除项是任务开始前已有的 CRLF 差异，不把结果描述成全局检查。11 个新增实现/fixture 的独立空白检查通过；13 份变更 Markdown 的 500 个本地目标路径检查通过。Windows/Linux Test CI 继续完整门禁并增加有界超时；发布标记不跳过 Test CI。远程执行状态需按实际 push 后的 workflow 核对，不将本机结果当作 Linux 或 hosted runner 证据。
 
