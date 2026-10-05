@@ -39,17 +39,20 @@ function run(command: string, args: readonly string[], cwd: string | undefined, 
       signal?.removeEventListener("abort", cancel);
       callback();
     };
+    let cancellationError: unknown;
     const cancel = () => {
+      cancellationError = signal?.reason ?? new Error("Benchmark preparation was cancelled");
       if (child.pid) stopProcessTree(child.pid);
       else child.kill();
-      finish(() => reject(signal?.reason ?? new Error("Benchmark preparation was cancelled")));
     };
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => { stdout.append(chunk); });
     child.stderr?.on("data", (chunk: string) => { stderr.append(chunk); });
-    child.once("error", (error) => finish(() => reject(error)));
-    child.once("close", (exitCode) => finish(() => resolveResult({ exitCode, stdout: stdout.text, stderr: stderr.text })));
+    child.once("error", (error) => finish(() => reject(cancellationError ?? error)));
+    child.once("close", (exitCode) => finish(() => cancellationError === undefined
+      ? resolveResult({ exitCode, stdout: stdout.text, stderr: stderr.text })
+      : reject(cancellationError)));
     signal?.addEventListener("abort", cancel, { once: true });
     if (signal?.aborted) cancel();
   });

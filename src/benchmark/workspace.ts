@@ -33,16 +33,17 @@ function runGit(args: readonly string[], cwd: string, signal?: AbortSignal): Pro
     const stdout = new BoundedOutputBuffer(MAX_GIT_OUTPUT_BYTES);
     const stderr = new BoundedOutputBuffer(MAX_GIT_OUTPUT_BYTES);
     let settled = false;
-    const finish = (result: GitCommandResult) => {
+    let cancelled = false;
+    const finish = (callback: () => void) => {
       if (settled) return;
       settled = true;
       signal?.removeEventListener("abort", cancel);
-      resolve(result);
+      callback();
     };
     const cancel = () => {
+      cancelled = true;
       if (child.pid) stopProcessTree(child.pid);
       else child.kill();
-      finish({ exitCode: null, stdout: stdout.text, stderr: `${stderr.text}\nGit command was cancelled` });
     };
 
     child.stdout?.setEncoding("utf8");
@@ -53,8 +54,15 @@ function runGit(args: readonly string[], cwd: string, signal?: AbortSignal): Pro
     child.stderr?.on("data", (chunk: string) => {
       stderr.append(chunk);
     });
-    child.once("error", reject);
-    child.once("close", (exitCode) => finish({ exitCode, stdout: stdout.text, stderr: stderr.text }));
+    child.once("error", (error) => {
+      if (cancelled) finish(() => resolve({ exitCode: null, stdout: stdout.text, stderr: `${stderr.text}\nGit command was cancelled` }));
+      else finish(() => reject(error));
+    });
+    child.once("close", (exitCode) => finish(() => resolve({
+      exitCode: cancelled ? null : exitCode,
+      stdout: stdout.text,
+      stderr: cancelled ? `${stderr.text}\nGit command was cancelled` : stderr.text,
+    })));
     signal?.addEventListener("abort", cancel, { once: true });
     if (signal?.aborted) cancel();
   });
