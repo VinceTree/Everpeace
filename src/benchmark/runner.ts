@@ -53,33 +53,43 @@ export function runBenchmarkVerification(spec: BenchmarkVerification, workspaceP
     const stderr = new BoundedOutputBuffer(MAX_OUTPUT_BYTES);
     let timedOut = false;
     let cancelled = false;
+    let terminationRequested = false;
     let settled = false;
     let timer: NodeJS.Timeout | undefined;
+    let cancelTimer: NodeJS.Timeout | undefined;
 
     const finish = (exitCode: number | null, error?: string) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (cancelTimer) clearTimeout(cancelTimer);
       signal.removeEventListener("abort", cancel);
+      const cancellationError = timedOut ? "Verification timed out" : cancelled ? "Verification was cancelled" : undefined;
+      const failure = cancellationError ?? error;
       const expectedExitCode = spec.expectedExitCode ?? 0;
       resolve({
         attempted: true,
-        passed: !timedOut && error === undefined && exitCode === expectedExitCode,
-        exitCode,
+        passed: cancellationError === undefined && error === undefined && exitCode === expectedExitCode,
+        exitCode: cancellationError === undefined ? exitCode : null,
         stdout: stdout.text,
         stderr: stderr.text,
         durationMs: Math.max(0, Date.now() - startedAt),
         timedOut,
         cancelled,
-        ...(error === undefined ? {} : { error }),
+        ...(failure === undefined ? {} : { error: failure }),
       });
     };
 
     const cancel = () => {
+      if (settled || terminationRequested) return;
+      terminationRequested = true;
       if (!timedOut) cancelled = true;
       if (child.pid) stopProcessTree(child.pid);
       else child.kill();
-      finish(null, timedOut ? "Verification timed out" : "Verification was cancelled");
+      cancelTimer = setTimeout(() => {
+        if (settled) return;
+        try { child.kill(); } catch {}
+      }, 500);
     };
 
     let child: ReturnType<typeof spawn>;

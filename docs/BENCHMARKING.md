@@ -82,6 +82,8 @@ pnpm benchmark:campaign -- --config .\campaign.json --live
 
 Windows 上 benchmark verification 保持 `shell: false`；manifest 中的 `npm` 命令通过当前 Node 安装的 `npm-cli.js` 直接启动，不经过不可直接 spawn 的 `npm.cmd` batch shim。fixture 准备失败时删除临时 checkout 使用有界重试，避免 Windows 文件句柄短暂占用覆盖原始失败原因。
 
+Day.js 的 evaluator 会加载固定源码中的 Babel toolchain；四项 pristine 与 acceptance 统一使用 120 秒 deadline，覆盖 Windows 冷启动。该时限对所有 harness 相同，不修改断言、任务总时限、seed/reference patch 或评分规则，超时仍是基础设施失败。
+
 live 入口在任何请求前写入 `campaign-plan.json`，随后随机交错 harness 顺序；结果写入 `campaign-result.json`，包含完整 planned、executed、skipped、unknown usage 和 stop reason。每个 skipped 项保留 adapter、task 和 repetition。准备失败作为执行结果保存，不算有效 seed，也不会消费模型预算。
 
 ## Usage and budget

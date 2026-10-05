@@ -74,8 +74,8 @@
       "source": { "repositoryUrl": "https://github.com/iamkun/dayjs", "commit": "436bde0bcded312781cbe45dc2b0ef079a36d8e3", "issue": "everpeace-ds-07", "license": "MIT" },
       "maxRepairAttempts": 3,
       "verification": { "command": "npm", "args": ["test"], "timeoutMs": 180000 },
-      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "timezone-gap", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 30000 },
-      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "timezone-gap", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 30000 }, "seedPatch": "dayjs-timezone-dst-gap/seed.patch", "referencePatch": "dayjs-timezone-dst-gap/reference.patch" }
+      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "timezone-gap", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 },
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "timezone-gap", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 }, "seedPatch": "dayjs-timezone-dst-gap/seed.patch", "referencePatch": "dayjs-timezone-dst-gap/reference.patch" }
     },
     {
       "id": "dayjs-relative-locale-fallback",
@@ -85,8 +85,8 @@
       "source": { "repositoryUrl": "https://github.com/iamkun/dayjs", "commit": "436bde0bcded312781cbe45dc2b0ef079a36d8e3", "issue": "everpeace-ds-08", "license": "MIT" },
       "maxRepairAttempts": 3,
       "verification": { "command": "npm", "args": ["test"], "timeoutMs": 180000 },
-      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "relative-fallback", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 30000 },
-      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "relative-fallback", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 30000 }, "seedPatch": "dayjs-relative-locale-fallback/seed.patch", "referencePatch": "dayjs-relative-locale-fallback/reference.patch" }
+      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "relative-fallback", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 },
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "relative-fallback", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 }, "seedPatch": "dayjs-relative-locale-fallback/seed.patch", "referencePatch": "dayjs-relative-locale-fallback/reference.patch" }
     },
     {
       "id": "dayjs-negative-duration",
@@ -96,8 +96,8 @@
       "source": { "repositoryUrl": "https://github.com/iamkun/dayjs", "commit": "436bde0bcded312781cbe45dc2b0ef079a36d8e3", "issue": "everpeace-ds-09", "license": "MIT" },
       "maxRepairAttempts": 3,
       "verification": { "command": "npm", "args": ["test"], "timeoutMs": 180000 },
-      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "negative-duration", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 30000 },
-      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "negative-duration", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 30000 }, "seedPatch": "dayjs-negative-duration/seed.patch", "referencePatch": "dayjs-negative-duration/reference.patch" }
+      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "negative-duration", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 },
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "negative-duration", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 }, "seedPatch": "dayjs-negative-duration/seed.patch", "referencePatch": "dayjs-negative-duration/reference.patch" }
     },
     {
       "id": "dayjs-plugin-immutability",
@@ -107,8 +107,8 @@
       "source": { "repositoryUrl": "https://github.com/iamkun/dayjs", "commit": "436bde0bcded312781cbe45dc2b0ef079a36d8e3", "issue": "everpeace-ds-10", "license": "MIT" },
       "maxRepairAttempts": 3,
       "verification": { "command": "npm", "args": ["test"], "timeoutMs": 180000 },
-      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "duration-clone", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 30000 },
-      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "duration-clone", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 30000 }, "seedPatch": "dayjs-plugin-immutability/seed.patch", "referencePatch": "dayjs-plugin-immutability/reference.patch" }
+      "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "duration-clone", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 },
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "duration-clone", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 }, "seedPatch": "dayjs-plugin-immutability/seed.patch", "referencePatch": "dayjs-plugin-immutability/reference.patch" }
     }
   ]
 }

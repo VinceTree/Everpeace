@@ -118,4 +118,8 @@ test("DeepSeek Node catalog contains ten pinned tasks", () => {
     existsSync(resolve(fixtureRoot, task.fixture.seedPatch)) &&
     existsSync(resolve(fixtureRoot, task.fixture.referencePatch))));
   assert.ok(tasks.every((task) => task.acceptance?.args?.some((value) => value.includes("${FIXTURE_ROOT}"))));
+
+  const dayjsTasks = tasks.filter((task) => task.id.startsWith("dayjs-"));
+  assert.equal(dayjsTasks.length, 4);
+  assert.ok(dayjsTasks.every((task) => task.fixture?.pristineVerification?.timeoutMs === 120_000 && task.acceptance?.timeoutMs === 120_000));
 });
