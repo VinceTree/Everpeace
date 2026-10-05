@@ -30,6 +30,9 @@ test("context inspection captures the admitted coding payload and returns immuta
   const snapshot = agent.getContextSnapshot();
   assert.ok(snapshot);
   assert.equal(snapshot.model, "deepseek-chat");
+  assert.equal(snapshot.runtimeIdentity.agent, "Everpeace");
+  assert.equal(snapshot.runtimeIdentity.protocol, "Responses");
+  assert.equal(snapshot.runtimeIdentity.workspacePath, process.cwd());
   assert.equal(snapshot.attachments[0]?.path, "src/example.ts");
   assert.ok(snapshot.advertisedTools.includes("read_file"));
   assert.ok(snapshot.previews.some((preview) => preview.kind === "conversation" && preview.text.includes("Inspect")));

@@ -2076,6 +2076,7 @@ export class ReactAgent {
       request: snapshot,
       model: this.#model,
       provider: this.#providerCapabilities.provider,
+      workspacePath: this.#workspacePath,
       stableInstructions,
       dynamicInstructions,
       ...(this.#projectRuleSnapshot === undefined ? {} : { projectRules: this.#projectRuleSnapshot }),

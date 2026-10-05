@@ -5,7 +5,7 @@
 ## 当前基线与范围
 
 - 产品保持 DeepSeek 优先、Windows 优先、单 Agent、Node/TypeScript、Responses 与 inline TUI，包版本为 `0.3.8`。
-- 本轮开发起点为已交付的 `main`，commit `13ef48b04cad0ba69be41331ebca252a16136e0e`；比较参考仍固定为本地 DeepSeek Harness 官方 checkout `639ed015397290b3745d163aafe02ffee4aa3f84`。实验调度与 Agent Teams 不在本轮基线。
+- 本轮开发起点为已交付的 `main`，commit `411ea9f681d9766cc6bebf8a649b4b2929baee9f`；比较参考仍固定为本地 DeepSeek Harness 官方 checkout `639ed015397290b3745d163aafe02ffee4aa3f84`。实验调度与 Agent Teams 不在本轮基线。
 - 用户授权本轮可靠性、MCP 资源访问、Windows LSP 原生门禁与长会话成本优化；既有历史/附件、exec、分支、重连和压力裁剪继续复用。模型默认参数、权限和宿主验证规则保持不变。
 - 用户随后明确授权更新版本、提交并推送，包与双语 README 同步为 `0.3.8`，依赖版本未变。交付 commit 以 Git `HEAD` 为准；仅推送 `main`，提交使用 `[skip publish]`，不创建或推送 tag、不创建或更新远程 Release。已核对 Release workflow 的分支跳过条件及独立 Test CI；未读取模型凭据或发送 live 模型请求。
 - 本轮继续按用户授权自动提交并推送；新增的 agent runtime identity 优化只改变动态请求 instructions，不改变权限、Session schema 或模型注册。真实 dsh coding-task 比较仍未执行，不能据此宣称质量领先。
@@ -35,6 +35,11 @@
 - required-task 工具不广告，`/mcp` 明确显示不支持；optional-task 可以普通调用。initialize capabilities 分别决定 tools/resources/prompts，resources-only、prompts-only 和 instructions-only server 可以 ready。
 - `list_resources(cursor?)`、`list_resource_templates(cursor?)`、`list_prompts(cursor?)` 每次实时请求一页，返回来源及 `next_cursor`。单页最多 1,000 项／1 MiB；超限返回明确范围错误且不给部分条目或跳项续点。游标原样传递，返回相同非空游标拒绝；过期游标要求重新列举，不承诺跨页快照一致。read/get 保留文本、来源和 mimeType，图片/音频/blob 仅返回类型说明，不注入 base64；无资源订阅或目录缓存。
 - [ripgrep resolver](../src/tools/ripgrep.ts) 惰性解析 `@vscode/ripgrep@1.18.0` 的绝对二进制路径，search/glob、Composer `@` 候选和 doctor 都传 `--no-config`，不读取系统 `PATH` 或用户 rg 配置。缺少匹配 optional package 时明确 unavailable；Windows/Linux CI 不再显式安装系统 rg。
+
+### Agent runtime identity
+
+- 每个 coding request 的动态 instructions 都包含宿主确认的 Everpeace agent 身份、实际 provider、模型原始 ID、Responses 协议和当前 workspace/cwd；这些值不是工作区内容，不改变权限，也不进入 Session JSONL。
+- `/context` 的最近请求快照复用同一份宿主事实，显示 runtime agent、协议和 workspace/cwd，帮助用户核对模型看到的 checkout；快照仍是内存诊断，不从历史恢复。
 
 ### 公开 `everpeace exec`
 

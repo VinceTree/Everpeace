@@ -21,6 +21,11 @@ export interface ContextPreview {
 export interface ContextInspectionSnapshot {
   model: string;
   provider: string;
+  runtimeIdentity: {
+    agent: "Everpeace";
+    protocol: "Responses";
+    workspacePath: string;
+  };
   submittedAt: string;
   contextRevision: number;
   requestFingerprint: string;
@@ -131,6 +136,7 @@ export function createContextInspectionSnapshot(options: {
   request: RequestSnapshot;
   model: string;
   provider: string;
+  workspacePath: string;
   stableInstructions: string;
   dynamicInstructions: string;
   projectRules?: ProjectRuleSnapshot;
@@ -174,6 +180,11 @@ export function createContextInspectionSnapshot(options: {
   const snapshot: ContextInspectionSnapshot = {
     model: options.model,
     provider: options.provider,
+    runtimeIdentity: {
+      agent: "Everpeace",
+      protocol: "Responses",
+      workspacePath: options.workspacePath,
+    },
     submittedAt: options.submittedAt ?? new Date().toISOString(),
     contextRevision: options.request.contextRevision,
     requestFingerprint: options.request.requestFingerprint,
