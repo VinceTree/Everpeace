@@ -2014,9 +2014,9 @@ export class ReactAgent {
       .join("\n\n");
     const stableInstructions = `${INSTRUCTIONS}\n${PERMISSION_INSTRUCTIONS}`;
     const dynamicInstructions = [
-      runtimeIdentityInstructions(this.#providerCapabilities.provider, this.#model, this.#workspacePath),
       `Current permissions: ${JSON.stringify(this.#io.getPermissions?.() ?? defaultPermissions())}.`,
       extensionInstructions,
+      runtimeIdentityInstructions(this.#providerCapabilities.provider, this.#model, this.#workspacePath),
     ]
       .filter(Boolean)
       .join("\n\n");
