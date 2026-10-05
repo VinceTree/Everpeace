@@ -30,6 +30,8 @@ TUI / everpeace exec / 内部 benchmark adapter
 
 [production factory](../../src/runtime/production.ts) 是真实 Agent/命令装配边界，集中 provider、Session 历史/附件、Skills、MCP、learned Memory、Goal、代码导航、sandbox policy 与请求账本。TUI dependencies 只提供交互和状态回调；[exec runtime](../../src/exec/runtime.ts) 提供无 Ink 的交互停止策略；内部 benchmark 继续显式覆盖评测用批准/参数。三者复用生产 runner，不得各自复制修复、验证或资源清理循环；独立评分仍属于评测器职责。
 
+每个 coding request 的动态 instructions 还包含宿主提供的运行时身份：固定的 Everpeace agent 身份、实际 provider、模型原始 ID、Responses 协议和当前 workspace/cwd。它们来自宿主装配而不是工作区文件，不授予额外权限，也不作为项目规则或 Session 内容持久化；这样模型可以明确区分当前 checkout 与不可信的仓库文本。
+
 ## 请求与计量
 
 - `createProviderRuntime` 统一 client、能力与请求设置。只使用 Responses；模型 ID 保留服务端原值，不能通过名称推测中转端点支持官方能力。

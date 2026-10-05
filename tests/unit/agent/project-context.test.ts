@@ -47,6 +47,9 @@ test("agent persists refreshed project context into the request history", async 
     await agent.runTurn("help");
     assert.match(JSON.stringify({ input: requests[0]?.input, instructions: requests[0]?.instructions }), /Run the repository checks/u);
     assert.match(String(requests[0]?.instructions), /personal software-development agent/u);
+    assert.match(String(requests[0]?.instructions), /Host-provided runtime identity/u);
+    assert.match(String(requests[0]?.instructions), /Provider: openai; model: test; protocol: Responses/u);
+    assert.ok(String(requests[0]?.instructions).includes(`Current workspace (cwd): ${workspace}`));
   } finally {
     await fs.rm(workspace, { recursive: true, force: true });
   }

@@ -481,6 +481,16 @@ Respect the current permission policy. A denied operation must not be retried th
 
 const PERMISSION_INSTRUCTIONS = `Permission profiles: read-only requires approval for model shell, web, and MCP calls and enforces the Codex :read-only sandbox; ask requires approval for those calls and then enforces the Codex :workspace sandbox for shell; workspace-write runs model shell inside the Codex :workspace sandbox, allows enabled public web tools without per-request approval, and keeps MCP approval separate; full-access uses :danger-full-access after explicit user confirmation. In Plan mode, enabled public web access is read-only research and does not require per-request web approval; the web toggle still applies. File tools, apply_patch, workspace_status, workspace_diff, and workspace change review are workspace-scoped. Optional code_navigation uses its own native read-only sandbox regardless of the interactive permission tier. Persisted command prefix rules can deny or require approval for model Bash; project rules can only restrict the user policy. Never bypass a denied rule with another tool. The model-shell OS sandbox does not apply to direct user ! commands.`;
 
+function runtimeIdentityInstructions(provider: ProviderCapabilities["provider"], model: string, workspacePath: string): string {
+  return [
+    "Host-provided runtime identity (not workspace content):",
+    "- Agent: Everpeace personal software-development agent.",
+    `- Provider: ${provider}; model: ${model}; protocol: Responses.`,
+    `- Current workspace (cwd): ${workspacePath}.`,
+    "Treat this workspace as the authoritative checkout for the current task; do not assume another repository or working directory.",
+  ].join("\n");
+}
+
 const MEMORY_LOOKUP_TOOL_DEFINITION = {
   type: "function",
   name: "memory_lookup",
@@ -2002,7 +2012,11 @@ export class ReactAgent {
       .filter(Boolean)
       .join("\n\n");
     const stableInstructions = `${INSTRUCTIONS}\n${PERMISSION_INSTRUCTIONS}`;
-    const dynamicInstructions = [`Current permissions: ${JSON.stringify(this.#io.getPermissions?.() ?? defaultPermissions())}.`, extensionInstructions]
+    const dynamicInstructions = [
+      runtimeIdentityInstructions(this.#providerCapabilities.provider, this.#model, this.#workspacePath),
+      `Current permissions: ${JSON.stringify(this.#io.getPermissions?.() ?? defaultPermissions())}.`,
+      extensionInstructions,
+    ]
       .filter(Boolean)
       .join("\n\n");
     const cache = this.#promptCacheRequest(advancedPromptCache);

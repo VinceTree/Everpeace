@@ -1,6 +1,6 @@
 # 当前交接
 
-更新日期：2026-10-02。新 Session 先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 选择专题。本文件只保存当前状态；此前完整记录见 [历史交接](archive/HANDOFF_HISTORY.md)。
+更新日期：2026-10-05。新 Session 先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 选择专题。本文件只保存当前状态；此前完整记录见 [历史交接](archive/HANDOFF_HISTORY.md)。
 
 ## 当前基线与范围
 
@@ -8,6 +8,7 @@
 - 本轮开发起点为已交付的 `main`，commit `13ef48b04cad0ba69be41331ebca252a16136e0e`；比较参考仍固定为本地 DeepSeek Harness 官方 checkout `639ed015397290b3745d163aafe02ffee4aa3f84`。实验调度与 Agent Teams 不在本轮基线。
 - 用户授权本轮可靠性、MCP 资源访问、Windows LSP 原生门禁与长会话成本优化；既有历史/附件、exec、分支、重连和压力裁剪继续复用。模型默认参数、权限和宿主验证规则保持不变。
 - 用户随后明确授权更新版本、提交并推送，包与双语 README 同步为 `0.3.8`，依赖版本未变。交付 commit 以 Git `HEAD` 为准；仅推送 `main`，提交使用 `[skip publish]`，不创建或推送 tag、不创建或更新远程 Release。已核对 Release workflow 的分支跳过条件及独立 Test CI；未读取模型凭据或发送 live 模型请求。
+- 本轮继续按用户授权自动提交并推送；新增的 agent runtime identity 优化只改变动态请求 instructions，不改变权限、Session schema 或模型注册。真实 dsh coding-task 比较仍未执行，不能据此宣称质量领先。
 
 ## 已完成能力
 
