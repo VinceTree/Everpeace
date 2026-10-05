@@ -165,7 +165,9 @@ export async function prepareBenchmarkFixture(
     if (preparedTask.fixture?.pristineVerification) {
       const pristine = await runBenchmarkVerification(preparedTask.fixture.pristineVerification, destination, preparationSignal);
       if (!pristine.passed) {
-        throw new Error(`Benchmark ${task.id} pinned source did not pass its pristine assertion${pristine.error ? `: ${pristine.error}` : ""}`);
+        const reason = pristine.error
+          ?? (pristine.timedOut ? "Verification timed out" : pristine.cancelled ? "Verification was cancelled" : `exited with ${pristine.exitCode ?? "unknown"}`);
+        throw new Error(`Benchmark ${task.id} pinned source did not pass its pristine assertion: ${reason}`);
       }
     }
     await applyPatch(fixturePath(options.fixtureRoot, task.fixture.seedPatch), destination, options.signal);

@@ -40,7 +40,7 @@ export const task: BenchmarkTask = {
 2. seed 应用后，同一 assertion 因预期缺陷失败；
 3. reference repair 应用后，同一 assertion 再次通过。
 
-超时、缺少依赖、命令启动失败和 `exitCode: null` 都是基础设施失败，不算有效 seed。重复运行使用 `createIsolatedBenchmarkPreparer()` 创建 `campaign/harness/task/repetition` 目录，避免 harness 和 repetition 相互覆盖。
+超时、缺少依赖、命令启动失败和 `exitCode: null` 都是基础设施失败，不算有效 seed。验证结果把 `timedOut` 与 `cancelled` 分开记录；任务或 campaign 取消不能伪装成验证超时。重复运行使用 `createIsolatedBenchmarkPreparer()` 创建 `campaign/harness/task/repetition` 目录，避免 harness 和 repetition 相互覆盖。
 
 ## Production and external adapters
 

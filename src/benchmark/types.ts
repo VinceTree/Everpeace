@@ -162,6 +162,7 @@ export interface BenchmarkVerificationResult {
   stderr: string;
   durationMs: number;
   timedOut: boolean;
+  cancelled: boolean;
   error?: string;
 }
 

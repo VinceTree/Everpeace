@@ -52,6 +52,7 @@ export function runBenchmarkVerification(spec: BenchmarkVerification, workspaceP
     const stdout = new BoundedOutputBuffer(MAX_OUTPUT_BYTES);
     const stderr = new BoundedOutputBuffer(MAX_OUTPUT_BYTES);
     let timedOut = false;
+    let cancelled = false;
     let settled = false;
     let timer: NodeJS.Timeout | undefined;
 
@@ -69,15 +70,16 @@ export function runBenchmarkVerification(spec: BenchmarkVerification, workspaceP
         stderr: stderr.text,
         durationMs: Math.max(0, Date.now() - startedAt),
         timedOut,
+        cancelled,
         ...(error === undefined ? {} : { error }),
       });
     };
 
     const cancel = () => {
-      timedOut = true;
+      if (!timedOut) cancelled = true;
       if (child.pid) stopProcessTree(child.pid);
       else child.kill();
-      finish(null, "Verification was cancelled or timed out");
+      finish(null, timedOut ? "Verification timed out" : "Verification was cancelled");
     };
 
     let child: ReturnType<typeof spawn>;
@@ -106,7 +108,10 @@ export function runBenchmarkVerification(spec: BenchmarkVerification, workspaceP
     });
     child.once("error", (error) => finish(null, error.message));
     child.once("close", (exitCode) => finish(exitCode));
-    timer = setTimeout(cancel, timeoutMs);
+    timer = setTimeout(() => {
+      timedOut = true;
+      cancel();
+    }, timeoutMs);
     signal.addEventListener("abort", cancel, { once: true });
     if (signal.aborted) cancel();
   });
@@ -356,6 +361,11 @@ export async function runBenchmarkTask(
       verification = await runBenchmarkVerification(verificationSpec, task.workspacePath, controller.signal);
       metrics.onEvent({ type: "timing_recorded", operation: "verification", durationMs: verification.durationMs });
       verificationAttempts.push(verification);
+      if (verification.cancelled) {
+        status = timedOut ? "timed_out" : "error";
+        failure = timedOut ? `Benchmark task exceeded ${task.timeoutMs ?? DEFAULT_TASK_TIMEOUT_MS}ms` : "Benchmark task was cancelled";
+        break;
+      }
       if (verification.timedOut) {
         status = "timed_out";
         failure = verification.error ?? "Verification timed out";

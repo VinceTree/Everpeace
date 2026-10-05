@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createFileBenchmarkArtifactSink } from "../../../src/benchmark/artifacts.js";
-import { resolveBenchmarkProcess, runBenchmarkSuite, runBenchmarkTask } from "../../../src/benchmark/runner.js";
+import { resolveBenchmarkProcess, runBenchmarkSuite, runBenchmarkTask, runBenchmarkVerification } from "../../../src/benchmark/runner.js";
 import type { BenchmarkHarnessAdapter, BenchmarkTask } from "../../../src/benchmark/types.js";
 
 const task = (overrides: Partial<BenchmarkTask> = {}): BenchmarkTask => ({
@@ -102,6 +102,30 @@ test("verification timeout terminates the process tree", async () => {
 
   assert.equal(result.status, "timed_out");
   assert.equal(result.verification?.timedOut, true);
+  assert.equal(result.verification?.cancelled, false);
+});
+
+test("verification cancellation is distinct from a timeout", async () => {
+  const controller = new AbortController();
+  const running = runBenchmarkVerification({ command: "node", args: ["-e", "setTimeout(() => {}, 1000)"] }, process.cwd(), controller.signal);
+  controller.abort(new Error("campaign cancelled"));
+  const result = await running;
+  assert.equal(result.passed, false);
+  assert.equal(result.timedOut, false);
+  assert.equal(result.cancelled, true);
+  assert.equal(result.error, "Verification was cancelled");
+});
+
+test("task cancellation during verification is not reported as a verification timeout", async () => {
+  const controller = new AbortController();
+  const cancellation = setTimeout(() => controller.abort(new Error("campaign cancelled")), 1_000);
+  const result = await runBenchmarkTask(task({
+    verification: { command: "node", args: ["-e", "setTimeout(() => {}, 1000)"] },
+  }), { name: "fixture-harness", async run() {} }, { signal: controller.signal });
+  clearTimeout(cancellation);
+  assert.equal(result.status, "error");
+  assert.equal(result.error, "Benchmark task was cancelled");
+  assert.equal(result.verification?.cancelled, true);
 });
 
 test("task timeout stops waiting for an adapter that ignores cancellation", async () => {
