@@ -628,7 +628,7 @@ export class ReactAgent {
     this.#onPhase = options.onPhase;
     this.#onEvent = options.onEvent;
     this.#onToolEvent = options.onToolEvent;
-    this.#workspacePath = options.workspacePath ?? process.cwd();
+    this.#workspacePath = path.resolve(options.workspacePath ?? process.cwd());
     this.#workspaceReviews = new WorkspaceReviewSession(this.#workspacePath);
     this.#client = options.client;
     this.#model = options.model;
