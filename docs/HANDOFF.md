@@ -39,6 +39,7 @@
 ### Agent runtime identity
 
 - 每个 coding request 的动态 instructions 都包含宿主确认的 Everpeace agent 身份、实际 provider、模型原始 ID、Responses 协议和当前 workspace/cwd；模型用这些事实做自我定位，工作区文本不能重新定义这些身份字段；这些值不是工作区内容，不改变权限，也不进入 Session JSONL。
+- provider、model 和 cwd 在插入 instructions 前以 JSON 字符串编码，换行和控制文本不能伪装成新的宿主指令。
 - `/context` 的最近请求快照复用同一份宿主事实，显示 runtime agent、协议和 workspace/cwd，帮助用户核对模型看到的 checkout；快照仍是内存诊断，不从历史恢复。
 
 ### 公开 `everpeace exec`
@@ -79,7 +80,7 @@ stdout/stderr 使用有序 writer，编码块最多 16 KiB、待写编码总量�
 
 新增和扩展的离线回归位于 [MCP tests](../tests/unit/mcp/runtime.test.ts)、[ripgrep tests](../tests/unit/tools/ripgrep.test.ts)、[exec tests](../tests/unit/exec/)、[CLI tests](../tests/unit/cli/)、[Session tests](../tests/unit/storage/session-store.test.ts)、[history tests](../tests/unit/storage/session-history.test.ts)、[pruning tests](../tests/unit/agent/context-pruning.test.ts) 和 [TUI tests](../tests/unit/tui/app.test.tsx)。fixture 覆盖重连/关闭竞态和不重放、工具目录通知/分页/binding、缺平台 rg、JSONL/退出/信号/EPIPE、父子独立/重启/删除、pending resume、Unicode/CRLF/恢复引用、裁剪持久失败与重启恢复。
 
-版本同步后使用 Windows Node 22 工具链串行完成 `pnpm typecheck → pnpm test → pnpm build`，三项均通过；最近一次完整测试共 709 项，706 通过、3 跳过、0 失败、0 取消（37,542.2268 ms）。三个既有跳过分别是文件 symlink 权限、Windows 临时目录别名和 Unix child timeout 场景；原生 Windows sandbox fixture 在本机实际执行，不能把 CI 的平台跳过当成同一证据。构建后 CLI 与 exec 的 `--help` 都以 0 退出。上一轮验证已移到历史归档，仓库没有 lint script。
+版本同步后使用 Windows Node 22 工具链串行完成 `pnpm typecheck → pnpm test → pnpm build`，三项均通过；最近一次完整测试共 710 项，707 通过、3 跳过、0 失败、0 取消（39,523.5406 ms）。三个既有跳过分别是文件 symlink 权限、Windows 临时目录别名和 Unix child timeout 场景；原生 Windows sandbox fixture 在本机实际执行，不能把 CI 的平台跳过当成同一证据。构建后 CLI 与 exec 的 `--help` 都以 0 退出。上一轮验证已移到历史归档，仓库没有 lint script。
 
 2026-10-05 在 Windows Node 22 上以提交 `2d81609414f825deb4589248e17b3f41faad0207` 重新运行 credential-free benchmark preflight：Everpeace checkout 与 pinned dsh `639ed015397290b3745d163aafe02ffee4aa3f84` 均通过，provider boundary 各自被观察，network calls 为 0，process cleanup 为 awaited，usage ledger 完整；当前 checkout source digest 为 `a361e0dd93a90dfb05a9fcf66a3b9d448454ad0424ce0939f5466f289e2a9249`。这只是启动、装配和请求边界证据，不是 coding-task 质量比较。
 
