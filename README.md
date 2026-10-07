@@ -89,6 +89,8 @@ Assistant text is preserved in full after redaction, including answers over 64 K
 | `interaction_required` | `kind` (`approval` or `question`), `tool`, optional `prompt` |
 | `run_finished` | optional `session_id`; `status` (`success`, `runtime_error`, `configuration_error`, `verification_failed`, `limit_reached`, `interaction_required`, or `cancelled`); `usage_complete`; optional `stop_reason`, `workflow_result`, and `usage` with `input_tokens`, `output_tokens`, and optional `reasoning_tokens`, `cached_input_tokens`, `cache_write_input_tokens` |
 
+The same non-interactive task is available as a small TypeScript SDK. `import { runTask } from "everpeace/sdk"` accepts a prompt plus the exec options above (including `resume`, `plan`, and `permissionMode`), streams the same events through `onEvent`, and resolves with the classified result. Credentials and sessions resolve from the system keyring and default store unless a host injects its own registry or session store; the SDK never mounts Ink and never auto-approves interactive prompts.
+
 Exit codes are fixed: `0` for host `verified` or `no_changes`; `1` for a runtime/cleanup failure or failed/stalled output pipe; `2` for argument/startup configuration errors; `3` for `failed` or `unverified` verification; `4` for token, usage, step, or deadline limits; `5` for required interaction; and `130`/`143` for SIGINT/SIGTERM. Output failure waits for task and output-writer cleanup before exit.
 
 On macOS/Linux, if `bash` is not in `PATH`, configure it explicitly:

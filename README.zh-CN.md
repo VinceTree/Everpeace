@@ -89,6 +89,8 @@ everpeace exec [prompt] [-C <directory>] [--model <id-or-name>]
 | `interaction_required` | `kind`（`approval` 或 `question`）、`tool`、可选 `prompt` |
 | `run_finished` | 可选 `session_id`；`status`（`success`、`runtime_error`、`configuration_error`、`verification_failed`、`limit_reached`、`interaction_required` 或 `cancelled`）；`usage_complete`；可选 `stop_reason`、`workflow_result`，以及含 `input_tokens`、`output_tokens` 和可选 `reasoning_tokens`、`cached_input_tokens`、`cache_write_input_tokens` 的 `usage` |
 
+同一非交互任务也作为小型 TypeScript SDK 提供。`import { runTask } from "everpeace/sdk"` 接受提示词加上述 exec 选项（含 `resume`、`plan`、`permissionMode`），通过 `onEvent` 流式交付相同事件并返回分类结果。凭据与 Session 默认来自系统 keyring 和默认存储，宿主可注入自己的 registry 或 session store；SDK 不挂载 Ink，也永远不自动批准交互确认。
+
 退出码固定为：`0` 表示宿主结果为 `verified` 或 `no_changes`；`1` 表示运行/清理故障或输出管道失败、停滞；`2` 表示参数或启动配置错误；`3` 表示验证 `failed` 或 `unverified`；`4` 表示 token、usage、step 或 deadline 限制；`5` 表示需要交互；`130`/`143` 分别表示 SIGINT/SIGTERM。输出故障会在退出前等待任务和 writer 清理。
 
 macOS/Linux 上如果 `bash` 不在 `PATH` 中，可以显式配置：

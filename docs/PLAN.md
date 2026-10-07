@@ -28,7 +28,7 @@ Test CI 的 Windows/Linux 矩阵执行新增 fixture 并设置有界超时；本
 ## 独立后续
 
 1. 固定 Windows native backend 的网络隔离仍受阻；本轮不更换 sandbox、不关闭门禁、不回退宿主执行。后续候选是上游共同 Windows backend 的网络拒绝修复，先以独立分支审查具体 revision，不能只因版本变新就放行。升级回归必须保持宿主正对照、明确拒绝证据，并分别记录 IPv4/IPv6 和其他实际测试传输，重验工作区写入、应用状态读取、shell/patch 权限、取消及进程树确认退出。只有原生门禁通过后再实现用户 lsp.json、通用 registry 与四实例池及其生命周期。
-2. 公开 TypeScript SDK、exec 自动批准策略、OAuth/header helper、elicitation、sampling/tasks、持久审批和资源订阅仍需独立场景与方案。
+2. MCP OAuth/header helper、elicitation、sampling/tasks、持久审批和资源订阅仍需独立场景与方案。
 3. 持久 undo、item-level 提前执行、图片、多 Agent、Web/Desktop、完整插件化、自研 sandbox 和新协议不进入本轮。
 4. 真实模型比较需要另行明确授权与 task/campaign 数值预算；离线宿主 I/O、进程数和耗时证据不代表模型成功率、质量或 token 提升。
 

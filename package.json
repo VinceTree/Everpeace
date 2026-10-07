@@ -6,6 +6,12 @@
   "bin": {
     "everpeace": "dist/cli/index.js"
   },
+  "exports": {
+    "./sdk": {
+      "types": "./dist/sdk/index.d.ts",
+      "import": "./dist/sdk/index.js"
+    }
+  },
   "files": [
     "dist",
     "third_party/codex",
