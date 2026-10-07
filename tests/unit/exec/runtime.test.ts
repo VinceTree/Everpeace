@@ -507,3 +507,146 @@ test("context persistence and cleanup failures return runtime failure after disp
     }
   });
 });
+test("exec resume forks the parent, reuses the saved model, and clears fork_pending_resume after success", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const provider = fakeProvider((params) => {
+    requests.push(params);
+    return assistant("continued", "Resumed and verified.");
+  });
+  const testFixture = await fixture(provider);
+  try {
+    const parent = await testFixture.sessionStore.create({
+      title: "exec resume parent",
+      titlePending: false,
+      workspacePath: testFixture.workspacePath,
+      model: {
+        id: model.id,
+        model_name: model.model_name,
+        base_url: model.base_url,
+      },
+    });
+    await testFixture.sessionStore.appendContext(parent.id, [
+      { type: "message", role: "user", content: [{ type: "input_text", text: "original requirement" }] },
+    ]);
+
+    const events: ExecEvent[] = [];
+    const result = await runExec({
+      prompt: "finish the original requirement",
+      workspacePath: testFixture.workspacePath,
+      resume: parent.id,
+      onEvent(event) { events.push(event); },
+    }, testFixture.dependencies);
+
+    assert.equal(result.exitCode, 0, result.error);
+    assert.equal(result.classification, "success");
+    assert.equal(result.workflowResult, "no_changes");
+    assert.equal(result.assistantText, "Resumed and verified.");
+    assert.ok(result.sessionId);
+    assert.notEqual(result.sessionId, parent.id);
+    assert.equal(provider.calls, 1);
+    assert.match(JSON.stringify(requests[0]?.input), /original requirement/u);
+    assert.match(JSON.stringify(requests[0]?.input), /finish the original requirement/u);
+
+    const started = events.find((event) => event.type === "session_started");
+    assert.equal(started?.type, "session_started");
+    if (started?.type === "session_started") {
+      assert.equal(started.sessionId, result.sessionId);
+      assert.equal(started.parentSessionId, parent.id);
+    }
+
+    const child = await testFixture.sessionStore.load(result.sessionId!);
+    assert.equal(child.summary.lineage?.parent_session_id, parent.id);
+    assert.equal(child.forkPendingResume, false);
+    assert.equal(child.summary.model.id, model.id);
+    assert.equal(child.workflow?.task_source, "session_resume");
+    assert.match(JSON.stringify(child.context), /original requirement/u);
+
+    const source = await testFixture.sessionStore.load(parent.id);
+    assert.equal(source.summary.model.id, model.id);
+    assert.doesNotMatch(JSON.stringify(source.context), /finish the original requirement/u);
+  } finally {
+    await testFixture.cleanup();
+  }
+});
+
+test("exec resume rejects a different workspace, a missing session, an unregistered model, and --model", async (t) => {
+  await t.test("different workspace", async () => {
+    const provider = fakeProvider(() => assistant("unused", "unused"));
+    const testFixture = await fixture(provider);
+    try {
+      const otherRoot = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-exec-other-"));
+      try {
+        const parent = await testFixture.sessionStore.create({
+          title: "other workspace parent",
+          titlePending: false,
+          workspacePath: otherRoot,
+          model: { id: model.id, model_name: model.model_name, base_url: model.base_url },
+        });
+        const result = await runExec({
+          prompt: "work",
+          workspacePath: testFixture.workspacePath,
+          resume: parent.id,
+        }, testFixture.dependencies);
+        assert.equal(result.exitCode, 2);
+        assert.equal(result.classification, "configuration_error");
+        assert.match(result.error ?? "", /different workspace/u);
+        assert.equal(provider.calls, 0);
+      } finally { await fs.rm(otherRoot, { recursive: true, force: true }); }
+    } finally { await testFixture.cleanup(); }
+  });
+
+  await t.test("missing session", async () => {
+    const provider = fakeProvider(() => assistant("unused", "unused"));
+    const testFixture = await fixture(provider);
+    try {
+      const result = await runExec({
+        prompt: "work",
+        workspacePath: testFixture.workspacePath,
+        resume: "missing-session",
+      }, testFixture.dependencies);
+      assert.equal(result.exitCode, 2);
+      assert.equal(result.classification, "configuration_error");
+      assert.match(result.error ?? "", /could not be loaded/u);
+      assert.equal(provider.calls, 0);
+    } finally { await testFixture.cleanup(); }
+  });
+
+  await t.test("saved model unavailable", async () => {
+    const provider = fakeProvider(() => assistant("unused", "unused"));
+    const testFixture = await fixture(provider);
+    try {
+      const parent = await testFixture.sessionStore.create({
+        title: "unavailable model parent",
+        titlePending: false,
+        workspacePath: testFixture.workspacePath,
+        model: { id: "gone-registration", model_name: "gone-model", base_url: "https://gone.invalid/v1" },
+      });
+      const result = await runExec({
+        prompt: "work",
+        workspacePath: testFixture.workspacePath,
+        resume: parent.id,
+      }, testFixture.dependencies);
+      assert.equal(result.exitCode, 2);
+      assert.equal(result.classification, "configuration_error");
+      assert.match(result.error ?? "", /model is unavailable/u);
+      assert.equal(provider.calls, 0);
+    } finally { await testFixture.cleanup(); }
+  });
+
+  await t.test("model override", async () => {
+    const provider = fakeProvider(() => assistant("unused", "unused"));
+    const testFixture = await fixture(provider);
+    try {
+      const result = await runExec({
+        prompt: "work",
+        workspacePath: testFixture.workspacePath,
+        resume: "parent-1",
+        model: model.id,
+      }, testFixture.dependencies);
+      assert.equal(result.exitCode, 2);
+      assert.equal(result.classification, "configuration_error");
+      assert.match(result.error ?? "", /cannot be combined/u);
+      assert.equal(provider.calls, 0);
+    } finally { await testFixture.cleanup(); }
+  });
+});

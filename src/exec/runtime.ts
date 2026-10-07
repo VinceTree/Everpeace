@@ -3,6 +3,7 @@ import path from "node:path";
 import type { LoopEvent } from "../agent/agent-loop.js";
 import { RequestAttemptLedger } from "../agent/request-attempt-ledger.js";
 import type { AgentIO, AgentInteractionRequired } from "../agent/react-agent.js";
+import { normalizeWorkspacePath } from "../memory/learned-memory.js";
 import { loadPermissionPolicy, type PermissionPolicy } from "../permissions/policy.js";
 import {
   createProductionAgent,
@@ -12,7 +13,7 @@ import {
   type ProductionCommandExecutor,
 } from "../runtime/production.js";
 import type { ResolvedModels } from "../storage/model-registry.js";
-import { SessionStore } from "../storage/session-store.js";
+import { SessionStore, type LoadedSession } from "../storage/session-store.js";
 import { redactSecretsPreservingLayout } from "../util/redact-secrets.js";
 import { CodingWorkflowRuntime } from "../workflow/runtime.js";
 import { CodingTaskRunner, type CodingTaskRunnerResult } from "../workflow/task-runner.js";
@@ -126,6 +127,28 @@ export function selectExecModel(resolved: ResolvedModels, selector?: string): Ex
   throw new ExecConfigurationError("Multiple models are available; select one with --model");
 }
 
+function selectResumeModel(session: LoadedSession, resolved: ResolvedModels, workspacePath: string): ExecSelectedModel {
+  if (normalizeWorkspacePath(session.summary.workspace_path) !== normalizeWorkspacePath(workspacePath)) {
+    throw new ExecConfigurationError("The saved Session belongs to a different workspace; use -C with its original directory");
+  }
+  const saved = session.summary.model;
+  // Resume never falls back from a missing registration ID to another model's name.
+  if (!resolved.available.some((model) => model.id === saved.id)) {
+    throw new ExecConfigurationError("The saved Session model is unavailable; restore its registered model and credential first");
+  }
+  const selected = selectExecModel(resolved, saved.id);
+  if (selected.model.model_name !== saved.model_name || selected.model.base_url !== saved.base_url) {
+    throw new ExecConfigurationError("The saved Session model registration has changed; use the TUI to review a replacement model");
+  }
+  return {
+    ...selected,
+    model: {
+      ...selected.model,
+      ...(saved.request_settings ? { request_settings: { ...saved.request_settings } } : {}),
+    },
+  };
+}
+
 function toolStatus(output: string): string | undefined {
   try {
     const value = JSON.parse(output) as unknown;
@@ -214,6 +237,12 @@ function successfulResult(
 export async function runExec(options: ExecOptions, dependencies: ExecDependencies): Promise<ExecResult> {
   try {
     if (!options.prompt.trim()) throw new ExecConfigurationError("Exec prompt must not be empty");
+    if (options.resume !== undefined && !/^[A-Za-z0-9_-]+$/u.test(options.resume)) {
+      throw new ExecConfigurationError("--resume requires a local Session ID");
+    }
+    if (options.resume !== undefined && options.model !== undefined) {
+      throw new ExecConfigurationError("--resume uses the saved model; --model cannot be combined with it");
+    }
     requirePositiveInteger("tokenBudget", options.tokenBudget);
     requirePositiveInteger("timeoutMs", options.timeoutMs);
     requirePositiveInteger("maxSteps", options.maxSteps);
@@ -268,14 +297,33 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
       throw new ExecConfigurationError(`Workspace is unavailable: ${workspacePath}`, { cause: error });
     });
     if (!workspace.isDirectory()) throw new ExecConfigurationError(`Workspace is not a directory: ${workspacePath}`);
-    const selected = selectExecModel(await waitWithSignal(dependencies.registry.resolveAll(), taskSignal), options.model);
+    let restored: LoadedSession | undefined;
+    if (options.resume !== undefined) {
+      try { restored = await waitWithSignal(sessionStore.load(options.resume), taskSignal); }
+      catch (error) { throw new ExecConfigurationError("The requested Session could not be loaded", { cause: error }); }
+      if (normalizeWorkspacePath(restored.summary.workspace_path) !== normalizeWorkspacePath(workspacePath)) {
+        throw new ExecConfigurationError("The saved Session belongs to a different workspace; use -C with its original directory");
+      }
+    }
+    const resolved = await waitWithSignal(dependencies.registry.resolveAll(), taskSignal);
+    let selected = restored ? selectResumeModel(restored, resolved, workspacePath) : selectExecModel(resolved, options.model);
     taskSignal.throwIfAborted();
     const policy = await waitWithSignal(readPolicy(workspacePath), taskSignal);
+    if (options.resume !== undefined) {
+      // Fork owns cancellation and must finish its transaction before cleanup.
+      // Load the published child, not the earlier source projection: another
+      // host may have appended to the source before its locked EOF was frozen.
+      startupConfigured = true;
+      const child = await sessionStore.fork(options.resume, { title: deterministicExecTitle(options.prompt), signal: taskSignal });
+      sessionId = child.id;
+      restored = await waitWithSignal(sessionStore.load(sessionId), taskSignal);
+      selected = selectResumeModel(restored, resolved, workspacePath);
+    }
     ledger = new RequestAttemptLedger(options.tokenBudget === undefined ? {} : { tokenBudget: options.tokenBudget });
     let workflow: CodingWorkflowRuntime | undefined;
     let execute: ProductionCommandExecutor | undefined;
     let goal: Awaited<ReturnType<NonNullable<AgentIO["getGoal"]>>>;
-    let taskProgress: TaskProgress | undefined;
+    let taskProgress: TaskProgress | undefined = restored?.taskProgress;
     let pendingInteraction: AgentInteractionRequired | undefined;
     const requestInteraction = (kind: AgentInteractionRequired["kind"], tool: string, prompt?: string): false => {
       pendingInteraction ??= { kind, tool, ...(prompt ? { prompt: safeText(prompt) } : {}) };
@@ -353,6 +401,8 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
       requestAttemptLedger: ledger,
       ...(options.maxSteps === undefined ? {} : { maxSteps: options.maxSteps }),
       restore: {
+        ...(restored ? { initialHistory: restored.context } : {}),
+        ...(restored?.taskProgress ? { initialTaskProgress: restored.taskProgress } : {}),
         onHistoryAppend: (items) => {
           if (!sessionId) throw new Error("Context persistence requires an active session");
           return sessionStore.appendContext(sessionId, items);
@@ -378,21 +428,25 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
       readableRoots: handle.readableRoots,
     });
     startupConfigured = true;
-    const session = await sessionStore.create({
-      title: deterministicExecTitle(options.prompt),
-      titlePending: false,
-      workspacePath,
-      model: {
-        id: selected.model.id,
-        model_name: selected.model.model_name,
-        base_url: selected.model.base_url,
-        request_settings: { ...handle.provider.settings },
-      },
-    });
-    sessionId = session.id;
+    if (!restored) {
+      const session = await sessionStore.create({
+        title: deterministicExecTitle(options.prompt),
+        titlePending: false,
+        workspacePath,
+        model: {
+          id: selected.model.id,
+          model_name: selected.model.model_name,
+          base_url: selected.model.base_url,
+          request_settings: { ...handle.provider.settings },
+        },
+      });
+      sessionId = session.id;
+    }
+    if (!sessionId) throw new Error("Exec requires an active Session");
     await sessionStore.setMemoryPolicy(sessionId, EXEC_MEMORY_POLICY);
     workflow = new CodingWorkflowRuntime({
       workspacePath,
+      ...(restored?.workflow ? { initialState: restored.workflow } : {}),
       async onState(state) {
         await sessionStore.setWorkflow(sessionId!, state);
         await emit({
@@ -416,6 +470,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
       modelId: selected.model.id,
       modelName: selected.model.model_name,
       workspacePath,
+      ...(restored?.lineage ? { parentSessionId: restored.lineage.parent_session_id } : {}),
     });
     taskSignal.throwIfAborted();
     const runner = new CodingTaskRunner({
@@ -437,10 +492,14 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
         onSystemMessage(message) { queueTimeline("system", safeText(message, Number.MAX_SAFE_INTEGER)); },
       },
     });
-    const runnerResult = await runner.run({ text: options.prompt, source: "exec", signal: taskSignal });
+    const runnerResult = await runner.run({ text: options.prompt, source: restored ? "session_resume" : "exec", signal: taskSignal });
     await timeline;
     const assistantText = lastAssistantText;
     result = successfulResult(runnerResult, sessionId, assistantText, ledger);
+    taskSignal.throwIfAborted();
+    if (restored?.forkPendingResume && result.classification === "success") {
+      await sessionStore.setForkPendingResume(sessionId, false);
+    }
     if (result.interaction) await emit({ type: "interaction_required", ...result.interaction });
   } catch (error) {
     if (deadlineExceeded) {

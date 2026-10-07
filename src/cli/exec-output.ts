@@ -18,6 +18,7 @@ export interface ExecSessionStartedEvent {
   modelId: string;
   modelName?: string;
   workspacePath: string;
+  parentSessionId?: string;
 }
 
 export interface ExecAssistantMessageEvent {
@@ -175,6 +176,7 @@ function payload(event: ExecJsonlEvent, truncation: PayloadTruncation): Record<s
         model_id: identifier(event.modelId),
         ...(event.modelName === undefined ? {} : { model_name: identifier(event.modelName) }),
         workspace: identifier(event.workspacePath),
+        ...(event.parentSessionId === undefined ? {} : { parent_session_id: identifier(event.parentSessionId) }),
       };
     case "assistant_message":
       return { text: sanitizeExecOutput(event.text, Number.MAX_SAFE_INTEGER) };

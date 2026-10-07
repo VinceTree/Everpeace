@@ -107,3 +107,16 @@ test("resolveExecPrompt enforces one positional or piped source", () => {
   assert.throws(() => resolveExecPrompt({ ...positional, prompt: " \r\n\t " }, { stdinIsTTY: true }), /cannot be blank/);
   assert.throws(() => resolveExecPrompt(piped, { stdinIsTTY: false, stdinText: " \r\n\t " }), /non-blank/);
 });
+
+test("exec resume requires an explicit local ID and a fresh prompt without a model override", () => {
+  const resumed = parseArgs(["exec", "Continue the fix", "--resume", "session_1-abc", "-C", "project", "--json"]) as ExecCliOptions;
+  assert.equal(resumed.resume, "session_1-abc");
+  assert.equal(resolveExecPrompt(resumed, { stdinIsTTY: true }), "Continue the fix");
+  for (const id of ["../session", "C:\\session", " ", "session.jsonl"]) {
+    assert.throws(() => parseArgs(["exec", "--resume", id]), /local Session ID/u);
+  }
+  assert.throws(() => parseArgs(["exec", "--resume"]), /Missing value/u);
+  assert.throws(() => parseArgs(["exec", "--resume", "one", "--resume", "two"]), /only be specified once/u);
+  assert.throws(() => parseArgs(["exec", "--resume", "one", "--model", "other"]), /cannot be combined/u);
+  assert.throws(() => resolveExecPrompt(parseArgs(["exec", "--resume", "one"]) as ExecCliOptions, { stdinIsTTY: true }), /Missing exec prompt/u);
+});

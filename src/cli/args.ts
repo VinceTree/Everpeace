@@ -15,6 +15,7 @@ export interface ExecCliOptions extends BaseCliOptions {
   prompt?: string;
   directory?: string;
   model?: string;
+  resume?: string;
   json: boolean;
   tokenBudget?: number;
   timeoutMs?: number;
@@ -37,9 +38,10 @@ export class CliArgumentError extends Error {
 }
 
 const COMMANDS = new Set<CliCommand>(["run", "login", "models", "logout", "exec"]);
-const EXEC_VALUE_OPTIONS = new Map<string, keyof Pick<ExecCliOptions, "directory" | "model" | "tokenBudget" | "timeoutMs" | "maxSteps">>([
+const EXEC_VALUE_OPTIONS = new Map<string, keyof Pick<ExecCliOptions, "directory" | "model" | "resume" | "tokenBudget" | "timeoutMs" | "maxSteps">>([
   ["-C", "directory"],
   ["--model", "model"],
+  ["--resume", "resume"],
   ["--token-budget", "tokenBudget"],
   ["--timeout-ms", "timeoutMs"],
   ["--max-steps", "maxSteps"],
@@ -78,6 +80,7 @@ function parseExecArgs(args: readonly string[], helpSeen: boolean): ExecCliOptio
   let prompt: string | undefined;
   let directory: string | undefined;
   let model: string | undefined;
+  let resume: string | undefined;
   let json = false;
   let tokenBudget: number | undefined;
   let timeoutMs: number | undefined;
@@ -108,6 +111,7 @@ function parseExecArgs(args: readonly string[], helpSeen: boolean): ExecCliOptio
       const field = EXEC_VALUE_OPTIONS.get(argument)!;
       if (field === "directory" && directory !== undefined) duplicate(argument);
       if (field === "model" && model !== undefined) duplicate(argument);
+      if (field === "resume" && resume !== undefined) duplicate(argument);
       if (field === "tokenBudget" && tokenBudget !== undefined) duplicate(argument);
       if (field === "timeoutMs" && timeoutMs !== undefined) duplicate(argument);
       if (field === "maxSteps" && maxSteps !== undefined) duplicate(argument);
@@ -117,6 +121,9 @@ function parseExecArgs(args: readonly string[], helpSeen: boolean): ExecCliOptio
         directory = value;
       } else if (field === "model") {
         model = value;
+      } else if (field === "resume") {
+        if (!/^[A-Za-z0-9_-]+$/u.test(value)) throw new CliArgumentError("--resume requires a local Session ID");
+        resume = value;
       } else {
         const parsed = positiveInteger(argument, value);
         if (field === "tokenBudget") {
@@ -142,6 +149,9 @@ function parseExecArgs(args: readonly string[], helpSeen: boolean): ExecCliOptio
     prompt = argument;
   }
 
+  if (resume !== undefined && model !== undefined) {
+    throw new CliArgumentError("--resume uses the saved model; --model cannot be combined with it");
+  }
   return {
     command: "exec",
     help,
@@ -149,6 +159,7 @@ function parseExecArgs(args: readonly string[], helpSeen: boolean): ExecCliOptio
     ...(prompt === undefined ? {} : { prompt }),
     ...(directory === undefined ? {} : { directory }),
     ...(model === undefined ? {} : { model }),
+    ...(resume === undefined ? {} : { resume }),
     ...(tokenBudget === undefined ? {} : { tokenBudget }),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...(maxSteps === undefined ? {} : { maxSteps }),

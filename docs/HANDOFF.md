@@ -48,7 +48,7 @@
 - [CLI](../src/cli/commands/exec.ts) 暴露 `everpeace exec [prompt] [-C <directory>] [--model <id-or-name>] [--json] [--token-budget <n>] [--timeout-ms <n>] [--max-steps <n>]`。提示词来自一个位置参数或非 TTY stdin，二者同时提供或都缺失均为参数错误；管道输入最多 8 MiB。
 - 模型先按注册 ID、再按唯一模型名解析；省略模型只允许恰好一个凭据可用模型。帮助路径在 registry/keyring、MCP 和 TUI 之前返回。
 - [production factory](../src/runtime/production.ts) 由 TUI、exec 和 benchmark 共用，统一 Session、历史附件、Memory、MCP、权限、sandbox、workflow、预算、验证和清理。通过启动阶段的 exec 任务创建正常 Session，标题来自首条非空提示行，之后可由 TUI `/resume` 打开。
-- exec 读取已有 learned Memory，但固定关闭本次自动 capture。首版不提供 CLI resume、Plan 或自动批准；审批或结构化问题先保存配对结果，再以 `interaction_required` 停止并清理。
+- exec 读取已有 learned Memory，但固定关闭本次自动 capture。`--resume <session-id>` 把同工作区 Session 分支为独立子副本并恢复其 context、workflow、TaskProgress 与已保存模型（`--resume` 与 `--model` 互斥，模型注册变化或凭据缺失属于参数错误）；子副本在续跑结算为 `verified`/`no_changes` 后清除 `fork_pending_resume`。不支持 Plan 或自动批准；审批或结构化问题先保存配对结果，再以 `interaction_required` 停止并清理。
 - token budget 覆盖主请求、压缩、retry 和 repair；timeout 与 max steps 也跨全部修复轮共享。默认 stdout 只写最终助手文本，stderr 写进度和宿主验证摘要。
 - `--json` 在 exec 输出层初始化后输出 schema 1 的脱敏 JSONL：`session_started`、`assistant_message`、`tool_started`、`tool_finished`、`workflow_updated`、`interaction_required`，以及清理后唯一的 `run_finished`。不导出 reasoning 正文或原始 provider response；终态 usage 可含汇总 reasoning tokens。顶层参数语法或模块启动错误发生在 JSONL 启动前；EPIPE 无法补写终态。退出码为 `0` verified/no_changes、`1` 运行/清理/EPIPE、`2` 参数/启动配置、`3` failed/unverified、`4` 预算/usage/step/deadline、`5` 需要交互、`130/143` 信号。
 
@@ -111,7 +111,7 @@ stdout/stderr 使用有序 writer，编码块最多 16 KiB、待写编码总量�
 
 1. `@vscode/ripgrep` 只覆盖 Windows x64/arm64/ia32、macOS x64/arm64 及 Linux x64/arm64/arm/ia32/ppc64/riscv64/s390x；其他平台或禁用 optional dependency 时搜索明确 unavailable。
 2. MCP 资源/模板/prompt 已支持按需分页，但没有订阅、目录缓存或跨页快照保证；OAuth、header helper、elicitation、sampling、task execution 和按工具持久审批尚未接入。
-3. exec 首版没有 resume、Plan、自动批准或公开 TypeScript SDK。JSONL 是公共自动化面，不等同于 ACP 或通用 app-server。
+3. exec 已有 `--resume` Session 分支续跑，但没有 Plan、自动批准或公开 TypeScript SDK。JSONL 是公共自动化面，不等同于 ACP 或通用 app-server。
 4. 分支只接受空闲本地 Session；它不克隆审批、观察、undo、Goal 或验证成功。历史/关系读取不会授予写权限。
 5. 裁剪要求可用的持久 Session 历史和唯一恢复证据；不满足时沿用现有压缩。离线 fixture 不能证明真实模型质量或 token/速度提升。
 6. Windows LSP 因固定 native backend 实测允许 TCP/IPv4 而保持 unavailable；共同后端升级候选与网络回归须独立处理，门禁通过后才实施配置和通用池，不回退宿主直跑。

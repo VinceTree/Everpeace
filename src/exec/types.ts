@@ -30,6 +30,7 @@ export type ExecEvent =
       modelId: string;
       modelName: string;
       workspacePath: string;
+      parentSessionId?: string;
     }
   | { type: "assistant_message"; text: string }
   | { type: "tool_started"; name: string; callId?: string }
@@ -51,6 +52,8 @@ export interface ExecOptions {
   prompt: string;
   workspacePath: string;
   model?: string;
+  /** Continue a same-workspace Session in an independent child; requires a new prompt. */
+  resume?: string;
   tokenBudget?: number;
   timeoutMs?: number;
   maxSteps?: number;

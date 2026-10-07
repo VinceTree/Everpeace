@@ -187,6 +187,26 @@ test("plain exec reserves stdout for the final assistant text", async () => {
   assert.match(io.stderr.join(""), /Host verification: no_changes/u);
 });
 
+test("exec resume forwards the explicit ID and reports the independent child and parent", async () => {
+  const io = host(false, "continue with this requirement");
+  const resumeOptions = options({ resume: "parent-1", json: true, directory: "C:\\project" });
+  delete resumeOptions.prompt;
+  const exit = await runExecCommand(resumeOptions, registry, io, {
+    async run(runtimeOptions) {
+      assert.equal(runtimeOptions.resume, "parent-1");
+      assert.equal(runtimeOptions.prompt, "continue with this requirement");
+      assert.equal(runtimeOptions.workspacePath, "C:\\project");
+      await runtimeOptions.onEvent?.({ type: "session_started", sessionId: "child-1", parentSessionId: "parent-1", modelId: "model-1", modelName: "offline", workspacePath: "C:\\project" });
+      return result({ sessionId: "child-1" });
+    },
+  });
+  assert.equal(exit, 0);
+  const records = io.stdout.join("").trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+  assert.equal(records[0]?.parent_session_id, "parent-1");
+  assert.equal(records[0]?.session_id, "child-1");
+  assert.equal(records.at(-1)?.session_id, "child-1");
+});
+
 test("signals retain 130/143 and stdout EPIPE cancels with cleanup-compatible exit", async (t) => {
   await t.test("SIGTERM", async () => {
     const io = host();

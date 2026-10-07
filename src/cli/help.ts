@@ -1,9 +1,12 @@
 export const EXEC_HELP = `Non-interactive execution:
   everpeace exec [prompt] [-C <directory>] [--model <id-or-name>]
+               [--resume <session-id>]
                [--json] [--token-budget <n>]
                [--timeout-ms <n>] [--max-steps <n>]
 
   Supply the prompt as one positional argument or through piped stdin.
+  --resume continues a same-workspace Session in a new child using its saved model.
+  A new prompt is required; --resume and --model cannot be combined.
   --json writes versioned JSONL events to stdout.
 
 Exec exit codes:
@@ -16,7 +19,7 @@ Exec exit codes:
   130 Interrupted by SIGINT
   143 Terminated by SIGTERM`;
 
-export const HELP = `Everpeace - a minimal ReAct coding agent
+export const HELP = `Everpeace - a DeepSeek-first personal development agent
 
 Usage:
   everpeace                 Open the interactive TUI

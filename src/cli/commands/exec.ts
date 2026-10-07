@@ -145,7 +145,7 @@ function jsonUsage(result: ExecResult): ExecJsonlUsage | undefined {
 function humanProgress(event: ExecEvent): string | undefined {
   switch (event.type) {
     case "session_started":
-      return `Session ${event.sessionId} · ${event.modelName}\n`;
+      return `Session ${event.sessionId} · ${event.modelName}${event.parentSessionId ? ` · continued from ${event.parentSessionId}` : ""}\n`;
     case "tool_started":
       return `Tool: ${event.name}\n`;
     case "workflow_updated":
@@ -212,6 +212,7 @@ export async function runExecCommand(
       prompt,
       workspacePath: options.directory ?? host.cwd(),
       ...(options.model === undefined ? {} : { model: options.model }),
+      ...(options.resume === undefined ? {} : { resume: options.resume }),
       ...(options.tokenBudget === undefined ? {} : { tokenBudget: options.tokenBudget }),
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       ...(options.maxSteps === undefined ? {} : { maxSteps: options.maxSteps }),
