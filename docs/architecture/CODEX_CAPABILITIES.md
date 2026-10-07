@@ -51,7 +51,7 @@ Windows 的 Codex restricted-token backend 可以运行系统 PowerShell，但 G
 
 除标准 tools 外，宿主按初始化 capabilities 注册受审批的 `list_resources`、`list_resource_templates`、`read_resource`、`list_prompts` 和 `get_prompt`。只有 resources、prompts 或 instructions 的 server 也能进入 ready，不需要成功发现标准 tools。三个 list 接口接收可选 `cursor`，每次实时读取一页，并原样返回服务器游标为 `next_cursor`；空页也保留续点，返回与请求相同的非空游标则拒绝。空字符串游标仍原样转发；若服务器持续返回相同空游标而不前进，应重新列举，宿主不猜测替代游标。单页最多 1,000 项且完整序列化结果最多 1 MiB；超限返回 `incomplete` 与 `range_error`，不返回会跳过遗漏条目的续点。read/get 同样按需读取，不缓存目录、不自动订阅资源更新。
 
-MCP 文本投影保留文本、URI 和 MIME；只处理协议明确的 tool `content[]`、prompt `messages[].content`、resource `contents[]` 及其中嵌入的 resource 内容块，将 image/audio/blob 的 base64 替换为类型与大小说明。`structuredContent`、各层 `_meta` 和列表 metadata 不递归改写，业务字段即使名为 `blob` 或形如 image 也保持原值。普通结果连同截断 envelope 保持有效 JSON 且最多 1 MiB。Codex OAuth 凭据复用、`http_headers_helper`、elicitation、sampling、tasks 和按工具持久审批策略尚未接入。OAuth/header-helper server 会以明确失败状态显示；不得声称与完整 Codex MCP runtime 等价。
+MCP 文本投影保留文本、URI 和 MIME；只处理协议明确的 tool `content[]`、prompt `messages[].content`、resource `contents[]` 及其中嵌入的 resource 内容块，将 image/audio/blob 的 base64 替换为类型与大小说明。`structuredContent`、各层 `_meta` 和列表 metadata 不递归改写，业务字段即使名为 `blob` 或形如 image 也保持原值。普通结果连同截断 envelope 保持有效 JSON 且最多 1 MiB。Client 声明 `roots: { listChanged: true }` 并应答 `roots/list`，把当前工作区作为唯一 root 提供给 server；`setWorkspace` 通过断开重连让新工作区生效。Codex OAuth 凭据复用、`http_headers_helper`、elicitation、sampling、tasks 和按工具持久审批策略尚未接入。OAuth/header-helper server 会以明确失败状态显示；不得声称与完整 Codex MCP runtime 等价。
 
 模型文件编辑通过兼容的 `apply_patch` function tool 接入，支持有界 unified diff；生产 update/delete 强制匹配宿主读版本，审批绑定 preview hash 与权限 revision。更新逐文件原子替换，创建排他执行；批量失败仅回滚仍匹配本次 post-image 的已写文件，冲突或回滚错误明确报告，不保证整个批次原子成功。详见 [TOOLS](TOOLS.md)；它不是完整 Codex 原生 `apply_patch_call` wire protocol。
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
 import type { Tool, ListResourcesResult } from "@modelcontextprotocol/sdk/types.js";
 import { McpRuntime, formatMcpStatus, type McpServerConfig } from "../../../src/mcp/runtime.js";
@@ -282,4 +283,22 @@ test("MCP list envelopes attribute the real server and preserve only the wire cu
   assert.equal(page.next_cursor, undefined);
   assert.deepEqual(page._meta, { type: "image", data: "chart-record-id" });
   assert.deepEqual(page.resources[0]._meta, { blob: "git-object-id" });
+});
+test("MCP client advertises the workspace as its single root to a real HTTP server", async (t) => {
+  const fixture = await startHttpProtocolFixture({});
+  const workspace = process.cwd();
+  const runtime = new McpRuntime({
+    workspacePath: workspace,
+    async loadConfig() { return [config({ type: "streamable_http", url: fixture.url })]; },
+  });
+  t.after(async () => { await runtime.close(); await fixture.close(); });
+  const snapshot = await runtime.ensureReady();
+  assert.equal(snapshot.servers[0]?.state, "ready");
+  const server = [...fixture.servers][0];
+  assert.ok(server);
+  const roots = await server.listRoots();
+  assert.equal(roots.roots.length, 1);
+  const expected = pathToFileURL(resolve(workspace)).href;
+  assert.equal(roots.roots[0]?.uri, expected);
+  assert.equal(roots.roots[0]?.name, "workspace");
 });

@@ -1,13 +1,14 @@
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { delimiter, extname, isAbsolute, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   getDefaultEnvironment,
   StdioClientTransport,
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { CallToolResultSchema, ListToolsResultSchema, type Tool } from "@modelcontextprotocol/sdk/types.js";
+import { CallToolResultSchema, ListRootsRequestSchema, ListToolsResultSchema, type Tool } from "@modelcontextprotocol/sdk/types.js";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type { JsonSchemaType, JsonSchemaValidator } from "@modelcontextprotocol/sdk/validation";
 import { readCodexCliJson } from "../codex/cli.js";
@@ -630,6 +631,12 @@ export class McpRuntime {
     const client = new Client(
       { name: "everpeace", version: context.version },
       {
+        capabilities: {
+          // Advertise the workspace as the single MCP root so servers can
+          // scope filesystem and context requests; listChanged lets the host
+          // notify a live server when the workspace changes.
+          roots: { listChanged: true },
+        },
         listChanged: {
           tools: {
             autoRefresh: false,
@@ -638,6 +645,12 @@ export class McpRuntime {
         },
       },
     );
+    client.setRequestHandler(ListRootsRequestSchema, () => ({
+      roots: [{
+        uri: pathToFileURL(resolve(context.workspacePath)).href,
+        name: "workspace",
+      }],
+    }));
     let transportError: Error | undefined;
     client.onclose = context.onClose;
     const transport = config.transport.type === "stdio"
