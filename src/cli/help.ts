@@ -1,12 +1,14 @@
 export const EXEC_HELP = `Non-interactive execution:
   everpeace exec [prompt] [-C <directory>] [--model <id-or-name>]
                [--resume <session-id>]
-               [--json] [--token-budget <n>]
+               [--plan] [--json] [--token-budget <n>]
                [--timeout-ms <n>] [--max-steps <n>]
 
   Supply the prompt as one positional argument or through piped stdin.
   --resume continues a same-workspace Session in a new child using its saved model.
   A new prompt is required; --resume and --model cannot be combined.
+  --plan inspects the workspace and prints a submitted implementation plan
+  without editing files; it never auto-approves execution.
   --json writes versioned JSONL events to stdout.
 
 Exec exit codes:

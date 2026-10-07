@@ -120,3 +120,13 @@ test("exec resume requires an explicit local ID and a fresh prompt without a mod
   assert.throws(() => parseArgs(["exec", "--resume", "one", "--model", "other"]), /cannot be combined/u);
   assert.throws(() => resolveExecPrompt(parseArgs(["exec", "--resume", "one"]) as ExecCliOptions, { stdinIsTTY: true }), /Missing exec prompt/u);
 });
+
+test("exec plan is a repeat-rejected flag and combines with resume but not with a model override", () => {
+  const planned = parseArgs(["exec", "Plan the refactor", "--plan"]) as ExecCliOptions;
+  assert.equal(planned.plan, true);
+  const resumedPlan = parseArgs(["exec", "Plan the refactor", "--plan", "--resume", "parent-1"]) as ExecCliOptions;
+  assert.equal(resumedPlan.plan, true);
+  assert.equal(resumedPlan.resume, "parent-1");
+  assert.throws(() => parseArgs(["exec", "p", "--plan", "--plan"]), /only be specified once/u);
+  assert.throws(() => parseArgs(["exec", "p", "--plan", "--resume", "one", "--model", "other"]), /cannot be combined/u);
+});

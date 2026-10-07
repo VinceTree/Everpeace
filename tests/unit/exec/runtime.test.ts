@@ -650,3 +650,40 @@ test("exec resume rejects a different workspace, a missing session, an unregiste
     } finally { await testFixture.cleanup(); }
   });
 });
+test("exec --plan submits a read-only plan, prints it, and never implements", async () => {
+  const provider = fakeProvider((_params, _signal, call) => {
+    if (call === 1) return response("plan", [{
+      type: "function_call",
+      name: "submit_plan",
+      call_id: "plan-1",
+      arguments: JSON.stringify({ title: "Refactor plan", plan: "1. Read src\n2. Edit safely\n" }),
+    }]);
+    throw new Error(`Unexpected provider call `);
+  });
+  const testFixture = await fixture(provider);
+  const events: ExecEvent[] = [];
+  try {
+    const result = await runExec({
+      prompt: "Plan the refactor",
+      workspacePath: testFixture.workspacePath,
+      plan: true,
+      onEvent(event) { events.push(event); },
+    }, testFixture.dependencies);
+    assert.equal(result.exitCode, 0, result.error);
+    assert.equal(result.classification, "success");
+    assert.equal(result.status, "plan");
+    assert.equal(result.assistantText, "1. Read src\n2. Edit safely");
+    assert.equal(provider.calls, 1);
+    const assistantEvent = events.find((event) => event.type === "assistant_message");
+    assert.equal(assistantEvent?.type, "assistant_message");
+    if (assistantEvent?.type === "assistant_message") {
+      assert.match(assistantEvent.text, /Read src/u);
+    }
+    assert.ok(result.sessionId);
+    const loaded = await testFixture.sessionStore.load(result.sessionId!);
+    assert.equal(loaded.workflow, undefined);
+    assert.match(JSON.stringify(loaded.context), /Refactor plan/u);
+  } finally {
+    await testFixture.cleanup();
+  }
+});

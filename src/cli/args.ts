@@ -16,6 +16,7 @@ export interface ExecCliOptions extends BaseCliOptions {
   directory?: string;
   model?: string;
   resume?: string;
+  plan?: boolean;
   json: boolean;
   tokenBudget?: number;
   timeoutMs?: number;
@@ -46,7 +47,7 @@ const EXEC_VALUE_OPTIONS = new Map<string, keyof Pick<ExecCliOptions, "directory
   ["--timeout-ms", "timeoutMs"],
   ["--max-steps", "maxSteps"],
 ]);
-const EXEC_FLAGS = new Set(["--json"]);
+const EXEC_FLAGS = new Set(["--json", "--plan"]);
 
 function isCliCommand(value: string): value is CliCommand {
   return COMMANDS.has(value as CliCommand);
@@ -81,6 +82,7 @@ function parseExecArgs(args: readonly string[], helpSeen: boolean): ExecCliOptio
   let directory: string | undefined;
   let model: string | undefined;
   let resume: string | undefined;
+  let plan = false;
   let json = false;
   let tokenBudget: number | undefined;
   let timeoutMs: number | undefined;
@@ -104,6 +106,12 @@ function parseExecArgs(args: readonly string[], helpSeen: boolean): ExecCliOptio
     if (!positionalOnly && argument === "--json") {
       if (json) duplicate(argument);
       json = true;
+      continue;
+    }
+
+    if (!positionalOnly && argument === "--plan") {
+      if (plan) duplicate(argument);
+      plan = true;
       continue;
     }
 
@@ -160,6 +168,7 @@ function parseExecArgs(args: readonly string[], helpSeen: boolean): ExecCliOptio
     ...(directory === undefined ? {} : { directory }),
     ...(model === undefined ? {} : { model }),
     ...(resume === undefined ? {} : { resume }),
+    ...(plan ? { plan: true } : {}),
     ...(tokenBudget === undefined ? {} : { tokenBudget }),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...(maxSteps === undefined ? {} : { maxSteps }),

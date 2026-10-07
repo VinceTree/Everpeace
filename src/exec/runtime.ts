@@ -222,6 +222,10 @@ function successfulResult(
       ...(result.workflowResult?.state.result ? { workflowResult: result.workflowResult.state.result } : {}),
     });
   }
+  // A non-interactive plan run never approves; the submitted plan is the product.
+  if (result.disposition === "plan_cancelled" || result.disposition === "plan_approved") {
+    return runtimeResult("success", 0, "plan", ledger, common);
+  }
   const workflowResult = result.workflowResult?.state.result;
   if (workflowResult === "verified" || workflowResult === "no_changes") {
     return runtimeResult("success", 0, workflowResult, ledger, { ...common, workflowResult });
@@ -365,6 +369,16 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
           requestInteraction("question", "request_user_input", questionPrompt(request));
           return {};
         },
+        ...(options.plan === true ? {
+          async reviewPlan(submitted: Parameters<NonNullable<AgentIO["reviewPlan"]>>[0]) {
+            const safe = safeText(submitted.plan, Number.MAX_SAFE_INTEGER);
+            lastAssistantText = safe;
+            queueTimeline("assistant", safe);
+            await emit({ type: "assistant_message", text: safe });
+            // Non-interactive exec never auto-approves an implementation plan.
+            return "cancel" as const;
+          },
+        } : {}),
         takeInteractionRequired() {
           const interaction = pendingInteraction;
           pendingInteraction = undefined;
@@ -492,7 +506,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
         onSystemMessage(message) { queueTimeline("system", safeText(message, Number.MAX_SAFE_INTEGER)); },
       },
     });
-    const runnerResult = await runner.run({ text: options.prompt, source: restored ? "session_resume" : "exec", signal: taskSignal });
+    const runnerResult = await runner.run({ text: options.prompt, mode: options.plan === true ? "plan" : "default", source: restored ? "session_resume" : "exec", signal: taskSignal });
     await timeline;
     const assistantText = lastAssistantText;
     result = successfulResult(runnerResult, sessionId, assistantText, ledger);

@@ -111,7 +111,7 @@ stdout/stderr 使用有序 writer，编码块最多 16 KiB、待写编码总量�
 
 1. `@vscode/ripgrep` 只覆盖 Windows x64/arm64/ia32、macOS x64/arm64 及 Linux x64/arm64/arm/ia32/ppc64/riscv64/s390x；其他平台或禁用 optional dependency 时搜索明确 unavailable。
 2. MCP 资源/模板/prompt 已支持按需分页，但没有订阅、目录缓存或跨页快照保证；OAuth、header helper、elicitation、sampling、task execution 和按工具持久审批尚未接入。
-3. exec 已有 `--resume` Session 分支续跑，但没有 Plan、自动批准或公开 TypeScript SDK。JSONL 是公共自动化面，不等同于 ACP 或通用 app-server。
+3. exec 已有 `--resume` Session 分支续跑和只读 `--plan`（提交计划作为输出，绝不自动批准执行），但没有自动批准或公开 TypeScript SDK。JSONL 是公共自动化面，不等同于 ACP 或通用 app-server。
 4. 分支只接受空闲本地 Session；它不克隆审批、观察、undo、Goal 或验证成功。历史/关系读取不会授予写权限。
 5. 裁剪要求可用的持久 Session 历史和唯一恢复证据；不满足时沿用现有压缩。离线 fixture 不能证明真实模型质量或 token/速度提升。
 6. Windows LSP 因固定 native backend 实测允许 TCP/IPv4 而保持 unavailable；共同后端升级候选与网络回归须独立处理，门禁通过后才实施配置和通用池，不回退宿主直跑。

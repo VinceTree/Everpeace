@@ -54,6 +54,8 @@ export interface ExecOptions {
   model?: string;
   /** Continue a same-workspace Session in an independent child; requires a new prompt. */
   resume?: string;
+  /** Inspect the workspace and emit a submitted plan without implementing it. */
+  plan?: boolean;
   tokenBudget?: number;
   timeoutMs?: number;
   maxSteps?: number;

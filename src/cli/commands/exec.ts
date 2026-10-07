@@ -213,6 +213,7 @@ export async function runExecCommand(
       workspacePath: options.directory ?? host.cwd(),
       ...(options.model === undefined ? {} : { model: options.model }),
       ...(options.resume === undefined ? {} : { resume: options.resume }),
+      ...(options.plan === true ? { plan: true } : {}),
       ...(options.tokenBudget === undefined ? {} : { tokenBudget: options.tokenBudget }),
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       ...(options.maxSteps === undefined ? {} : { maxSteps: options.maxSteps }),
