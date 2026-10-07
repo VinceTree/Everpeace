@@ -1,6 +1,6 @@
 # 当前交接
 
-更新日期：2026-10-05。新 Session 先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 选择专题。本文件只保存当前状态；此前完整记录见 [历史交接](archive/HANDOFF_HISTORY.md)。
+更新日期：2026-10-07。新 Session 先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 选择专题。本文件只保存当前状态；此前完整记录见 [历史交接](archive/HANDOFF_HISTORY.md)。
 
 ## 当前基线与范围
 
@@ -8,7 +8,7 @@
 - 当前已交付的 `main` 基线为 commit `ef443c745bb67a34ae3a90bc552fc495e8f0d38b`；比较参考仍固定为本地 DeepSeek Harness 官方 checkout `639ed015397290b3745d163aafe02ffee4aa3f84`。实验调度与 Agent Teams 不在本轮基线。
 - 用户授权本轮可靠性、MCP 资源访问、Windows LSP 原生门禁与长会话成本优化；既有历史/附件、exec、分支、重连和压力裁剪继续复用。模型默认参数、权限和宿主验证规则保持不变。
 - 用户随后明确授权更新版本、提交并推送，包与双语 README 同步为 `0.3.8`，依赖版本未变。交付 commit 以 Git `HEAD` 为准；仅推送 `main`，提交使用 `[skip publish]`，不创建或推送 tag、不创建或更新远程 Release。已核对 Release workflow 的分支跳过条件及独立 Test CI；未读取模型凭据或发送 live 模型请求。
-- 本轮继续按用户授权自动提交并推送；新增的 agent runtime identity 优化只改变动态请求 instructions，不改变权限、Session schema 或模型注册，并把身份块放在不可信工作区上下文之后作为最终 host boundary；`/context` 额外显示 `Identity source: host`，可直接验证快照身份不是工作区文本；benchmark 验证现在明确区分取消与超时、等待被终止验证进程收束，准备和 Git 快照取消也等待子进程关闭，pristine fixture 失败会保留可诊断原因，Day.js 冷启动 deadline 调整为 120 秒。真实 dsh coding-task 比较仍未执行，不能据此宣称质量领先。
+- 本轮继续按用户授权自动提交、推送；交付 commit 为 `5f0f575`（main，已推送）。新增 `everpeace exec --resume <session-id>`：把同工作区 Session 分支为独立子副本并恢复其 context、workflow、TaskProgress 与已保存模型（`--resume` 与 `--model` 互斥），子副本结算 `verified`/`no_changes` 后清除 `fork_pending_resume`，JSONL `session_started` 附带 `parent_session_id`；runtime instructions 增加自主性/保留用户改动/失败重跑/仅授权动作可执行的约束，summary/compaction 请求也附带 host runtime identity 块。真实 dsh coding-task 比较仍未执行，不能据此宣称质量领先。
 
 ## 已完成能力
 
