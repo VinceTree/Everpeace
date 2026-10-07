@@ -247,6 +247,12 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
     if (options.resume !== undefined && options.model !== undefined) {
       throw new ExecConfigurationError("--resume uses the saved model; --model cannot be combined with it");
     }
+    if (options.permissionMode !== undefined
+      && options.permissionMode !== "read-only"
+      && options.permissionMode !== "ask"
+      && options.permissionMode !== "workspace-write") {
+      throw new ExecConfigurationError("--permission-mode must be read-only, ask, or workspace-write; exec cannot request full-access");
+    }
     requirePositiveInteger("tokenBudget", options.tokenBudget);
     requirePositiveInteger("timeoutMs", options.timeoutMs);
     requirePositiveInteger("maxSteps", options.maxSteps);
@@ -312,7 +318,12 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
     const resolved = await waitWithSignal(dependencies.registry.resolveAll(), taskSignal);
     let selected = restored ? selectResumeModel(restored, resolved, workspacePath) : selectExecModel(resolved, options.model);
     taskSignal.throwIfAborted();
-    const policy = await waitWithSignal(readPolicy(workspacePath), taskSignal);
+    const basePolicy = await waitWithSignal(readPolicy(workspacePath), taskSignal);
+    // A CLI override selects the approval tier but keeps restrictive web,
+    // shell-network, and command-rule constraints from the saved policy.
+    const policy: PermissionPolicy = options.permissionMode === undefined
+      ? basePolicy
+      : { ...basePolicy, mode: options.permissionMode };
     if (options.resume !== undefined) {
       // Fork owns cancellation and must finish its transaction before cleanup.
       // Load the published child, not the earlier source projection: another

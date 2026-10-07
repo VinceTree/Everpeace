@@ -130,3 +130,15 @@ test("exec plan is a repeat-rejected flag and combines with resume but not with 
   assert.throws(() => parseArgs(["exec", "p", "--plan", "--plan"]), /only be specified once/u);
   assert.throws(() => parseArgs(["exec", "p", "--plan", "--resume", "one", "--model", "other"]), /cannot be combined/u);
 });
+
+test("exec permission mode selects a non-elevating tier and rejects full-access", () => {
+  const restricted = parseArgs(["exec", "work", "--permission-mode", "read-only"]) as ExecCliOptions;
+  assert.equal(restricted.permissionMode, "read-only");
+  const asked = parseArgs(["exec", "work", "--permission-mode", "ask"]) as ExecCliOptions;
+  assert.equal(asked.permissionMode, "ask");
+  const write = parseArgs(["exec", "work", "--permission-mode", "workspace-write"]) as ExecCliOptions;
+  assert.equal(write.permissionMode, "workspace-write");
+  assert.throws(() => parseArgs(["exec", "work", "--permission-mode", "full-access"]), /read-only, ask, or workspace-write/u);
+  assert.throws(() => parseArgs(["exec", "work", "--permission-mode", "bogus"]), /read-only, ask, or workspace-write/u);
+  assert.throws(() => parseArgs(["exec", "work", "--permission-mode", "read-only", "--permission-mode", "ask"]), /only be specified once/u);
+});

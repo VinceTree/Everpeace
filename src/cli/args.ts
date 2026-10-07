@@ -17,6 +17,7 @@ export interface ExecCliOptions extends BaseCliOptions {
   model?: string;
   resume?: string;
   plan?: boolean;
+  permissionMode?: "read-only" | "ask" | "workspace-write";
   json: boolean;
   tokenBudget?: number;
   timeoutMs?: number;
@@ -39,10 +40,11 @@ export class CliArgumentError extends Error {
 }
 
 const COMMANDS = new Set<CliCommand>(["run", "login", "models", "logout", "exec"]);
-const EXEC_VALUE_OPTIONS = new Map<string, keyof Pick<ExecCliOptions, "directory" | "model" | "resume" | "tokenBudget" | "timeoutMs" | "maxSteps">>([
+const EXEC_VALUE_OPTIONS = new Map<string, keyof Pick<ExecCliOptions, "directory" | "model" | "resume" | "permissionMode" | "tokenBudget" | "timeoutMs" | "maxSteps">>([
   ["-C", "directory"],
   ["--model", "model"],
   ["--resume", "resume"],
+  ["--permission-mode", "permissionMode"],
   ["--token-budget", "tokenBudget"],
   ["--timeout-ms", "timeoutMs"],
   ["--max-steps", "maxSteps"],
@@ -82,6 +84,7 @@ function parseExecArgs(args: readonly string[], helpSeen: boolean): ExecCliOptio
   let directory: string | undefined;
   let model: string | undefined;
   let resume: string | undefined;
+  let permissionMode: ExecCliOptions["permissionMode"];
   let plan = false;
   let json = false;
   let tokenBudget: number | undefined;
@@ -120,6 +123,7 @@ function parseExecArgs(args: readonly string[], helpSeen: boolean): ExecCliOptio
       if (field === "directory" && directory !== undefined) duplicate(argument);
       if (field === "model" && model !== undefined) duplicate(argument);
       if (field === "resume" && resume !== undefined) duplicate(argument);
+      if (field === "permissionMode" && permissionMode !== undefined) duplicate(argument);
       if (field === "tokenBudget" && tokenBudget !== undefined) duplicate(argument);
       if (field === "timeoutMs" && timeoutMs !== undefined) duplicate(argument);
       if (field === "maxSteps" && maxSteps !== undefined) duplicate(argument);
@@ -132,6 +136,11 @@ function parseExecArgs(args: readonly string[], helpSeen: boolean): ExecCliOptio
       } else if (field === "resume") {
         if (!/^[A-Za-z0-9_-]+$/u.test(value)) throw new CliArgumentError("--resume requires a local Session ID");
         resume = value;
+      } else if (field === "permissionMode") {
+        if (value !== "read-only" && value !== "ask" && value !== "workspace-write") {
+          throw new CliArgumentError("--permission-mode must be read-only, ask, or workspace-write");
+        }
+        permissionMode = value;
       } else {
         const parsed = positiveInteger(argument, value);
         if (field === "tokenBudget") {
@@ -169,6 +178,7 @@ function parseExecArgs(args: readonly string[], helpSeen: boolean): ExecCliOptio
     ...(model === undefined ? {} : { model }),
     ...(resume === undefined ? {} : { resume }),
     ...(plan ? { plan: true } : {}),
+    ...(permissionMode === undefined ? {} : { permissionMode }),
     ...(tokenBudget === undefined ? {} : { tokenBudget }),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...(maxSteps === undefined ? {} : { maxSteps }),

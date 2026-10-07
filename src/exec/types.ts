@@ -56,6 +56,8 @@ export interface ExecOptions {
   resume?: string;
   /** Inspect the workspace and emit a submitted plan without implementing it. */
   plan?: boolean;
+  /** Override the effective permission mode; `full-access` is not selectable. */
+  permissionMode?: "read-only" | "ask" | "workspace-write";
   tokenBudget?: number;
   timeoutMs?: number;
   maxSteps?: number;

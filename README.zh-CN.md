@@ -69,12 +69,12 @@ pnpm dev -- logout
 everpeace exec [prompt] [-C <directory>] [--model <id-or-name>]
                [--resume <session-id>]
                [--plan] [--json] [--token-budget <n>]
-               [--timeout-ms <n>] [--max-steps <n>]
+               [--permission-mode <mode>] [--timeout-ms <n>] [--max-steps <n>]
 ```
 
 提示词只能来自一个位置参数或非 TTY stdin；同时提供两者属于参数错误，交互终端中两者都缺失会立即退出。管道输入最多 8 MiB。开发环境可通过 `pnpm dev -- exec ...` 使用同一接口。`-C` 默认为当前目录。模型先按注册 ID 匹配，再按唯一模型名匹配；省略 `--model` 时必须恰好只有一个凭据可用的模型。`everpeace exec --help` 会在加载模型注册表、系统凭据库、MCP 或 TUI 之前返回。
 
-通过启动阶段的每项任务都会创建正常 Session，并使用确定性的 `Exec: ...` 标题，之后可以在 TUI 中查看或恢复。`--resume <session-id>` 则把同工作区的已有 Session 分支为独立子副本并用新提示词继续：它会恢复源 Session 保存的 context、workflow、TaskProgress 与模型（`--resume` 与 `--model` 不能同时使用）。子 Session 在续跑任务结算为 `verified` 或 `no_changes` 后清除 `fork_pending_resume` 标记。`--plan` 执行只读规划：检查工作区后把提交的实现计划作为 assistant 正文输出，不编辑文件、也不会自动批准执行。命令会读取现有 learned Memory，但关闭本次捕获。不能自动批准：权限确认或结构化问题会作为配对工具结果持久化，以 `interaction_required` 报告，并在完成清理后停止。`--token-budget` 覆盖 coding、压缩、重试和修复；`--timeout-ms` 与 `--max-steps` 同样覆盖整个任务，不会在修复轮之间重置。
+通过启动阶段的每项任务都会创建正常 Session，并使用确定性的 `Exec: ...` 标题，之后可以在 TUI 中查看或恢复。`--resume <session-id>` 则把同工作区的已有 Session 分支为独立子副本并用新提示词继续：它会恢复源 Session 保存的 context、workflow、TaskProgress 与模型（`--resume` 与 `--model` 不能同时使用）。子 Session 在续跑任务结算为 `verified` 或 `no_changes` 后清除 `fork_pending_resume` 标记。`--plan` 执行只读规划：检查工作区后把提交的实现计划作为 assistant 正文输出，不编辑文件、也不会自动批准执行。`--permission-mode <read-only|ask|workspace-write>` 为单次运行覆盖已保存的权限层级；exec 永远不能选择 `full-access`，已保存的 web/shell 网络/命令规则收紧仍然生效。命令会读取现有 learned Memory，但关闭本次捕获。不能自动批准：权限确认或结构化问题会作为配对工具结果持久化，以 `interaction_required` 报告，并在完成清理后停止。`--token-budget` 覆盖 coding、压缩、重试和修复；`--timeout-ms` 与 `--max-steps` 同样覆盖整个任务，不会在修复轮之间重置。
 
 不带 `--json` 时，stdout 只输出最终 assistant 文本，进度与宿主验证摘要写入 stderr。exec 输出层初始化后，`--json` 输出 UTF-8 JSONL，每行包含 `schema_version: 1`、ISO `timestamp` 和下表白名单字段。事件类型为 `session_started`、`assistant_message`、`tool_started`、`tool_finished`、`workflow_updated`、`interaction_required`，以及任务清理后唯一的 `run_finished`。顶层参数语法或模块启动错误会在 JSONL 开始前写入 stderr 并以 2 退出。所有文本先移除终端控制序列并脱敏；不导出 reasoning 正文或原始 provider response，usage 可包含汇总 reasoning/cache 计数。
 

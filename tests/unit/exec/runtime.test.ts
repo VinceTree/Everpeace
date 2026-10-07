@@ -687,3 +687,78 @@ test("exec --plan submits a read-only plan, prints it, and never implements", as
     await testFixture.cleanup();
   }
 });
+test("exec --permission-mode overrides the tier without weakening saved web restrictions", async () => {
+  const provider = fakeProvider(() => assistant("done", "done"));
+  const testFixture = await fixture(provider, { mode: "workspace-write", web: false });
+  try {
+    const result = await runExec({
+      prompt: "work",
+      workspacePath: testFixture.workspacePath,
+      permissionMode: "read-only",
+    }, testFixture.dependencies);
+    assert.equal(result.exitCode, 0, result.error);
+    const loaded = await testFixture.sessionStore.load(result.sessionId!);
+    assert.equal(loaded.summary.workspace_path, testFixture.workspacePath);
+  } finally {
+    await testFixture.cleanup();
+  }
+});
+
+test("exec --permission-mode read-only turns a shell call into interaction_required instead of running it", async () => {
+  const provider = fakeProvider(() => response("shell", [{
+    type: "function_call",
+    name: "bash",
+    call_id: "bash-1",
+    arguments: JSON.stringify({ command: "echo hi" }),
+  }]));
+  const testFixture = await fixture(provider, { mode: "workspace-write", web: true });
+  let executions = 0;
+  testFixture.dependencies.createCommandExecutor = () => async () => {
+    executions += 1;
+    return verificationResult(true);
+  };
+  try {
+    const result = await runExec({
+      prompt: "echo hi",
+      workspacePath: testFixture.workspacePath,
+      permissionMode: "read-only",
+    }, testFixture.dependencies);
+    assert.equal(result.exitCode, 5);
+    assert.equal(result.interaction?.kind, "approval");
+    assert.equal(result.interaction?.tool, "bash");
+    assert.equal(executions, 0);
+  } finally {
+    await testFixture.cleanup();
+  }
+});
+
+test("exec --permission-mode workspace-write runs an allowed shell call without interaction", async () => {
+  const provider = fakeProvider((_params, _signal, call) => {
+    if (call === 1) return response("shell", [{
+      type: "function_call",
+      name: "bash",
+      call_id: "bash-1",
+      arguments: JSON.stringify({ command: "echo hi" }),
+    }]);
+    return assistant("done", "echoed");
+  });
+  const testFixture = await fixture(provider, { mode: "read-only", web: true });
+  let executions = 0;
+  testFixture.dependencies.createCommandExecutor = () => async () => {
+    executions += 1;
+    return verificationResult(true);
+  };
+  try {
+    const result = await runExec({
+      prompt: "echo hi",
+      workspacePath: testFixture.workspacePath,
+      permissionMode: "workspace-write",
+    }, testFixture.dependencies);
+    // The shell ran without interaction; verification outcome is separate.
+    assert.notEqual(result.exitCode, 5);
+    assert.equal(result.interaction, undefined);
+    assert.equal(executions, 1);
+  } finally {
+    await testFixture.cleanup();
+  }
+});
