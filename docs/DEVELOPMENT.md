@@ -118,6 +118,8 @@ Plan 专项验收另检查：在审阅选择 `Revise plan` 输入意见，resize
 
 Composer 另检查带有效文件引用的提交：连续按 Enter 只启动一次，进入运行中 guidance 后新草稿能正常编辑，resize 和任务结束不清空它；无效引用保留草稿，纠正后显式重交。再打开命令窗口并按 Esc，确认同一 Session 历史及单 prompt。受控 Promise 与 Ink 输入回归只证明本地生命周期，真实 Windows Terminal 的按键、滚轮与缩放仍须按本节单独记录。
 
+独立 Prompt 回归在等待提交完成／失败后，以测试 stdin 的 readable 订阅恢复确认 Ink 输入 effect 已重新启用，再发送一次性输入；仅看到新画面或经过固定延时不能证明订阅已就绪。待处理阶段先观察订阅停用再结算受控 Promise，重复 Enter／粘贴仍同步连续发送，保留渲染前竞态覆盖。
+
 App 回归在每项测试结束后统一清理渲染器和捕获的输出帧，即使断言失败也释放。ink-testing-library 会保留渲染器引用，仅 unmount 不会释放捕获帧；所有历史、resize 和隐私断言仍在清理前执行。不通过增大 CI 堆或跳过断言绕过资源问题。
 
 fixture 中验证命令仍通过生产原生 sandbox；失败保持 unverified，不回退宿主执行。直接 `!` 是工作目录固定在 fixture workspace 的正常用户 PTY。自动测试不替代这里的终端体验验收；执行后记录终端版本、步骤和结果，未执行时明确标记 pending。

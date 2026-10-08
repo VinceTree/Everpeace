@@ -33,7 +33,11 @@ Prompt 原来依靠异步提交后的 React submitting 状态停用输入，连�
 
 更新展示版本后重新串行验证：typecheck 通过 → lint 脚本缺项 → pnpm test 867 项、864 通过、0 失败、3 个既有平台跳过，耗时 56,177.5415 ms → build 通过。本机启动器最初无输出退出，改用实际 pnpm Node 入口并重定向日志，确认命令正文与退出码；不把无输出调用当作验证证据。宿主临时目录日志为 everpeace-composer-delivery-typecheck-20261008.log、everpeace-composer-delivery-test-20261008.log 和 everpeace-composer-delivery-build-20261008.log。git diff --check 通过；package.json 与双语 README 均为 `0.3.16`。
 
-本次仅纳入 Composer 修复、回归、相关文档与展示版本；原有无关未跟踪内容保留。提交标题使用 `fix: guard composer submissions and preserve drafts [skip publish]`；推送与远端 CI／Release 结果待操作后回填，不以历史 CI 代替当前验证。
+首轮修复已提交并推送 main：`1e762bb880adc4a72f89cccf786e61f572230ba6`，标题为 `fix: guard composer submissions and preserve drafts [skip publish]`。[Release workflow](https://github.com/VinceTree/Everpeace/actions/runs/37801243422) 与 Publish version job 均实际 skipped；推送前后 27 条 Release 的 ID、tag 与 updated_at 一致，远端 v0.3.16 tag 不存在。仅纳入 Composer 修复、回归、相关文档与展示版本，原有无关未跟踪内容保留。
+
+[首轮 Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37801243361) 的 Windows／Linux 均因新增 Prompt 回归的输入时序失败：画面刷新早于 passive input effect 恢复，下一次输入丢失；false／reject 的固定延时也不能保证重交就绪。失败均在新测试，无生产代码修改。测试改为观察独立 stdin 的 readable 订阅停用／恢复，再结算受控 Promise 和发送下一次单次输入；重复 Enter／粘贴仍同步连续发送，保留所有原断言，不增大超时或自动重试输入。
+
+修正后输入回归 14 项通过；再次串行 typecheck 通过 → lint 缺项 → test 867 项、864 通过、0 失败、3 个既有跳过，耗时 55,239.9873 ms → build 通过。宿主临时日志前缀为 everpeace-composer-input-ready-，包含 focused、typecheck、test、build 的 20261008.log。git diff --check 通过；补充提交继续带 `[skip publish]`，修正后的双平台 CI 待远端验证。
 
 ## 独立验收与后续
 

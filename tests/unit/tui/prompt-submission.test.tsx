@@ -35,6 +35,12 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+async function waitForInput(view: ReturnType<typeof render>, active: boolean): Promise<void> {
+  // A rendered draft can precede Ink's passive input effects. Observe the
+  // stream subscription before sending one-shot input or settling a pending call.
+  await waitFor(() => (view.stdin.listenerCount("readable") > 0) === active);
+}
+
 test("pending submission blocks repeated Enter, typing and paste through resize, then clears once", async () => {
   const pending = deferred();
   const editorRef = { current: createComposerState("中文 draft 🙂") };
@@ -44,7 +50,7 @@ test("pending submission blocks repeated Enter, typing and paste through resize,
     submissions.push(value);
     return submissions.length === 1 ? pending.promise : true;
   }} />);
-  await tick();
+  await waitForInput(view, true);
   view.stdin.write("\r");
   view.stdin.write("\r");
   view.stdin.write("unexpected");
@@ -55,9 +61,11 @@ test("pending submission blocks repeated Enter, typing and paste through resize,
   assert.deepEqual(submissions, [original.value]);
   assert.strictEqual(editorRef.current, original);
   assert.equal((view.lastFrame() ?? "").split("\n").filter((line) => line.trimStart().startsWith("›")).length, 1);
+  await waitForInput(view, false);
   pending.resolve(true);
   await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
   assert.equal(editorRef.current.value, "");
+  await waitForInput(view, true);
   view.stdin.write("next draft");
   await waitFor(() => editorRef.current.value === "next draft");
   view.stdin.write("\r");
@@ -156,13 +164,14 @@ test("false, rejected and thrown submissions preserve the draft and allow an exp
       if (outcome === "throw") throw new Error("submission failed");
       return pending.promise;
     }} />);
-    await tick();
+    await waitForInput(view, true);
     view.stdin.write("\r");
-    await tick();
+    await waitFor(() => submissions.length === 1);
+    if (outcome !== "throw") await waitForInput(view, false);
     if (outcome === "false") pending.resolve(false);
     if (outcome === "reject") pending.reject(new Error("submission failed"));
     if (outcome !== "throw") await pending.promise.catch(() => undefined);
-    await tick();
+    await waitForInput(view, true);
     assert.strictEqual(editorRef.current, original);
     view.stdin.write("\r");
     await waitFor(() => submissions.length === 2 && editorRef.current.value === "");
