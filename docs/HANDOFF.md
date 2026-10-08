@@ -37,7 +37,9 @@ Prompt 原来依靠异步提交后的 React submitting 状态停用输入，连�
 
 [首轮 Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37801243361) 的 Windows／Linux 均因新增 Prompt 回归的输入时序失败：画面刷新早于 passive input effect 恢复，下一次输入丢失；false／reject 的固定延时也不能保证重交就绪。失败均在新测试，无生产代码修改。测试改为观察独立 stdin 的 readable 订阅停用／恢复，再结算受控 Promise 和发送下一次单次输入；重复 Enter／粘贴仍同步连续发送，保留所有原断言，不增大超时或自动重试输入。
 
-修正后输入回归 14 项通过；再次串行 typecheck 通过 → lint 缺项 → test 867 项、864 通过、0 失败、3 个既有跳过，耗时 55,239.9873 ms → build 通过。宿主临时日志前缀为 everpeace-composer-input-ready-，包含 focused、typecheck、test、build 的 20261008.log。git diff --check 通过；补充提交继续带 `[skip publish]`，修正后的双平台 CI 待远端验证。
+修正后输入回归 14 项通过；再次串行 typecheck 通过 → lint 缺项 → test 867 项、864 通过、0 失败、3 个既有跳过，耗时 55,239.9873 ms → build 通过。宿主临时日志前缀为 everpeace-composer-input-ready-，包含 focused、typecheck、test、build 的 20261008.log。git diff --check 通过；12 份修改文档的 466 个本地链接路径有效，双语 README 展示版本与 package.json 一致。
+
+测试修正已提交并推送：`67940c3dc0fa2dbc5aed4eff397ad49e5f3f9320`，标题为 `test: await composer input subscriptions [skip publish]`。[修正后 Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37802133169) 的 Windows／Linux jobs 均 success，包含 typecheck、完整 test、build 和差异检查。Linux 867 项、864 通过、0 失败、3 跳过，耗时 94,140.785129 ms；Windows 867 项、863 通过、0 失败、4 跳过，耗时 165,418.2297 ms。Windows hosted runner 的额外原生 sandbox 跳过仍遵循开发指南的证据边界。该补充提交没有触发 Release workflow；收尾仅更新交接和计划，提交继续带 `[skip publish]`，不改变已验收的实现、测试或展示版本。
 
 ## 独立验收与后续
 
