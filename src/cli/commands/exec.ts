@@ -83,19 +83,32 @@ export function createProcessExecCommandHost(options: { outputStallMs?: number }
   const stdout = new ExecStreamWriter(stdoutStream, writerOptions);
   const stderr = new ExecStreamWriter(stderrStream, writerOptions);
   let disposing = false;
+  const failureHandlers = new Map<Writable, Set<(error: Error) => void>>();
+  const write = async (writer: ExecStreamWriter, stream: Writable, text: string, signal?: AbortSignal) => {
+    try { await writer.write(text, signal); }
+    catch (error) {
+      // Writable emits its error after _destroy completes. Cancel the task at the
+      // failed write boundary, before runtime resource cleanup can finish.
+      if (!disposing) for (const handler of failureHandlers.get(stream) ?? []) handler(error instanceof Error ? error : new ExecOutputError(String(error)));
+      throw error;
+    }
+  };
   const watch = (stream: Writable, handler: (error: Error) => void) => {
+    const handlers = failureHandlers.get(stream) ?? new Set<(error: Error) => void>();
+    failureHandlers.set(stream, handlers);
+    handlers.add(handler);
     const failed = (error: Error) => { if (!disposing) handler(error); };
     const closed = () => { if (!disposing) handler(new ExecOutputError("Exec output was closed")); };
     stream.on("error", failed);
     stream.on("close", closed);
-    return () => { stream.off("error", failed); stream.off("close", closed); };
+    return () => { handlers.delete(handler); stream.off("error", failed); stream.off("close", closed); };
   };
   return {
     cwd: () => process.cwd(),
     stdinIsTTY: process.stdin.isTTY === true,
     readStdin: readProcessStdin,
-    writeStdout: (text, signal) => stdout.write(text, signal),
-    writeStderr: (text, signal) => stderr.write(text, signal),
+    writeStdout: (text, signal) => write(stdout, stdoutStream, text, signal),
+    writeStderr: (text, signal) => write(stderr, stderrStream, text, signal),
     onSignal(handler) {
       const interrupt = () => handler(130);
       const terminate = () => handler(143);

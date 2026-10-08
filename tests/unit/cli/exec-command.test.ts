@@ -4,9 +4,11 @@ import type { ExecOptions, ExecResult } from "../../../src/exec/types.js";
 import type { ModelRegistry } from "../../../src/storage/model-registry.js";
 import {
   runExecCommand,
+  createProcessExecCommandHost,
   type ExecCommandHost,
 } from "../../../src/cli/commands/exec.js";
 import type { ExecCliOptions } from "../../../src/cli/args.js";
+import { ExecOutputError, ExecStreamWriter } from "../../../src/cli/exec-writer.js";
 
 function host(stdinIsTTY = true, stdinText = "") {
   const stdout: string[] = [];
@@ -38,6 +40,26 @@ function host(stdinIsTTY = true, stdinText = "") {
 }
 
 const registry = {} as ModelRegistry;
+
+test("process host cancels at a failed write before runtime cleanup even without a stream error event", async (context) => {
+  context.mock.method(ExecStreamWriter.prototype, "write", async () => { throw new ExecOutputError("fixture delayed stream error"); });
+  for (const stream of ["stdout", "stderr"] as const) {
+    const io = { ...createProcessExecCommandHost(), stdinIsTTY: true };
+    let cleanup = false;
+    const code = await runExecCommand(options({ json: true }), registry, io, { async run(runtimeOptions) {
+      try {
+        await (stream === "stdout" ? io.writeStdout : io.writeStderr)("frame", runtimeOptions.signal);
+        assert.fail("write must fail");
+      } catch (error) {
+        assert.ok(error instanceof ExecOutputError);
+        assert.equal(runtimeOptions.signal?.aborted, true, "host cancellation cannot wait for a later stream error");
+      } finally { cleanup = true; }
+      return result({ exitCode: 1, classification: "runtime_error", status: "runtime_error" });
+    } });
+    assert.equal(code, 1);
+    assert.equal(cleanup, true);
+  }
+});
 
 function options(overrides: Partial<ExecCliOptions> = {}): ExecCliOptions {
   return { command: "exec", help: false, json: false, prompt: "do work", ...overrides };

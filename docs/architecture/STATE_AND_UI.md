@@ -124,6 +124,8 @@ workflow 提供路径列表时同时返回 `changed_paths_total` 和 `changed_pa
 
 [真实子进程回归](../../tests/unit/cli/exec-process.test.ts) 通过 IPC 分别观察 provider 就绪、取消先于任务清理、输出清理完成；继续断言退出码、owned helper 回收、完整终态文件和半条输出无 final。Linux 使用实际 OS 信号，Windows 通过 IPC 触发安装的 signal handler；这不能替代真实 Windows Terminal Ctrl+C 验收。上一轮双平台 CI 失败与本轮实际验证结果只在 [HANDOFF](../HANDOFF.md) 维护。
 
+代理 Writable 的 error 事件可能等异步 destroy 完成后才发出。CLI host 因此也在写入 Promise 失败边界立即通知输出失败、取消任务，不能仅等 stream error；原 error／close 监听器仍保留到完整清理后，取消必须先于 runtime 资源结算。
+
 ## Inline TUI 与独立命令窗口
 
 详细目录职责见 [TUI_STRUCTURE](TUI_STRUCTURE.md)。界面始终 inline，使用终端原生 scrollback，不切换 alternate screen。主状态机拥有视图切换；展示组件不得自己创建 Agent、写 Session 或启动新任务。

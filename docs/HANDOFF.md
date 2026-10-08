@@ -33,9 +33,15 @@ Windows Node v22.19.0／pnpm@10.22.0。定向离线回归 138 项全部通过，
 
 fake provider 的 [共享生产闭环](../tests/unit/runtime/project-editing.test.ts) 贯通地图定位 → 规则刷新／盲写拒绝 → 读取 → 精确失败 → 显式容错 → 完整宿主验证；另行证明 Plan 广告和地图不加载子目录规则。已有 TUI、exec、SDK 共用 production factory，不新增分叉实现。
 
-最后补齐地图的深层 manifest 元数据诊断和极长路径／文件类型的输出上限保护，地图／生产回归 10 项全部通过，再重新执行最终串行门禁：pnpm typecheck 通过；实际 scripts 无 lint，明确记为缺项；pnpm test 共 758 项，755 通过、0 失败、3 跳过，耗时 51,966.4625 ms；pnpm build 通过。跳过项仍为当前文件系统不允许的 file symlink、Windows 临时目录 alias 和 Unix-only timeout；没有新增跳过以回避输出问题。测试日志在临时目录 everpeace-map-0.3.10-test.log。git diff --check、新文件空白检查及本轮 9 份文档的本地链接检查通过。
+最后补齐地图的深层 manifest 元数据诊断和极长路径／文件类型的输出上限保护，以及后述 CI 诊断／取消时序回归，再重新执行最终串行门禁：pnpm typecheck 通过；实际 scripts 无 lint，明确记为缺项；pnpm test 共 759 项，756 通过、0 失败、3 跳过，耗时 46,276.3648 ms；pnpm build 通过。跳过项仍为当前文件系统不允许的 file symlink、Windows 临时目录 alias 和 Unix-only timeout；没有新增跳过以回避输出问题。测试日志在临时目录 everpeace-map-0.3.10-test.log。git diff --check、新文件空白检查及本轮 9 份文档的本地链接检查通过。
 
-定向入口仍使用 node --import tsx --test，当前 Windows 的 pnpm exec tsx shim 未解析成功；pnpm scripts 可运行，依赖／工具链配置未改。完整测试在获准宿主进程运行，供 Windows native sandbox fixture 初始化；模型 shell 的隔离与失败关闭规则不变。远端双平台 CI 与 Release 核验在推送后完成并回填，不把本地通过当作远端通过。
+定向入口仍使用 node --import tsx --test，当前 Windows 的 pnpm exec tsx shim 未解析成功；pnpm scripts 可运行，依赖／工具链配置未改。完整测试在获准宿主进程运行，供 Windows native sandbox fixture 初始化；模型 shell 的隔离与失败关闭规则不变。
+
+实现已提交并推送为 `abd0b31e1a16e10890332c080a76d27e9cc1fcc2`（feat: add project maps and controlled edits, fix pipe cleanup [skip publish]）。[首次本轮 Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37727322912) 的 Linux 安装／typecheck／完整测试／build／差异检查全部通过，758 项、755 通过、3 跳过。Windows 758 项、753 通过、1 失败、4 跳过；唯一失败为新增回滚测试按临时目录原路径比较，未识别 hosted runner 的短路径别名，模拟故障未触发。输出停滞／关闭／取消回归在两平台均通过。现已把故障目标比较改为 realpath，并加入实际目录 alias／junction 复现，定向 5 项全部通过，继续重跑门禁／推送修复，包版本不再递增。
+
+[首次本轮 Release workflow](https://github.com/VinceTree/Everpeace/actions/runs/37727322999) completed／skipped，Publish job 跳过；远端现有 27 份 Release 元数据和 26 个 tag 引用与推送前基线完全一致。后续未改 package.json 的提交不触发该 workflow；最终双平台 CI 完成后继续核对元数据并回填。
+
+继续本轮时，一次本地重跑的 stdout stall 与独立 MCP stdio 回归均跨约 35 分钟后超时，原断言／超时未放宽，保留为无效交付运行；随后完整重跑恢复通过。独立定向复现还发现关闭 stdout 时 write Promise 已失败、Writable error 却等待异步 destroy 后才通知，导致 IPC 取消标记偶尔晚于任务清理。CLI host 已在写入失败边界立即通知取消，继续等待迟到 stream error／close 和 owned writer 清理。真实输出／MCP stdio／容错回归 25 项通过；新增不发 stream error 的失败注入明确验证 stdout／stderr 写失败先取消、后清理，CLI 回归 12 项全部通过。最终完整门禁结果见上，修复继续提交推送，不递增包版本。
 
 ## 保持的能力与限制
 
