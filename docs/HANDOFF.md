@@ -31,7 +31,11 @@ git diff --check、新文件尾部空白检查及 11 份文档的 205 个本地�
 
 ## 授权交付
 
-用户授权后 package.json 与双语 README 同步为 `0.3.11`，依赖声明未变，无需变更 pnpm lockfile。已核对 Release workflow：main push 的发布 job 遇到 `[skip publish]` 会跳过，Test workflow 不受影响。版本更新后在宿主环境重新串行执行 typecheck → test → build，全部通过；当前无 lint script。完整测试 789 项，786 通过、0 失败、3 个原有跳过，耗时 52,750.7978 ms，日志为宿主临时目录 everpeace-plan-delivery-test.log。提交推送和远端 CI 结果待核对。
+用户授权后 package.json 与双语 README 同步为 `0.3.11`，依赖声明未变，无需变更 pnpm lockfile。功能提交 `701fc870e72b7ce8a1beb3b068eb814d8d0be7d7` 已推送 main。版本更新后在宿主环境重新串行执行 typecheck → test → build，全部通过；当前无 lint script。完整测试 789 项，786 通过、0 失败、3 个原有跳过，耗时 52,750.7978 ms，日志为宿主临时目录 everpeace-plan-delivery-test.log。
+
+已核对 [发布任务](https://github.com/VinceTree/Everpeace/actions/runs/37760253688)：`[skip publish]` 使发布 job 实际 skipped，Test workflow 仍运行。推送前后 Release 均为 27 项，最近条目的 ID 与更新时间不变，目标 `v0.3.11` tag 不存在；未创建或更新 Release。
+
+首次 [双平台 CI](https://github.com/VinceTree/Everpeace/actions/runs/37760253924) 均未通过：两平台审阅回归在非空意见提交断言失败，Windows 另有既有 Bash abort 回归 15 秒超时。本地固定 20 ms 等待没有同步实际输入处理；现改为有界等待菜单、输入和回调状态，拆开空白输入与 Enter，并复用生产 CommandScreen，确认 resize 后边框确实缩窄且正文保留。原有断言保留，新增 resize 正文断言，没有跳过测试或调整 Bash 超时。修复后定向回归 4 项全通过；重新串行执行 typecheck → test → build 全通过，审阅 TSX 单独严格类型检查通过。完整测试 789 项，786 通过、0 失败、3 个原有跳过，耗时 51,696.2096 ms，日志为宿主临时目录 everpeace-plan-delivery-fix-test.log。修复推送 CI 待核对。
 
 ## 限制与独立后续
 
