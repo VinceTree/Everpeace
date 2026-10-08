@@ -35,7 +35,9 @@ git diff --check、新文件尾部空白检查及 11 份文档的 205 个本地�
 
 已核对 [发布任务](https://github.com/VinceTree/Everpeace/actions/runs/37760253688)：`[skip publish]` 使发布 job 实际 skipped，Test workflow 仍运行。推送前后 Release 均为 27 项，最近条目的 ID 与更新时间不变，目标 `v0.3.11` tag 不存在；未创建或更新 Release。
 
-首次 [双平台 CI](https://github.com/VinceTree/Everpeace/actions/runs/37760253924) 均未通过：两平台审阅回归在非空意见提交断言失败，Windows 另有既有 Bash abort 回归 15 秒超时。本地固定 20 ms 等待没有同步实际输入处理；现改为有界等待菜单、输入和回调状态，拆开空白输入与 Enter，并复用生产 CommandScreen，确认 resize 后边框确实缩窄且正文保留。原有断言保留，新增 resize 正文断言，没有跳过测试或调整 Bash 超时。修复后定向回归 4 项全通过；重新串行执行 typecheck → test → build 全通过，审阅 TSX 单独严格类型检查通过。完整测试 789 项，786 通过、0 失败、3 个原有跳过，耗时 51,696.2096 ms，日志为宿主临时目录 everpeace-plan-delivery-fix-test.log。修复推送 CI 待核对。
+首次 [双平台 CI](https://github.com/VinceTree/Everpeace/actions/runs/37760253924) 均未通过：两平台审阅回归在非空意见提交断言失败，Windows 另有既有 Bash abort 回归 15 秒超时。本地固定 20 ms 等待没有同步实际输入处理；现改为有界等待菜单、输入和回调状态，拆开空白输入与 Enter，并复用生产 CommandScreen，确认 resize 后边框确实缩窄且正文保留。原有断言保留，新增 resize 正文断言，没有跳过测试或调整 Bash 超时。修复后定向回归 4 项全通过；重新串行执行 typecheck → test → build 全通过，审阅 TSX 单独严格类型检查通过。完整测试 789 项，786 通过、0 失败、3 个原有跳过，耗时 51,696.2096 ms，日志为宿主临时目录 everpeace-plan-delivery-fix-test.log。
+
+修复提交 `f3d1b6ac1e911321184c3cdd54bc56a20fae82c4` 已推送 main；其 [双平台 CI](https://github.com/VinceTree/Everpeace/actions/runs/37761215440) 实测 success，Windows／Linux 的安装、类型检查、完整测试、构建和差异检查均成功。Windows 的既有 Bash abort 测试本次通过，未调整其断言或超时。修复未改 package.json，未触发 Release workflow。随后交付记录提交仅补录本节证据，仍带 `[skip publish]` 且只推送 main；此处 CI 证据明确对应上述功能与测试代码，不将文档补录冒充一次新的本地全套验证。
 
 ## 限制与独立后续
 
