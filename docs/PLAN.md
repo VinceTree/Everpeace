@@ -1,36 +1,28 @@
 # 当前开发计划
 
-产品保持 DeepSeek 优先、Windows 优先、单 Agent、Node/TypeScript、Responses 与 inline TUI。当前版本、提交和验证证据只见 [HANDOFF](HANDOFF.md)。第一阶段整体框架与验证基线的 [计划](archive/PLAN_FRAMEWORK_BASELINE.md) 和 [交接](archive/HANDOFF_FRAMEWORK_BASELINE.md) 已归档。
+产品保持 DeepSeek 优先、Windows 优先、单 Agent、Node/TypeScript、Responses 与 inline TUI。当前版本、提交和验证证据只见 [HANDOFF](HANDOFF.md)。第二阶段任务与会话协调的 [计划](archive/PLAN_APPLICATION_COORDINATION.md) 和 [交接](archive/HANDOFF_APPLICATION_COORDINATION.md) 已归档。
 
-## 当前里程碑：任务与会话协调
+## 第三阶段首轮：逻辑 step 工具目录
 
-用户授权先交付第一阶段，再开始第二阶段。本轮处理一个明确问题：TUI 入口同时保存会话身份、模式、模型任务占用、批准正文和命令操作身份，相关判断分散。按状态所有者提取 UI 无关的应用协调对象，保留现有 runner、production factory、Session 存储、权限与用户流程。
+本轮处理 Agent 引擎中的一个明确问题：ReactAgent 分别保存广告工具定义、可调用名称与 MCP binding，并在另一处判定并发资格。这些派生状态属于同一逻辑 step，提取为独立工具目录，供请求准备、工具准入与并发调度读取。
 
-具体方案与边界：
+1. 工具目录按当前模式和可用宿主能力构建，保持既有工具集合及顺序；深复制并冻结定义和 MCP metadata。
+2. 同一个目录拥有名称准入、MCP binding 和保守并发资格，未知工具与 MCP annotations 不获得本地并发能力。
+3. 所有 step 来源准备完毕后发布目录；普通采样 retry 复用，follow-up／steering 刷新，turn 收尾丢弃，不从 Session 恢复。
+4. 实时权限、审批、取消／预算、文件观察、durable record 和实际工具执行留在现有路径；不提取第二套 dispatcher、loop、runner 或存储。
+5. 保持公共 CLI/SDK 参数、Session schema、请求工具定义及用户流程；使用离线 fake provider 验收。
 
-1. 协调对象管理当前 Session／Agent 身份、模式、模型任务准入／取消、Plan 批准和命令操作身份，TUI 持有单一实例及显示投影。
-2. 取消仅发信号，活动任务保持占位直到 runner 清理；句柄身份保护迟到完成，Session 和 Agent 替换推进身份。
-3. 初次惰性创建绑定已有任务；新建／恢复／清空／fork 只在宿主成功后替换协调身份，失败保留原状态和批准。
-4. 批准复制完整正文；显式执行同步消费并准入，不自动重试或从历史恢复。旧身份、已取消和重复结果不能授权。
-5. 存储 I/O、工作目录切换、审批界面、直接 PTY、guidance 与重放仍由适配入口负责；fork 验证债务仍按现有 runner 结算，不新增 schema 或公共参数。
+- [x] 提取工具目录并接入请求、工具准入、MCP binding 与并发资格。
+- [x] 覆盖 Plan 集合、可选能力、嵌套定义隔离、binding 隔离、未知工具与并发屏障。
+- [x] 保留并通过重试／follow-up、steering、权限收紧、取消、持久化及生产入口回归。
+- [x] 更新运行时、loop、项目地图、架构决策及交接。
+- [x] 串行执行实际 typecheck → lint → test → build，首败停止；记录 lint 缺项，检查差异和文档链接。
+- [ ] 按用户授权更新展示版本、提交并推送 main；核对 Test CI 与 Release 未变化，不推送 tag。
 
-- [x] 提取并接入 ApplicationCoordinator，保持核心依赖边界。
-- [x] 增加状态语义回归，覆盖清理占用、单次消费、取消、会话／Agent 替换、迟到与重复结果。
-- [x] 增加 TUI 竞争回归：清空期间的 Plan 清理与初次 Session 创建不能进入新会话。
-- [x] TUI、Plan、Session、runner、SDK 和生产闭环定向回归通过；原有断言保留。
-- [x] 更新项目地图、运行时／状态契约、TUI 结构、决策及交接。
-- [x] 最终串行执行实际 typecheck → lint → test → build，记录缺少 lint；差异、文档链接通过。
-- [x] 推送后核对 Windows/Linux Test CI 均通过，Release 未改变；证据见交接。
+## 后续顺序
 
-## 后续模块顺序
-
-1. Agent 引擎：先细化请求准备、上下文维护和工具调度的具体内部边界。
-2. 工具与进程：错误反馈、资源归属和取消清理，保持权限与文件观察约束。
-3. 存储与恢复：Session、usage、历史附件和 Memory 状态边界。
-4. 终端交互：输入、审批、resize、重放和真实 Windows Terminal 验收。
-
-以上仅确定顺序，不把路线图视为立即实施授权。每轮细化方案、完成回归和交接后进入下一项，整体框架见 [PROJECT_MAP](architecture/PROJECT_MAP.md#整体分层与状态归属)。
+Agent 引擎的其余请求投影／上下文职责在下一轮按具体问题细化；本轮不一并拆分整个 ReactAgent。之后依次推进工具与进程、存储与恢复、终端交互，每轮完成回归和交接后再进入下一项。整体框架见 [PROJECT_MAP](architecture/PROJECT_MAP.md#整体分层与状态归属)。
 
 ## 独立验收
 
-本轮沿用离线 fake provider，不调用真实模型。真实 Windows Terminal 手工验收仍单独 pending，自动测试不能替代；不创建或更新 Release，不推送 tag，保留用户所有原有未跟踪内容。
+真实 Windows Terminal 手工验收仍单独 pending，自动测试不能替代；不调用真实模型，不创建或更新 Release，不推送 tag，保留用户所有原有未跟踪内容。

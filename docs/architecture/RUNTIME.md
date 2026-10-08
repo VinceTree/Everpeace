@@ -8,6 +8,7 @@
 |---|---|---|
 | 模型参数、请求失败、token | 请求与计量 | [capabilities](../../src/providers/capabilities.ts)、[provider factory](../../src/providers/openai-compatible.ts)、[provider tests](../../tests/unit/providers/capabilities.test.ts) |
 | 重试、流、并发、steering | ReAct 循环 | [ReactAgent](../../src/agent/react-agent.ts)、[agent-loop](../../src/agent/agent-loop.ts)、[loop boundaries](../../tests/unit/agent/loop-boundaries.test.ts) |
+| step 工具集合、准入与 MCP binding | ReAct 循环 | [工具目录](../../src/agent/step-tool-catalog.ts)、[目录回归](../../tests/unit/agent/step-tool-catalog.test.ts) |
 | 自动修复、完成状态、取消 | Coding task 与验证 | [task-runner](../../src/workflow/task-runner.ts)、[workflow](../../src/workflow/runtime.ts)、[runner tests](../../tests/unit/workflow/task-runner.test.ts) |
 | 编码提问、执行清单、后台完成通知 | ReAct 循环、Coding task 与验证 | [ReactAgent](../../src/agent/react-agent.ts)、[task progress](../../src/workflow/task-progress.ts)、[ReactAgent tests](../../tests/unit/agent/react-agent.test.ts) |
 | 压缩、上下文大小 | 上下文 | [conversation-checkpoint](../../src/agent/conversation-checkpoint.ts)、[request-snapshot](../../src/agent/request-snapshot.ts)、[checkpoint tests](../../tests/unit/agent/conversation-checkpoint.test.ts) |
@@ -71,7 +72,9 @@ TUI 分开显示主编码与辅助用量；Session 编码总量不混入标题�
 
 生产启用最多四个经过能力审定的只读工具并发；`parallelReadTools` 是宿主调度设置，和发给供应商的 `parallel_tool_calls` 分离。某个读取完成即可补入下一项，连续已就绪结果按序持久化后释放缓存；全部完成但未持久化结果及其待提交输出正文受数量与字节背压限制。超大结果的正文在并发执行阶段仅有界准备，按模型顺序提交附件、追加配对结果引用，再淘汰旧附件；任何存储失败均停止后续请求。写入、shell、MCP、审批和不安全读取形成串行屏障。
 
-dispatch 仍检查实时权限、当前 step 广告工具集合、停止状态和取消。Plan 只读限制由宿主实施；不能依靠模型遵循提示。steering 在安全点保存并更新上下文，未启动工具补齐 `steered` output，不能遗留断开的工具链。
+[StepToolCatalog](../../src/agent/step-tool-catalog.ts) 拥有一个逻辑 step 的工具定义、名称准入、MCP binding 和并发资格。ReactAgent 等 MCP／Skill／Memory／项目规则来源全部准备完毕后构建目录；定义和 metadata 深复制并冻结，普通采样 retry 复用，follow-up／steering 重建，turn 收尾丢弃。请求参数、稳定前缀、context inspection 与 dispatch 读取同一个目录；未广告的 MCP metadata 不能进入 binding 查询，MCP annotations 也不能取得本地读取的并发资格。目录不包含权限或持久化状态，不从 Session 历史恢复。
+
+dispatch 仍检查实时权限、当前 step 目录、停止状态和取消。Plan 只读限制由宿主实施；不能依靠模型遵循提示。steering 在安全点保存并更新上下文，未启动工具补齐 `steered` output，不能遗留断开的工具链。目录只提供准入事实，不执行工具或授权操作；实际路由、审批、文件观察和结果落盘继续使用现有 ReactAgent 与工具实现。
 
 活动 coding task 为每次 runner invocation 分配 generation。后台命令完成只排入该 generation 的元数据通知（job ID、终态、退出码、完成时间）；下一个普通 step 在工具结果配对和 steering 之后，通过既有 durable context 通道保存通知，成功后才确认出队，正文仍须用 `poll_background` 读取。通知不会唤醒空闲 Session 或额外发请求；任务结束会丢弃未送达项，迟到 callback 也因 generation 失效。运行中 job 与未送达通知合计最多 20 项，既有同时运行两个命令的限制继续生效。
 

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runAgentLoop, type ToolCall, type AgentLoopOptions } from "../../../src/agent/agent-loop.js";
 import { ReactAgent, type AgentResponse, type AgentIO } from "../../../src/agent/react-agent.js";
 import { repairToolContext } from "../../../src/agent/repair-context.js";
@@ -245,7 +248,7 @@ test("budget and unknown usage stop before tools, retries, and false completion"
 test("MCP hints never parallelize approval or dispatch", async () => {
   let requests = 0, active = 0, peak = 0;
   const names = ["mcp__a__read", "mcp__b__read"];
-  const agent = new ReactAgent({ model: "test", parallelToolCalls: true,
+  const agent = new ReactAgent({ model: "test", parallelToolCalls: true, parallelReadTools: true,
     client: { responses: { create: async () => ++requests === 1 ? response(names.map((name, index) => call(String(index), name))) : response() } },
     mcp: {
       ensureReady: async () => ({ tools: names.map((name) => ({ type: "function", name, description: "read", parameters: { type: "object" } })), instructions: "", servers: [] }),
@@ -256,6 +259,92 @@ test("MCP hints never parallelize approval or dispatch", async () => {
   });
   await agent.runTurn("read");
   assert.equal(peak, 1);
+});
+
+test("Agent catalog parallelizes local reads but keeps MCP as an ordered barrier", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "everpeace-step-catalog-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(join(root, "a.txt"), "first file");
+  await writeFile(join(root, "b.txt"), "second file");
+  let requests = 0, active = 0, peak = 0;
+  const name = "mcp__fixture__read";
+  const order: string[] = [], recorded: Record<string, unknown>[] = [];
+  const agent = new ReactAgent({
+    workspacePath: root, model: "offline", parallelReadTools: true, maxParallelTools: 2,
+    client: { responses: { async create() {
+      return ++requests === 1 ? response([
+        call("a", "read_file", { path: "a.txt" }),
+        call("b", "read_file", { path: "b.txt" }),
+        call("mcp", name),
+        call("c", "read_file", { path: "a.txt" }),
+      ]) : response();
+    } } },
+    io: { ...io, getPermissions: () => ({ mode: "full-access", web: false }) },
+    mcp: {
+      async ensureReady() {
+        return { tools: [{ type: "function", name, description: "fixture", parameters: { type: "object" } }],
+          toolInfo: [{ callableName: name, serverName: "fixture", toolName: "read", binding: "step-binding" }], instructions: "", servers: [] };
+      },
+      toolInfo() { throw new Error("Live metadata lookup is forbidden"); },
+      async call(_name, _args, binding) {
+        assert.equal(active, 1);
+        assert.equal(binding, "step-binding");
+        return "MCP complete";
+      },
+    },
+    async onToolEvent(event) {
+      if (event.type === "tool_started") {
+        active++;
+        peak = Math.max(peak, active);
+        order.push(event.call.call_id);
+        if (event.call.name === "read_file") await new Promise<void>((resolve) => setImmediate(resolve));
+      } else active--;
+    },
+    async onHistoryAppend(items) { recorded.push(...items); },
+  });
+  t.after(() => agent.dispose());
+  await agent.runTurn("Inspect both files, call MCP, then inspect again.");
+  assert.equal(peak, 2);
+  assert.equal(active, 0);
+  assert.deepEqual(order, ["a", "b", "mcp", "c"]);
+  const results = recorded.filter((item) => item.type === "function_call_output");
+  assert.deepEqual(results.map((item) => item.call_id), order);
+  assert.match(String(results[0]?.output), /first file/u);
+  assert.match(String(results[1]?.output), /second file/u);
+  assert.equal(requests, 2);
+});
+
+test("failed step preparation cannot sample and its catalog cannot authorize a later turn", async () => {
+  let preparations = 0, requests = 0, executed = 0;
+  const name = "mcp__fixture__read";
+  const recorded: Record<string, unknown>[] = [];
+  const agent = new ReactAgent({ model: "offline", io: { ...io, getPermissions: () => ({ mode: "full-access", web: false }) },
+    client: { responses: { async create(params) {
+      requests++;
+      if (requests === 1) return response([call("original", name)]);
+      assert.equal((params.tools as Array<{ name: string }>).some((tool) => tool.name === name), false);
+      return requests === 2 ? response([call("late", name)]) : response();
+    } } },
+    mcp: {
+      async ensureReady() {
+        if (++preparations === 2) throw new Error("Catalog source failed");
+        return { tools: preparations === 1 ? [{ type: "function", name, description: "fixture", parameters: { type: "object" } }] : [],
+          toolInfo: [{ callableName: name, serverName: "fixture", toolName: "read", binding: "old-binding" }], instructions: "", servers: [] };
+      },
+      toolInfo() { throw new Error("Live metadata lookup is forbidden"); },
+      async call() { executed++; return "original result"; },
+    },
+    async onHistoryAppend(items) { recorded.push(...items); },
+  });
+  try {
+    await assert.rejects(agent.runTurn("first task"), /Catalog source failed/u);
+    assert.equal(requests, 1);
+    assert.equal(executed, 1);
+    await agent.runTurn("new task");
+    assert.equal(executed, 1);
+    assert.equal(requests, 3);
+    assert.match(String(recorded.find((item) => item.type === "function_call_output" && item.call_id === "late")?.output), /TOOL_UNAVAILABLE/u);
+  } finally { await agent.dispose(); }
 });
 
 test("parallel reads are bounded, ordered and cannot cross a write", async () => {

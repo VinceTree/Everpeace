@@ -12,7 +12,13 @@ Session 保存持久事实，界面使用投影。批准、文件观察和活动
 
 [ApplicationCoordinator](../../src/runtime/application-coordinator.ts) 从 TUI 提取 Session／Agent 身份、模式、模型任务准入／取消、Plan 批准和命令操作身份。它是每次 TUI 挂载的进程内状态所有者，使用泛型 Agent 身份，不引用 UI 合同；TUI 保存显示投影和宿主 I/O 适配，生产 factory 与 coding runner 继续承担原职责。
 
-取消不释放准入，清理后才由同一任务句柄释放；成功会话替换推进身份并取消旧任务，首次惰性创建保留现有任务身份。批准正文复制保存／读取，消费与执行准入同步完成，旧会话、旧 Agent、取消或重复结果不能恢复批准。失败的宿主会话操作不提交身份替换。初次 Session 创建在清空后才返回时，保留已落盘事实但不重新进入旧会话；旧任务清理仍释放入口，不把其错误或批准显示到新会话。语义回归见 [协调状态](../../tests/unit/runtime/application-coordinator.test.ts) 和 [TUI App](../../tests/unit/tui/app.test.tsx)。不提取第二套验证或存储，也不在本轮继续整理 Agent 引擎、工具、存储或终端模块。
+取消不释放准入，清理后才由同一任务句柄释放；成功会话替换推进身份并取消旧任务，首次惰性创建保留现有任务身份。批准正文复制保存／读取，消费与执行准入同步完成，旧会话、旧 Agent、取消或重复结果不能恢复批准。失败的宿主会话操作不提交身份替换。初次 Session 创建在清空后才返回时，保留已落盘事实但不重新进入旧会话；旧任务清理仍释放入口，不把其错误或批准显示到新会话。语义回归见 [协调状态](../../tests/unit/runtime/application-coordinator.test.ts) 和 [TUI App](../../tests/unit/tui/app.test.tsx)。第二阶段的这次提取不建立第二套验证或存储，也不同时整理 Agent 引擎、工具、存储或终端模块。
+
+## Agent step 工具目录
+
+第三阶段首轮按同一逻辑 step 的状态归属提取 [StepToolCatalog](../../src/agent/step-tool-catalog.ts)：广告定义、名称准入、MCP binding 和并发资格由一个不可变目录派生。ReactAgent 在独立来源准备成功后构建它；请求、稳定前缀、context inspection 与 dispatch 共同读取，普通 retry 复用，follow-up／steering 刷新，turn 收尾丢弃。保持工具顺序和格式，不扩展公共参数或 Session schema。
+
+MCP metadata 仅绑定当前广告工具，annotations 与供应商并行参数都不能授予本地并发能力。宿主审定的读取可以并发，LSP 与 MCP 保持串行屏障；返回的能力对象独立，外部修改不能改变目录。工具路由、实时权限、审批、取消、预算、文件观察、durable record 与 runner 结算继续归既有实现，不因目录存在而获得操作授权。回归覆盖嵌套定义／binding 隔离、失败准备不得采样、跨 turn 准入丢弃和真实本地读取顺序，见 [目录回归](../../tests/unit/agent/step-tool-catalog.test.ts) 与 [loop boundaries](../../tests/unit/agent/loop-boundaries.test.ts)。后续请求／上下文职责逐项细化，不机械拆分整个 ReactAgent。
 
 ## 个人开发任务连续性与失败反馈
 

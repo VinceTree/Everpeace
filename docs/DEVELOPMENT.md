@@ -71,6 +71,7 @@ pnpm exec tsx --test --test-name-pattern="cancel" tests/unit/agent/react-agent.t
 | 分层依赖、类型配置 | [dependency-boundaries.test.ts](../tests/unit/architecture/dependency-boundaries.test.ts)；用 `tsc --listFilesOnly` 对照 tracked `.ts` / `.tsx` 清单 |
 | 模型任务准入、取消、会话身份与批准 | [application-coordinator.test.ts](../tests/unit/runtime/application-coordinator.test.ts)、[app.test.tsx](../tests/unit/tui/app.test.tsx)、[生产 Plan 闭环](../tests/unit/runtime/plan-execution.test.tsx) |
 | 采样、工具调度、取消、上下文 | [agent tests](../tests/unit/agent/) |
+| step 工具定义、准入、binding 与并发资格 | [step-tool-catalog.test.ts](../tests/unit/agent/step-tool-catalog.test.ts)、[loop-boundaries.test.ts](../tests/unit/agent/loop-boundaries.test.ts)、[react-agent.test.ts](../tests/unit/agent/react-agent.test.ts)；同时覆盖 Plan、重试和权限边界 |
 | 完成判据、修复、验证、变更跟踪 | [workflow tests](../tests/unit/workflow/) |
 | Responses 能力与请求参数 | [provider tests](../tests/unit/providers/) |
 | 文件保护、后台命令、搜索、LSP | [tool tests](../tests/unit/tools/) |
