@@ -1,5 +1,13 @@
 # Architecture Decisions
 
+## 全项目分层与验证基线
+
+现有实现按入口适配、应用协调、任务执行、Agent 引擎、能力与资源划分职责；各层映射和状态所有者统一记录于 [PROJECT_MAP](PROJECT_MAP.md#整体分层与状态归属)。生产 factory 保持共享装配入口，核心模块不依赖 React、Ink 或 TUI。入口负责交互，应用协调决定是否启动及会话归属，现有 runner 决定清理、验证和最终完成；后续按状态所有权逐步提取，不按行数拆文件，不建立第二套 runner 或存储。
+
+Session 保存持久事实，界面使用投影。批准、文件观察和活动进程各自保留现有生命周期，不通过恢复历史重建批准或写权限。本阶段只建立架构与验证契约，不新增协调模块，不改变公共 CLI/SDK、Session schema 或操作流程。
+
+[架构回归](../../tests/unit/architecture/dependency-boundaries.test.ts) 使用已安装 TypeScript 的解析能力，禁止 runtime、Agent、workflow、exec、SDK 普通／类型导入、重导出或字面量动态导入 React、Ink、`@inkjs/ui` 与 TUI 模块；CLI 与 TUI 适配入口允许合法 UI 依赖。常规类型检查显式覆盖源码及测试全部 `.ts` / `.tsx`，构建显式覆盖源码 TSX 并排除测试，保留严格设置与 ES2022。暴露的测试契约差异由替身和数据修复，不放宽生产接口或断言。门禁与升级编译器时的解析 API 复核见 [DEVELOPMENT](../DEVELOPMENT.md#开发与检查命令)。
+
 ## 个人开发任务连续性与失败反馈
 
 参考固定 DeepSeek Harness `639ed015397290b3745d163aafe02ffee4aa3f84` 的 `compaction-basic/src/summarizer.ts`，采用结构化交接保留目标、最新纠正、失败证据和下一步，但继续使用现有 Responses 与单 Agent runner。模型摘要作为 assistant 背景；旧摘要仅做请求投影，避免将模型生成正文放入 developer 权威。八章结构验证失败时保留原 context，不以额外请求修复摘要；这保证失败关闭，不保证模型摘要语义无遗漏。
@@ -68,11 +76,11 @@ benchmark 结果不是 Session 事件，不写入 JSONL，也不进入模型 con
 
 Provider capability profile 只记录已观察的模型能力和 context window。未知兼容端点保持保守默认值，第一阶段不自动路由或切换模型，避免把未验证的 provider 假设变成运行时策略。
 
-## 生产 runtime 与公开 exec
+## 生产 runtime 与公开 exec / SDK
 
-真实运行依赖由 `src/runtime/production.ts` 统一装配：provider、ReactAgent、Session 历史/附件、Skills、MCP、learned Memory、Goal、代码导航及原生 sandbox command executor 不再由 TUI 和 benchmark 分别拼装。Ink 只提供交互与显示回调；公开 `everpeace exec` 通过同一 factory 和 `CodingTaskRunner` 运行，内部 benchmark 只保留 reviewed 参数与批准策略覆盖。这样共享的是生产行为，不把 benchmark adapter 暴露为公共 API。
+真实运行依赖由 `src/runtime/production.ts` 统一装配：provider、ReactAgent、Session 历史/附件、Skills、MCP、learned Memory、Goal、代码导航及原生 sandbox command executor 不再由 TUI 和 benchmark 分别拼装。Ink 只提供交互与显示回调；公开 `everpeace exec` 与 `everpeace/sdk` 的 `runTask` 通过同一 factory 和 `CodingTaskRunner` 运行，内部 benchmark 只保留 reviewed 参数与批准策略覆盖。这样共享的是生产行为，不把 benchmark adapter 暴露为公共 API。
 
-exec 采用 CLI + JSONL，而非本期新增 TypeScript SDK。每次调用创建正常可恢复 Session，模型先按注册 ID、再按唯一名称解析；提示词只来自位置参数或非 TTY stdin。首版没有非交互 resume、Plan 或自动批准，所有需要用户的审批/结构化问题先保存配对结果，再以 `interaction_required` 结算。可选 token budget、deadline 和 step 上限覆盖完整 runner/repair 生命周期。默认 stdout 只保留最终正文，JSON 模式只输出脱敏白名单事件，并在任务清理后尝试发布唯一终态；帮助解析不得提前加载 keyring、MCP 或 TUI。
+exec 提供 CLI + JSONL，公开 SDK 提供相同非交互运行和事件的 TypeScript 接口，不挂载 Ink。每次调用创建正常可恢复 Session，模型先按注册 ID、再按唯一名称解析；CLI 提示词来自位置参数或非 TTY stdin。`--resume` 在相同工作区 fork 独立子会话，并保留 `session_resume` 的验证债务语义；`--plan` 只读输出计划，不自动批准或执行。所有需要用户的审批／结构化问题先保存配对结果，再以 `interaction_required` 结算。可选 token budget、deadline 和 step 上限覆盖完整 runner/repair 生命周期。默认 stdout 只保留最终正文，JSON 模式只输出脱敏白名单事件，并在任务清理后尝试发布唯一终态；帮助解析不得提前加载 keyring、MCP 或 TUI。
 
 exec 输出接受消费端背压，正文完整保留并分块转义，助手/工具事件的异步回调向生产循环传递等待。Windows 非 TTY 标准管道由 CLI host 拥有的 writer 子进程负责写入，避免同步管道阻塞主循环取消与清理。管道失败或半条 JSONL 中断后不能保证终态可写，消费端同时检查退出码；具体大小与超时契约见 [STATE_AND_UI](STATE_AND_UI.md#非交互-exec)。
 
@@ -244,7 +252,7 @@ Responses usage 中的 `input_tokens_details.cached_tokens` 与 `cache_write_tok
 
 并发能力已从工具名白名单迁移到显式 `read_only`、`idempotent`、`parallel_safe` 和资源键；未声明工具串行，MCP 元数据不单独授予本地并发权限。结果按模型顺序持久化，取消、steering、stop 和持久化失败不得留下未配对 function output。
 
-benchmark 只作为协议变更证据，不是自动路由或近期重构理由。hooks、MCP OAuth/elicitation/tasks、Plugin/远端 provider、多 Agent、TypeScript SDK 和外部 app-server 维持明确未实现边界，不用 no-op 或伪造成功暴露。
+benchmark 只作为协议变更证据，不是自动路由或近期重构理由。hooks、MCP OAuth/elicitation/tasks、Plugin/远端 provider、多 Agent 和外部 app-server 维持明确未实现边界，不用 no-op 或伪造成功暴露。公开 TypeScript SDK 已复用 exec 的生产任务路径，不扩展这些能力。
 
 ## 维护约束
 

@@ -31,7 +31,7 @@ test("recalled slash commands do not capture history arrows and Down returns to 
 test("history navigation restores drafts and Ctrl+C clears before exiting", async () => {
   let exits = 0;
   const submissions: string[] = [];
-  const view = render(<Prompt activeModelName="test" history={["first", "!pwd"]} onSubmit={(text) => submissions.push(text)} onEmptyInterrupt={() => exits++} />);
+  const view = render(<Prompt activeModelName="test" history={["first", "!pwd"]} onSubmit={(text) => { submissions.push(text); }} onEmptyInterrupt={() => exits++} />);
   await tick();
   view.stdin.write("draft"); await tick();
   view.stdin.write("\u001b[A"); await tick();
@@ -48,7 +48,7 @@ test("history navigation restores drafts and Ctrl+C clears before exiting", asyn
 
 test("bracketed multiline paste and modified Enter never submit accidentally", async () => {
   const submissions: string[] = [];
-  const view = render(<Prompt activeModelName="test" onSubmit={(text) => submissions.push(text)} />);
+  const view = render(<Prompt activeModelName="test" onSubmit={(text) => { submissions.push(text); }} />);
   await tick();
   view.stdin.write("\u001b[200~first\nsecond\u001b[201~"); await tick();
   view.stdin.write("\u001b[13;2u"); await tick();

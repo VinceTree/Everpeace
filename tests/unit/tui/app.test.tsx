@@ -73,12 +73,17 @@ function visibleSlashCommandLines(frame: string): SlashCommand[] {
 
 function lastBorderedSurface(frame: string): string {
   const lines = frame.split("\n");
-  const bottom = lines.findLastIndex((line) => line.trimStart().startsWith("╰"));
+  let bottom = lines.length - 1;
+  while (bottom >= 0 && !lines[bottom]!.trimStart().startsWith("╰")) bottom -= 1;
   assert.ok(bottom >= 0, "expected a bordered command surface");
   let top = bottom;
   while (top >= 0 && !lines[top]!.trimStart().startsWith("╭")) top -= 1;
   assert.ok(top >= 0, "expected the command surface top border");
   return lines.slice(top, bottom + 1).join("\n");
+}
+
+function timelineText(entries: readonly StoredTimelineEntry[]): string {
+  return entries.map((entry) => "text" in entry ? entry.text : "").join("\n");
 }
 
 function stored(model: RegisteredModel): StoredModelRegistration {
@@ -339,6 +344,7 @@ function createFixture(options?: {
           await restore?.onContextAppend?.([
             { type: "message", role: "assistant", content: `echo: ${input}` },
           ]);
+          return {};
         },
       })),
     async generateSessionTitle(_model, firstQuestion) {
@@ -369,8 +375,8 @@ function createPlanFixture(options: { endTask?: () => Promise<void>; coding?: (s
     return {
       beginTask(input) { starts.push({ mode: input.mode, source: input.source }); },
       async runTurn(text, signal, input) {
-        inputs.push({ text, mode: input.mode ?? "default" });
-        if (input.mode === "plan") {
+        inputs.push({ text, mode: input?.mode ?? "default" });
+        if (input?.mode === "plan") {
           const review = normalizePlanReview(await io.reviewPlan!({ title: "Approved offline plan", plan: approvedBody }, signal));
           return { planDecision: review.decision, ...(review.decision === "approve" ? { approvedPlan: approvedBody, approvedPlanTitle: "Approved offline plan" } : {}) };
         }
@@ -812,6 +818,7 @@ test("/compact replaces persisted model context without removing the visible tra
       async runTurn(input) {
         await restore?.onContextAppend?.([{ role: "user", content: input }]);
         io.writeAssistant("visible answer");
+        return {};
       },
       async compact() {
         const items = [{ type: "compaction", encrypted_content: "opaque" }];
@@ -853,6 +860,7 @@ test("history below the Codex row cap stays visible and remains persisted", asyn
     createAgent: (_model, io) => ({
       async runTurn() {
         for (let index = 0; index < 205; index++) io.writeAssistant(`window-reply-${index}.`);
+        return {};
       },
     }),
   });
@@ -900,6 +908,7 @@ test("active turns show provider-aware English sampling and tool phases", async 
         await new Promise<void>((resolve) => { finishTurn = resolve; });
         restore?.onPhase?.("completed");
         io.writeAssistant("done");
+        return {};
       },
     }),
   });
@@ -941,6 +950,7 @@ test("running turns keep a guidance composer and drain queued corrections", asyn
           await new Promise<void>((resolve) => { releaseFirst = resolve; });
         }
         io.writeAssistant(`done: ${input}`);
+        return {};
       },
     }),
   });
@@ -984,6 +994,7 @@ test("running composer sends guidance to agents with live steering support", asy
         await new Promise<void>((resolve) => { release = resolve; });
         restore?.onEvent?.({ type: "steering_applied", count: corrections.length });
         io.writeAssistant(`applied ${corrections.join("; ")}`);
+        return {};
       },
       requestSteering(text) { corrections.push(text); return true; },
     }),
@@ -1082,6 +1093,7 @@ test("/status keeps cumulative usage persistent while its command screen stays t
           total_tokens: 1_500,
         });
         io.writeAssistant("done");
+        return {};
       },
     }),
   });
@@ -1157,7 +1169,7 @@ test("/reasoning applies on the next turn and persists with the session model", 
     initial: [model],
     createAgent: (_model, io) => ({
       setRequestSettings(settings) { selected = settings.reasoningEffort; },
-      async runTurn(input) { io.writeAssistant(`done: ${input}`); },
+      async runTurn(input) { io.writeAssistant(`done: ${input}`); return {}; },
     }),
   });
   const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
@@ -1356,7 +1368,7 @@ test("/memory opens a transient learned experience surface and supports pause", 
     enabled: true,
     projectEntries: 2,
     userEntries: 1,
-    recent: [{ scope: "project", lesson: "Validate inputs first", applyWhen: "When adding commands", createdAt: "2026-09-20T00:00:00.000Z" }],
+    recent: [{ id: "lesson-1", scope: "project", kind: "procedure", lesson: "Validate inputs first", applyWhen: "When adding commands", confidence: "high", status: "active", createdAt: "2026-09-20T00:00:00.000Z", updatedAt: "2026-09-20T00:00:00.000Z" }],
   });
   let enabled: boolean | undefined;
   fixture.dependencies.setMemoryEnabled = async (value) => { enabled = value; };
@@ -1802,6 +1814,7 @@ test("model-requested Bash waits for confirmation", async () => {
           await io.runBash("pwd");
           io.writeAssistant("done");
         }
+        return {};
       },
     }),
   });
@@ -1850,6 +1863,7 @@ test("model-requested MCP calls use their own approval surface", async () => {
           called = true;
           io.writeAssistant("mcp done");
         }
+        return {};
       },
     }),
   });
@@ -1884,6 +1898,7 @@ test("model Bash streams head and tail output and adapts to terminal height", as
           await io.runBash("long-output");
           io.writeAssistant("done");
         }
+        return {};
       },
     }),
   });
@@ -2092,7 +2107,7 @@ test("/clear resets the agent session and clears rendered output", async () => {
     initial: [model],
     createAgent: () => {
       createdAgents += 1;
-      return { async runTurn() {} };
+      return { async runTurn() { return {}; } };
     },
   });
   const view = render(
@@ -2269,13 +2284,13 @@ test("/new leaves the previous session intact and writes subsequent chat only to
 
   assert.equal(fixture.sessionStore.sessions.size, 2);
   assert.doesNotMatch(
-    oldSession.timeline.map((entry) => entry.text).join("\n"),
+    timelineText(oldSession.timeline),
     /new conversation/,
   );
   const newSession = [...fixture.sessionStore.sessions.values()].at(-1);
   assert.ok(newSession);
   assert.match(
-    newSession.timeline.map((entry) => entry.text).join("\n"),
+    timelineText(newSession.timeline),
     /new conversation/,
   );
   view.unmount();
@@ -2320,8 +2335,8 @@ test("/fork creates and enters an independent child with the requested title", a
     await tick();
     view.stdin.write("\r");
     await waitFor(() => (view.lastFrame() ?? "").includes("echo: child-only message"));
-    assert.doesNotMatch(parent.timeline.map((entry) => entry.text).join("\n"), /child-only message/u);
-    assert.match(child.timeline.map((entry) => entry.text).join("\n"), /child-only message/u);
+    assert.doesNotMatch(timelineText(parent.timeline), /child-only message/u);
+    assert.match(timelineText(child.timeline), /child-only message/u);
     assert.equal(child.forkPendingResume, false);
   } finally {
     view.unmount();
@@ -2337,6 +2352,7 @@ test("/fork refuses while a model task is active", async () => {
       async runTurn(input) {
         if (input === "hold task") await new Promise<void>((resolve) => { release = resolve; });
         io.writeAssistant(`done: ${input}`);
+        return {};
       },
     }),
   });
@@ -2404,7 +2420,7 @@ test("a restarted fork keeps resume semantics through planning and cancellation 
         taskStarts.push({ mode: options.mode, source: options.source });
       },
       async runTurn(input, signal, options) {
-        if (options.mode === "plan") {
+        if (options?.mode === "plan") {
           io.writeAssistant(`planned: ${input}`);
           return {};
         }
@@ -2549,6 +2565,7 @@ test("/resume restores transcript, workspace, context, and continues the same se
         async runTurn(input) {
           await restore?.onContextAppend?.([{ role: "user", content: input }]);
           io.writeAssistant(`continued: ${input}`);
+          return {};
         },
       };
     },
@@ -2615,7 +2632,9 @@ test("/resume restores transcript, workspace, context, and continues the same se
   await waitFor(() => (view.lastFrame() ?? "").includes("continued: continue now"));
   assert.equal(fixture.sessionStore.sessions.size, 1);
   const loaded = await fixture.sessionStore.load(summary.id);
-  assert.match(loaded.timeline.at(-1)?.text ?? "", /continued: continue now/);
+  const lastEntry = loaded.timeline.at(-1);
+  assert.ok(lastEntry && "text" in lastEntry);
+  assert.match(lastEntry.text, /continued: continue now/);
   assert.deepEqual(loaded.context.at(-1), { role: "user", content: "continue now" });
   view.unmount();
 });
@@ -2649,7 +2668,7 @@ test("/resume asks for a replacement model and preserves the restored context", 
     initial: [replacement],
     createAgent: (_model, _io, restore) => {
       restoredContexts.push(restore?.initialContext ?? []);
-      return { async runTurn() {} };
+      return { async runTurn() { return {}; } };
     },
   });
   const oldModel: SessionModelRef = {
@@ -2808,7 +2827,7 @@ test("/permissions is transient and changes the live policy without rebuilding t
   const fixture = createFixture({ initial: [model], createAgent: (_model, agentIo) => {
     io = agentIo;
     created++;
-    return { async runTurn() {} };
+    return { async runTurn() { return {}; } };
   } });
   const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
   await tick();

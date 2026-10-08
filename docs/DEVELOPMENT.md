@@ -46,13 +46,17 @@ Windows TUI 手工验收仍需真实 Windows Terminal。通过 WSL 调用 Node �
 | --- | --- |
 | `pnpm dev` | 用 tsx 启动开发 CLI/TUI |
 | `pnpm dev -- exec <prompt> ...` | 用 tsx 运行公开非交互 CLI 路径 |
-| `pnpm typecheck` | 检查项目 TypeScript 类型 |
+| `pnpm typecheck` | 严格检查全部源码与测试 `.ts` / `.tsx` |
 | `pnpm test` | 执行全部测试，文件并发度固定为 4 |
 | `pnpm build` | 清理并重新生成构建产物 |
 | `pnpm start` | 运行已经构建的 CLI |
 | `git diff --check` | 检查 tracked 差异的空白问题 |
 
 本仓库没有独立 `lint` script，不要为完成检查臆造该命令。Agent 对目标项目运行的最终 suite 与本仓库门禁不同：它发现目标当前 manifest 的实际脚本，并按 `typecheck → lint → test → build` 顺序全部执行。
+
+[类型配置](../tsconfig.json) 显式包含 `src` 和 `tests` 下所有 `.ts`、`.tsx`，保留严格选项和 ES2022 target；[构建配置](../tsconfig.build.json) 显式包含源码 TSX，继续排除测试。测试替身按真实接口返回结果、处理可选参数和收窄联合类型；不得通过扩大生产接口、`any`、忽略错误或移除断言规避检查。辅助写法必须与当前编译库兼容。
+
+[依赖边界回归](../tests/unit/architecture/dependency-boundaries.test.ts) 使用已有 TypeScript 的异步解析 API 扫描 runtime、Agent、workflow、exec、SDK 的源码，禁止普通／类型导入、重导出和字面量动态导入 React、Ink、`@inkjs/ui` 或 TUI。TUI、CLI 适配入口允许 UI 依赖。虚拟文件案例验证语法覆盖与允许边界；解析快照和本地编译器子进程在结束时清理，不增加依赖或独立 lint 工具。TypeScript 的 `unstable` API 是当前已安装编译器的接口，升级编译器时须复核这项回归。
 
 开发期间先运行与变化相关的测试，再执行交付门禁。定向测试直接使用相同的 tsx/Node runner：
 
@@ -64,6 +68,7 @@ pnpm exec tsx --test --test-name-pattern="cancel" tests/unit/agent/react-agent.t
 
 | 修改范围 | 首选测试入口 |
 | --- | --- |
+| 分层依赖、类型配置 | [dependency-boundaries.test.ts](../tests/unit/architecture/dependency-boundaries.test.ts)；用 `tsc --listFilesOnly` 对照 tracked `.ts` / `.tsx` 清单 |
 | 采样、工具调度、取消、上下文 | [agent tests](../tests/unit/agent/) |
 | 完成判据、修复、验证、变更跟踪 | [workflow tests](../tests/unit/workflow/) |
 | Responses 能力与请求参数 | [provider tests](../tests/unit/providers/) |
@@ -71,6 +76,7 @@ pnpm exec tsx --test --test-name-pattern="cancel" tests/unit/agent/react-agent.t
 | Session schema 与恢复 | [session-store.test.ts](../tests/unit/storage/session-store.test.ts)、[app.test.tsx](../tests/unit/tui/app.test.tsx) |
 | 历史、附件、分支与裁剪 | [session-history.test.ts](../tests/unit/storage/session-history.test.ts)、[session-outputs.test.ts](../tests/unit/storage/session-outputs.test.ts)、[react-agent.test.ts](../tests/unit/agent/react-agent.test.ts) |
 | `everpeace exec` 参数、JSONL 与生产运行 | [CLI tests](../tests/unit/cli/)、[exec tests](../tests/unit/exec/)、[runtime factory tests](../tests/unit/runtime/) |
+| 公开 SDK 非交互契约 | [SDK tests](../tests/unit/exec/sdk.test.ts) |
 | 终端布局、输入、slash 窗口 | [TUI tests](../tests/unit/tui/) |
 | Memory、Skills、MCP | [memory](../tests/unit/memory/)、[skills](../tests/unit/skills/)、[mcp](../tests/unit/mcp/) |
 | 评测预算、fixture、独立评分 | [benchmark tests](../tests/unit/benchmark/) |
@@ -130,7 +136,7 @@ pnpm benchmark:campaign -- --config .\campaign.json --prove-fixtures
 1. 开始时执行 `git status --short --branch` 与 `git diff`，记录用户已有 tracked/untracked 差异。
 2. 按任务文档定位最小源码、测试和接口范围；实现依赖的当前代码仍须阅读，文档不能替代真实写入前检查。
 3. 行为、接口或持久化变化同步补相关回归；纯文档变化检查链接、示例和事实即可，不写镜像实现的测试。
-4. 默认串行执行 `pnpm typecheck`、`pnpm test`、`pnpm build`，然后运行 `git diff --check`。无法完成的命令注明原因与未验证范围。
+4. 按实际存在的 `typecheck → lint → test → build` 串行执行，首败停止；当前执行 `pnpm typecheck`、记录缺少 lint、`pnpm test`、`pnpm build`，然后运行 `git diff --check`。无法完成的命令注明原因与未验证范围。
 5. 全仓 diff 因用户原有差异失败时单独报告；再对本次文件做 scoped 检查，不修改用户文件来制造全绿。新建未跟踪文档须另行检查，普通 `git diff --check` 不覆盖它们。
 6. 更新对应专题文档，并检查 [PLAN.md](PLAN.md)、[DECISIONS.md](architecture/DECISIONS.md)、[HANDOFF.md](HANDOFF.md)；命令、输出或安装行为变化时同步两份 README。
 7. HANDOFF 保存最新状态、实测证据、已知限制和下一步；专题保存稳定契约；根 AGENTS 保存通用约束与阅读路径。旧记录不得覆盖当前事实。

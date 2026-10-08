@@ -10,16 +10,32 @@ Everpeace 是 DeepSeek 优先、Windows 优先的个人开发 CLI；保留官方
 - React + Ink 提供 inline TUI，保留原生 scrollback；同一 `dist/cli/index.js` 也暴露不加载 Ink 的 `everpeace exec`。
 - 普通 Responses 驱动单 Agent ReAct；供应商能力显式配置，不依据 SDK 是否有方法或模型名推断能力。
 - 模型 shell 使用固定原生执行后端；结构化读写、Web、MCP、Skills 各自保持权限与信任边界。
-- TUI、公开 exec 与内部 benchmark 共用生产 Agent factory 和 coding task runner；完整验证结果决定代码 Goal 与成功学习。
-- `everpeace exec` 是 CLI + JSONL 自动化面，不等于公开 TypeScript SDK、ACP 或通用 app-server；多 Agent、Web/Desktop 和完整插件架构不是现有产品承诺。
+- TUI、公开 exec、TypeScript SDK 与内部 benchmark 共用生产 Agent factory 和 coding task runner；完整验证结果决定代码 Goal 与成功学习。
+- `everpeace exec` 提供 CLI + JSONL 自动化面，`everpeace/sdk` 的 `runTask` 提供同一非交互任务的公开 TypeScript 接口；ACP、通用 app-server、多 Agent、Web/Desktop 和完整插件架构不是现有产品承诺。
 - 对比结果与真实 Windows Terminal/API 验收情况以 HANDOFF 为准，不从功能数量推导性能排名。
+
+## 整体分层与状态归属
+
+以下层次描述现有职责和后续提取方向，不要求新增目录或建立第二套运行时。
+
+| 层次 | 职责与状态归属 | 当前入口 |
+| --- | --- | --- |
+| 入口适配 | 处理输入输出和各自交互方式；展示、草稿与终端按键属于界面 | `src/tui/`、`src/cli/`、`src/exec/`、`src/sdk/`、`src/benchmark/` |
+| 应用协调 | 管理当前 Session、模式、待执行计划、任务准入、取消及操作身份，决定任务是否启动、属于哪个会话 | 当前集中于 TUI App；非交互入口管理各自调用生命周期 |
+| 任务执行 | runner/workflow 管理任务资源、清理、验证、诊断及最终结算，决定任务是否完成、是否验证通过 | `src/workflow/` |
+| Agent 引擎 | 请求准备、上下文维护、模型循环、工具调度与请求计量 | `src/agent/` |
+| 能力与资源 | 文件、shell、权限、存储、provider、MCP、Skills、Memory 提供各自能力，保留各自安全和生命周期约束 | `src/tools/`、`src/permissions/`、`src/storage/`、`src/providers/` 等 |
+
+共享 [production factory](../../src/runtime/production.ts) 继续装配各入口使用的 Agent 与 IO。入口适配可以依赖核心模块；`src/runtime/`、`src/agent/`、`src/workflow/`、`src/exec/`、`src/sdk/` 不得反向引入 React、Ink、`@inkjs/ui` 或 `src/tui/`，包括类型导入、重导出及字面量动态导入。TUI 与 CLI 的适配入口保留合法 UI 依赖；[架构回归](../../tests/unit/architecture/dependency-boundaries.test.ts) 在现有测试命令中执行这条边界。
+
+Session 存储持久事实；timeline、模型 context、workflow 元数据保持既有分离，界面从它们建立状态投影。Plan 批准属于当前进程的会话／Agent 协调状态，文件观察属于工具实例，活动进程属于任务；恢复、fork 或历史文本不能重建这些授权和资源。后续按状态所有者提取协调模块，保持 runner 与存储为单一实现，不按文件行数拆分。详细生命周期见 [RUNTIME](RUNTIME.md) 与 [STATE_AND_UI](STATE_AND_UI.md)。
 
 ## 目录职责
 
 | 路径 | 职责与依赖边界 |
 | --- | --- |
-| `src/cli/`、`src/exec/` | 参数解析、登录/登出/模型命令、TUI 启动、exec 输出与非交互任务生命周期 |
-| `src/runtime/` | TUI、exec、benchmark 共用的生产 Agent、AgentIO 与 sandbox 命令 factory；不得依赖 Ink |
+| `src/cli/`、`src/exec/`、`src/sdk/` | CLI 参数／输出、TUI 启动及公开非交互 CLI/SDK 适配；exec 与 SDK 不依赖 UI |
+| `src/runtime/` | TUI、exec、SDK、benchmark 共用的生产 Agent、AgentIO 与 sandbox 命令 factory；不依赖 UI |
 | `src/tui/` | 应用状态与展示；目录分层见 [TUI_STRUCTURE](TUI_STRUCTURE.md) |
 | `src/agent/` | Responses 交互、step/context、请求执行与计量、压缩、项目规则 |
 | `src/providers/` | client 工厂、能力契约、用途设置、模型列表 |
@@ -43,6 +59,7 @@ Everpeace 是 DeepSeek 优先、Windows 优先的个人开发 CLI；保留官方
 | --- | --- | --- | --- |
 | CLI 参数、启动、登录/模型选择 | [cli/index](../../src/cli/index.ts)、[args](../../src/cli/args.ts)、[selection](../../src/cli/selection.ts) | [args](../../tests/unit/cli/args.test.ts)、[selection](../../tests/unit/cli/selection.test.ts) | [README](../../README.md)、[STATE_AND_UI](STATE_AND_UI.md) |
 | `everpeace exec`、JSONL、管道背压与退出清理 | [exec runtime](../../src/exec/runtime.ts)、[exec output](../../src/cli/exec-output.ts)、[exec writer](../../src/cli/exec-writer.ts)、[production factory](../../src/runtime/production.ts) | [exec](../../tests/unit/exec/runtime.test.ts)、[exec output](../../tests/unit/cli/exec-output.test.ts)、[writer](../../tests/unit/cli/exec-writer.test.ts)、[真实子进程](../../tests/unit/cli/exec-process.test.ts) | [README](../../README.md#non-interactive-execution)、[RUNTIME](RUNTIME.md)、[STATE_AND_UI](STATE_AND_UI.md) |
+| 公开 SDK、分层与禁止的依赖方向 | [SDK](../../src/sdk/index.ts)、[production factory](../../src/runtime/production.ts)、[类型配置](../../tsconfig.json) | [SDK](../../tests/unit/exec/sdk.test.ts)、[架构回归](../../tests/unit/architecture/dependency-boundaries.test.ts) | [DEVELOPMENT](../DEVELOPMENT.md)、[DECISIONS](DECISIONS.md) |
 | 请求 step、工具调度、steering、重试 | [react-agent](../../src/agent/react-agent.ts)、[agent-loop](../../src/agent/agent-loop.ts) | [react-agent](../../tests/unit/agent/react-agent.test.ts)、[loop boundaries](../../tests/unit/agent/loop-boundaries.test.ts) | [RUNTIME](RUNTIME.md)、[AGENT_LOOP](AGENT_LOOP.md) |
 | DeepSeek/兼容端点、reasoning、辅助请求 | [capabilities](../../src/providers/capabilities.ts)、[provider client](../../src/providers/openai-compatible.ts)、[request executor](../../src/agent/request-executor.ts) | [capabilities](../../tests/unit/providers/capabilities.test.ts)、[react-agent](../../tests/unit/agent/react-agent.test.ts)、[TUI dependencies](../../tests/unit/tui/dependencies.test.ts) | [RUNTIME](RUNTIME.md) |
 | attempt 计量、预算、context/缓存 | [ledger](../../src/agent/request-attempt-ledger.ts)、[request snapshot](../../src/agent/request-snapshot.ts)、[context limits](../../src/agent/context-limits.ts) | [ledger](../../tests/unit/agent/request-attempt-ledger.test.ts)、[snapshot](../../tests/unit/agent/request-snapshot.test.ts)、[context](../../tests/unit/agent/context-limits.test.ts) | [RUNTIME](RUNTIME.md)、[STATE_AND_UI](STATE_AND_UI.md) |
@@ -89,10 +106,10 @@ CLI → model registry + keyring → TUI dependencies → App
                   finish jobs → full verification → host settlement
 ```
 
-1. TUI 把用户消息交给任务 runner；工具/模型回调更新显示，同时按对应通道保存 Session。
+1. TUI、exec、SDK 和 benchmark 各自完成输入适配与任务准入，再交给共享任务 runner；工具/模型回调更新各自输出，同时按对应通道保存 Session。
 2. Agent 在完整响应边界执行工具，后续 step 更新适用规则、Memory、已落盘历史读取边界和工具快照；普通网络重试复用同一步快照。
 3. workflow 记录任务开始内容基线，跟踪结构化与 shell 修改，在最终检查前后对比 revision，过期结果不得结算。
-4. runner 统一顶层 task generation、执行清单范围、诊断轮数、后台资源清理与完成通知、停止原因、Goal 完成与 Memory outcome；benchmark 复用这条链。
+4. 应用协调维护会话归属和操作身份；runner 统一任务内部 generation、执行清单范围、诊断轮数、后台资源清理与完成通知、停止原因、Goal 完成与 Memory outcome；各入口复用这条链。
 5. 评测器另建评分工作区并用 evaluator-owned assertions 判断结果；通过可被模型改写的 npm scripts 不等于独立验收通过。
 
 持久化的 timeline、模型 context 与 workflow 元数据是不同通道；详细字段和恢复不变量见 [STATE_AND_UI](STATE_AND_UI.md)。

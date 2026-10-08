@@ -6,7 +6,7 @@ Everpeace 是 **DeepSeek 优先、Windows 优先的个人开发 CLI**：在终�
 
 ## 技术与运行形态
 
-Node.js + TypeScript ESM；React/Ink 提供 inline 终端交互，`everpeace exec` 提供 CLI + JSONL 的非交互入口。TUI、exec 与内部 benchmark 通过 UI 无关的生产 factory 构造同一 Responses ReAct Agent；`CodingTaskRunner` 统一任务清理、诊断、最终检查和完成结算。模型 shell 使用固定原生执行后端；用户直接 `!` 使用独立交互 PTY。
+Node.js + TypeScript ESM；React/Ink 提供 inline 终端交互，`everpeace exec` 提供 CLI + JSONL 的非交互入口，公开 TypeScript SDK `everpeace/sdk` 提供 `runTask`。TUI、exec、SDK 与内部 benchmark 通过 UI 无关的生产 factory 构造同一 Responses ReAct Agent；`CodingTaskRunner` 统一任务清理、诊断、最终检查和完成结算。模型 shell 使用固定原生执行后端；用户直接 `!` 使用独立交互 PTY。
 
 支持官方 DeepSeek、OpenAI 和兼容 Responses 端点；保留原始 model ID。供应商能力显式声明，未知端点保守处理。编码默认 `high` 推理、32K 输出预算；这是产品默认，不代表未知模型的硬上限。详见 [运行时](architecture/RUNTIME.md)。
 
@@ -26,7 +26,7 @@ Node.js + TypeScript ESM；React/Ink 提供 inline 终端交互，`everpeace exe
 | 外部信息与扩展 | 公共 Web、可恢复且热更新工具目录的 MCP tools/resources/prompts、主机 Skills 与安装向导 | [集成](architecture/CODEX_CAPABILITIES.md) |
 | 终端体验 | 英文宿主 UI、Markdown、独立命令窗口、输入历史、steering、PTY、取消和重放 | [状态](architecture/STATE_AND_UI.md) |
 | 诊断与评测 | `/doctor` 本地探测、显式 live；内部 campaign、独立评分、固定 fixtures | [评测](BENCHMARKING.md) |
-| 自动化调用 | `everpeace exec`、纯文本 stdout 或版本化脱敏 JSONL、任务级预算/时限/step 与固定退出码 | [中文 README](../README.zh-CN.md#非交互执行) |
+| 自动化调用 | `everpeace exec` 与 `everpeace/sdk` 的 `runTask`；纯文本 stdout 或版本化脱敏事件、任务级预算/时限/step 与分类结果 | [中文 README](../README.zh-CN.md#非交互执行) |
 
 命令的参数和用户操作以 [中文 README](../README.zh-CN.md#使用) / [English README](../README.md#usage) 为入口，开发定位使用 [PROJECT_MAP](architecture/PROJECT_MAP.md)。
 
@@ -38,7 +38,7 @@ Node.js + TypeScript ESM；React/Ink 提供 inline 终端交互，`everpeace exe
 
 ## 明确的边界
 
-- 主产品仍是单 Agent 终端工具；`everpeace exec` 是公开的非交互 CLI，不构成 TypeScript SDK、ACP 或通用 app-server。没有多 Agent 调度、Web/Desktop 或完整插件架构。
+- 主产品仍是单 Agent 终端工具；公开非交互 CLI 与 TypeScript SDK 共用任务运行时，SDK 不挂载 Ink，也不自动批准交互请求。没有 ACP、通用 app-server、多 Agent 调度、Web/Desktop 或完整插件架构。
 - MCP 已覆盖瞬时断连恢复与工具列表热更新；OAuth/elicitation/tasks 等协议能力、私有认证 Skill 安装及 Skill 更新/删除仍不属于完整支持范围，具体见集成文档。
 - 读取和编辑有宿主路径/版本保护；不要把所有本地工具都描述成 OS sandbox 隔离。显式配置的 LSP 通过固定原生 read-only sandbox 启动并先验证网络隔离；后端不满足探针时失败关闭，当前固定 Windows 后端因此尚不可用。
 - Session 历史与 Learned Memory 分开；历史及父子关系读取限定完全相同工作区，不能恢复写权限、审批或验证成功。分支复制的是固定 EOF 和最多 16 份已保留附件；父子之后独立。大工具输出只保留每会话最近 16 项的前 2 MiB，旧进程内正文和超出保留范围的内容不可恢复。
