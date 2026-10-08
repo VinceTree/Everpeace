@@ -54,7 +54,9 @@ const host = createProcessExecCommandHost(scenario.endsWith("stall") ? { outputS
 const code = await runExecCommand({ command: "exec", help: false, json: true, prompt: "fixture request", directory: workspace }, {
   async resolveAll() { return { available: [model], missing: [] }; },
 }, host, {
-  run: (options, dependencies) => runExec({
+  run: (options, dependencies) => {
+    options.signal?.addEventListener("abort", () => process.send?.({ type: "task_cancelled" }), { once: true });
+    return runExec({
     ...options,
     async onEvent(event) {
       if (scenario.startsWith("stderr-") && event.type === "assistant_message") {
@@ -75,11 +77,14 @@ const code = await runExecCommand({ command: "exec", help: false, json: true, pr
         helper.kill();
         await helperExit;
         await fs.writeFile(path.join(directory, "disposed.json"), JSON.stringify({ calls, helperPid: helper.pid }));
+        process.send?.({ type: "task_cleaned" });
         if (scenario === "cleanup-failure") throw new Error("fixture cleanup failure");
       } };
     },
-  }),
+    });
+  },
 });
 await fs.writeFile(path.join(directory, "exit.json"), JSON.stringify({ code }));
+await new Promise<void>((resolve, reject) => process.send?.({ type: "output_cleaned", code }, (error) => error ? reject(error) : resolve()));
 if (process.connected) process.disconnect();
 process.exitCode = code;

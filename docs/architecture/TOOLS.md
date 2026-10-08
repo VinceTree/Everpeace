@@ -46,7 +46,9 @@
 
 ## 结构化编辑、审批和撤销
 
-`apply_patch` 接受 create/update/delete 操作，由宿主预览并绑定观察版本。update 在完整 `content`、unified `patch` 和精确 `replace: { oldText, newText }` 中三选一；replace 要求非空 oldText 在规范化 CRLF/LF 后精确且唯一匹配，并拒绝不改变内容的替换。它保留原文件的 BOM 和主换行风格，不做大小写、空白或模糊匹配。
+`apply_patch` 接受 create/update/delete 操作，由宿主预览并绑定观察版本。update 在完整 `content`、unified `patch` 和 `replace: { oldText, newText, matchMode? }` 中三选一。matchMode 默认 `exact`：非空 oldText 在规范化 CRLF/LF 后精确且唯一匹配，并拒绝不改变内容的替换。
+
+只有显式 `line_whitespace` 且精确匹配不存在时才容错；精确匹配已歧义时直接拒绝。容错只接受全文件唯一的连续完整行块，仅忽略行首／行尾 ASCII 空格和 Tab，保留行数、空行位置及所有行内字符；纯空白目标、大小写／标点／字符串内部空格差异都拒绝。替换实际匹配范围，newText 按提交内容应用，不自动缩进；保留原 BOM 和主换行风格。预览和执行共用定位逻辑，返回 `matchMode` 与一基 `matchedLines: { start, end }`，审批正文明确显示方式和范围。原始字节与 permission revision 绑定、重新读取、回滚保护均保持。回归见 [line whitespace](../../tests/unit/tools/line-whitespace.test.ts)、[production editing](../../tests/unit/runtime/project-editing.test.ts)。
 
 解析、预览和执行错误返回稳定原因及修复提示，覆盖无效参数、缺少当前进程观察、旧版本、未匹配或多重匹配、hunk 不符及策略拒绝。策略拒绝与可修复的编辑错误保持不同；任何替代编辑路径仍需通过同一权限边界。审批绑定预览文件 SHA-256 与权限 revision；审批期间权限变化或文件内容变化时不能沿用旧批准继续写入。create 使用排他创建，不能把期间新增的用户文件覆盖。
 
@@ -57,6 +59,14 @@
 `/undo` 使用 [TurnCheckpoint](../../src/workflow/checkpoint.ts) 的进程内检查点，只恢复结构化编辑，不承诺撤销任意 shell 副作用。恢复前比较当前版本，发生冲突不能覆盖用户内容。检查点及文件内容不写入 Session JSONL，重启后不伪造可撤销状态。
 
 文件观察是防止盲写的必要条件，不替代完整验证；显式修改 ignored 文件也要纳入工作流追踪，详见 [RUNTIME](RUNTIME.md)。
+
+## 按需项目地图
+
+[project_map](../../src/tools/project-map.ts) 是共享 production Agent 的只读文件工具，TUI、exec、SDK 和 Plan 均可使用。`path` 默认工作区目录，只允许工作区内目录；`depth` 默认 2、范围 1–4，只控制结构展示深度。每次重新枚举，遵守随包 rg ignore 规则，不跟随 symlink/junction，排除 node_modules、vendor、虚拟环境及 `.git`／`.codex`／`.agents`／`.everpeace`，不查询系统 PATH、不建数据库或自动注入每轮请求。
+
+结果包含观察到的目录结构、文件类型计数、包元数据和 README／AGENTS／测试／配置／manifest 位置。只解析 package.json 的 name、packageManager、脚本与声明入口（main/module/types/typings/bin/exports）；其他语言仅标记已发现 manifest。`declaredEntries` 与 `entryCandidates` 分开，后者仅依据文件名约定，不代表已确认架构。地图不扫描源码正文、符号或依赖图，不加载规则正文、登记文件写观察、提升权限或证明验证成功；地图作用域也不会登记到下一步规则加载路径。编辑仍须 read_file。
+
+枚举最多 5 秒、2 MiB、10,000 路径；最多解析 32 份 manifest，每份 256 KiB、合计 1 MiB；JSON 结果最多 32 KiB。达到上限、文件期间变化或损坏 manifest 时返回 `incomplete`、明确 `reasons` 和缩小目录提示；不把不完整地图当作全部结构。不熟悉项目时可先地图、再搜索与读取；简单任务无须强制扫描。回归见 [project map](../../tests/unit/tools/project-map.test.ts) 与 [共享生产链路](../../tests/unit/runtime/project-editing.test.ts)。
 
 ## 按路径项目规则
 

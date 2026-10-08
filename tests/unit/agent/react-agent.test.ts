@@ -1632,6 +1632,7 @@ test("workspace-write searches the web without per-request confirmation", async 
     "read_workspace_change",
     "web_search",
     "web_fetch",
+    "project_map",
     "read_file",
     "list_directory",
     "search_files",

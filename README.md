@@ -11,6 +11,8 @@ Model API keys are never read from environment variables or written to the proje
 
 Summary compaction keeps a structured checkpoint of your goals and corrections, decisions, file changes, check evidence, unfinished work, and next steps, alongside the latest two complete interactions. `/context` labels it as a model-generated checkpoint. The Agent receives the current host workflow state on each step, including pending verification and repair limits. Known file, edit, and command failures include a reason and corrective guidance; timed-out commands retain partial output so the Agent can inspect possible side effects before continuing. These mechanisms have offline regression coverage; real-model quality and token savings remain unmeasured.
 
+For unfamiliar workspaces, the Agent can call `project_map` on demand in coding or Plan mode to inspect structure, package declarations, scripts, and document/test/config locations. It honors ignore rules and reports scan limits; filename entry candidates remain unconfirmed. Editing still requires reading the target file. `apply_patch` keeps exact replacement by default; an explicit `line_whitespace` mode can tolerate only leading/trailing spaces or tabs in a unique complete line block after an exact miss. Approval previews and results show the actual mode and matched lines.
+
 ## Requirements
 
 - Node.js 22+
@@ -104,7 +106,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.3.9) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.10) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │

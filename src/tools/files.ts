@@ -6,6 +6,7 @@ import { stopProcessTree } from "./process-cancel.js";
 import { decodeTextFile } from "./file-version.js";
 import { resolveBundledRipgrep, type RipgrepPathResolver } from "./ripgrep.js";
 import { invalidToolArgument, POLICY_DENIED_REMEDY, ToolFeedbackError } from "./tool-feedback.js";
+import { PROJECT_MAP_TOOL_DEFINITION, runProjectMap } from "./project-map.js";
 
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const DEFAULT_READ_LINES = 200;
@@ -18,6 +19,7 @@ const MAX_RETAINED_SEARCHES = 16;
 const MAX_RETAINED_SEARCH_BYTES = 8 * 1024 * 1024;
 
 export const FILE_TOOL_DEFINITIONS = [
+  PROJECT_MAP_TOOL_DEFINITION,
   {
     type: "function" as const,
     name: "read_file",
@@ -294,6 +296,7 @@ export async function runFileTool(
   for (const key of Object.keys(record)) {
     if (!allowedFields.includes(key)) invalidToolArgument(key, `only the supported fields: ${allowedFields.join(", ")}`);
   }
+  if (name === "project_map") return runProjectMap(record, workspace, signal, resolveRipgrep);
   const maximum = integer(record.max_results, DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS, "max_results");
   const maxLines = integer(record.max_lines, DEFAULT_READ_LINES, MAX_READ_LINES, "max_lines");
   const requestedStartLine = integer(record.start_line, 1, Number.MAX_SAFE_INTEGER, "start_line");

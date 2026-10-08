@@ -120,7 +120,9 @@ CLI 提示词只能来自一个位置参数或非 TTY stdin。模型解析先匹
 
 workflow 提供路径列表时同时返回 `changed_paths_total` 和 `changed_paths_returned`；后者始终等于实际交付数组长度。截断 `output`、`prompt` 或 `result_reason` 时给出对应的 `*_total_bytes`，计量完整去控制序列、脱敏后且限幅前的 UTF-8 正文。整行因 JSON 转义再次缩减时同步这些字段，保留 Session、身份、状态、usage 和停止原因。助手正文不走截断路径。
 
-[exec-writer](../../src/cli/exec-writer.ts) 每次写入最多 16 KiB，并等待 callback 与必要的 drain；事件锁保证同一 JSONL frame 不被其他事件插入，编码缓冲/队列最多 1 MiB。该上限不包含 Agent 原本持有的正文或 Session context。单块 30 秒没有完成进展即中止输出并取消任务。Windows 的非 TTY 标准管道通过 CLI host 惰性创建的专用 Node writer 子进程写入，固定子程序只接收有界脱敏块并以 IPC 确认完成；正常退出、取消或故障都终止并等待该子进程。Windows TTY 与其他平台继续使用 Writable。取消或故障可能留下半条 JSONL 末行，此时不补写终态；消费端必须同时检查退出码。
+[exec-writer](../../src/cli/exec-writer.ts) 每次写入最多 16 KiB，并等待 callback 与必要的 drain；事件锁保证同一 JSONL frame 不被其他事件插入，编码缓冲/队列最多 1 MiB。该上限不包含 Agent 原本持有的正文或 Session context。单块 30 秒没有完成进展即中止输出并取消任务。Windows/Linux 非 TTY 标准流统一通过 CLI host 惰性创建的专用 Node writer 子进程输出；TTY 继续使用 Writable。固定子程序用可报告完成／错误的流写入，只有每块实际写入 callback 后才 IPC 确认，支持慢消费者；超时和取消由父进程控制。正常退出、取消或故障都等待待处理写入结算、代理流关闭与子进程退出，再移除宿主监听器；代理流还保留迟到错误处理，清理关闭不伪造任务取消。取消或故障可能留下半条 JSONL 末行，此时不补写终态；消费端必须同时检查退出码。
+
+[真实子进程回归](../../tests/unit/cli/exec-process.test.ts) 通过 IPC 分别观察 provider 就绪、取消先于任务清理、输出清理完成；继续断言退出码、owned helper 回收、完整终态文件和半条输出无 final。Linux 使用实际 OS 信号，Windows 通过 IPC 触发安装的 signal handler；这不能替代真实 Windows Terminal Ctrl+C 验收。上一轮双平台 CI 失败与本轮实际验证结果只在 [HANDOFF](../HANDOFF.md) 维护。
 
 ## Inline TUI 与独立命令窗口
 

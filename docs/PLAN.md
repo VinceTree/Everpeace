@@ -1,21 +1,19 @@
 # 当前开发计划
 
-产品保持 DeepSeek 优先、Windows 优先、单 Agent、Node/TypeScript、Responses 与 inline TUI。当前版本、提交和验证证据见 [HANDOFF](HANDOFF.md)，机制见 [知识库](README.md)，此前计划见 [PLAN_HISTORY](archive/PLAN_HISTORY.md)。
+产品保持 DeepSeek 优先、Windows 优先、单 Agent、Node/TypeScript、Responses 与 inline TUI。当前版本、提交和验证证据只见 [HANDOFF](HANDOFF.md)。此前计划见 [连续性历史](archive/HANDOFF_CONTINUITY.md) 与 [PLAN_HISTORY](archive/PLAN_HISTORY.md)。
 
-## 当前里程碑：个人开发任务连续性与工具反馈
+## 当前里程碑：按需项目地图与受控容错编辑
 
-用户授权离线实施，参考固定 DeepSeek Harness `639ed015397290b3745d163aafe02ffee4aa3f84`；随后明确授权更新展示版本、提交与推送，但不更新 Release。只推送 `main` 并使用 `[skip publish]`，不创建或推送 tag；不调用真实模型，已有未跟踪内容保留。默认模型参数、Responses、原生 sandbox 和 runner 成功判定不变。
+用户授权离线实施并自动更新展示版本、提交推送 main；不创建／推送 tag、不更新 Release，不调用真实模型，保留原有未跟踪内容。提交包含 [skip publish]，不跳过测试 CI。默认 high／32,768、原生 sandbox、Responses 和宿主验证规则保持。
 
-- [x] 固定八章摘要交接，assistant 背景回注，旧摘要请求投影兼容与 /context 展示。
-- [x] 完整交互边界、连续压缩及无效摘要保留原 context；不追加摘要修复请求。
-- [x] 共享 production IO 提供当前工作流事实，每 step 冻结、retry 复用，保留恢复与历史验证债务。
-- [x] 文件／搜索、shell／后台和 patch 的显式错误分类及修正提示，保留超时部分输出与不重放边界。
-- [x] fake provider 和临时 Git 工作区验证失败反馈 → 压缩 → fork／重启 → 重新读取 → 修正 → 完整宿主验证。
-- [x] 更新运行时、工具、决策和双语说明，修正 exec Plan 矛盾，归档旧交接证据。
-- [x] 最终重新发现并串行执行现有 typecheck → lint → test → build，首败停止；记录缺少 lint，并检查差异／本地链接。
+- [x] 共享 coding／Plan 只读 project_map，按需枚举、Node 元数据、声明与候选分离、ignore／链接／工作区边界及完整上限。
+- [x] 显式 line_whitespace 唯一完整行块定位，默认 exact、拒绝歧义、预览／结果展示方式与行范围，保留审批／并发／回滚边界。
+- [x] Windows／Linux 非 TTY owned output writer，完成 callback ACK、父进程取消／超时、pending／close／exit 清理顺序和迟到错误处理。
+- [x] fake provider 生产闭环及地图／编辑／输出进程回归，IPC 就绪／取消／清理证据。
+- [x] 工具、运行时、状态、决策和双语说明更新，归档前一轮交接与实际 CI 失败。
+- [x] 串行重新发现并执行现有 typecheck → lint → test → build，首败停止，明确缺少 lint，差异与文档链接检查。
+- [ ] 自动提交推送 main，等待 Windows／Linux Test CI，核对 Release job 跳过与已有 Release 不变；相关失败继续修复，本轮不重复递增版本。
 
-## 验收与独立后续
+## 独立后续
 
-回归证明宿主机制与持久化边界，不证明 DS 摘要语义完整性、真实编码质量或 token 节省。真实 Windows Terminal 手工验收继续独立待办；Windows LSP 不可用原因仍为固定 backend 网络隔离门禁失败。MCP 扩展、LSP backend 升级、多 Agent、新协议不在本轮。
-
-真实模型 smoke 和 dsh 对照仍需另行明确授权及 task／campaign 数值预算。Goal 与成功 Memory 只由宿主验证结算，不以摘要或执行清单代替。
+离线回归证明工具行为与宿主闭环，不能证明真实 DeepSeek 编码成功率或 token 成本改善。真实 Windows Terminal 手工验收、Windows LSP backend 门禁和有数值预算的 live／dsh 评测独立处理；本轮不扩展 MCP、LSP、多 Agent 或新协议。

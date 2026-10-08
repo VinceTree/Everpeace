@@ -82,6 +82,8 @@ dispatch 仍检查实时权限、当前 step 广告工具集合、停止状态�
 
 ## Coding task 与验证
 
+项目定位复用普通只读文件调度：按需 `project_map` 在 coding 和 Plan 广告，TUI、exec、SDK 无独立实现；完整结果按调用顺序持久化。地图不会恢复文件观察或使子目录规则自动加载。读取后，精确替换失败可由下一显式调用选择完整行空白容错，宿主仍执行同一 patch 预览、审批、revision 与最终验证流程。fake provider 的 [生产编辑回归](../../tests/unit/runtime/project-editing.test.ts) 覆盖地图 → 盲写拒绝 → 读取 → 精确失败 → 显式容错 → 完整验证；这些证据不代表真实 DeepSeek 编码质量改善。
+
 共享 production IO 的可选 `getWorkflowContext()` 只提供任务来源、phase/result、待验证和追踪受限状态、已用及最大修复轮数。`prior_unverified` 也投影为待验证，但不提供旧任务 ID、验证正文或文件检查点。Agent 在每个逻辑 step 准备完成后显式选取并冻结这些字段，普通网络 retry 和自动 summary/native compaction 复用，下一 step 刷新；手动压缩从当前宿主状态获取独立快照，不增加 Session 事件或第二套状态。当前宿主事实优先于历史摘要，缺字段表示 unknown，不推断成功。TUI、exec、SDK 和 benchmark 共用该 IO，验证、Goal 与 Memory 结算仍由 runner 执行。
 
 回归入口：[workflow context](../../tests/unit/agent/workflow-context.test.ts)、[生产连续性闭环](../../tests/unit/runtime/coding-continuity.test.ts)。后者以 fake provider 和独立临时 Git 工作区覆盖规则刷新、盲写拒绝、快速验证失败、压缩、fork／重启及最终完整验证；模拟验证器不等同于真实模型质量或原生终端验收。

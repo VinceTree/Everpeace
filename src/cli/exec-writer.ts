@@ -18,39 +18,53 @@ export function isExecOutputError(error: unknown): boolean {
 }
 
 const PIPE_WRITER_SOURCE = `
-const fs = require('node:fs');
+const streams = { 1: process.stdout, 2: process.stderr };
+for (const stream of Object.values(streams)) stream.on('error', () => {});
 process.on('message', message => {
   if (!message || (message.fd !== 1 && message.fd !== 2) || typeof message.text !== 'string') return;
   try {
-    const bytes = Buffer.from(message.text, 'utf8');
-    let offset = 0;
-    while (offset < bytes.length) {
-      const written = fs.writeSync(message.fd, bytes, offset, bytes.length - offset);
-      if (written <= 0) throw new Error('Output made no progress');
-      offset += written;
-    }
-    process.send?.({ id: message.id });
+    streams[message.fd].write(message.text, error => {
+      if (process.connected) process.send({ id: message.id, ...(error ? { error: 'Output pipe failed' } : {}) }, () => {});
+    });
   } catch (error) { process.send?.({ id: message.id, error: 'Output pipe failed' }); }
 });
 process.on('disconnect', () => process.exit(0));
 `;
 
-/** Windows pipe writes block even in fs.write workers. An owned process makes stalled writes cancellable. */
+/** Owned non-TTY output keeps pending OS pipe writes out of the host process. */
 export class ExecPipeProcess {
   #child: ChildProcess | undefined;
   #exit: Promise<void> | undefined;
   #stopped = false;
   #nextId = 0;
   readonly #pending = new Map<number, (error?: Error) => void>();
+  readonly #streams = new Set<Writable>();
+  #disposal: Promise<void> | undefined;
 
   stream(fd: 1 | 2): Writable {
-    return new Writable({
+    const stream = new Writable({
       write: (chunk: Buffer, _encoding, done) => { this.#write(fd, chunk.toString("utf8")).then(() => done(), done); },
-      destroy: (error, done) => { void this.dispose().then(() => done(error), done); },
+      destroy: (error, done) => { void this.#stop().then(() => done(error), done); },
     });
+    // A write callback may report an error after its caller has already cancelled.
+    stream.on("error", () => {});
+    this.#streams.add(stream);
+    return stream;
   }
 
   async dispose(): Promise<void> {
+    this.#disposal ??= (async () => {
+      await this.#stop();
+      await Promise.all([...this.#streams].map((stream) => new Promise<void>((resolve) => {
+        if (stream.closed) { resolve(); return; }
+        stream.once("close", resolve);
+        stream.destroy();
+      })));
+    })();
+    await this.#disposal;
+  }
+
+  async #stop(): Promise<void> {
     this.#stopped = true;
     for (const finish of this.#pending.values()) finish(new ExecOutputError("Exec output writer was closed"));
     this.#pending.clear();

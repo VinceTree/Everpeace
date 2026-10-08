@@ -18,8 +18,10 @@ async function fixture(scenario: string) {
   child.stderr.setEncoding("utf8");
   if (scenario !== "stderr-stall") child.stderr.on("data", (chunk: string) => { stderr += chunk; });
   const exit = once(child, "exit") as Promise<[number | null, NodeJS.Signals | null]>;
+  const messages: string[] = [];
+  child.on("message", (message: { type?: string }) => { if (message.type) messages.push(message.type); });
   const ready = new Promise<void>((resolve, reject) => {
-    child.once("message", () => resolve());
+    child.on("message", (message: { type?: string }) => { if (message.type === "provider_ready") resolve(); });
     child.once("exit", () => reject(new Error(`Exec fixture exited before provider readiness: ${stderr}`)));
   });
   void ready.catch(() => {});
@@ -31,6 +33,13 @@ async function fixture(scenario: string) {
       const marker = JSON.parse(await fs.readFile(path.join(directory, "disposed.json"), "utf8")) as { calls: number; helperPid: number };
       assert.equal(marker.calls, 1);
       assert.throws(() => process.kill(marker.helperPid, 0), "owned helper process was cleaned up");
+      assert.ok(messages.includes("provider_ready"));
+      assert.ok(messages.includes("task_cleaned"));
+      assert.ok(messages.includes("output_cleaned"), "stream cleanup and complete exit marker preceded exit");
+      if (scenario !== "slow" && scenario !== "cleanup-failure") {
+        assert.ok(messages.includes("task_cancelled"));
+        assert.ok(messages.indexOf("task_cancelled") < messages.indexOf("task_cleaned"), "cancellation precedes task cleanup");
+      }
     },
     async cleanup() {
       clearTimeout(timeout);

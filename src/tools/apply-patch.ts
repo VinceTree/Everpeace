@@ -23,6 +23,7 @@ export interface ApplyPatchOperation {
   replace?: {
     oldText: string;
     newText: string;
+    matchMode?: "exact" | "line_whitespace";
   };
   expectedSha256?: string;
 }
@@ -42,6 +43,8 @@ export interface ApplyPatchFileResult {
   action: ApplyPatchAction;
   status: "applied" | "failed";
   error?: string;
+  matchMode?: "exact" | "line_whitespace";
+  matchedLines?: { start: number; end: number };
 }
 
 export interface ApplyPatchResult {
@@ -62,6 +65,8 @@ export interface ApplyPatchPreviewFile {
   beforeSha256: string | null;
   afterSha256: string | null;
   diff: string;
+  matchMode?: "exact" | "line_whitespace";
+  matchedLines?: { start: number; end: number };
 }
 
 export interface ApplyPatchPreview {
@@ -108,10 +113,11 @@ export const APPLY_PATCH_TOOL_DEFINITION = {
             patch: { type: ["string", "null"], description: "Unified diff hunks for an update." },
             replace: {
               type: ["object", "null"],
-              description: "Exact single-match text replacement for an update.",
+              description: "Unique text replacement. Defaults to exact; explicitly choose line_whitespace only to tolerate leading/trailing spaces or tabs in complete lines after an exact miss. Read the file first.",
               properties: {
                 oldText: { type: "string" },
                 newText: { type: "string" },
+                matchMode: { type: "string", enum: ["exact", "line_whitespace"] },
               },
               required: ["oldText", "newText"],
               additionalProperties: false,
@@ -143,8 +149,10 @@ function parseOperation(value: unknown): ApplyPatchOperation {
     if (typeof replacement.oldText !== "string" || !replacement.oldText.length || typeof replacement.newText !== "string") {
       patchError("INVALID_ARGUMENTS", "Patch replace requires non-empty oldText and string newText");
     }
-    if (Object.keys(replacement).some((key) => key !== "oldText" && key !== "newText")) patchError("INVALID_ARGUMENTS", "Patch replace contains unsupported fields");
-    replace = { oldText: replacement.oldText, newText: replacement.newText };
+    if (replacement.matchMode !== undefined && replacement.matchMode !== "exact" && replacement.matchMode !== "line_whitespace") patchError("INVALID_ARGUMENTS", "replace.matchMode must be exact or line_whitespace");
+    if (replacement.matchMode === "line_whitespace" && !/[^ \t\r\n]/u.test(replacement.oldText)) patchError("INVALID_ARGUMENTS", "replace.oldText must contain non-whitespace text for line_whitespace");
+    if (Object.keys(replacement).some((key) => !["oldText", "newText", "matchMode"].includes(key))) patchError("INVALID_ARGUMENTS", "Patch replace contains unsupported fields");
+    replace = { oldText: replacement.oldText, newText: replacement.newText, ...(replacement.matchMode === undefined ? {} : { matchMode: replacement.matchMode }) };
   }
   if (record.expectedSha256 !== undefined && record.expectedSha256 !== null && (typeof record.expectedSha256 !== "string" || !/^[a-f0-9]{64}$/iu.test(record.expectedSha256))) patchError("INVALID_ARGUMENTS", "expectedSha256 must be a SHA-256 hex digest");
   if (Object.keys(record).some((key) => !["path", "action", "content", "patch", "replace", "expectedSha256"].includes(key))) patchError("INVALID_ARGUMENTS", "Patch operation contains unsupported fields");
@@ -210,16 +218,51 @@ function applyUnifiedPatch(original: string, patch: string): string {
   return output.join("\n");
 }
 
-function applyExactReplacement(original: string, replacement: NonNullable<ApplyPatchOperation["replace"]>): string {
+function locateReplacement(original: string, replacement: NonNullable<ApplyPatchOperation["replace"]>): { text: string; matchMode: "exact" | "line_whitespace"; matchedLines: { start: number; end: number } } {
   const source = original.replace(/\r\n/gu, "\n");
   const oldText = replacement.oldText.replace(/\r\n/gu, "\n");
   const newText = replacement.newText.replace(/\r\n/gu, "\n");
   if (!oldText.length) patchError("INVALID_ARGUMENTS", "Replacement oldText must not be empty");
   if (oldText === newText) patchError("REPLACEMENT_UNCHANGED", "Replacement would not change the file", "Submit a replacement whose newText differs from oldText.");
-  const first = source.indexOf(oldText);
-  if (first < 0) patchError("REPLACEMENT_NOT_FOUND", "Replacement oldText was not found", "Read the current file and copy the exact text to replace.");
-  if (source.indexOf(oldText, first + 1) >= 0) patchError("REPLACEMENT_AMBIGUOUS", "Replacement oldText matches more than once", "Include more surrounding text so oldText matches exactly once.");
-  return `${source.slice(0, first)}${newText}${source.slice(first + oldText.length)}`;
+  let first = source.indexOf(oldText);
+  let end = first + oldText.length;
+  let matchMode: "exact" | "line_whitespace" = "exact";
+  if (first >= 0 && source.indexOf(oldText, first + 1) >= 0) patchError("REPLACEMENT_AMBIGUOUS", "Replacement oldText matches more than once", "Include more surrounding text so oldText matches exactly once.");
+  if (first < 0 && replacement.matchMode === "line_whitespace") {
+    const trimEdges = (line: string) => line.replace(/^[ \t]+|[ \t]+$/gu, "");
+    const trailingNewline = oldText.endsWith("\n");
+    const wanted = (trailingNewline ? oldText.slice(0, -1) : oldText).split("\n").map(trimEdges);
+    const lines = source.split("\n");
+    // Prefix matching avoids quadratic work for long blocks of repeated blank lines.
+    const prefix = Array<number>(wanted.length).fill(0);
+    for (let index = 1, length = 0; index < wanted.length; index++) {
+      while (length && wanted[index] !== wanted[length]) length = prefix[length - 1]!;
+      if (wanted[index] === wanted[length]) length++;
+      prefix[index] = length;
+    }
+    const offsets: number[] = [];
+    let offset = 0;
+    let length = 0;
+    for (let index = 0; index < lines.length; index++) {
+      offsets.push(offset);
+      const line = trimEdges(lines[index]!);
+      while (length && line !== wanted[length]) length = prefix[length - 1]!;
+      if (line === wanted[length]) length++;
+      if (length === wanted.length && (!trailingNewline || index < lines.length - 1)) {
+        if (first >= 0) patchError("REPLACEMENT_AMBIGUOUS", "Whitespace-tolerant replacement matches more than once", "Read the file and include more complete surrounding lines for a unique match.");
+        first = offsets[index - wanted.length + 1]!;
+        end = offset + lines[index]!.length + (trailingNewline ? 1 : 0);
+      }
+      if (length === wanted.length) length = prefix[length - 1]!;
+      offset += lines[index]!.length + 1;
+    }
+    matchMode = "line_whitespace";
+  }
+  if (first < 0) patchError("REPLACEMENT_NOT_FOUND", "Replacement oldText was not found", "Read the current file and copy the exact text, or explicitly use line_whitespace with unique complete lines differing only in leading/trailing spaces or tabs.");
+  if (source.slice(first, end) === newText) patchError("REPLACEMENT_UNCHANGED", "Replacement would not change the file", "Submit newText that changes the actual matched text.");
+  const startLine = source.slice(0, first).split("\n").length;
+  const endLine = startLine + source.slice(first, end).replace(/\n$/u, "").split("\n").length - 1;
+  return { text: `${source.slice(0, first)}${newText}${source.slice(end)}`, matchMode, matchedLines: { start: startLine, end: endLine } };
 }
 
 async function assertSafeTarget(root: string, target: string): Promise<void> {
@@ -277,6 +320,8 @@ interface PreparedPatch {
   before: { exists: false } | ({ exists: true } & TextFileVersion);
   after?: Buffer;
   afterText?: string;
+  matchMode?: "exact" | "line_whitespace";
+  matchedLines?: { start: number; end: number };
 }
 
 async function preparePatch(
@@ -295,7 +340,8 @@ async function preparePatch(
   const seen = new Set<string>();
   let patchBytes = 0;
   try {
-    for (const operation of operations) {
+    for (const rawOperation of operations) {
+      const operation = parseOperation(rawOperation);
       patchBytes += Buffer.byteLength(operation.content ?? operation.patch ?? operation.replace?.oldText ?? "", "utf8")
         + Buffer.byteLength(operation.replace?.newText ?? "", "utf8");
       if (patchBytes > MAX_PATCH_BYTES) throw new Error("Patch batch exceeds the 512 KiB limit");
@@ -312,6 +358,7 @@ async function preparePatch(
       if (operation.action !== "create" && !before.exists) throw new Error(`File does not exist: ${operation.path}`);
       if (operation.expectedSha256 && (!before.exists || before.sha256 !== operation.expectedSha256)) patchError("STALE_VERSION", `File changed since it was read: ${operation.path}`, "Read the file again before retrying the edit.");
       let after: string | undefined;
+      let match: ReturnType<typeof locateReplacement> | undefined;
       if (operation.action === "create") {
         if (operation.content === undefined || operation.patch !== undefined || operation.replace !== undefined) patchError("INVALID_ARGUMENTS", "Create operations require content only");
         after = operation.content;
@@ -319,8 +366,9 @@ async function preparePatch(
         if (!before.exists) throw new Error(`File does not exist: ${operation.path}`);
         const methods = [operation.content, operation.patch, operation.replace].filter((item) => item !== undefined).length;
         if (methods !== 1) patchError("INVALID_ARGUMENTS", "Update operations require exactly one of content, patch, or replace");
-        after = operation.replace !== undefined
-          ? applyExactReplacement(before.text, operation.replace)
+        match = operation.replace === undefined ? undefined : locateReplacement(before.text, operation.replace);
+        after = match !== undefined
+          ? match.text
           : operation.patch === undefined ? operation.content : applyUnifiedPatch(before.text, operation.patch);
       } else if (operation.content !== undefined || operation.patch !== undefined || operation.replace !== undefined) {
         patchError("INVALID_ARGUMENTS", "Delete operations do not accept content, patch, or replace");
@@ -329,7 +377,7 @@ async function preparePatch(
         ? undefined
         : encodeTextFile(after, operation.action === "update" && before.exists ? before : undefined);
       if (afterBytes !== undefined && afterBytes.byteLength > MAX_FILE_BYTES) throw new Error("Patched file exceeds the 512 KiB limit");
-      prepared.push({ operation, target, before, ...(afterBytes === undefined ? {} : { after: afterBytes, afterText: after! }) });
+      prepared.push({ operation, target, before, ...(afterBytes === undefined ? {} : { after: afterBytes, afterText: after! }), ...(match ? { matchMode: match.matchMode, matchedLines: match.matchedLines } : {}) });
     }
     return { prepared };
   } catch (error) {
@@ -364,6 +412,7 @@ export async function previewApplyPatch(
     beforeSha256: item.before.exists ? item.before.sha256 : null,
     afterSha256: item.after === undefined ? null : sha256Bytes(item.after),
     diff: diffFor(item),
+    ...(item.matchMode ? { matchMode: item.matchMode, matchedLines: item.matchedLines! } : {}),
   }));
   return { status: "ready", files, diff: files.map((file) => file.diff).join("\n") };
 }
@@ -385,7 +434,7 @@ export async function runApplyPatch(
       else if (item.operation.action === "create") await exclusiveCreate(item.target, item.after!);
       else await atomicWrite(item.target, item.after!);
       applied.push(item);
-      files.push({ path: item.operation.path, action: item.operation.action, status: "applied" });
+      files.push({ path: item.operation.path, action: item.operation.action, status: "applied", ...(item.matchMode ? { matchMode: item.matchMode, matchedLines: item.matchedLines! } : {}) });
     }
     return {
       status: "applied",

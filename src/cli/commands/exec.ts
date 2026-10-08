@@ -77,16 +77,18 @@ async function readProcessStdin(signal: AbortSignal): Promise<string> {
 
 export function createProcessExecCommandHost(options: { outputStallMs?: number } = {}): ExecCommandHost {
   const writerOptions = options.outputStallMs === undefined ? {} : { stallMs: options.outputStallMs };
-  const pipeProcess = process.platform === "win32" && (!process.stdout.isTTY || !process.stderr.isTTY) ? new ExecPipeProcess() : undefined;
+  const pipeProcess = !process.stdout.isTTY || !process.stderr.isTTY ? new ExecPipeProcess() : undefined;
   const stdoutStream = pipeProcess && !process.stdout.isTTY ? pipeProcess.stream(1) : process.stdout;
   const stderrStream = pipeProcess && !process.stderr.isTTY ? pipeProcess.stream(2) : process.stderr;
   const stdout = new ExecStreamWriter(stdoutStream, writerOptions);
   const stderr = new ExecStreamWriter(stderrStream, writerOptions);
+  let disposing = false;
   const watch = (stream: Writable, handler: (error: Error) => void) => {
-    const closed = () => handler(new ExecOutputError("Exec output was closed"));
-    stream.on("error", handler);
+    const failed = (error: Error) => { if (!disposing) handler(error); };
+    const closed = () => { if (!disposing) handler(new ExecOutputError("Exec output was closed")); };
+    stream.on("error", failed);
     stream.on("close", closed);
-    return () => { stream.off("error", handler); stream.off("close", closed); };
+    return () => { stream.off("error", failed); stream.off("close", closed); };
   };
   return {
     cwd: () => process.cwd(),
@@ -106,7 +108,7 @@ export function createProcessExecCommandHost(options: { outputStallMs?: number }
     },
     onStdoutError: (handler) => watch(stdoutStream, handler),
     onStderrError: (handler) => watch(stderrStream, handler),
-    ...(pipeProcess ? { disposeOutput: () => pipeProcess.dispose() } : {}),
+    ...(pipeProcess ? { async disposeOutput() { disposing = true; await pipeProcess.dispose(); } } : {}),
   };
 }
 
