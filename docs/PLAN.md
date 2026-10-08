@@ -17,7 +17,7 @@
 - [x] 接入既有 Agent 通知与 runner 收束回归，验证结算不越过未结束任务。
 - [x] 更新工具／运行时契约、架构决策、地图、开发指南和交接。
 - [x] 串行执行实际 typecheck → lint → test → build，首败停止；记录 lint 缺项，检查差异与文档链接。
-- [ ] 按新增授权更新版本、重新执行交付门禁、提交并推送 main；核对双平台 CI 与 Release 未变，不推送 tag。
+- [x] 按新增授权更新版本、重新执行交付门禁、提交并推送 main；双平台 Test CI 通过，Release workflow 实际跳过、Release 未变，未推送 tag；证据见交接。
 
 ## 后续顺序
 

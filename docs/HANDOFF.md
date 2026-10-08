@@ -7,7 +7,7 @@
 - 第四阶段开始 main HEAD：`9e65c4ea413d00de76d1bed03b255d6fe9356938`，与 origin/main 同步；package.json 与双语 README 为 `0.3.13`。
 - 用户要求开始第四阶段，随后明确授权更新版本、提交并推送，禁止更新 Release。首轮聚焦工具与进程中的后台任务准入和完整结算，继续使用现有 BackgroundJobManager、shell、原生 sandbox 和 runner。
 - 公共 CLI/SDK 参数、Session schema、工具定义、权限与文件观察边界不变。双语 README 同步可查询启动失败和清理／销毁期间拒绝启动的行为。
-- 本次交付将 package.json 与双语 README 更新为 `0.3.14`，使用 `[skip publish]` 提交标记，只推送 main，不打 tag 或创建／更新 Release，不调用真实模型。已有 GitHub 凭据授权仍仅限在内存中用于 Release／CI 只读核对。
+- 本次交付已将 package.json 与双语 README 更新为 `0.3.14`，使用 `[skip publish]` 提交标记，只推送 main，不打 tag 或创建／更新 Release，不调用真实模型。已有 GitHub 凭据授权仍仅限在内存中用于 Release／CI 只读核对。
 
 ## 第四阶段首轮实现
 
@@ -30,7 +30,9 @@
 
 版本更新后重新在宿主 Node 环境串行执行：pnpm typecheck 通过 → lint 脚本缺项 → pnpm test 854 项、851 通过、0 失败、3 个既有跳过，耗时 53,249.6519 ms → pnpm build 通过。日志为宿主临时目录 everpeace-background-lifecycle-delivery-test-20261008.log，构建产物已重新生成。git diff --check、17 份修改／新增文件空白及 14 份文档的 536 个本地链接／标题检查通过，package.json 与双语 README 版本一致。
 
-推送前 main 为上述基线，远端无 v0.3.14 tag；27 条 Release 的 ID、tag 与 updated_at 已取得只读基线，推送后逐项比较。实际 Windows／Linux CI 和交付结果待推送后补记。
+第四阶段实现与版本更新已提交并推送 main：`eabe173432149785aaeaca9f7b2a5b5b144ef3d2`，标题为 `fix: enforce background job lifecycle [skip publish]`。远端 main 精确匹配该提交；推送前后 27 条 Release 的 ID、tag 和 updated_at 逐项一致，远端 v0.3.14 tag 不存在。[Release workflow](https://github.com/VinceTree/Everpeace/actions/runs/37784586991) 与 Publish version job 均实际 skipped；没有创建或更新 Release。
+
+[Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37784587059) 对上述实现提交的 Windows／Linux jobs 均 success，包含 typecheck、完整 test、build 与差异检查。Windows 854 项、850 通过、0 失败、4 跳过，耗时 125,704.0268 ms；Linux 854 项、851 通过、0 失败、3 跳过，耗时 67,862.952919 ms。Windows hosted runner 跳过原生 sandbox 真实初始化等既有平台项目，证据边界见 [开发指南](DEVELOPMENT.md#独立测试-ci-与证据范围)。收尾只更新交接和计划，不改变已验收的实现、测试或 package.json。
 
 ## 独立验收与后续
 
