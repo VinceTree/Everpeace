@@ -43,7 +43,9 @@ fake provider 的 [共享生产闭环](../tests/unit/runtime/project-editing.tes
 
 继续本轮时，一次本地重跑的 stdout stall 与独立 MCP stdio 回归均跨约 35 分钟后超时，原断言／超时未放宽，保留为无效交付运行；随后完整重跑恢复通过。独立定向复现还发现关闭 stdout 时 write Promise 已失败、Writable error 却等待异步 destroy 后才通知，导致 IPC 取消标记偶尔晚于任务清理。CLI host 已在写入失败边界立即通知取消，继续等待迟到 stream error／close 和 owned writer 清理。真实输出／MCP stdio／容错回归 25 项通过；新增不发 stream error 的失败注入明确验证 stdout／stderr 写失败先取消、后清理，CLI 回归 12 项全部通过。最终完整门禁结果见上，修复继续提交推送，不递增包版本。
 
-修复已提交推送为 `5e04fbc053399a3eb9b1590caf411e3abd259a0b`（fix: cancel failed output writes before cleanup [skip publish]）。[修复后 Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37731315535) completed／success：Linux 759 项、756 通过、0 失败、3 跳过，耗时 66,447.689328 ms；Windows 759 项、755 通过、0 失败、4 跳过，耗时 129,222.3676 ms。两平台安装、typecheck、完整 test、build 和差异检查均通过；Windows hosted runner 的原生 sandbox 跳过范围见 [开发指南](DEVELOPMENT.md)，不当作真实隔离／终端验收。本轮未扩增跳过或放宽输出进程回归超时。该提交没有触发 Release workflow；再次核对 27 份 Release 元数据和 26 个 tag 引用完全未变。实现／测试代码至此固定，交接文档的后续同步不递增包版本或改变发布条件。
+修复已提交推送为 `5e04fbc053399a3eb9b1590caf411e3abd259a0b`（fix: cancel failed output writes before cleanup [skip publish]）。[修复后 Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37731315535) completed／success：Linux 759 项、756 通过、0 失败、3 跳过，耗时 66,447.689328 ms；Windows 759 项、755 通过、0 失败、4 跳过，耗时 129,222.3676 ms。两平台安装、typecheck、完整 test、build 和差异检查均通过；Windows hosted runner 的原生 sandbox 跳过范围见 [开发指南](DEVELOPMENT.md)，不当作真实隔离／终端验收。本轮未扩增跳过或放宽输出进程回归超时。该提交没有触发 Release workflow；再次核对 27 份 Release 元数据和 26 个 tag 引用完全未变。交接文档的同步不递增包版本或改变发布条件。
+
+最后边界复核补齐 line_whitespace 的纯 Unicode 空白拒绝（含 NBSP、中文全角空格、换页符），默认 exact 及只允许 ASCII 首尾空格／Tab 的匹配规则不变。定向 5 项通过，重新执行完整门禁 759 项、756 通过、0 失败、3 跳过，类型检查／构建通过；版本仍为 0.3.10。该补充已推送为 `5c1a1bd36a4278bd72669c7c5bcdbab9712d7770`，[最终实现 Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37731989972) completed／success，Windows／Linux job 均 completed／success，全部安装／typecheck／test／build／差异检查通过。再次比对 27 份 Release 元数据和 26 个 tag 引用完全未变；未触发新的 Release job。后续交接同步仅修改文档，主实现和验证测试不再变化。
 
 ## 保持的能力与限制
 
@@ -56,5 +58,3 @@ Windows LSP 仍因固定 backend 的 TCP/IPv4 网络隔离门禁失败而 unavai
 ## 用户原有内容
 
 开始时 tracked 差异为空；已有未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}` 全部保留，不加入提交、不清理。
-
-最后边界复核补齐 line_whitespace 的纯 Unicode 空白拒绝（含 NBSP、中文全角空格、换页符），默认 exact 及只允许 ASCII 首尾空格／Tab 的匹配规则不变。定向 5 项通过，重新执行完整门禁 759 项、756 通过、0 失败、3 跳过，类型检查／构建通过；版本仍为 0.3.10。该补充继续按同一 skip publish／无 tag 路径提交推送，新的 CI 完成证据随后记录。
