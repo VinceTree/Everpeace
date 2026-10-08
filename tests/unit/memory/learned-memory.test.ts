@@ -369,22 +369,27 @@ test("memory capture can wait for idle time before extracting", async () => {
 test("persistent capture jobs preserve consecutive turns and resume after restart", async () => {
   const directory = await temporaryDirectory();
   const workspacePath = "C:\\repo";
+  const runtimes: LearnedMemoryRuntime[] = [];
+  let queuedRequests = 0;
   let requests = 0;
   try {
     const store = new LearnedMemoryStore({ directory });
     const queuedRuntime = new LearnedMemoryRuntime({
       store,
       model: "test-model",
-      idleDelayMs: 40,
+      idleDelayMs: 0,
       unrefTimers: false,
-      client: { responses: { async create() { throw new Error("queued runtime should be disposed before capture"); } } },
+      client: { responses: { async create() { queuedRequests++; throw new Error("queued runtime should be disposed before capture"); } } },
     });
+    runtimes.push(queuedRuntime);
+    await queuedRuntime.beginTask();
     await queuedRuntime.finishTurn({ workspacePath, sessionId: "session-1", userInput: "Fix alpha behavior", transcript: "verified local tool result alpha", assistantText: "done", toolCallCount: 1 }, "verified");
     await queuedRuntime.finishTurn({ workspacePath, sessionId: "session-1", userInput: "Fix beta behavior", transcript: "verified local tool result beta", assistantText: "done", toolCallCount: 1 }, "verified");
     assert.equal((await queuedRuntime.status(workspacePath)).capture?.queued, 2);
+    assert.equal((await store.loadJobs()).filter((job) => job.status === "queued").length, 2);
+    assert.equal(queuedRequests, 0);
     await queuedRuntime.dispose();
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 50));
     const resumedRuntime = new LearnedMemoryRuntime({
       store,
       model: "test-model",
@@ -401,8 +406,11 @@ test("persistent capture jobs preserve consecutive turns and resume after restar
         };
       } } },
     });
+    runtimes.push(resumedRuntime);
     await waitFor(async () => (await store.read("project", workspacePath)).length === 2);
+    await waitFor(async () => (await store.loadJobs()).length === 0);
     assert.equal(requests, 2);
+    assert.equal(queuedRequests, 0);
     assert.deepEqual((await store.read("project", workspacePath)).map((entry) => entry.lesson).sort(), [
       "Keep alpha behavior verified",
       "Keep beta behavior verified",
@@ -410,6 +418,7 @@ test("persistent capture jobs preserve consecutive turns and resume after restar
     assert.equal((await resumedRuntime.status(workspacePath)).capture?.queued, 0);
     await resumedRuntime.dispose();
   } finally {
+    for (const runtime of runtimes) await runtime.dispose();
     await removeTemporaryDirectory(directory);
   }
 });

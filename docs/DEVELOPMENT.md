@@ -124,6 +124,8 @@ Composer 另检查带有效文件引用的提交：连续按 Enter 只启动一�
 
 Memory 的 [空闲生命周期回归](../tests/unit/runtime/memory-idle-lifecycle.test.ts) 只对五分钟及更长的 idle/租约等待使用受控 timer，锁心跳及 Windows 原子 rename 的短 backoff 使用真实 timer。推进 Date 检查最后一毫秒不能冻结持久化重试，否则 Windows sharing violation 会让关闭等待停滞；回归显式注入一次 EBUSY，检查重试成功且空闲时间没有推进。
 
+[Memory 队列重启回归](../tests/unit/memory/learned-memory.test.ts) 在保存两轮内容时显式 beginTask 暂停后台消费，不假定原子写能在短 idle 窗口内完成；重启后同时等待条目与 capture jobs 结算，并在断言失败时释放 runtime。[验证命令超时回归](../tests/unit/benchmark/runner.test.ts) 直接调用验证器，避免独立的任务 deadline 在 Windows taskkill 清理期间到期而改变取消分类；任务取消与任务超时另有独立断言。
+
 App 回归在每项测试结束后统一清理渲染器和捕获的输出帧，即使断言失败也释放。ink-testing-library 会保留渲染器引用，仅 unmount 不会释放捕获帧；所有历史、resize 和隐私断言仍在清理前执行。不通过增大 CI 堆或跳过断言绕过资源问题。
 
 fixture 中验证命令仍通过生产原生 sandbox；失败保持 unverified，不回退宿主执行。直接 `!` 是工作目录固定在 fixture workspace 的正常用户 PTY。自动测试不替代这里的终端体验验收；执行后记录终端版本、步骤和结果，未执行时明确标记 pending。

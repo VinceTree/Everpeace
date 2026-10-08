@@ -87,23 +87,20 @@ test("evaluator-owned acceptance takes precedence over harness-visible verificat
   assert.equal(result.verification?.exitCode, 7);
 });
 
-test("verification timeout terminates the process tree", async () => {
-  const adapter: BenchmarkHarnessAdapter = {
-    name: "fixture-harness",
-    async run() {},
-  };
-  const result = await runBenchmarkTask(task({
-    timeoutMs: 2_000,
-    verification: {
-      command: "node",
-      args: ["-e", "setTimeout(() => {}, 1000)"],
-      timeoutMs: 10,
-    },
-  }), adapter);
+test("verification timeout terminates the process tree", { timeout: 10_000 }, async () => {
+  // Isolate the verification deadline from a task deadline that may expire
+  // while Windows is still completing taskkill.
+  const result = await runBenchmarkVerification({
+    command: process.execPath,
+    args: ["-e", "setInterval(() => {}, 1000)"],
+    timeoutMs: 10,
+  }, process.cwd(), new AbortController().signal);
 
-  assert.equal(result.status, "timed_out");
-  assert.equal(result.verification?.timedOut, true);
-  assert.equal(result.verification?.cancelled, false);
+  assert.equal(result.passed, false);
+  assert.equal(result.timedOut, true);
+  assert.equal(result.cancelled, false);
+  assert.equal(result.exitCode, null);
+  assert.notEqual(result.cleanupFailed, true);
 });
 
 test("verification cancellation is distinct from a timeout", async () => {

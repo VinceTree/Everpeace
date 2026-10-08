@@ -1,6 +1,6 @@
 # 当前交接
 
-更新日期：2026-10-09。先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 定位。本轮授权交付当前 Memory 修复，展示版本已同步为 0.3.22；功能源码 ea659ef590015299f5150de13e85849ce947053e 已提交、推送，首次 CI 的 Windows 时钟 fixture 故障已修正并重新通过本地门禁，继续核对修正提交的远端结果。
+更新日期：2026-10-09。先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 定位。本轮授权交付当前 Memory 修复，展示版本已同步为 0.3.22；功能源码 ea659ef590015299f5150de13e85849ce947053e 已提交、推送。交付中修正 Windows 时钟 fixture 及两处既有测试竞态，最新完整本地门禁通过，继续核对修正提交的远端结果。
 
 ## 本轮范围与授权
 
@@ -19,7 +19,7 @@
 
 ## 本轮交付门禁
 
-升版后重新发现实际 manifest 并串行执行：typecheck 通过 → 实际没有 lint script → test 1054 项、1051 通过、0 失败、0 cancelled、3 项平台跳过（60,854.2129 ms）→ build 通过。构建前确认 dist 的绝对路径及父目录在本工作区。最新日志位于宿主临时目录：everpeace-memory-delivery-0.3.22-{typecheck,test,build}-ci-fix-20261009.log，不使用开发阶段旧门禁冒充本次验证。
+最终测试修正后重新发现实际 manifest 并串行执行：typecheck 通过 → 实际没有 lint script → test 1054 项、1051 通过、0 失败、0 cancelled、3 项平台跳过（61,765.6732 ms）→ build 通过。构建前确认 dist 的绝对路径及父目录在本工作区且不是 symlink。最新日志位于宿主临时目录：everpeace-memory-delivery-0.3.22-{typecheck,test,build}-ci-races-20261009.log，不使用开发阶段旧门禁冒充本次验证。
 
 测试包含真实生产 factory/runner、Session 持久化、实际 SDK fake fetch、隔离 Git 项目、进程中断和 Ink 回归；它们不调用真实付费模型，也不替代 Windows Terminal 手工体验或真实模型质量验收。
 
@@ -27,7 +27,9 @@
 
 功能提交 ea659ef 的 [首次 Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37858600081) 中 Linux 通过，Windows 在 overdue reliable running 回归期间出现 cancelledByParent，后续同文件测试也被取消。读取实际 GitHub 注释后定位到 fixture 同时冻结所有 setTimeout：Windows 原子 rename 的 10–160ms backoff 和锁重试因此不能完成，finally 的关闭等待也停滞。独立负向用 10ms timer 复现 false 而预期 true（everpeace-memory-delivery-clock-retry-baseline-20261009.log）。
 
-修正仅控制五分钟及以上 idle/租约 timer，存储 backoff 和锁心跳继续使用真实 timer；清理仍等待真正持久化，不削弱生产策略、业务断言或 CI。新增真实 Windows store 的一次 EBUSY 注入，断言第二次 rename 成功、条目落盘且 idle Date 未推进。首次扩展定向 15/15 通过；补齐严格的 Node/DOM timer handle 类型与真实 Windows 回归后，最终完整门禁 1051 通过。设计操作说明回填 [DEVELOPMENT](DEVELOPMENT.md)。修正后的远端 CI 另行核对，首次失败不能被描述为通过。
+修正仅控制五分钟及以上 idle/租约 timer，存储 backoff 和锁心跳继续使用真实 timer；清理仍等待真正持久化，不削弱生产策略、业务断言或 CI。新增真实 Windows store 的一次 EBUSY 注入，断言第二次 rename 成功、条目落盘且 idle Date 未推进。首次扩展定向 15/15 通过；补齐严格的 Node/DOM timer handle 类型与真实 Windows 回归后完整门禁 1051 通过。设计操作说明回填 [DEVELOPMENT](DEVELOPMENT.md)。
+
+时钟修正提交 a9d9168e01ddb823a4ee8261183080b19724e569 的 [第二次 Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37859761531) 中 Linux 通过，Windows 的空闲生命周期回归已通过，但两项既有测试失败：验证命令超时测试的两秒任务 deadline 在 taskkill 清理中到期，使 cancelled 同为 true；Memory 队列保存依赖两次写入在 40ms idle 窗口内完成，消费提前启动后 queued 只剩一项。分别直接测试 verification deadline（任务取消/任务超时仍有独立回归），以及 beginTask 显式暂停保存两轮内容、释放后由新 runtime 消费。队列同时断言持久化的两项 queued、旧 runtime 零请求、新 runtime 恰好两次请求、条目和 jobs 结算，finally 始终清理 runtime。此次完整本地门禁亦为 1051 通过；没有改变产品 timeout、Memory 策略或 CI 门禁，远端最新提交另行复核，两次历史失败均保留为失败证据。
 
 ## 远端验证与保护状态
 
