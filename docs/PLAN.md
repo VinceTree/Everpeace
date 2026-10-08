@@ -17,7 +17,7 @@
 - [x] 保留并通过重试／follow-up、steering、权限收紧、取消、持久化及生产入口回归。
 - [x] 更新运行时、loop、项目地图、架构决策及交接。
 - [x] 串行执行实际 typecheck → lint → test → build，首败停止；记录 lint 缺项，检查差异和文档链接。
-- [ ] 按用户授权更新展示版本、提交并推送 main；核对 Test CI 与 Release 未变化，不推送 tag。
+- [x] 按用户授权更新展示版本、提交并推送 main；Windows／Linux Test CI 通过，Release workflow 实际跳过、Release 未变化，未推送 tag；证据见交接。
 
 ## 后续顺序
 

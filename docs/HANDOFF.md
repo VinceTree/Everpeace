@@ -27,11 +27,13 @@ Agent、workflow context、context inspection／pruning、production factory、P
 
 实现完成后在宿主 Node 环境串行执行：pnpm typecheck 通过 → scripts 缺少 lint，明确缺项 → pnpm test 844 项、841 通过、0 失败、3 个既有跳过，耗时 59,330.4523 ms → pnpm build 通过。日志：宿主临时目录 everpeace-agent-catalog-final-test-20261008.log；构建已生成新工具目录的 JS 与声明文件。git diff --check、14 份修改／新增文件空白和 14 份相关文档的 468 个本地链接／标题检查通过，双语 README 的知识库入口保持一致。测试包含现有依赖边界、Plan／TUI／Session／SDK 与生产 runner 回归。
 
-## 本次交付进度
+## 本次交付结果
 
 更新展示版本后重新在宿主串行执行 typecheck → 记录缺少 lint → test → build，所有存在项通过。测试 844 项、841 通过、0 失败、3 个既有跳过，耗时 59,678.5638 ms；日志为宿主临时目录 everpeace-agent-catalog-delivery-test-20261008.log。17 份修改／新增文件空白与 14 份文档的 468 个本地链接／标题检查通过。
 
-推送前只读核对远端 main 与开始基线一致，现有 27 条 Release 的 ID、tag 和更新时间与既有基线相同；远端 `v0.3.13` tag 不存在。基线文档提交的 [Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37772227355) 已 success；本次实现的 CI 和 Release workflow 结果须推送后独立核对。
+第三阶段实现与展示版本已提交并推送 main：`f355b96ab2af7ca2784dabbbe41e3a9a02120ba1`，标题为 `refactor: unify step tool admission [skip publish]`。推送前后只读核对 27 条 Release 的 ID、tag 和更新时间完全一致，远端 `v0.3.13` tag 不存在。[Release workflow](https://github.com/VinceTree/Everpeace/actions/runs/37777947178) 与 Publish version job 均实际 skipped；没有创建或更新 Release。
+
+[Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37777947141) 对上述实现提交的 Windows／Linux jobs 均 success，包含 typecheck、完整 test、build 与差异检查。Windows 844 项、840 通过、0 失败、4 跳过，耗时 198,045.9137 ms；Linux 844 项、841 通过、0 失败、3 跳过，耗时 98,721.445625 ms。Windows hosted runner 额外跳过原生 sandbox 真实初始化，证据边界见 [开发指南](DEVELOPMENT.md#独立测试-ci-与证据范围)。基线文档提交的 [Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37772227355) 也已 success。收尾只更新交接和计划，不改变已验收的实现与测试。
 
 ## 独立验收与后续
 
