@@ -21,7 +21,7 @@ Everpeace 是 DeepSeek 优先、Windows 优先的个人开发 CLI；保留官方
 | 层次 | 职责与状态归属 | 当前入口 |
 | --- | --- | --- |
 | 入口适配 | 处理输入输出和各自交互方式；展示、草稿与终端按键属于界面 | `src/tui/`、`src/cli/`、`src/exec/`、`src/sdk/`、`src/benchmark/` |
-| 应用协调 | 管理当前 Session、模式、待执行计划、任务准入、取消及操作身份，决定任务是否启动、属于哪个会话 | 当前集中于 TUI App；非交互入口管理各自调用生命周期 |
+| 应用协调 | 管理当前 Session 身份、模式、待执行计划、模型任务准入、取消及操作身份，决定任务是否启动、属于哪个会话 | [ApplicationCoordinator](../../src/runtime/application-coordinator.ts) 由 TUI App 持有；非交互入口管理各自调用生命周期 |
 | 任务执行 | runner/workflow 管理任务资源、清理、验证、诊断及最终结算，决定任务是否完成、是否验证通过 | `src/workflow/` |
 | Agent 引擎 | 请求准备、上下文维护、模型循环、工具调度与请求计量 | `src/agent/` |
 | 能力与资源 | 文件、shell、权限、存储、provider、MCP、Skills、Memory 提供各自能力，保留各自安全和生命周期约束 | `src/tools/`、`src/permissions/`、`src/storage/`、`src/providers/` 等 |
@@ -35,8 +35,8 @@ Session 存储持久事实；timeline、模型 context、workflow 元数据保�
 | 路径 | 职责与依赖边界 |
 | --- | --- |
 | `src/cli/`、`src/exec/`、`src/sdk/` | CLI 参数／输出、TUI 启动及公开非交互 CLI/SDK 适配；exec 与 SDK 不依赖 UI |
-| `src/runtime/` | TUI、exec、SDK、benchmark 共用的生产 Agent、AgentIO 与 sandbox 命令 factory；不依赖 UI |
-| `src/tui/` | 应用状态与展示；目录分层见 [TUI_STRUCTURE](TUI_STRUCTURE.md) |
+| `src/runtime/` | 共享生产 Agent／IO／sandbox factory，以及 UI 无关的应用协调状态；不依赖 UI |
+| `src/tui/` | 交互、展示及宿主 I/O 适配；应用协调状态委托给 runtime，目录分层见 [TUI_STRUCTURE](TUI_STRUCTURE.md) |
 | `src/agent/` | Responses 交互、step/context、请求执行与计量、压缩、项目规则 |
 | `src/providers/` | client 工厂、能力契约、用途设置、模型列表 |
 | `src/workflow/` | coding 任务编排、变更追踪、检查发现/执行、检查点、TaskProgress 与结果 |
@@ -60,6 +60,7 @@ Session 存储持久事实；timeline、模型 context、workflow 元数据保�
 | CLI 参数、启动、登录/模型选择 | [cli/index](../../src/cli/index.ts)、[args](../../src/cli/args.ts)、[selection](../../src/cli/selection.ts) | [args](../../tests/unit/cli/args.test.ts)、[selection](../../tests/unit/cli/selection.test.ts) | [README](../../README.md)、[STATE_AND_UI](STATE_AND_UI.md) |
 | `everpeace exec`、JSONL、管道背压与退出清理 | [exec runtime](../../src/exec/runtime.ts)、[exec output](../../src/cli/exec-output.ts)、[exec writer](../../src/cli/exec-writer.ts)、[production factory](../../src/runtime/production.ts) | [exec](../../tests/unit/exec/runtime.test.ts)、[exec output](../../tests/unit/cli/exec-output.test.ts)、[writer](../../tests/unit/cli/exec-writer.test.ts)、[真实子进程](../../tests/unit/cli/exec-process.test.ts) | [README](../../README.md#non-interactive-execution)、[RUNTIME](RUNTIME.md)、[STATE_AND_UI](STATE_AND_UI.md) |
 | 公开 SDK、分层与禁止的依赖方向 | [SDK](../../src/sdk/index.ts)、[production factory](../../src/runtime/production.ts)、[类型配置](../../tsconfig.json) | [SDK](../../tests/unit/exec/sdk.test.ts)、[架构回归](../../tests/unit/architecture/dependency-boundaries.test.ts) | [DEVELOPMENT](../DEVELOPMENT.md)、[DECISIONS](DECISIONS.md) |
+| 任务准入、取消、会话归属与待执行 Plan | [应用协调](../../src/runtime/application-coordinator.ts)、[App](../../src/tui/app/app.tsx) | [协调回归](../../tests/unit/runtime/application-coordinator.test.ts)、[App](../../tests/unit/tui/app.test.tsx)、[生产闭环](../../tests/unit/runtime/plan-execution.test.tsx) | [RUNTIME](RUNTIME.md#应用协调与任务执行)、[STATE_AND_UI](STATE_AND_UI.md) |
 | 请求 step、工具调度、steering、重试 | [react-agent](../../src/agent/react-agent.ts)、[agent-loop](../../src/agent/agent-loop.ts) | [react-agent](../../tests/unit/agent/react-agent.test.ts)、[loop boundaries](../../tests/unit/agent/loop-boundaries.test.ts) | [RUNTIME](RUNTIME.md)、[AGENT_LOOP](AGENT_LOOP.md) |
 | DeepSeek/兼容端点、reasoning、辅助请求 | [capabilities](../../src/providers/capabilities.ts)、[provider client](../../src/providers/openai-compatible.ts)、[request executor](../../src/agent/request-executor.ts) | [capabilities](../../tests/unit/providers/capabilities.test.ts)、[react-agent](../../tests/unit/agent/react-agent.test.ts)、[TUI dependencies](../../tests/unit/tui/dependencies.test.ts) | [RUNTIME](RUNTIME.md) |
 | attempt 计量、预算、context/缓存 | [ledger](../../src/agent/request-attempt-ledger.ts)、[request snapshot](../../src/agent/request-snapshot.ts)、[context limits](../../src/agent/context-limits.ts) | [ledger](../../tests/unit/agent/request-attempt-ledger.test.ts)、[snapshot](../../tests/unit/agent/request-snapshot.test.ts)、[context](../../tests/unit/agent/context-limits.test.ts) | [RUNTIME](RUNTIME.md)、[STATE_AND_UI](STATE_AND_UI.md) |

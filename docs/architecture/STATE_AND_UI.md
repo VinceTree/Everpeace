@@ -9,8 +9,9 @@
 | API Key | [AuthStorage](../../src/storage/auth-storage.ts) 与系统 keyring | models JSON、Session、日志、UI、测试快照 |
 | 模型注册 | [ModelRegistry](../../src/storage/model-registry.ts)，平台配置中的 `models.json` | 明文 Key；只保存 `auth_ref` |
 | 对话、context、主请求 usage | [SessionStore](../../src/storage/session-store.ts)，每 Session 一个 JSONL | 从历史恢复的权限授权 |
-| 当前视图、审批、运行状态 | [TUI App](../../src/tui/app/app.tsx) 及依赖 | 临时命令窗口不能变为聊天历史 |
-| 已批准待执行计划 | 当前 TUI 进程内，绑定 Session 与 Agent | JSONL、恢复后的执行授权、文件审批或验证成功 |
+| 当前视图、审批与运行显示 | [TUI App](../../src/tui/app/app.tsx) 及依赖；模式和活动任务显示是协调状态的投影 | 临时命令窗口不能变为聊天历史 |
+| 当前 Session 身份、模式、模型任务准入／取消及命令操作身份 | [ApplicationCoordinator](../../src/runtime/application-coordinator.ts)，TUI 每次挂载一个实例 | 持久事实、UI 组件、第二套 runner 或资源清理循环 |
+| 已批准待执行计划 | 当前协调实例内，绑定 Session 与 Agent，正文按值返回 | JSONL、恢复后的执行授权、文件审批或验证成功 |
 | coding 结果与验证债务 | [workflow runtime](../../src/workflow/runtime.ts)，Session 只保存元数据 | 验证 stdout/stderr/error、文件检查点 |
 | 当前 coding 执行清单 | [TaskProgress](../../src/workflow/task-progress.ts)，Session 保存最新整体投影 | 验证成功、Goal 完成或权限授权 |
 | Goal | [GoalRuntime](../../src/goal/runtime.ts)，Session 绑定 | 无宿主验证的编码完成状态 |
@@ -115,7 +116,9 @@
 
 `/plan` 和 `/plan <request>` 保持严格只读。审阅菜单为 `Approve plan / Revise plan / Cancel plan`；修订输入要求非空意见，通过当前 `submit_plan` 的配对结果先落盘再继续采样。修订输入的 Esc 返回菜单，菜单的 Esc 取消规划，两处 Ctrl+C 均取消活动任务。预先 aborted 的 signal 不打开窗口，回调只结算一次，迟到决定不能复活批准。
 
-批准后等待 runner 完成清理，保存标题、完整正文和当前 Session／Agent 身份，继续保持 Plan 模式并提示 `Plan approved. Run /plan execute to start.`。不新增 Session event，不从历史推断批准。`/plan show` 只读查看进程内计划，不发模型请求；手动压缩不影响这份正文。`/plan execute` 只在空闲且绑定有效时捕获并消费计划，通过包含完整正文的新 coding 输入启动共享 runner。消费后取消或失败不自动重试；计划批准不能代替 patch／shell 审批，也不恢复文件观察。
+批准后等待 runner 完成清理，由协调实例校验任务、Session 与 Agent 身份后保存标题和完整正文，继续保持 Plan 模式并提示 `Plan approved. Run /plan execute to start.`。不新增 Session event，不从历史推断批准。`/plan show` 只读查看进程内计划，不发模型请求；手动压缩不影响这份正文。`/plan execute` 的正文消费与任务准入同步完成，再通过包含完整正文的新 coding 输入启动共享 runner。消费后取消或失败不自动重试；计划批准不能代替 patch／shell 审批，也不恢复文件观察。
+
+协调实例发出取消但保留活动任务，宿主等待 runner 清理后才释放准入。成功新建／恢复／清空／fork 调用会话替换，取消旧任务并推进身份；首次惰性创建只绑定当前任务，不替换它。会话或 Agent 已改变时，迟到任务结果不能发布批准或错误消息，也不能继续排队 guidance；尚未处理的输入返回草稿等待重交。初次创建在清空后才返回，也不能重新绑定旧会话。界面仍负责存储／目录切换及其失败处理，仅成功后提交协调身份，失败不会提前丢失原批准。相关回归见 [协调状态](../../tests/unit/runtime/application-coordinator.test.ts) 和 [App](../../tests/unit/tui/app.test.tsx)。
 
 新讨论、带需求的 `/plan` 在任务启动前清除旧批准；`/plan exit`、成功新建／切换／清空／fork 会话和 Agent 替换均使批准失效。失败的会话操作保持原批准；重启／恢复不重建。Plan 的 queued guidance 不自动进入另一轮任务，结束时连同现有草稿返回输入区，等待用户再次提交；coding 的实时 steering 继续沿用现有路径。相关回归见 [Plan runtime](../../tests/unit/plan/runtime.test.ts)、[审阅组件](../../tests/unit/tui/plan-surface.test.tsx)、[App](../../tests/unit/tui/app.test.tsx) 与 [生产闭环](../../tests/unit/runtime/plan-execution.test.tsx)。
 

@@ -4,9 +4,15 @@
 
 现有实现按入口适配、应用协调、任务执行、Agent 引擎、能力与资源划分职责；各层映射和状态所有者统一记录于 [PROJECT_MAP](PROJECT_MAP.md#整体分层与状态归属)。生产 factory 保持共享装配入口，核心模块不依赖 React、Ink 或 TUI。入口负责交互，应用协调决定是否启动及会话归属，现有 runner 决定清理、验证和最终完成；后续按状态所有权逐步提取，不按行数拆文件，不建立第二套 runner 或存储。
 
-Session 保存持久事实，界面使用投影。批准、文件观察和活动进程各自保留现有生命周期，不通过恢复历史重建批准或写权限。本阶段只建立架构与验证契约，不新增协调模块，不改变公共 CLI/SDK、Session schema 或操作流程。
+Session 保存持久事实，界面使用投影。批准、文件观察和活动进程各自保留现有生命周期，不通过恢复历史重建批准或写权限。基础阶段建立架构与验证契约；后续提取协调状态同样不改变公共 CLI/SDK、Session schema 或操作流程。
 
 [架构回归](../../tests/unit/architecture/dependency-boundaries.test.ts) 使用已安装 TypeScript 的解析能力，禁止 runtime、Agent、workflow、exec、SDK 普通／类型导入、重导出或字面量动态导入 React、Ink、`@inkjs/ui` 与 TUI 模块；CLI 与 TUI 适配入口允许合法 UI 依赖。常规类型检查显式覆盖源码及测试全部 `.ts` / `.tsx`，构建显式覆盖源码 TSX 并排除测试，保留严格设置与 ES2022。暴露的测试契约差异由替身和数据修复，不放宽生产接口或断言。门禁与升级编译器时的解析 API 复核见 [DEVELOPMENT](../DEVELOPMENT.md#开发与检查命令)。
+
+## 应用协调状态提取
+
+[ApplicationCoordinator](../../src/runtime/application-coordinator.ts) 从 TUI 提取 Session／Agent 身份、模式、模型任务准入／取消、Plan 批准和命令操作身份。它是每次 TUI 挂载的进程内状态所有者，使用泛型 Agent 身份，不引用 UI 合同；TUI 保存显示投影和宿主 I/O 适配，生产 factory 与 coding runner 继续承担原职责。
+
+取消不释放准入，清理后才由同一任务句柄释放；成功会话替换推进身份并取消旧任务，首次惰性创建保留现有任务身份。批准正文复制保存／读取，消费与执行准入同步完成，旧会话、旧 Agent、取消或重复结果不能恢复批准。失败的宿主会话操作不提交身份替换。初次 Session 创建在清空后才返回时，保留已落盘事实但不重新进入旧会话；旧任务清理仍释放入口，不把其错误或批准显示到新会话。语义回归见 [协调状态](../../tests/unit/runtime/application-coordinator.test.ts) 和 [TUI App](../../tests/unit/tui/app.test.tsx)。不提取第二套验证或存储，也不在本轮继续整理 Agent 引擎、工具、存储或终端模块。
 
 ## 个人开发任务连续性与失败反馈
 

@@ -69,6 +69,7 @@ pnpm exec tsx --test --test-name-pattern="cancel" tests/unit/agent/react-agent.t
 | 修改范围 | 首选测试入口 |
 | --- | --- |
 | 分层依赖、类型配置 | [dependency-boundaries.test.ts](../tests/unit/architecture/dependency-boundaries.test.ts)；用 `tsc --listFilesOnly` 对照 tracked `.ts` / `.tsx` 清单 |
+| 模型任务准入、取消、会话身份与批准 | [application-coordinator.test.ts](../tests/unit/runtime/application-coordinator.test.ts)、[app.test.tsx](../tests/unit/tui/app.test.tsx)、[生产 Plan 闭环](../tests/unit/runtime/plan-execution.test.tsx) |
 | 采样、工具调度、取消、上下文 | [agent tests](../tests/unit/agent/) |
 | 完成判据、修复、验证、变更跟踪 | [workflow tests](../tests/unit/workflow/) |
 | Responses 能力与请求参数 | [provider tests](../tests/unit/providers/) |
@@ -109,6 +110,8 @@ pnpm exec tsx tests/fixtures/tui-offline.ts --root "$env:TEMP\everpeace-tui-offl
 Plan 专项验收另检查：在审阅选择 `Revise plan` 输入意见，resize 后意见仍保留；Esc 返回菜单，菜单 Esc／两处 Ctrl+C 恢复聊天且仅一个 prompt。重新规划并批准后应保持空闲，`/plan show` 可查看正文，`/plan execute` 才启动 coding；取消执行后不能再次消费旧批准。重启、fork 或继续讨论后必须重新批准。自动化生产闭环见 [Plan execution](../tests/unit/runtime/plan-execution.test.tsx)，SDK 通过隔离临时用户目录和本地 fake HTTP provider 验证只读计划输出／问题停止；均不调用真实模型，不代替本节手工验收。
 
 审阅组件回归复用生产 CommandScreen 布局，并等待实际菜单、输入和回调状态后发送下一按键；固定延时不能代替 Ink 的 Esc 缓冲和 React 更新完成。resize 必须确认实际边框宽度已改变，再检查修订正文与提交结果。
+
+App 回归在每项测试结束后统一清理渲染器和捕获的输出帧，即使断言失败也释放。ink-testing-library 会保留渲染器引用，仅 unmount 不会释放捕获帧；所有历史、resize 和隐私断言仍在清理前执行。不通过增大 CI 堆或跳过断言绕过资源问题。
 
 fixture 中验证命令仍通过生产原生 sandbox；失败保持 unverified，不回退宿主执行。直接 `!` 是工作目录固定在 fixture workspace 的正常用户 PTY。自动测试不替代这里的终端体验验收；执行后记录终端版本、步骤和结果，未执行时明确标记 pending。
 

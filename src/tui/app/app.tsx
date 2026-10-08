@@ -33,6 +33,7 @@ import {
 import type { BashOutputPreview, BashResult } from "../../tools/bash.js";
 import { CodingWorkflowRuntime } from "../../workflow/runtime.js";
 import { CodingTaskRunner } from "../../workflow/task-runner.js";
+import { ApplicationCoordinator } from "../../runtime/application-coordinator.js";
 import { createProductionWorkflowAgentIO } from "../../runtime/production.js";
 import type { WorkflowState, WorkflowTaskSource } from "../../workflow/types.js";
 import { discoverVerificationCommands, selectVerificationCommands } from "../../workflow/verifier.js";
@@ -320,18 +321,15 @@ export function EverpeaceApp({
   }, [firstActiveModel, initialModels.missing]);
 
   const nextId = useRef(initialTimeline.length);
-  const abortController = useRef<AbortController | undefined>(undefined);
+  const [coordinator] = useState(() => new ApplicationCoordinator<AgentSession>());
   const titleControllers = useRef(new Set<AbortController>());
   const confirmationRef = useRef<PendingConfirmation | undefined>(undefined);
   const permissions = useRef(defaultPermissions());
   const permissionsReady = useRef<Promise<void>>(Promise.resolve());
   const terminalCommandRunning = useRef(false);
-  const commandOperation = useRef(0);
-  const activeSessionId = useRef<string | undefined>(undefined);
   const workflowRuntime = useRef<CodingWorkflowRuntime | undefined>(undefined);
   const sessionTitlePending = useRef(false);
   const forkResumePending = useRef(false);
-  const pendingApprovedPlan = useRef<{ sessionId: string; agent: AgentSession; submitted: SubmittedPlan } | undefined>(undefined);
   const [timeline, setTimeline] = useState(initialTimeline);
   const [timelineEpoch, setTimelineEpoch] = useState(0);
   const [terminalColumns, setTerminalColumns] = useState(() => Math.max(1, stdout.columns ?? 80));
@@ -351,7 +349,11 @@ export function EverpeaceApp({
   );
   const [activeModel, setActiveModel] = useState(firstActiveModel);
   const [requestSettings, setRequestSettings] = useState(() => settingsForModel(firstActiveModel));
-  const [agentMode, setAgentMode] = useState<AgentMode>("default");
+  const [agentMode, projectAgentMode] = useState<AgentMode>(coordinator.mode);
+  const setAgentMode = useCallback((mode: AgentMode) => {
+    coordinator.setMode(mode);
+    projectAgentMode(coordinator.mode);
+  }, [coordinator]);
   const [activeGoal, setActiveGoal] = useState<SessionGoal>();
   const activeGoalProjection = useRef<SessionGoal | undefined>(undefined);
   const [activeTaskProgress, setActiveTaskProgress] = useState<TaskProgress>();
@@ -474,7 +476,7 @@ export function EverpeaceApp({
       workspacePath: workflowWorkspace,
       ...(initialState ? { initialState } : {}),
       onState: async (state: WorkflowState) => {
-        const sessionId = activeSessionId.current;
+        const sessionId = coordinator.sessionId;
         if (sessionId) await dependencies.sessionStore.setWorkflow?.(sessionId, state);
       },
     };
@@ -497,7 +499,7 @@ export function EverpeaceApp({
     ]);
     if (!persist) return id;
 
-    const sessionId = activeSessionId.current;
+    const sessionId = coordinator.sessionId;
     if (sessionId !== undefined) {
       void dependencies.sessionStore
         .appendTimeline(sessionId, { kind, text })
@@ -527,12 +529,23 @@ export function EverpeaceApp({
     const entry = { kind: "output" as const, text, command };
     const id = nextId.current++;
     setTimeline((current) => [...current, { ...entry, id }]);
-    const sessionId = activeSessionId.current;
+    const sessionId = coordinator.sessionId;
     if (sessionId) void dependencies.sessionStore.appendTimeline(sessionId, entry).catch((e: unknown) => appendTransient("error", `Session save failed: ${String(e)}`));
   }, [dependencies.sessionStore, appendTransient]);
 
+  const returnQueuedGuidanceToDraft = useCallback(() => {
+    const pending = queuedGuidance.current.splice(0);
+    setQueuedGuidanceCount(0);
+    if (pending.length === 0) return;
+    const draft = [editorRef.current.value, ...pending.map((item) => item.text)].filter(Boolean).join("\n\n");
+    editorRef.current = createComposerState(draft);
+    historyNavigationRef.current = { index: undefined, draft: "" };
+    setInputKey((current) => current + 1);
+    appendTransient("system", "Pending guidance was returned to your draft. Submit it when ready.");
+  }, [appendTransient]);
+
   const enterCommandView = useCallback((nextView: CommandView) => {
-    commandOperation.current += 1;
+    coordinator.nextCommandOperation();
     onReplayOutput(() => {
       setView(nextView);
     });
@@ -549,7 +562,7 @@ export function EverpeaceApp({
     cancellable = true,
     onCancel?: () => void,
   ): number => {
-    const operation = ++commandOperation.current;
+    const operation = coordinator.nextCommandOperation();
     const nextView: CommandView = {
       kind: "loading",
       title,
@@ -566,12 +579,12 @@ export function EverpeaceApp({
   }, [onReplayOutput]);
 
   const isCurrentCommandOperation = useCallback(
-    (operation: number): boolean => commandOperation.current === operation,
+    (operation: number): boolean => coordinator.isCurrentCommandOperation(operation),
     [],
   );
 
   const returnToChat = useCallback((update?: () => void) => {
-    commandOperation.current += 1;
+    coordinator.nextCommandOperation();
     onReplayOutput(() => {
       update?.();
       setView({ kind: "chat" });
@@ -684,7 +697,7 @@ export function EverpeaceApp({
         complete: finish,
         cancel: mode === "plan"
           ? cancel
-          : () => abortController.current?.abort(new Error("Question cancelled by user")),
+          : () => coordinator.cancelTask(new Error("Question cancelled by user")),
       });
     })
   ), [enterCommandView, returnToChat]);
@@ -706,7 +719,7 @@ export function EverpeaceApp({
       const cancel = () => decide("cancel");
       signal?.addEventListener("abort", cancel, { once: true });
       enterCommandView({ kind: "plan-review", submitted, decide, cancelTask: () => {
-        abortController.current?.abort(new Error("Plan review cancelled by user"));
+        coordinator.cancelTask(new Error("Plan review cancelled by user"));
         cancel();
       } });
     })
@@ -794,12 +807,12 @@ export function EverpeaceApp({
         dependencies.runBash(command, permissions.current, signal, onOutput, timeoutMs),
       executeVerification: (command, signal, timeoutMs) => executeVerification(command, signal, timeoutMs),
       session: {
-        getId: () => activeSessionId.current,
+        getId: () => coordinator.sessionId,
         async getGoal() {
-          return activeSessionId.current ? activeGoalProjection.current : undefined;
+          return coordinator.sessionId ? activeGoalProjection.current : undefined;
         },
         async setGoal(goal) {
-          const sessionId = activeSessionId.current;
+          const sessionId = coordinator.sessionId;
           if (!sessionId) throw new Error("Goals require an active session");
           await dependencies.sessionStore.setGoal(sessionId, goal);
           activeGoalProjection.current = goal;
@@ -811,7 +824,7 @@ export function EverpeaceApp({
             : cloneTaskProgress(activeTaskProgressProjection.current);
         },
         async setTaskProgress(progress) {
-          const sessionId = activeSessionId.current;
+          const sessionId = coordinator.sessionId;
           if (!sessionId) throw new Error("Task progress requires an active session");
           if (!dependencies.sessionStore.setTaskProgress) throw new Error("Task progress persistence is unavailable");
           await dependencies.sessionStore.setTaskProgress(sessionId, progress);
@@ -872,19 +885,19 @@ export function EverpeaceApp({
             initialContextTokens: sessionUsage.context_tokens,
             ...(activeTaskProgressProjection.current === undefined ? {} : { initialTaskProgress: cloneTaskProgress(activeTaskProgressProjection.current) }),
             async onContextAppend(items) {
-              const sessionId = activeSessionId.current;
+              const sessionId = coordinator.sessionId;
               if (sessionId !== undefined) {
                 await dependencies.sessionStore.appendContext(sessionId, items);
               }
             },
             async onContextCompacted(items, automatic, usage) {
-              const sessionId = activeSessionId.current;
+              const sessionId = coordinator.sessionId;
               if (sessionId === undefined) throw new Error("Context compaction requires an active session");
               await dependencies.sessionStore.compactContext(sessionId, items, automatic, usage);
               setSessionUsage((current) => applyCompactionUsage(current, usage));
             },
             async onContextPruned(items, metadata) {
-              const sessionId = activeSessionId.current;
+              const sessionId = coordinator.sessionId;
               if (sessionId === undefined || !dependencies.sessionStore.pruneContext) {
                 throw new Error("Context pruning requires an active persistent session");
               }
@@ -892,7 +905,7 @@ export function EverpeaceApp({
               setSessionUsage((current) => ({ ...current, context_tokens: null }));
             },
             async onUsage(usage) {
-              const sessionId = activeSessionId.current;
+              const sessionId = coordinator.sessionId;
               if (sessionId !== undefined) {
                 await dependencies.sessionStore.appendUsage(sessionId, usage);
               }
@@ -941,9 +954,7 @@ export function EverpeaceApp({
     [activeModel, agentIo, clearLiveAssistant, contextWindow, dependencies, requestSettings, sessionContext, sessionEpoch],
   );
 
-  useEffect(() => { pendingApprovedPlan.current = undefined; }, [agent]);
-  const currentAgent = useRef(agent);
-  currentAgent.current = agent;
+  coordinator.setAgent(agent);
 
   useEffect(() => {
     agent?.setMemoryPolicy?.(memoryPolicy);
@@ -956,10 +967,10 @@ export function EverpeaceApp({
   const activateModel = useCallback(
     (model: RegisteredModel, message = `Enabled model ${model.model_name}`) => {
       const nextSettings = settingsForModel(model);
-      pendingApprovedPlan.current = undefined;
+      coordinator.invalidatePlan();
       clearQueuedGuidance();
-      abortController.current?.abort();
-      const sessionId = activeSessionId.current;
+      coordinator.cancelTask();
+      const sessionId = coordinator.sessionId;
       if (sessionId !== undefined) {
         void dependencies.sessionStore
           .selectModel(sessionId, toSessionModel(model, nextSettings), false)
@@ -1101,7 +1112,7 @@ export function EverpeaceApp({
     const next = { ...memoryPolicy, ...patch };
     setMemoryPolicy(next);
     agent?.setMemoryPolicy?.(patch);
-    const sessionId = activeSessionId.current;
+    const sessionId = coordinator.sessionId;
     if (sessionId) void dependencies.sessionStore.setMemoryPolicy?.(sessionId, next).catch((error: unknown) => {
       appendTransient("error", `Memory policy save failed: ${error instanceof Error ? error.message : String(error)}`);
     });
@@ -1276,9 +1287,7 @@ export function EverpeaceApp({
         ];
 
         clearQueuedGuidance();
-        abortController.current?.abort();
-        pendingApprovedPlan.current = undefined;
-        activeSessionId.current = loaded.summary.id;
+        coordinator.replaceSession(loaded.summary.id);
         workflowRuntime.current = undefined;
         ensureWorkflow(loaded.workflow, restoredWorkspace);
         sessionTitlePending.current = loaded.summary.title_pending;
@@ -1474,9 +1483,7 @@ export function EverpeaceApp({
         model: toSessionModel(activeModel, requestSettings),
       });
 
-      abortController.current?.abort();
-      pendingApprovedPlan.current = undefined;
-      activeSessionId.current = session.id;
+      coordinator.replaceSession(session.id);
       workflowRuntime.current = undefined;
       sessionTitlePending.current = true;
       forkResumePending.current = false;
@@ -1518,9 +1525,7 @@ export function EverpeaceApp({
     setResumedInputHistory(undefined);
     editorRef.current = createComposerState();
     historyNavigationRef.current = { index: undefined, draft: "" };
-    abortController.current?.abort();
-    pendingApprovedPlan.current = undefined;
-    activeSessionId.current = undefined;
+    coordinator.replaceSession(undefined);
     workflowRuntime.current = undefined;
     sessionTitlePending.current = false;
     forkResumePending.current = false;
@@ -1551,7 +1556,7 @@ export function EverpeaceApp({
 
   const forkCurrentSession = useCallback(async (requestedTitle: string) => {
     if (
-      abortController.current ||
+      coordinator.activeTask ||
       directController.current ||
       confirmationRef.current ||
       terminalCommandRunning.current ||
@@ -1564,7 +1569,7 @@ export function EverpeaceApp({
       );
       return;
     }
-    const sourceSessionId = activeSessionId.current;
+    const sourceSessionId = coordinator.sessionId;
     if (!sourceSessionId) {
       openInfo(
         "/fork · No active session",
@@ -1602,7 +1607,7 @@ export function EverpeaceApp({
         dependencies.registry.resolveAll(),
       ]);
       controller.signal.throwIfAborted();
-      if (!isCurrentCommandOperation(operation) || activeSessionId.current !== sourceSessionId) return;
+      if (!isCurrentCommandOperation(operation) || coordinator.sessionId !== sourceSessionId) return;
       const sourceModel = resolved.available.find(
         (candidate) =>
           candidate.id === source.summary.model.id ||
@@ -1619,10 +1624,10 @@ export function EverpeaceApp({
         signal: controller.signal,
       });
       controller.signal.throwIfAborted();
-      if (!isCurrentCommandOperation(operation) || activeSessionId.current !== sourceSessionId) return;
+      if (!isCurrentCommandOperation(operation) || coordinator.sessionId !== sourceSessionId) return;
       const loaded = await dependencies.sessionStore.load(child.id);
       controller.signal.throwIfAborted();
-      if (!isCurrentCommandOperation(operation) || activeSessionId.current !== sourceSessionId) return;
+      if (!isCurrentCommandOperation(operation) || coordinator.sessionId !== sourceSessionId) return;
 
       operation = startCommandLoad(
         "/fork · Fork session",
@@ -1652,29 +1657,29 @@ export function EverpeaceApp({
   }, [appendTransient, completeResume, dependencies.registry, dependencies.sessionStore, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad]);
 
   const deleteSessions = useCallback(async (sessionIds: string[]): Promise<void> => {
-    if (abortController.current || directController.current) {
+    if (coordinator.activeTask || directController.current) {
       throw new Error("A model turn or direct command is active. Wait for it to finish before deleting sessions.");
     }
     await dependencies.sessionStore.deleteMany(sessionIds);
-    if (activeSessionId.current && sessionIds.includes(activeSessionId.current)) {
+    if (coordinator.sessionId && sessionIds.includes(coordinator.sessionId)) {
       clearConversation();
       returnToChat();
     }
   }, [clearConversation, dependencies.sessionStore, returnToChat]);
 
   const runtimeForGoal = useCallback((sessionId: string) => new GoalRuntime({
-    getGoal: async () => activeSessionId.current === sessionId
+    getGoal: async () => coordinator.sessionId === sessionId
       ? activeGoalProjection.current
       : (await dependencies.sessionStore.load(sessionId)).goal,
     setGoal: async (goal) => {
       await dependencies.sessionStore.setGoal(sessionId, goal);
-      if (activeSessionId.current === sessionId) activeGoalProjection.current = goal;
+      if (coordinator.sessionId === sessionId) activeGoalProjection.current = goal;
       setActiveGoal(goal);
     },
   }), [dependencies.sessionStore]);
 
   const showGoalStatus = useCallback(async () => {
-    const sessionId = activeSessionId.current;
+    const sessionId = coordinator.sessionId;
     const goal = sessionId ? (await dependencies.sessionStore.load(sessionId)).goal : undefined;
     activeGoalProjection.current = goal;
     setActiveGoal(goal);
@@ -1682,7 +1687,7 @@ export function EverpeaceApp({
   }, [dependencies.sessionStore, enterCommandView]);
 
   const pauseGoal = useCallback(() => {
-    const sessionId = activeSessionId.current;
+    const sessionId = coordinator.sessionId;
     if (!sessionId) { void showGoalStatus(); return; }
     void runtimeForGoal(sessionId).update("paused").then((goal) => {
       activeGoalProjection.current = goal;
@@ -1692,7 +1697,7 @@ export function EverpeaceApp({
   }, [appendTransient, openInfo, returnToChat, runtimeForGoal, showGoalStatus]);
 
   const resumeGoal = useCallback(() => {
-    const sessionId = activeSessionId.current;
+    const sessionId = coordinator.sessionId;
     if (!sessionId) { void showGoalStatus(); return; }
     void runtimeForGoal(sessionId).resume().then((goal) => {
       activeGoalProjection.current = goal;
@@ -1707,11 +1712,11 @@ export function EverpeaceApp({
       openInfo("/goal · Cannot create", "No model is active. Use /login or /model first.", "error");
       return;
     }
-    let sessionId = activeSessionId.current;
+    let sessionId = coordinator.sessionId;
     if (!sessionId) {
       const session = await dependencies.sessionStore.create({ title: fallbackSessionTitle(objective), titlePending: false, workspacePath, model: toSessionModel(activeModel, requestSettings) });
       sessionId = session.id;
-      activeSessionId.current = sessionId;
+      coordinator.attachSession(sessionId);
       sessionTitlePending.current = false;
       startTitleGeneration(sessionId, activeModel, objective);
     }
@@ -1757,7 +1762,7 @@ export function EverpeaceApp({
         provider: metadata?.provider ?? "N/A",
         base_url: activeModel?.base_url ?? null,
         workspace_path: workspacePath,
-        session_id: activeSessionId.current ?? null,
+        session_id: coordinator.sessionId ?? null,
         context_window: metadata?.context_window ?? null,
         context_tokens: activeModel ? sessionUsage.context_tokens : null,
         input_tokens: sessionUsage.input_tokens,
@@ -1795,7 +1800,7 @@ export function EverpeaceApp({
       openInfo("/reasoning · Invalid setting", "Use /reasoning off|low|high|max.", "error");
       return;
     }
-    if (abortController.current || directController.current) {
+    if (coordinator.activeTask || directController.current) {
       openInfo("/reasoning · Busy", "Wait for the active task to finish. The setting is captured at the start of a turn.", "error");
       return;
     }
@@ -1810,7 +1815,7 @@ export function EverpeaceApp({
     const next = { ...requestSettings, reasoningEffort: effort };
     agent.setRequestSettings?.(next);
     setRequestSettings(next);
-    const sessionId = activeSessionId.current;
+    const sessionId = coordinator.sessionId;
     if (sessionId) {
       void dependencies.sessionStore.selectModel(sessionId, toSessionModel(activeModel, next), true)
         .catch((error: unknown) => appendTransient("error", `Reasoning setting could not be saved: ${error instanceof Error ? error.message : String(error)}`));
@@ -1855,7 +1860,7 @@ export function EverpeaceApp({
       openInfo("/compact · Invalid command", "Use /compact without arguments.", "error");
       return;
     }
-    if (abortController.current || directController.current) {
+    if (coordinator.activeTask || directController.current) {
       openInfo("/compact · Busy", "A model turn or direct command is active. Wait for it to finish before compacting context.", "error");
       return;
     }
@@ -1863,7 +1868,7 @@ export function EverpeaceApp({
       openInfo("/compact · Cannot compact", "No model is active. Use /login or /model first.", "error");
       return;
     }
-    if (!activeSessionId.current) {
+    if (!coordinator.sessionId) {
       openInfo("/compact · Nothing to compact", "There is no active session context to compact.", "error");
       return;
     }
@@ -1901,33 +1906,32 @@ export function EverpeaceApp({
     async (
       text: string,
       timelineRecorded = false,
-      mode: AgentMode = agentMode,
+      mode: AgentMode = coordinator.mode,
       taskSource: WorkflowTaskSource = "user",
       attachments: readonly FileAttachment[] = [],
       executeApprovedPlan = false,
     ) => {
       await permissionsReady.current;
-      if (abortController.current || directController.current) return;
+      if (directController.current) return;
       if (!agent || !activeModel) {
         append("error", "No model is active. Use /login or /model first.");
         return;
       }
-      if (executeApprovedPlan) {
-        const approved = pendingApprovedPlan.current;
-        if (!approved || approved.sessionId !== activeSessionId.current || approved.agent !== agent) {
+      const admission = coordinator.beginTask(agent, mode, executeApprovedPlan);
+      if (admission.status !== "started") {
+        if (admission.status === "no_approved_plan") {
           appendTransient("system", "No approved plan is available. Submit and approve a plan first.");
-          return;
         }
-        text = `Implement the following plan, which the user approved and explicitly started with /plan execute. Inspect current files and project rules before editing, respect current permissions, and verify the result.\n\nTitle: ${approved.submitted.title}\n\n${approved.submitted.plan}`;
-        pendingApprovedPlan.current = undefined;
-        setAgentMode("default");
-      } else {
-        pendingApprovedPlan.current = undefined;
+        return;
       }
-      const controller = new AbortController();
-      abortController.current = controller;
+      const task = admission.task;
+      if (admission.approvedPlan) {
+        const approved = admission.approvedPlan;
+        text = `Implement the following plan, which the user approved and explicitly started with /plan execute. Inspect current files and project rules before editing, respect current permissions, and verify the result.\n\nTitle: ${approved.title}\n\n${approved.plan}`;
+        setAgentMode("default");
+      }
 
-      if (activeSessionId.current === undefined) {
+      if (coordinator.sessionId === undefined) {
         setBusyLabel("Creating session");
         try {
           const session = await dependencies.sessionStore.create({
@@ -1936,31 +1940,47 @@ export function EverpeaceApp({
             workspacePath,
             model: toSessionModel(activeModel, requestSettings),
           });
-          activeSessionId.current = session.id;
+          if (!coordinator.matchesTaskContext(task)) {
+            coordinator.finishTask(task);
+            setBusyLabel(undefined);
+            returnQueuedGuidanceToDraft();
+            return;
+          }
+          coordinator.attachSession(session.id);
           sessionTitlePending.current = false;
           startTitleGeneration(session.id, activeModel, text);
         } catch (error) {
-          append("error", `Session creation failed: ${error instanceof Error ? error.message : String(error)}`);
-          clearQueuedGuidance();
+          if (coordinator.matchesTaskContext(task)) {
+            append("error", `Session creation failed: ${error instanceof Error ? error.message : String(error)}`);
+            clearQueuedGuidance();
+          }
           setBusyLabel(undefined);
-          abortController.current = undefined;
+          coordinator.finishTask(task);
           return;
         }
       } else if (sessionTitlePending.current) {
         setBusyLabel("Initializing session");
-        const sessionId = activeSessionId.current;
+        const sessionId = coordinator.sessionId;
         try {
           await dependencies.sessionStore.updateTitle(
             sessionId,
             fallbackSessionTitle(text),
           );
+          if (!coordinator.matchesTaskContext(task)) {
+            coordinator.finishTask(task);
+            setBusyLabel(undefined);
+            returnQueuedGuidanceToDraft();
+            return;
+          }
           sessionTitlePending.current = false;
           startTitleGeneration(sessionId, activeModel, text);
         } catch (error) {
-          append("error", `Session initialization failed: ${error instanceof Error ? error.message : String(error)}`);
-          clearQueuedGuidance();
+          if (coordinator.matchesTaskContext(task)) {
+            append("error", `Session initialization failed: ${error instanceof Error ? error.message : String(error)}`);
+            clearQueuedGuidance();
+          }
           setBusyLabel(undefined);
-          abortController.current = undefined;
+          coordinator.finishTask(task);
           return;
         }
       }
@@ -1975,7 +1995,6 @@ export function EverpeaceApp({
       setBusyLabel(`Waiting for ${waitingTarget}`);
       clearLiveAssistant();
       setLiveToolStatus(undefined);
-      const taskSessionId = activeSessionId.current;
       try {
         const effectiveTaskSource = mode === "default" && forkResumePending.current
           ? "session_resume"
@@ -1987,7 +2006,7 @@ export function EverpeaceApp({
             executeVerification,
             getGoal: async () => activeGoalProjection.current,
             async addGoalTime(seconds) {
-              const sessionId = activeSessionId.current;
+              const sessionId = coordinator.sessionId;
               const current = activeGoalProjection.current;
               if (!sessionId || !current) return current;
               const goal = { ...current, time_used_seconds: current.time_used_seconds + seconds, updated_at: new Date().toISOString() };
@@ -2008,10 +2027,11 @@ export function EverpeaceApp({
           text,
           mode,
           source: effectiveTaskSource,
-          signal: controller.signal,
+          signal: task.signal,
           ...(attachments.length === 0 ? {} : { attachments }),
         });
-        controller.signal.throwIfAborted();
+        task.signal.throwIfAborted();
+        if (!coordinator.matchesTaskContext(task)) return;
         const forkResumeSettled =
           mode === "default" &&
           forkResumePending.current &&
@@ -2019,19 +2039,18 @@ export function EverpeaceApp({
           (result.workflowResult?.state.result === "verified" ||
             result.workflowResult?.state.result === "no_changes");
         if (forkResumeSettled) {
-          const sessionId = activeSessionId.current;
+          const sessionId = coordinator.sessionId;
           if (!sessionId || !dependencies.sessionStore.setForkPendingResume) {
             throw new Error("Fork continuation state could not be persisted");
           }
           await dependencies.sessionStore.setForkPendingResume(sessionId, false);
-          if (activeSessionId.current === sessionId) forkResumePending.current = false;
+          if (coordinator.sessionId === sessionId) forkResumePending.current = false;
         }
         if (result.disposition === "plan_approved") {
           if (!result.agentResult.approvedPlan || !result.agentResult.approvedPlanTitle) {
             throw new Error("Approved plan content is missing");
           }
-          if (taskSessionId && activeSessionId.current === taskSessionId && currentAgent.current === agent) {
-            pendingApprovedPlan.current = { sessionId: taskSessionId, agent, submitted: { title: result.agentResult.approvedPlanTitle, plan: result.agentResult.approvedPlan } };
+          if (coordinator.approvePlan(task, { title: result.agentResult.approvedPlanTitle, plan: result.agentResult.approvedPlan })) {
             setAgentMode("plan");
             appendTransient("system", "Plan approved. Run /plan execute to start.");
           }
@@ -2041,9 +2060,10 @@ export function EverpeaceApp({
         }
       } catch (error) {
         await agent.finalizePendingGoalCompletion?.(false).catch(() => undefined);
-        await agent.finishMemoryTurn?.(controller.signal.aborted ? "cancelled" : "failed").catch(() => undefined);
-        if (controller.signal.aborted) {
-          const sessionId = activeSessionId.current;
+        await agent.finishMemoryTurn?.(task.signal.aborted ? "cancelled" : "failed").catch(() => undefined);
+        if (!coordinator.matchesTaskContext(task)) return;
+        if (task.signal.aborted) {
+          const sessionId = coordinator.sessionId;
           if (mode === "default" && sessionId) {
             const goal = activeGoalProjection.current;
             if (goal?.status === "active") {
@@ -2058,41 +2078,32 @@ export function EverpeaceApp({
           append("error", `Model request failed: ${modelErrorGuidance(error)}`);
         }
       } finally {
-        const ownsController = abortController.current === controller;
-        if (ownsController) abortController.current = undefined;
+        const matchesContext = coordinator.matchesTaskContext(task);
+        const ownsTask = coordinator.finishTask(task);
+        if (!ownsTask) return;
         setBusyLabel(undefined);
         setAgentPhase(undefined);
         setTurnStartedAt(undefined);
         setReasoningStartedAt(undefined);
         clearLiveAssistant();
         setLiveToolStatus(undefined);
-        if (controller.signal.aborted && queuedGuidance.current.length === 0) {
+        if (task.signal.aborted && queuedGuidance.current.length === 0) {
           setQueuedGuidanceCount(0);
         }
-        if (ownsController) {
-          if (mode === "plan") {
-            const pending = queuedGuidance.current.splice(0);
-            setQueuedGuidanceCount(0);
-            if (pending.length > 0) {
-              const draft = [editorRef.current.value, ...pending.map((item) => item.text)].filter(Boolean).join("\n\n");
-              editorRef.current = createComposerState(draft);
-              historyNavigationRef.current = { index: undefined, draft: "" };
-              setInputKey((current) => current + 1);
-              appendTransient("system", "Pending guidance was returned to your draft. Submit it when ready.");
-            }
-            return;
-          }
-          const next = queuedGuidance.current.shift();
-          setQueuedGuidanceCount(queuedGuidance.current.length);
-          if (next) {
-            // Let React render the completed turn before starting the queued
-            // guidance, keeping the transcript and spinner ordering stable.
-            queueMicrotask(() => void runChatRef.current?.(next.text, next.timelineRecorded, undefined, undefined, next.attachments));
-          }
+        if (!matchesContext || mode === "plan") {
+          returnQueuedGuidanceToDraft();
+          return;
+        }
+        const next = queuedGuidance.current.shift();
+        setQueuedGuidanceCount(queuedGuidance.current.length);
+        if (next) {
+          // Let React render the completed turn before starting the queued
+          // guidance, keeping the transcript and spinner ordering stable.
+          queueMicrotask(() => void runChatRef.current?.(next.text, next.timelineRecorded, undefined, undefined, next.attachments));
         }
       }
     },
-    [activeModel, agent, agentMode, append, appendTransient, clearLiveAssistant, clearQueuedGuidance, dependencies.sessionStore, ensureWorkflow, executeVerification, requestSettings, startTitleGeneration, workspacePath],
+    [activeModel, agent, agentMode, append, appendTransient, clearLiveAssistant, clearQueuedGuidance, dependencies.sessionStore, ensureWorkflow, executeVerification, requestSettings, returnQueuedGuidanceToDraft, startTitleGeneration, workspacePath],
   );
 
   useEffect(() => {
@@ -2112,7 +2123,7 @@ export function EverpeaceApp({
 
   const runDirectBash = useCallback(
     async (command: string) => {
-      if (abortController.current || directController.current) return;
+      if (coordinator.activeTask || directController.current) return;
       if (!command) {
         append("error", "Usage: !<command>");
         return;
@@ -2134,7 +2145,7 @@ export function EverpeaceApp({
   );
 
   const queueGuidance = useCallback((text: string, attachments: readonly FileAttachment[] = []) => {
-    const timelineRecorded = activeSessionId.current !== undefined;
+    const timelineRecorded = coordinator.sessionId !== undefined;
     if (timelineRecorded) append("user", text);
     if (confirmationRef.current) finishConfirmation(false);
     if (agentMode !== "plan" && agent?.requestSteering?.(text, attachments)) {
@@ -2169,7 +2180,7 @@ export function EverpeaceApp({
 
   const runManualVerification = useCallback(async (requested: string) => {
     await permissionsReady.current;
-    if (abortController.current || directController.current) {
+    if (coordinator.activeTask || directController.current) {
       openInfo("/verify · Busy", "Wait for the active task or command to finish.", "error");
       return;
     }
@@ -2220,7 +2231,7 @@ export function EverpeaceApp({
   }, [executeVerification, ensureWorkflow, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad, workspacePath]);
 
   const undoWorkflow = useCallback(async () => {
-    if (abortController.current || directController.current) {
+    if (coordinator.activeTask || directController.current) {
       appendTransient("system", "Cannot undo while a command or model turn is active.");
       return;
     }
@@ -2244,12 +2255,12 @@ export function EverpeaceApp({
         void dependencies.inputHistory?.append(input).catch(() => appendTransient("error", "Input history could not be saved"));
 
         if (parsed.kind === "chat") {
-          if (abortController.current) queueGuidance(parsed.text, attachments);
+          if (coordinator.activeTask) queueGuidance(parsed.text, attachments);
           else void runChat(parsed.text, false, agentMode, "user", attachments);
           return true;
         }
         if (parsed.kind === "bash") {
-          if (abortController.current) {
+          if (coordinator.activeTask) {
             appendTransient("system", "A model turn is active. Add guidance as a message or press Ctrl+C first.");
             return true;
           }
@@ -2295,19 +2306,18 @@ export function EverpeaceApp({
         if (parsed.command === "/plan") {
           const args = parsed.args?.trim() ?? "";
           const action = args.toLowerCase();
-          if (abortController.current || directController.current) {
+          if (coordinator.activeTask || directController.current) {
             appendTransient("system", "A task or command is active. Wait for it to finish before using /plan.");
           } else if (action === "execute") {
             void runChat("", false, "default", "user", [], true);
           } else if (action === "show") {
-            const approved = pendingApprovedPlan.current;
-            if (approved && approved.sessionId === activeSessionId.current && approved.agent === agent) {
-              enterCommandView({ kind: "approved-plan", submitted: { ...approved.submitted } });
+            const approved = coordinator.approvedPlan();
+            if (approved) {
+              enterCommandView({ kind: "approved-plan", submitted: approved });
             } else {
               appendTransient("system", "No approved plan is available. Submit and approve a plan first.");
             }
           } else if (action === "exit") {
-            pendingApprovedPlan.current = undefined;
             setAgentMode("default");
             appendTransient("system", "Plan mode disabled.");
           } else if (!args) {
@@ -2339,11 +2349,11 @@ export function EverpeaceApp({
         const controller = new AbortController();
         attachmentController.current?.abort(new Error("Superseded attachment resolution"));
         attachmentController.current = controller;
-        const capturedSessionId = activeSessionId.current;
+        const capturedSessionId = coordinator.sessionId;
         const capturedWorkspace = workspacePath;
         try {
           const attachments = await resolveFileAttachments(parsed.text, capturedWorkspace, controller.signal);
-          if (activeSessionId.current !== capturedSessionId || workspacePath !== capturedWorkspace) {
+          if (coordinator.sessionId !== capturedSessionId || workspacePath !== capturedWorkspace) {
             appendTransient("error", "File attachments were cancelled because the session or workspace changed.");
             return false;
           }
@@ -2466,8 +2476,8 @@ export function EverpeaceApp({
         return;
       }
       if (directController.current) { setActiveCommand((current) => current ? { ...current, cancelling: true } : current); directController.current.abort(); return; }
-      if (abortController.current) {
-        abortController.current.abort();
+      if (coordinator.activeTask) {
+        coordinator.cancelTask();
         setActiveCommand((current) => current ? { ...current, cancelling: true } : current);
         if (confirmationRef.current) finishConfirmation(false);
         return;
@@ -2482,7 +2492,7 @@ export function EverpeaceApp({
 
   useEffect(
     () => () => {
-      abortController.current?.abort();
+      coordinator.cancelTask();
       queuedGuidance.current = [];
       titleControllers.current.forEach((controller) => controller.abort());
       titleControllers.current.clear();
@@ -2534,7 +2544,7 @@ export function EverpeaceApp({
             onChange={(policy) => {
               void (async () => {
                 try {
-                  abortController.current?.abort(new Error("Permission policy changed"));
+                  coordinator.cancelTask(new Error("Permission policy changed"));
                   await dependencies.savePermissions?.(workspacePath, policy);
                   permissions.current = dependencies.loadPermissions
                     ? await dependencies.loadPermissions(workspacePath)
@@ -2549,7 +2559,7 @@ export function EverpeaceApp({
             onSaveProject={(policy) => {
               void (async () => {
                 try {
-                  abortController.current?.abort(new Error("Permission policy changed"));
+                  coordinator.cancelTask(new Error("Permission policy changed"));
                   await dependencies.savePermissions?.(workspacePath, policy, "project");
                   if (dependencies.loadPermissions) permissions.current = await dependencies.loadPermissions(workspacePath);
                 } catch {
@@ -2714,7 +2724,7 @@ export function EverpeaceApp({
             editorRef={editorRef}
             historyNavigationRef={historyNavigationRef}
             getFileSuggestions={getFileSuggestions}
-            onEmptyInterrupt={() => abortController.current?.abort()}
+            onEmptyInterrupt={() => coordinator.cancelTask()}
             onSubmit={handleSubmit}
           />
         </Box>
@@ -2741,7 +2751,7 @@ export function EverpeaceApp({
                 editorRef={editorRef}
                 historyNavigationRef={historyNavigationRef}
                 getFileSuggestions={getFileSuggestions}
-                onEmptyInterrupt={() => abortController.current?.abort()}
+                onEmptyInterrupt={() => coordinator.cancelTask()}
                 onSubmit={handleSubmit}
               />
             </>
@@ -2761,7 +2771,7 @@ export function EverpeaceApp({
             editorRef={editorRef}
             historyNavigationRef={historyNavigationRef}
             getFileSuggestions={getFileSuggestions}
-            onEmptyInterrupt={() => abortController.current?.abort()}
+            onEmptyInterrupt={() => coordinator.cancelTask()}
             onSubmit={handleSubmit}
           />
         </Box>

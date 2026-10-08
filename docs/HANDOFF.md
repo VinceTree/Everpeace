@@ -1,39 +1,43 @@
 # 当前交接
 
-更新日期：2026-10-08。新 Session 先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 选择专题。上一轮 Plan 修订、批准等待与显式执行的 [交接](archive/HANDOFF_PLAN_EXECUTION.md) 和 [计划](archive/PLAN_PLAN_EXECUTION.md) 已归档；历史交付和 CI 只作为当时证据。
+更新日期：2026-10-08。先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 选择专题。第一阶段整体框架与验证基线的 [交接](archive/HANDOFF_FRAMEWORK_BASELINE.md) 和 [计划](archive/PLAN_FRAMEWORK_BASELINE.md) 已归档；更早 Plan 交付见 [归档](archive/HANDOFF_PLAN_EXECUTION.md)。
 
-## 当前基线与范围
+## 当前基线与授权
 
-- 本轮开始 main HEAD：`59fb106989ded0a533e1350823fe6d6443e9a92d`；开始时 package.json 和双语 README 为 `0.3.11`；随后用户授权交付，已同步为 `0.3.12`，依赖声明未变。
-- 用户授权实施全项目渐进优化的第一阶段：补齐类型门禁、建立可执行依赖边界、统一架构记录。后续模块只确定顺序，不在本阶段提取协调模块或新增产品能力。
-- 保持单 Agent、Responses、Windows/DeepSeek 优先和离线验收。公共 CLI/SDK 参数、Session schema、权限、文件观察、宿主验证结算及操作流程不变；无真实模型评测或 Release 操作。
+- 第二阶段开始 main HEAD：`348d872b91b8073378e7fef6fffa1bea856c31b5`；package.json 与双语 README 为 `0.3.12`。
+- 用户明确授权交付第一阶段、更新展示版本、提交推送并开始第二阶段，禁止更新 Release。所有交付提交使用 `[skip publish]`，只推送 main，不创建或推送 tag。用户另明确允许已有 GitHub 凭据仅在内存中用于 Release 和 CI 只读核对，不输出或保存。
+- 本轮按状态所有者提取任务与会话协调：不改变公共 CLI/SDK 参数、Session schema 或用户操作；不继续实施 Agent 引擎等后续模块。单 Agent、Responses、Windows/DeepSeek 优先和离线验收保持。
 
-## 本轮实现
+## 第一阶段交付
 
-- [常规类型配置](../tsconfig.json) 显式包含全部源码和测试 TS/TSX；[构建配置](../tsconfig.build.json) 包含源码 TSX 并排除测试，保留严格选项和 ES2022。
-- [TUI App 回归](../tests/unit/tui/app.test.tsx) 修正 AgentTurnResult 替身返回值、可选参数、timeline 联合类型及完整 Memory 数据；辅助查找改用 ES2022 支持的反向循环。Prompt 回调返回 void，Skill metadata 使用真实 repo scope。原有断言保留，恢复后的最后一条 timeline 另增加类型收窄断言；生产接口未放宽。
-- [架构回归](../tests/unit/architecture/dependency-boundaries.test.ts) 用已安装 TypeScript 解析 API 扫描 runtime、Agent、workflow、exec、SDK，禁止 React、Ink、@inkjs/ui 与 TUI 依赖。覆盖普通／类型导入、重导出、字面量动态导入和路径边界；TUI/CLI 入口、正常核心依赖及注释／字符串允许。虚拟案例不写磁盘，快照和本地编译器子进程在 finally 中清理。
-- [项目地图](architecture/PROJECT_MAP.md#整体分层与状态归属) 与 [架构决策](architecture/DECISIONS.md#全项目分层与验证基线) 记录五层职责、状态归属和依赖方向：应用协调决定准入与会话归属，runner 决定验证和完成。Session 持久事实与 UI 投影分开，批准、文件观察和活动进程保持原生命周期。
-- 概览、项目地图与决策同步公开 everpeace/sdk 的 runTask、非交互 resume/Plan 事实；开发指南说明完整 TSX 类型检查、依赖回归及首败停止门禁。没有新增依赖、lint 工具、平行知识库或空模块目录。
+展示版本已同步更新，依赖声明及 lockfile 未变。交付前在宿主环境重新串行执行 typecheck → 记录缺少 lint → test → build，全部存在项通过；测试 824 项，821 通过、0 失败、3 个原有跳过，耗时 54,391.0418 ms。日志为宿主临时目录 everpeace-framework-delivery-test-20261008.log。
 
-## 本轮验证证据
+提交 `348d872b91b8073378e7fef6fffa1bea856c31b5` 已推送 main。[Release workflow](https://github.com/VinceTree/Everpeace/actions/runs/37765498726) 与 Publish version job 实际 skipped；推送前后 27 条 Release 的 ID、tag 和更新时间完全一致，远端 `v0.3.12` tag 不存在。[Test workflow](https://github.com/VinceTree/Everpeace/actions/runs/37765498802) 的 Linux job 通过，Windows job 在 App 测试进程耗尽约 2 GB 堆后失败，exit 134，不能记作断言通过。
 
-Windows Node v22.19.0／pnpm@10.22.0。架构定向回归先通过，最终完整测试包含新增架构检查及其全部允许／禁止案例共 35 项，均通过；TUI、Plan、Session 与公开 SDK 回归也通过。
+## 第二阶段实现
 
-实际 tsc --listFilesOnly 对照 git ls-files：受版本控制的源码／测试共 198 份 TS、25 份源码 TSX、12 份测试 TSX，常规类型检查无遗漏；构建源码无遗漏、测试文件为零。新增架构测试也被常规配置显式纳入。严格选项与 ES2022 未改，未使用 any 或忽略错误消除测试契约差异。
+- [ApplicationCoordinator](../src/runtime/application-coordinator.ts) 拥有当前 Session／Agent 身份、模式、模型任务准入／取消、Plan 批准和命令操作身份，不依赖 React、Ink 或 TUI；TUI 每次挂载持有一个实例，React 状态只作展示投影。
+- 取消保留任务占位直到 runner 清理；同一任务句柄才能释放，旧完成不能释放新任务。成功会话替换或 Agent 替换使旧身份及批准失效，初次惰性创建只附着当前任务；宿主会话操作失败不替换身份。
+- 批准复制完整标题／正文，消费与执行准入同步完成。取消、重复和迟到结果不能复活批准，讨论／退出模式使其失效；runner 仍决定验证、Goal 和 Memory 结算，fork_pending_resume 保持原持久债务语义。
+- [TUI App](../src/tui/app/app.tsx) 委托上述状态，保留存储／目录 I/O、审批、直接 PTY、guidance、历史与重放。修正清空期间迟到的初次创建不得重新绑定旧 Session，旧 Plan 清理仍释放入口但不把旧错误／批准投影到新会话；清理期间尚未处理的 guidance 返回草稿等待重交。双语 README 同步说明。
+- 项目地图、运行时与状态契约、TUI 结构和架构决策同步归属；既有 public factory、runner、Session 实现与公共入口不另建一套。
 
-最终在已获准的宿主 Windows 环境串行执行实际门禁：pnpm typecheck 通过；当前 package scripts 无 lint，明确记为缺项；pnpm test 共 824 项，821 通过、0 失败、3 个原有跳过，耗时 51,584.9967 ms；pnpm build 通过。没有新增跳过或移除原有断言，日志位于宿主临时目录 everpeace-framework-final-test-20261008.log。本轮结果是本地离线证据，不引用历史 CI 或声称新 CI 已运行。
+## 第二阶段验证
 
-git diff --check、新文件尾部空白检查和 12 份文档的 396 个本地链接／标题检查通过；新归档相对路径已按所在目录调整。中英文 README 的既有 SDK 说明与文档入口保持一致，本阶段没有用户命令、输出或安装方式变化。
+[协调状态回归](../tests/unit/runtime/application-coordinator.test.ts) 10 项通过；TUI、Plan、Session、runner、SDK、生产闭环定向共 116 项通过。随后新增清空期间迟到创建／Plan 清理两项 TUI 回归通过；严格类型检查通过，原有断言未移除或放宽。日志为宿主临时目录 everpeace-coordination-targeted-test-20261008.log。
 
-用户授权交付后 package.json 与双语 README 同步为 `0.3.12`，并在宿主环境重新串行执行门禁：typecheck 通过，无 lint script；test 824 项，821 通过、0 失败、3 个原有跳过，耗时 54,391.0418 ms；build 通过。日志为宿主临时目录 everpeace-framework-delivery-test-20261008.log。Release 基线只读核对共 27 项，记录 ID、tag 与更新时间；提交使用 `[skip publish]`，远端结果将在第二阶段交接中补录。
+扩展草稿返回断言时，测试误等非空草稿不会显示的空输入 placeholder；改为等待实际 Agent 重建、guidance 入队和草稿返回，再以 Ctrl+C 清空后验证空闲 prompt。相关 5 项回归重测通过，没有跳过或放宽语义断言。
+
+针对第一阶段 Windows CI 的 App 进程 OOM，以相同 Node 22.23.3、CI 环境变量和 512 MB 堆复核：第一阶段独立临时快照 68 项通过，第二阶段 70 项通过，未复现 CI 失败。发现测试库保留卸载后的渲染器及输出帧，App 夹具增加 afterEach 清理和帧释放，清理前保留所有断言；再次以相同 Node／环境和 512 MB 堆运行 70 项通过。该处理限制测试间累积，不将未复现的 CI 根因声称为已定位；新推送须核对 Windows CI。
+
+最终宿主串行门禁：pnpm typecheck 通过 → scripts 缺少 lint，明确缺项 → pnpm test 836 项、833 通过、0 失败、3 个原有跳过，耗时 49,331.751 ms → pnpm build 通过。测试日志为宿主临时目录 everpeace-coordination-delivery-test-20261008.log。git diff --check、新增文件空白及 13 份相关文档的 476 个本地链接／标题通过；远端交付结果推送后核对。第二阶段证据为离线机制回归，不能代替真实终端或真实模型评测。
 
 ## 独立验收与后续
 
-真实 Windows Terminal 手工验收仍 pending：Plan 修订输入、取消、resize／scrollback、恢复与单 prompt。离线自动回归不代替真实终端，不证明真实模型成功率或成本收益；live 评测需另行授权和数值预算。Windows LSP backend 的网络隔离门禁仍 unavailable，启动失败不回退宿主。
+真实 Windows Terminal 手工验收仍 pending：Plan 修订输入、取消、resize／scrollback、恢复及单 prompt。Windows LSP backend 的网络隔离门禁仍 unavailable，失败不回退宿主；live 评测需独立授权和数值预算。本轮没有模型请求或 Release 操作。
 
-后续顺序见 [PLAN](PLAN.md)：任务与会话协调 → Agent 引擎 → 工具与进程 → 存储与恢复 → 终端交互。下一模块开始前先细化具体方案和回归，不把路线图当作立即实施授权。TypeScript 解析 API 标为 unstable，未来升级编译器时复核该回归。
+后续顺序见 [PLAN](PLAN.md)：Agent 引擎 → 工具与进程 → 存储与恢复 → 终端交互，开始下一模块前再细化一个具体问题。TypeScript 解析 API 标为 unstable，升级编译器时须复核依赖检查。
 
 ## 用户原有内容
 
-开始时 tracked 差异为空；已有未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}` 全部保留，没有清理或纳入本轮变化。用户随后授权更新展示版本、提交、推送并开始第二阶段；所有交付提交带 `[skip publish]`，只推送 main，不创建或推送 tag，不创建或更新 Release。交付门禁和远端核对完成后补录证据。
+开始交付时 tracked 修改均为上一轮第一阶段内容；交付后只剩用户未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`，全部保留且不纳入提交。

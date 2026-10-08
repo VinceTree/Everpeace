@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { render } from "ink-testing-library";
+import { afterEach, test } from "node:test";
+import { render as renderInk } from "ink-testing-library";
 import React from "react";
 import type { AgentIO } from "../../../src/agent/react-agent.js";
 import type {
@@ -37,6 +37,25 @@ import {
 import { textWidth } from "../../../src/tui/rendering/text-width.js";
 import { cloneTaskProgress, type TaskProgress } from "../../../src/workflow/task-progress.js";
 import { normalizePlanReview } from "../../../src/plan/runtime.js";
+
+const renderedViews = new Set<ReturnType<typeof renderInk>>();
+
+function render(tree: Parameters<typeof renderInk>[0]): ReturnType<typeof renderInk> {
+  const view = renderInk(tree);
+  renderedViews.add(view);
+  return view;
+}
+
+afterEach(() => {
+  for (const view of renderedViews) {
+    view.cleanup();
+    // The testing library retains its renderers after unmount; release captured
+    // output only after each test has finished all frame and privacy assertions.
+    view.frames.length = 0;
+    view.stderr.frames.length = 0;
+  }
+  renderedViews.clear();
+});
 
 test("formats active turn elapsed time with useful units", () => {
   assert.equal(formatElapsed(0), "0s");
@@ -557,6 +576,81 @@ test("approval is unavailable during cleanup and cancellation there prevents pub
     await waitFor(() => (view.lastFrame() ?? "").includes("Model request cancelled"));
     await submitInput(view, "/plan execute");
     await waitFor(() => (view.lastFrame() ?? "").includes("No approved plan is available"));
+  } finally { release?.(); view.unmount(); }
+});
+
+test("clearing during Plan cleanup releases admission without publishing the old result", async () => {
+  let release!: () => void;
+  let cleaning = false;
+  const fixture = createPlanFixture({ endTask: async () => {
+    if (cleaning) return;
+    cleaning = true;
+    await new Promise<void>((resolve) => { release = resolve; });
+  } });
+  const createAgent = fixture.dependencies.createAgent;
+  let agentsCreated = 0;
+  fixture.dependencies.createAgent = (model, io, restore) => {
+    agentsCreated++;
+    return createAgent(model, io, restore);
+  };
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [planModel], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await tick();
+    await submitInput(view, "/plan inspect");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Approve plan"));
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => cleaning && (view.lastFrame() ?? "").includes("Add guidance"));
+    await submitInput(view, "/clear");
+    await waitFor(() => agentsCreated === 2 && !(view.lastFrame() ?? "").includes("› inspect"));
+    await submitInput(view, "keep this suggestion");
+    await waitFor(() => (view.lastFrame() ?? "").includes("1 guidance message pending"));
+    assert.equal(fixture.inputs.length, 1);
+    release();
+    try {
+      await waitFor(() => (view.lastFrame() ?? "").includes("Pending guidance was returned to your draft"));
+    } catch { assert.fail(view.lastFrame()); }
+    assert.doesNotMatch(view.lastFrame() ?? "", /Plan approved|Model request cancelled/u);
+    assert.match(view.lastFrame() ?? "", /keep this suggestion/u);
+    assert.equal(fixture.inputs.length, 1);
+    view.stdin.write("\u0003");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
+    await submitInput(view, "/plan execute");
+    await waitFor(() => (view.lastFrame() ?? "").includes("No approved plan is available"));
+    await submitInput(view, "fresh discussion");
+    await waitFor(() => fixture.inputs.length === 2 && (view.lastFrame() ?? "").includes("Explicit execution finished"));
+    assert.equal(fixture.inputs[1]?.text, "fresh discussion");
+    assert.equal(fixture.inputs[1]?.mode, "default");
+  } finally { release?.(); view.unmount(); }
+});
+
+test("late initial Session creation cannot reattach after clearing the conversation", async () => {
+  const fixture = createPlanFixture();
+  const create = fixture.sessionStore.create.bind(fixture.sessionStore);
+  let release!: () => void;
+  let creations = 0;
+  fixture.sessionStore.create = async (options) => {
+    const session = await create(options);
+    if (++creations === 1) await new Promise<void>((resolve) => { release = resolve; });
+    return session;
+  };
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [planModel], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await tick();
+    await submitInput(view, "old task");
+    await waitFor(() => Boolean(release) && (view.lastFrame() ?? "").includes("Creating session"));
+    await submitInput(view, "/clear");
+    await tick();
+    release();
+    await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
+    assert.equal(fixture.inputs.length, 0);
+    assert.doesNotMatch(view.lastFrame() ?? "", /Session creation failed|old task/u);
+    await submitInput(view, "fresh task");
+    await waitFor(() => fixture.inputs.length === 1 && (view.lastFrame() ?? "").includes("Explicit execution finished"));
+    assert.equal(creations, 2);
+    assert.equal(fixture.inputs[0]?.text, "fresh task");
+    assert.doesNotMatch(timelineText(fixture.sessionStore.sessions.get("session-1")!.timeline), /fresh task/u);
+    assert.match(timelineText(fixture.sessionStore.sessions.get("session-2")!.timeline), /fresh task/u);
   } finally { release?.(); view.unmount(); }
 });
 

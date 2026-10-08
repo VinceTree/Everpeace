@@ -11,14 +11,15 @@
 | 自动修复、完成状态、取消 | Coding task 与验证 | [task-runner](../../src/workflow/task-runner.ts)、[workflow](../../src/workflow/runtime.ts)、[runner tests](../../tests/unit/workflow/task-runner.test.ts) |
 | 编码提问、执行清单、后台完成通知 | ReAct 循环、Coding task 与验证 | [ReactAgent](../../src/agent/react-agent.ts)、[task progress](../../src/workflow/task-progress.ts)、[ReactAgent tests](../../tests/unit/agent/react-agent.test.ts) |
 | 压缩、上下文大小 | 上下文 | [conversation-checkpoint](../../src/agent/conversation-checkpoint.ts)、[request-snapshot](../../src/agent/request-snapshot.ts)、[checkpoint tests](../../tests/unit/agent/conversation-checkpoint.test.ts) |
-| TUI/exec/benchmark 生产装配 | 生产调用关系 | [production factory](../../src/runtime/production.ts)、[factory tests](../../tests/unit/runtime/production.test.ts) |
+| TUI/exec/SDK/benchmark 生产装配 | 生产调用关系 | [production factory](../../src/runtime/production.ts)、[factory tests](../../tests/unit/runtime/production.test.ts) |
+| 模型任务准入、取消、会话归属与批准 | 应用协调与任务执行 | [coordinator](../../src/runtime/application-coordinator.ts)、[协调回归](../../tests/unit/runtime/application-coordinator.test.ts)、[App](../../tests/unit/tui/app.test.tsx) |
 | 非交互任务、预算与退出状态 | 请求与计量、Coding task 与验证 | [exec runtime](../../src/exec/runtime.ts)、[exec tests](../../tests/unit/exec/runtime.test.ts) |
 | 修改识别或手动验证 | 变更与检查 | [workspace-tracker](../../src/workflow/workspace-tracker.ts)、[verifier](../../src/workflow/verifier.ts)、[workflow tests](../../tests/unit/workflow/runtime.test.ts) |
 
 ## 生产调用关系
 
 ```text
-TUI / everpeace exec / 内部 benchmark adapter
+TUI / everpeace exec / everpeace/sdk / 内部 benchmark adapter
   → production factory（provider、Agent、历史/附件、Memory、MCP、sandbox command）
   → CodingTaskRunner（整个编码任务及收尾）
     → CodingWorkflowRuntime（变更、检查、修复状态）
@@ -28,7 +29,13 @@ TUI / everpeace exec / 内部 benchmark adapter
     → 最终验证 → Goal / Memory 结算 → 宿主摘要
 ```
 
-[production factory](../../src/runtime/production.ts) 是真实 Agent/命令装配边界，集中 provider、Session 历史/附件、Skills、MCP、learned Memory、Goal、代码导航、sandbox policy 与请求账本。TUI dependencies 只提供交互和状态回调；[exec runtime](../../src/exec/runtime.ts) 提供无 Ink 的交互停止策略；内部 benchmark 继续显式覆盖评测用批准/参数。三者复用生产 runner，不得各自复制修复、验证或资源清理循环；独立评分仍属于评测器职责。
+[production factory](../../src/runtime/production.ts) 是真实 Agent/命令装配边界，集中 provider、Session 历史/附件、Skills、MCP、learned Memory、Goal、代码导航、sandbox policy 与请求账本。TUI dependencies 只提供交互和状态回调；[exec runtime](../../src/exec/runtime.ts) 与公开 SDK 提供无 Ink 的交互停止策略；内部 benchmark 继续显式覆盖评测用批准/参数。各入口复用生产 runner，不得各自复制修复、验证或资源清理循环；独立评分仍属于评测器职责。
+
+## 应用协调与任务执行
+
+[ApplicationCoordinator](../../src/runtime/application-coordinator.ts) 管理 TUI 的进程内 Session／Agent 身份、模式、模型任务准入、取消、待执行批准和命令操作身份，不依赖 React、Ink、TUI 或存储实现。TUI 完成宿主 I/O 后提交会话替换；初次创建仅附着到已准入任务。取消保留任务占位，直到宿主等待既有 runner 资源清理后调用 finishTask；旧句柄不能释放新任务。
+
+完整批准正文在当前身份匹配、未取消的 Plan 任务结束后保存，执行准入同步消费这份正文。新讨论、模式退出、会话／Agent 替换使其失效；迟到或重复完成不能重新授权。协调状态不推导 verified、Goal 完成或 Memory 成功，fork 的持久待继续标记仍由已有 Session／runner 验证结算处理，exec 与 SDK 生命周期也保持现有实现。界面、存储和用户命令契约见 [STATE_AND_UI](STATE_AND_UI.md)，回归见 [协调状态](../../tests/unit/runtime/application-coordinator.test.ts) 与 [生产 Plan 闭环](../../tests/unit/runtime/plan-execution.test.tsx)。
 
 每个 coding request 的动态 instructions 还包含宿主提供的运行时身份：固定的 Everpeace agent 身份、实际 provider、模型原始 ID、Responses 协议和当前 workspace/cwd。该身份块放在工作区规则、Skills、Memory、MCP 和任务状态之后，作为每次请求的最终 host boundary；Agent 会先把 workspace/cwd 规范为绝对路径。模型应使用这些宿主事实做自我定位，工作区文本不能重新定义 agent、provider、model、protocol 或 cwd。provider、model 和 cwd 以 JSON 字符串写入，避免路径或注册值中的换行/控制文本伪装成新的指令。它们来自宿主装配而不是工作区文件，不授予额外权限，也不作为项目规则或 Session 内容持久化；这样模型可以明确区分当前 checkout 与不可信的仓库文本。
 

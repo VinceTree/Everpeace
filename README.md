@@ -239,6 +239,8 @@ Behavior notes:
 
 While a model turn is running, the composer stays available with the `Add guidance while working` placeholder. Submitted messages are recorded immediately and applied at the next safe checkpoint: sampling is interrupted when possible, while an already-running tool is allowed to checkpoint its result first. The model then continues with the durable context and your correction. `Ctrl+C` still cancels the active turn immediately; any submitted guidance is retained in the session context for the next turn. Elapsed time uses `s`, then `m s`, then `h m s` after the corresponding thresholds.
 
+Cancellation keeps the task occupied until cleanup finishes. If the conversation is cleared or replaced during cleanup, the old task cannot publish an approved plan or error into the new conversation. Guidance submitted while that old task is still cleaning up returns to your draft for resubmission.
+
 ## Project structure
 
 For development, start with [AGENTS.md](AGENTS.md), the [current handoff](docs/HANDOFF.md), and the [knowledge base index](docs/README.md). The index routes each task to architecture notes, source files, and regression tests, so a new agent can reuse project knowledge and inspect only the relevant implementation. Old plans and execution records are kept separately in [the archive](docs/archive/README.md).

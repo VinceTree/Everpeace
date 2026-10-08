@@ -24,10 +24,10 @@ src/tui/
 ## Dependency direction
 
 - `index.tsx` constructs dependencies and mounts `app/app.tsx`.
-- `app/` owns view selection, Session lifecycle, running task state, and composition of all UI areas.
+- `app/` owns view selection, host I/O for Session changes, and composition of UI areas. Each mount holds one [ApplicationCoordinator](../../src/runtime/application-coordinator.ts) for Session identity, mode, task admission/cancellation, pending approval, and command operation identity; React state projects it for display.
 - `components/` may use application contracts from `app/types.ts`, but does not own persistence or Agent lifecycle.
 - `composer/`, `commands/`, and `rendering/` expose reusable input or presentation behavior and do not create application services.
 - `terminal/` contains filesystem operations; the corresponding interactive screen remains under `components/wizards/`.
 - New files should enter the narrowest matching responsibility directory. Do not recreate a flat `components` catch-all.
 
-The large application state machine remains in `app/app.tsx` so this reorganization stays behavior-preserving. Future extraction from that file should follow state ownership and include dedicated regression tests rather than splitting it by arbitrary line count.
+The coordinator has no React, Ink, or TUI dependency. `app/app.tsx` still adapts storage, workspace changes, prompts, approvals, direct PTY commands, and rendering; existing runner/workflow modules own resource cleanup and verified settlement. Cancellation keeps model-task admission occupied until cleanup completes. Session/Agent replacement invalidates old task identity and approved plans; host failures retain the prior identity. Further extraction should follow state ownership with regression tests, as established by the [coordinator tests](../../tests/unit/runtime/application-coordinator.test.ts), rather than arbitrary line count.
