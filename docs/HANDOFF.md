@@ -5,6 +5,7 @@
 ## 当前基线与授权
 
 - 第二阶段开始 main HEAD：`348d872b91b8073378e7fef6fffa1bea856c31b5`；package.json 与双语 README 为 `0.3.12`。
+- 第二阶段实现已提交并推送 main：`364066cbd9f7886f0d3f9d8d93176f4d2d29dd4e`，提交标题为 `refactor: isolate application coordination [skip publish]`。
 - 用户明确授权交付第一阶段、更新展示版本、提交推送并开始第二阶段，禁止更新 Release。所有交付提交使用 `[skip publish]`，只推送 main，不创建或推送 tag。用户另明确允许已有 GitHub 凭据仅在内存中用于 Release 和 CI 只读核对，不输出或保存。
 - 本轮按状态所有者提取任务与会话协调：不改变公共 CLI/SDK 参数、Session schema 或用户操作；不继续实施 Agent 引擎等后续模块。单 Agent、Responses、Windows/DeepSeek 优先和离线验收保持。
 
@@ -30,7 +31,13 @@
 
 针对第一阶段 Windows CI 的 App 进程 OOM，以相同 Node 22.23.3、CI 环境变量和 512 MB 堆复核：第一阶段独立临时快照 68 项通过，第二阶段 70 项通过，未复现 CI 失败。发现测试库保留卸载后的渲染器及输出帧，App 夹具增加 afterEach 清理和帧释放，清理前保留所有断言；再次以相同 Node／环境和 512 MB 堆运行 70 项通过。该处理限制测试间累积，不将未复现的 CI 根因声称为已定位；新推送须核对 Windows CI。
 
-最终宿主串行门禁：pnpm typecheck 通过 → scripts 缺少 lint，明确缺项 → pnpm test 836 项、833 通过、0 失败、3 个原有跳过，耗时 49,331.751 ms → pnpm build 通过。测试日志为宿主临时目录 everpeace-coordination-delivery-test-20261008.log。git diff --check、新增文件空白及 13 份相关文档的 476 个本地链接／标题通过；远端交付结果推送后核对。第二阶段证据为离线机制回归，不能代替真实终端或真实模型评测。
+最终宿主串行门禁：pnpm typecheck 通过 → scripts 缺少 lint，明确缺项 → pnpm test 836 项、833 通过、0 失败、3 个原有跳过，耗时 49,331.751 ms → pnpm build 通过。测试日志为宿主临时目录 everpeace-coordination-delivery-test-20261008.log。git diff --check、新增文件空白及 13 份相关文档的 476 个本地链接／标题通过。第二阶段证据为离线机制回归，不能代替真实终端或真实模型评测。
+
+第二阶段 [Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37770025378) 对上述实现提交运行，Linux job success；Windows 完成全部 App 回归且未再 OOM，但既有 stdio 初始化恢复测试失败，健康第二代超过 fixture 的 2 秒冷启动期限，重试后返回第三代。调整测试连接期限为 10 秒、恢复观察 20 秒、总上限 45 秒，首代仍明确不回应初始化，所有恰好两代、旧进程先退出、binding 失效及不重放断言保留，生产策略未改。修复后的门禁与 CI 须重新核对。
+
+冷启动预算修正后，Node 22.23.3／CI 环境的两项真实 stdio 回归通过；再次宿主串行执行 typecheck → 缺少 lint → test → build，所有存在项通过，完整测试 836 项、833 通过、0 失败、3 个原有跳过，耗时 49,589.7811 ms。日志为宿主临时目录 everpeace-coordination-recovery-final-test-20261008.log。差异与 14 份相关文档的 480 个本地链接／标题通过。新提交的 CI 结果推送后核对。
+
+本次未改 package.json，Release workflow 没有产生新的 run；推送后再次只读核对 27 条 Release 的 ID、tag 和更新时间与展示版本更新前相同，远端 `v0.3.12` tag 仍不存在。
 
 ## 独立验收与后续
 

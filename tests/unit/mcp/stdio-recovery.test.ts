@@ -28,7 +28,7 @@ function readEvents(path: string): FixtureEvent[] {
 }
 
 async function until(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 20_000;
   while (!predicate()) {
     if (Date.now() >= deadline) throw new Error("Stdio recovery fixture condition was not reached");
     await delay(20);
@@ -44,7 +44,11 @@ async function fixture(t: TestContext, mode: "disconnect" | "initialize_timeout"
       return [{
         name: "fixture", enabled: true,
         transport: { type: "stdio", command: process.execPath, args: ["--import", "tsx", fixturePath, mode, logPath] },
-        startup_timeout_sec: mode === "initialize_timeout" ? 2 : 5,
+        // This deadline includes Node/tsx/SDK cold startup on hosted Windows.
+        // Generation 1 deliberately never initializes in timeout mode, so a
+        // longer deadline preserves the timeout assertion without timing out
+        // the healthy replacement and accidentally starting generation 3.
+        startup_timeout_sec: 10,
         tool_timeout_sec: 5,
       }];
     },
@@ -62,7 +66,7 @@ async function fixture(t: TestContext, mode: "disconnect" | "initialize_timeout"
   return { runtime, events: () => readEvents(logPath) };
 }
 
-test("real stdio disconnect reconnects for later calls without replaying the interrupted call", { timeout: 20_000 }, async (t) => {
+test("real stdio disconnect reconnects for later calls without replaying the interrupted call", { timeout: 45_000 }, async (t) => {
   const { runtime, events } = await fixture(t, "disconnect");
   const first = await runtime.ensureReady();
   assert.equal(first.servers[0]?.state, "ready");
@@ -87,7 +91,7 @@ test("real stdio disconnect reconnects for later calls without replaying the int
   assert.deepEqual(events().filter((entry) => entry.event === "started").map((entry) => entry.previous_alive), [false, false]);
 });
 
-test("real stdio initialize timeout closes a slow partial client before reconnecting", { timeout: 20_000 }, async (t) => {
+test("real stdio initialize timeout closes a slow partial client before reconnecting", { timeout: 45_000 }, async (t) => {
   const { runtime, events } = await fixture(t, "initialize_timeout");
   const initial = await runtime.ensureReady();
   assert.equal(initial.servers[0]?.state, "reconnecting");

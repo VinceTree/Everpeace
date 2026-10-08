@@ -92,6 +92,8 @@ pnpm exec tsx --test --test-name-pattern="cancel" tests/unit/agent/react-agent.t
 
 完整测试、定向测试、平台跳过、基础设施失败和手工验收分别报告。单测目录也包含部分真实进程集成测试，不能仅凭目录名把全部检查描述为纯模拟。
 
+真实 stdio 恢复 fixture 的启动期限涵盖 Node／tsx／SDK 冷启动，测试使用 10 秒连接期限、20 秒恢复观察期限及 45 秒整体上限。首代在 timeout 场景明确不回应初始化；仍要求恰好两代、旧进程先退出、旧 binding 被拒绝和调用不重放。不要把冷启动误超时引入的第三代当作预期结果；生产 timeout 与重连策略未因此改变。
+
 ## 离线 Windows Terminal 手工验收
 
 [开发专用 TUI fixture](../tests/fixtures/tui-offline.ts) 使用 fake provider，复用生产 Agent、TaskRunner、Session 恢复和分支。它关闭 Memory、MCP、Skills 与 navigation，不读取用户 keyring/config。先在真实 Windows Terminal 的 PowerShell 中，从仓库运行：
