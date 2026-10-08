@@ -6,7 +6,7 @@
 
 总目标仍是完整实现 DeepSeek 优先、Windows 优先的个人 Node/TypeScript 编码 CLI，补齐功能后开始有预算的付费测试。目标保持 active；[PLAN](PLAN.md) 保存完整定位验收矩阵，不能用当前局部修复宣布全部完成。上一轮属于 progress：改变了实现并取得跨平台验证与交付证据。
 
-实现基线为 main 的 4f2083c58ea694cd53f56257a4f4314ec7aaa06e，与 origin/main 同步；本次交付开始时已存在下面记录的清理故障结算改动。用户再次明确要求提交、推送、更新版本，但不更新 Release。展示版本从 0.3.17 更新到 0.3.18，同步 package.json 和双语 README。提交使用 [skip publish]，保留独立测试 CI，不创建或推送 tag。推送前已记录 GitHub 27 个 Release 的 ID、tag 和更新时间，远端无 v0.3.18 tag；推送后必须再次核对。未请求付费模型。
+实现基线为 main 的 4f2083c58ea694cd53f56257a4f4314ec7aaa06e，与 origin/main 同步；本次交付开始时已存在下面记录的清理故障结算改动。用户再次明确要求提交、推送、更新版本，但不更新 Release。展示版本从 0.3.17 更新到 0.3.18，同步 package.json 和双语 README。提交使用 [skip publish]，保留独立测试 CI，不创建或推送 tag。推送前已记录 GitHub 27 个 Release 的 ID、tag 和更新时间，用于推送后比对。未请求付费模型。
 
 ## 当前实现与故障证据
 
@@ -26,7 +26,13 @@
 
 相关定向回归 148 项全部通过，日志 everpeace-task-cleanup-focused-final-20261009.log。完善测试 fixture 时曾发现非 Git 目录不能触发期望的最终验证、factory 测试缺少必需 streaming provider 与活动 Session；补齐真实契约后通过，没有扩大生产接口或跳过断言。
 
-更新展示版本后重新执行最终宿主串行门禁：typecheck 通过 → lint script 缺项 → test 889 项、886 通过、0 失败、3 项平台跳过（51,731.7006 ms）→ build 通过。最新日志使用宿主临时目录 everpeace-delivery-0318-{typecheck,test,build}-20261009.log，替代之前开发阶段的完整门禁记录。package.json 与双语 README 的展示版本一致，git diff --check、23 份交付文件的空白检查与 219 个本地文档链接路径检查通过。当前准备提交、推送并核对远端 Windows/Linux CI 与 Release 跳过结果；未把尚未执行的远端检查记为通过。
+更新展示版本后重新执行最终宿主串行门禁：typecheck 通过 → lint script 缺项 → test 889 项、886 通过、0 失败、3 项平台跳过（51,731.7006 ms）→ build 通过。最新日志使用宿主临时目录 everpeace-delivery-0318-{typecheck,test,build}-20261009.log，替代之前开发阶段的完整门禁记录。package.json 与双语 README 的展示版本一致，git diff --check、23 份交付文件的空白检查与 219 个本地文档链接路径检查通过。提交后的实际远端验证结果见下节。
+
+## 授权交付结果
+
+实现提交 7d7ed009d025b5ee9742aa91e608b07bec712197 已推送 main，标题为 fix: block task success after process cleanup failure [skip publish]。[Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37813764514) 已 completed/success，Windows/Linux jobs 均 success；证据针对这个实现提交，后续纯交接记录提交由独立 Test workflow 正常检查。
+
+[Release workflow](https://github.com/VinceTree/Everpeace/actions/runs/37813764358) 已 completed/skipped，Publish version job 实际 skipped。推送后 27 个 Release 的 ID、tag、更新时间与基线完全一致，远端没有 v0.3.18 tag。本次更新版本／提交／推送交易已完成，后续开发不自动重复；完整产品目标仍保持 active。
 
 ## 下一步与完整目标的未完成项
 
