@@ -122,6 +122,8 @@ Composer 另检查带有效文件引用的提交：连续按 Enter 只启动一�
 
 独立 Prompt 回归在等待提交完成／失败后，以测试 stdin 的 readable 订阅恢复确认 Ink 输入 effect 已重新启用，再发送一次性输入；仅看到新画面或经过固定延时不能证明订阅已就绪。待处理阶段先观察订阅停用再结算受控 Promise，重复 Enter／粘贴仍同步连续发送，保留渲染前竞态覆盖。
 
+Memory 的 [空闲生命周期回归](../tests/unit/runtime/memory-idle-lifecycle.test.ts) 只对五分钟及更长的 idle/租约等待使用受控 timer，锁心跳及 Windows 原子 rename 的短 backoff 使用真实 timer。推进 Date 检查最后一毫秒不能冻结持久化重试，否则 Windows sharing violation 会让关闭等待停滞；回归显式注入一次 EBUSY，检查重试成功且空闲时间没有推进。
+
 App 回归在每项测试结束后统一清理渲染器和捕获的输出帧，即使断言失败也释放。ink-testing-library 会保留渲染器引用，仅 unmount 不会释放捕获帧；所有历史、resize 和隐私断言仍在清理前执行。不通过增大 CI 堆或跳过断言绕过资源问题。
 
 fixture 中验证命令仍通过生产原生 sandbox；失败保持 unverified，不回退宿主执行。直接 `!` 是工作目录固定在 fixture workspace 的正常用户 PTY。自动测试不替代这里的终端体验验收；执行后记录终端版本、步骤和结果，未执行时明确标记 pending。

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { promises as fs } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { setTimeout as nativeTimeout, clearTimeout as nativeClearTimeout } from "node:timers";
 import { promisify } from "node:util";
 import type { AgentResponse } from "../../../src/agent/react-agent.js";
 import { LearnedMemoryRuntime, LearnedMemoryStore, type LearnedTurnOutcome } from "../../../src/memory/learned-memory.js";
@@ -15,7 +17,8 @@ import { CodingWorkflowRuntime } from "../../../src/workflow/runtime.js";
 import { CodingTaskRunner } from "../../../src/workflow/task-runner.js";
 
 const idleDelayMs = 300_000;
-const realTimeout = setTimeout;
+const realTimeout = nativeTimeout;
+const realClearTimeout = nativeClearTimeout;
 const delay = () => new Promise<void>((resolve) => realTimeout(resolve, 5));
 const usage = { input_tokens: 2, output_tokens: 1, total_tokens: 3 };
 const memoryResponse = (): AgentResponse => ({ id: "old-memory", status: "completed", output: [], usage,
@@ -211,6 +214,22 @@ for (const outcome of ["no_changes", "failed", "cancelled", "stopped"] as const)
 
 function clock(t: TestContext) {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+  const idleTimeout = globalThis.setTimeout;
+  const clearIdleTimeout = globalThis.clearTimeout;
+  const liveTimers = new Set<ReturnType<typeof realTimeout> | number>();
+  // Only long idle/lease waits are virtual. File locks and Windows rename
+  // backoff must make progress while asynchronous persistence is awaited.
+  t.mock.method(globalThis, "setTimeout", (callback: Parameters<typeof realTimeout>[0], ms = 0, ...args: unknown[]) => {
+    if (ms >= idleDelayMs) return idleTimeout(callback, ms, ...args);
+    const timer = realTimeout(callback, ms, ...args);
+    liveTimers.add(timer);
+    return timer;
+  });
+  t.mock.method(globalThis, "clearTimeout", (timer: Parameters<typeof realClearTimeout>[0]) => {
+    if ((typeof timer === "object" && timer !== null || typeof timer === "number") && liveTimers.delete(timer)) realClearTimeout(timer);
+    else clearIdleTimeout(timer);
+  });
+  t.after(() => { for (const timer of liveTimers) realClearTimeout(timer); });
   return {
     async settle() { for (let attempt = 0; attempt < 40; attempt++) { await delay(); t.mock.timers.tick(0); } },
     async advance(ms: number) { t.mock.timers.tick(ms); await this.settle(); },
@@ -224,6 +243,39 @@ function clock(t: TestContext) {
     },
   };
 }
+
+test("the controlled idle clock lets short persistence retry timers complete without advancing idle time", async (t) => {
+  clock(t);
+  const startedAt = Date.now();
+  let retried = false;
+  setTimeout(() => { retried = true; }, 10);
+  for (let attempt = 0; !retried && attempt < 50; attempt++) await delay();
+  assert.equal(retried, true, "Windows rename and lock retries must not wait for a five-minute clock tick");
+  assert.equal(Date.now(), startedAt);
+});
+
+test("Windows Memory atomic rename retries complete while the idle clock stays fixed", { skip: process.platform !== "win32" }, async (t) => {
+  clock(t);
+  const root = await mkdtemp(join(tmpdir(), "everpeace-memory-idle-rename-"));
+  const store = new LearnedMemoryStore({ directory: join(root, "memory") });
+  const realRename = fs.rename;
+  let attempts = 0;
+  t.mock.method(fs, "rename", async (...args: Parameters<typeof fs.rename>) => {
+    if (String(args[1]).endsWith("capture-jobs.json") && ++attempts === 1) {
+      throw Object.assign(new Error("Fixture transient Windows sharing violation"), { code: "EBUSY" });
+    }
+    return realRename(...args);
+  });
+  try {
+    const startedAt = Date.now();
+    const now = new Date().toISOString();
+    await store.updateJobs(() => [{ id: "reliable", turn: oldTurn(root), outcome: "verified", status: "queued",
+      createdAt: now, notBefore: now, attempts: 0, requestPending: false, usageComplete: true }]);
+    assert.equal(attempts, 2);
+    assert.equal((await store.loadJobs()).length, 1);
+    assert.equal(Date.now(), startedAt);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 for (const status of ["queued", "running"] as const) {
   test(`restarting a runtime gives an overdue reliable ${status} job a fresh idle period`, async (t) => {
