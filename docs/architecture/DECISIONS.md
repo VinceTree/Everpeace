@@ -143,7 +143,8 @@ Session 优化保持 JSONL 与 v1 输出附件格式：load/list/search 共用�
 
 ## Plan 与 Goal
 
-- `/plan` 是进程内严格规划模式，不写计划文件；只暴露 read/list、web、Skill read、`request_user_input` 和 `submit_plan`，从工具列表层面阻止 Bash/MCP。启用网页工具时，Plan 的公共 web 请求按只读联网能力免逐次确认；关闭网页工具仍然拒绝请求，普通聊天继续遵循当前权限档位。`request_user_input` 的 picker 同时用于普通 coding；等待不发模型请求，答案走普通 tool-result 持久化，且不能代替权限审批。Plan 的取消保持规划语义，coding 的取消进入活动任务清理。最终计划仍经独立 review，用户批准后在同一 Session 切回 Default 执行。
+- `/plan` 是进程内严格规划模式，不写计划文件；只广告只读与规划工具，dispatch 拒绝编辑、Bash、MCP 和 Goal 写操作。公共指令与 coding／Plan 行为指令分开，Plan 不注入持续实施或完成活动 Goal 的行动要求。启用网页工具时，Plan 的公共 web 请求按只读联网能力免逐次确认；关闭网页工具仍然拒绝请求，普通聊天继续遵循当前权限档位。`request_user_input` 的 picker 同时用于普通 coding；等待不发模型请求，答案走普通 tool-result 持久化，且不能代替权限审批。
+- Plan review 支持非空修订意见，随当前 `submit_plan` 配对结果先持久化，再请求完整替代稿；保留旧字符串决定兼容。批准仅在 runner 清理完成且未取消后形成绑定 Session／Agent 的进程内待执行正文，不恢复或 fork 批准。用户通过 `/plan execute` 消费完整正文并进入共享 coding runner；讨论、退出模式、成功会话变化或 Agent 替换使批准失效，失败会话操作保持原批准。Plan 排队输入返回草稿等待重交，不因批准／取消自动发新请求。审批界面 Esc／Ctrl+C 和迟到回调契约见 [STATE_AND_UI](STATE_AND_UI.md#plan-审阅与显式执行)。
 - `update_plan` 整体替换最多 20 项的 model-authored TaskProgress；`task_progress_updated` 是 additive Session event，写入成功后才更新 UI。显式 resume、repair 与同一 runner 的 Goal continuation 保留投影，新用户任务先清空。每个 coding 请求重新注入当前投影，历史和压缩摘要不能覆盖它；`/tasks` 只读展示，任何清单状态都不授予 verified、Goal complete 或成功 Memory。
 - `/goal` 绑定原 Session，以 `goal_updated` JSONL 事件保存最新快照，旧 Session 文件缺少该事件时按无目标兼容读取。目标恢复只发生在用户 `/resume` 原 Session 后，不扫描其他 Session 自动运行；`/new` 和 `/clear` 不继承目标。
 - Goal 工具按 Codex 语义提供 `get_goal`、`create_goal`、`update_goal`；只有显式目标创建、用户确认的暂停/恢复，以及真实完成或连续三轮同一阻塞才改变状态。连续阻塞计数写入 goal 快照，跨 Agent 重建和 Session 恢复不丢失。token budget 只在用户显式指定时启用，缺失 usage 不伪造 token。

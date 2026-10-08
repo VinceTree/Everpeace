@@ -115,6 +115,7 @@ export class CodingTaskRunner {
         ...(nextAttachments === undefined ? {} : { attachments: nextAttachments }),
       }) ?? {};
       nextAttachments = undefined;
+      input.signal?.throwIfAborted();
       if (lastAgentResult.interactionRequired) {
         await this.#agent.cancelBackgroundJobs?.(new Error("Task stopped for host interaction"));
         await this.#agent.finalizePendingGoalCompletion?.(false);

@@ -4,5 +4,6 @@
 
 - [历史交接](HANDOFF_HISTORY.md)：整理前完整交接记录。
 - [历史计划](PLAN_HISTORY.md)：整理前累计的计划与阶段说明。
+- [项目地图与受控编辑交接](HANDOFF_PROJECT_MAP.md)、[对应计划](PLAN_PROJECT_MAP.md)：Plan 优化前一轮的实现、交付及验证记录。
 
 新 Session 默认只读 [当前交接](../HANDOFF.md) 和 [当前计划](../PLAN.md)，仅在追溯历史时查阅这里。归档正文中的旧相对路径以当时 `docs/` 所在位置理解；当前文件定位以 [项目地图](../architecture/PROJECT_MAP.md) 为准。

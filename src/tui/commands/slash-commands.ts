@@ -85,7 +85,7 @@ export const TUI_HELP = `Slash commands
   /mcp     Refresh and inspect Codex MCP servers and tools
   /skills  Create, install, inspect, and use local skills
   /memory  View and manage learned experience
-  /plan    Enter strict planning mode or plan a request
+  /plan    Plan a request; show, execute an approved plan, or exit
   /goal    Create, inspect, pause, or resume a session goal
   /compact Compact the model context
   /reasoning Set off, low, high, or max for the next turn

@@ -61,7 +61,7 @@ import { SessionPicker } from "../components/navigation/session-picker.js";
 import { StatusBar } from "../components/conversation/status-bar.js";
 import { SkillWizard } from "../components/wizards/skill-wizard.js";
 import { MemorySurface } from "../components/screens/memory-surface.js";
-import { PlanQuestionsSurface, PlanReviewSurface } from "../components/screens/plan-surface.js";
+import { ApprovedPlanSurface, PlanQuestionsSurface, PlanReviewSurface } from "../components/screens/plan-surface.js";
 import { GoalConfirmationSurface, GoalStatusSurface } from "../components/screens/goal-surface.js";
 import { WorkspaceDiffSurface } from "../components/screens/workspace-diff-surface.js";
 import { ContextSurface } from "../components/screens/context-surface.js";
@@ -70,12 +70,13 @@ import { HighlightedCommand, RichOutput } from "../rendering/rich-text.js";
 import { TUI_COLORS } from "../rendering/palette.js";
 import { truncateEnd } from "../rendering/text-width.js";
 import type {
+  AgentSession,
   HistoryKind,
   TimelineEntry,
   TuiDependencies,
 } from "./types.js";
 import type { LearnedMemoryPolicy, LearnedMemoryStatus, LearnedScope } from "../../memory/learned-memory.js";
-import type { AgentMode, PlanRequest, PlanReviewDecision, SubmittedPlan } from "../../plan/runtime.js";
+import type { AgentMode, PlanRequest, PlanReviewResult, SubmittedPlan } from "../../plan/runtime.js";
 import { GoalRuntime, parseGoalCommand } from "../../goal/runtime.js";
 import type { SessionGoal } from "../../storage/session-store.js";
 import { modelErrorGuidance } from "../../agent/response-errors.js";
@@ -103,7 +104,8 @@ type View =
   | { kind: "skills" }
   | { kind: "memory"; status: LearnedMemoryStatus; policy: LearnedMemoryPolicy }
   | { kind: "plan-questions"; request: PlanRequest; mode: AgentMode; complete(answers: Record<string, string>): void; cancel(): void }
-  | { kind: "plan-review"; submitted: SubmittedPlan; decide(decision: PlanReviewDecision): void }
+  | { kind: "plan-review"; submitted: SubmittedPlan; decide(decision: PlanReviewResult): void; cancelTask(): void }
+  | { kind: "approved-plan"; submitted: SubmittedPlan }
   | { kind: "goal-confirm"; objective: string; tokenBudget?: number; confirm(): void; cancel(): void }
   | { kind: "goal-status"; goal?: SessionGoal }
   | { kind: "workspace-diff"; index: WorkspaceChangeIndex; workflow?: WorkflowState }
@@ -329,6 +331,7 @@ export function EverpeaceApp({
   const workflowRuntime = useRef<CodingWorkflowRuntime | undefined>(undefined);
   const sessionTitlePending = useRef(false);
   const forkResumePending = useRef(false);
+  const pendingApprovedPlan = useRef<{ sessionId: string; agent: AgentSession; submitted: SubmittedPlan } | undefined>(undefined);
   const [timeline, setTimeline] = useState(initialTimeline);
   const [timelineEpoch, setTimelineEpoch] = useState(0);
   const [terminalColumns, setTerminalColumns] = useState(() => Math.max(1, stdout.columns ?? 80));
@@ -686,19 +689,26 @@ export function EverpeaceApp({
     })
   ), [enterCommandView, returnToChat]);
 
-  const reviewPlan = useCallback((submitted: SubmittedPlan, signal?: AbortSignal): Promise<PlanReviewDecision> => (
+  const reviewPlan = useCallback((submitted: SubmittedPlan, signal?: AbortSignal): Promise<PlanReviewResult> => (
     new Promise((resolve) => {
+      if (signal?.aborted) {
+        resolve("cancel");
+        return;
+      }
       let finished = false;
-      const decide = (decision: PlanReviewDecision) => {
+      const decide = (decision: PlanReviewResult) => {
         if (finished) return;
         finished = true;
         signal?.removeEventListener("abort", cancel);
         returnToChat();
-        resolve(decision);
+        resolve(signal?.aborted ? "cancel" : decision);
       };
       const cancel = () => decide("cancel");
       signal?.addEventListener("abort", cancel, { once: true });
-      enterCommandView({ kind: "plan-review", submitted, decide });
+      enterCommandView({ kind: "plan-review", submitted, decide, cancelTask: () => {
+        abortController.current?.abort(new Error("Plan review cancelled by user"));
+        cancel();
+      } });
     })
   ), [enterCommandView, returnToChat]);
 
@@ -931,6 +941,10 @@ export function EverpeaceApp({
     [activeModel, agentIo, clearLiveAssistant, contextWindow, dependencies, requestSettings, sessionContext, sessionEpoch],
   );
 
+  useEffect(() => { pendingApprovedPlan.current = undefined; }, [agent]);
+  const currentAgent = useRef(agent);
+  currentAgent.current = agent;
+
   useEffect(() => {
     agent?.setMemoryPolicy?.(memoryPolicy);
   }, [agent, memoryPolicy]);
@@ -942,6 +956,7 @@ export function EverpeaceApp({
   const activateModel = useCallback(
     (model: RegisteredModel, message = `Enabled model ${model.model_name}`) => {
       const nextSettings = settingsForModel(model);
+      pendingApprovedPlan.current = undefined;
       clearQueuedGuidance();
       abortController.current?.abort();
       const sessionId = activeSessionId.current;
@@ -1262,6 +1277,7 @@ export function EverpeaceApp({
 
         clearQueuedGuidance();
         abortController.current?.abort();
+        pendingApprovedPlan.current = undefined;
         activeSessionId.current = loaded.summary.id;
         workflowRuntime.current = undefined;
         ensureWorkflow(loaded.workflow, restoredWorkspace);
@@ -1459,6 +1475,7 @@ export function EverpeaceApp({
       });
 
       abortController.current?.abort();
+      pendingApprovedPlan.current = undefined;
       activeSessionId.current = session.id;
       workflowRuntime.current = undefined;
       sessionTitlePending.current = true;
@@ -1502,6 +1519,7 @@ export function EverpeaceApp({
     editorRef.current = createComposerState();
     historyNavigationRef.current = { index: undefined, draft: "" };
     abortController.current?.abort();
+    pendingApprovedPlan.current = undefined;
     activeSessionId.current = undefined;
     workflowRuntime.current = undefined;
     sessionTitlePending.current = false;
@@ -1886,12 +1904,25 @@ export function EverpeaceApp({
       mode: AgentMode = agentMode,
       taskSource: WorkflowTaskSource = "user",
       attachments: readonly FileAttachment[] = [],
+      executeApprovedPlan = false,
     ) => {
       await permissionsReady.current;
       if (abortController.current || directController.current) return;
       if (!agent || !activeModel) {
         append("error", "No model is active. Use /login or /model first.");
         return;
+      }
+      if (executeApprovedPlan) {
+        const approved = pendingApprovedPlan.current;
+        if (!approved || approved.sessionId !== activeSessionId.current || approved.agent !== agent) {
+          appendTransient("system", "No approved plan is available. Submit and approve a plan first.");
+          return;
+        }
+        text = `Implement the following plan, which the user approved and explicitly started with /plan execute. Inspect current files and project rules before editing, respect current permissions, and verify the result.\n\nTitle: ${approved.submitted.title}\n\n${approved.submitted.plan}`;
+        pendingApprovedPlan.current = undefined;
+        setAgentMode("default");
+      } else {
+        pendingApprovedPlan.current = undefined;
       }
       const controller = new AbortController();
       abortController.current = controller;
@@ -1944,7 +1975,7 @@ export function EverpeaceApp({
       setBusyLabel(`Waiting for ${waitingTarget}`);
       clearLiveAssistant();
       setLiveToolStatus(undefined);
-      let approvedPlan = false;
+      const taskSessionId = activeSessionId.current;
       try {
         const effectiveTaskSource = mode === "default" && forkResumePending.current
           ? "session_resume"
@@ -1980,6 +2011,7 @@ export function EverpeaceApp({
           signal: controller.signal,
           ...(attachments.length === 0 ? {} : { attachments }),
         });
+        controller.signal.throwIfAborted();
         const forkResumeSettled =
           mode === "default" &&
           forkResumePending.current &&
@@ -1995,8 +2027,14 @@ export function EverpeaceApp({
           if (activeSessionId.current === sessionId) forkResumePending.current = false;
         }
         if (result.disposition === "plan_approved") {
-          approvedPlan = true;
-          setAgentMode("default");
+          if (!result.agentResult.approvedPlan || !result.agentResult.approvedPlanTitle) {
+            throw new Error("Approved plan content is missing");
+          }
+          if (taskSessionId && activeSessionId.current === taskSessionId && currentAgent.current === agent) {
+            pendingApprovedPlan.current = { sessionId: taskSessionId, agent, submitted: { title: result.agentResult.approvedPlanTitle, plan: result.agentResult.approvedPlan } };
+            setAgentMode("plan");
+            appendTransient("system", "Plan approved. Run /plan execute to start.");
+          }
         } else if (result.disposition === "plan_cancelled") {
           setAgentMode("default");
           appendTransient("system", "Plan mode cancelled.");
@@ -2032,8 +2070,16 @@ export function EverpeaceApp({
           setQueuedGuidanceCount(0);
         }
         if (ownsController) {
-          if (approvedPlan) {
-            queueMicrotask(() => void runChatRef.current?.("The user approved the immediately preceding plan. Implement it now and verify the result.", true, "default"));
+          if (mode === "plan") {
+            const pending = queuedGuidance.current.splice(0);
+            setQueuedGuidanceCount(0);
+            if (pending.length > 0) {
+              const draft = [editorRef.current.value, ...pending.map((item) => item.text)].filter(Boolean).join("\n\n");
+              editorRef.current = createComposerState(draft);
+              historyNavigationRef.current = { index: undefined, draft: "" };
+              setInputKey((current) => current + 1);
+              appendTransient("system", "Pending guidance was returned to your draft. Submit it when ready.");
+            }
             return;
           }
           const next = queuedGuidance.current.shift();
@@ -2091,14 +2137,14 @@ export function EverpeaceApp({
     const timelineRecorded = activeSessionId.current !== undefined;
     if (timelineRecorded) append("user", text);
     if (confirmationRef.current) finishConfirmation(false);
-    if (agent?.requestSteering?.(text, attachments)) {
+    if (agentMode !== "plan" && agent?.requestSteering?.(text, attachments)) {
       setQueuedGuidanceCount((current) => current + 1);
       setLiveToolStatus("Guidance received; applying at the next safe checkpoint");
       return;
     }
     queuedGuidance.current.push({ text, timelineRecorded, attachments });
     setQueuedGuidanceCount(queuedGuidance.current.length);
-  }, [agent, append, finishConfirmation]);
+  }, [agent, agentMode, append, finishConfirmation]);
 
   const showWorkspaceDiff = useCallback(async () => {
     const operation = startCommandLoad("/diff · Workspace changes", "Reading Git diff");
@@ -2248,7 +2294,20 @@ export function EverpeaceApp({
         }
         if (parsed.command === "/plan") {
           const args = parsed.args?.trim() ?? "";
-          if (args.toLowerCase() === "exit") {
+          const action = args.toLowerCase();
+          if (abortController.current || directController.current) {
+            appendTransient("system", "A task or command is active. Wait for it to finish before using /plan.");
+          } else if (action === "execute") {
+            void runChat("", false, "default", "user", [], true);
+          } else if (action === "show") {
+            const approved = pendingApprovedPlan.current;
+            if (approved && approved.sessionId === activeSessionId.current && approved.agent === agent) {
+              enterCommandView({ kind: "approved-plan", submitted: { ...approved.submitted } });
+            } else {
+              appendTransient("system", "No approved plan is available. Submit and approve a plan first.");
+            }
+          } else if (action === "exit") {
+            pendingApprovedPlan.current = undefined;
             setAgentMode("default");
             appendTransient("system", "Plan mode disabled.");
           } else if (!args) {
@@ -2307,6 +2366,7 @@ export function EverpeaceApp({
       exit,
       appendTransient,
       agentMode,
+      agent,
       openLogout,
       openModelPicker,
       openResume,
@@ -2526,7 +2586,9 @@ export function EverpeaceApp({
         ) : view.kind === "plan-questions" ? (
           <PlanQuestionsSurface request={view.request} mode={view.mode} onComplete={view.complete} onCancel={view.cancel} />
         ) : view.kind === "plan-review" ? (
-          <PlanReviewSurface submitted={view.submitted} onDecision={view.decide} />
+          <PlanReviewSurface submitted={view.submitted} onDecision={view.decide} onCancelTask={view.cancelTask} />
+        ) : view.kind === "approved-plan" ? (
+          <ApprovedPlanSurface submitted={view.submitted} onBack={returnToChat} />
         ) : view.kind === "goal-confirm" ? (
           <GoalConfirmationSurface
             objective={view.objective}

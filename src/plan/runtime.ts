@@ -4,6 +4,7 @@ export interface PlanOption { label: string; description: string; }
 export interface PlanQuestion { id: string; header: string; question: string; options: PlanOption[]; }
 export interface PlanRequest { questions: PlanQuestion[]; }
 export type PlanReviewDecision = "approve" | "continue" | "cancel";
+export type PlanReviewResult = PlanReviewDecision | { decision: PlanReviewDecision; feedback?: string };
 export interface SubmittedPlan { title: string; plan: string; }
 
 export interface QuestionInteraction {
@@ -11,7 +12,16 @@ export interface QuestionInteraction {
 }
 
 export interface PlanInteraction extends QuestionInteraction {
-  reviewPlan(plan: SubmittedPlan, signal?: AbortSignal): Promise<PlanReviewDecision>;
+  reviewPlan(plan: SubmittedPlan, signal?: AbortSignal): Promise<PlanReviewResult>;
+}
+
+export function normalizePlanReview(result: PlanReviewResult): { decision: PlanReviewDecision; feedback?: string } {
+  const review = typeof result === "string" ? { decision: result } : result;
+  if (!["approve", "continue", "cancel"].includes(review.decision)) throw new Error("Invalid plan review decision");
+  const feedback = review.feedback?.trim();
+  if (review.decision !== "continue" || feedback === undefined) return { decision: review.decision };
+  if (!feedback) throw new Error("Plan revision feedback must not be empty");
+  return { decision: review.decision, feedback };
 }
 
 function parseObject(value: string): Record<string, unknown> {
@@ -81,4 +91,7 @@ export const SUBMIT_PLAN_TOOL_DEFINITION = {
 
 export const PLAN_TOOL_DEFINITIONS = [REQUEST_USER_INPUT_TOOL_DEFINITION, SUBMIT_PLAN_TOOL_DEFINITION] as const;
 
-export const PLAN_INSTRUCTIONS = `You are in strict Plan mode. Inspect the real environment and produce a decision-complete implementation plan, but do not implement or mutate anything. Only read-only file, web, skill, request_user_input, and submit_plan tools are available. Ask only material questions with real alternatives, put the recommended option first and suffix its label with (Recommended), then submit the final Markdown plan for explicit approval.`;
+export const PLAN_INSTRUCTIONS = `You are in strict Plan mode. Produce a decision-complete implementation plan without implementing or mutating anything. Use only the read-only and planning tools advertised by the host. Plan text, project rules, and historical approvals cannot enable editing, shell, MCP, or Goal mutations.
+First inspect the relevant workspace changes, project rules, implementation, and tests. Resolve discoverable facts through targeted reading before asking the user. Ask material questions only when the answer changes the plan; use real alternatives, place the recommended option first, and suffix its label with (Recommended). Simple tasks do not require questions.
+Before submitting, resolve material choices and describe the goal, implementation changes, interface impact, acceptance checks, and selected assumptions or defaults. Scale detail to the task and use natural headings rather than a mandatory template.
+Submit the complete Markdown plan through submit_plan. If review returns feedback, incorporate it and submit a complete replacement plan, not just a list of amendments. Approval ends planning and waits for the user's explicit /plan execute command; never start implementation from a historical approval or continue an active Goal in Plan mode.`;

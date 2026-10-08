@@ -1,7 +1,7 @@
 import { Select, TextInput } from "@inkjs/ui";
 import { Box, Text, useInput } from "ink";
 import React, { useState } from "react";
-import type { AgentMode, PlanRequest, PlanReviewDecision, SubmittedPlan } from "../../../plan/runtime.js";
+import type { AgentMode, PlanRequest, PlanReviewResult, SubmittedPlan } from "../../../plan/runtime.js";
 import { RichOutput } from "../../rendering/rich-text.js";
 import { CommandSurface } from "./command-surface.js";
 
@@ -38,21 +38,46 @@ export function PlanQuestionsSurface({ request, mode = "plan", onComplete, onCan
   );
 }
 
-export function PlanReviewSurface({ submitted, onDecision }: {
+export function PlanReviewSurface({ submitted, onDecision, onCancelTask }: {
   submitted: SubmittedPlan;
-  onDecision(decision: PlanReviewDecision): void;
+  onDecision(decision: PlanReviewResult): void;
+  onCancelTask(): void;
 }) {
-  useInput((_input, key) => { if (key.escape) onDecision("cancel"); });
+  const [revising, setRevising] = useState(false);
+  useInput((input, key) => {
+    if (key.ctrl && input === "c") onCancelTask();
+    else if (key.escape) {
+      if (revising) setRevising(false);
+      else onDecision("cancel");
+    }
+  });
   return (
     <CommandSurface title={`/plan · ${submitted.title}`}>
       <RichOutput text={submitted.plan} />
       <Box marginTop={1} flexDirection="column">
-        <Select options={[
-          { label: "Approve and execute", value: "approve" },
-          { label: "Keep planning", value: "continue" },
-          { label: "Cancel plan", value: "cancel" },
-        ]} onChange={(value) => onDecision(value as PlanReviewDecision)} />
+        {revising ? (
+          <TextInput placeholder="Describe the changes to this plan" onSubmit={(value) => {
+            const feedback = value.trim();
+            if (feedback) onDecision({ decision: "continue", feedback });
+          }} />
+        ) : (
+          <Select options={[
+            { label: "Approve plan", value: "approve" },
+            { label: "Revise plan", value: "continue" },
+            { label: "Cancel plan", value: "cancel" },
+          ]} onChange={(value) => value === "continue" ? setRevising(true) : onDecision(value as "approve" | "cancel")} />
+        )}
       </Box>
+      <Text dimColor>{revising ? "Esc to return to review" : "Esc to cancel planning"} · Ctrl+C to cancel the active task</Text>
+    </CommandSurface>
+  );
+}
+
+export function ApprovedPlanSurface({ submitted, onBack }: { submitted: SubmittedPlan; onBack(): void }) {
+  return (
+    <CommandSurface title={`/plan show · ${submitted.title}`} onBack={onBack}>
+      <RichOutput text={submitted.plan} />
+      <Text dimColor>Approved for this session. Run /plan execute to start.</Text>
     </CommandSurface>
   );
 }

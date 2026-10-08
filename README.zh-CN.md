@@ -106,7 +106,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.3.10) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.11) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -170,7 +170,7 @@ TUI 命令：
 - `/mcp`：重新加载 Codex MCP 配置、连接已启用服务器并查看 tool/resource/prompt 状态。
 - `/skills`：创建、安装、查看并显式调用本地 Skills。
 - `/memory`：查看 learned 经验和独立的 Memory 模型用量、全局启用或关闭读取与自动学习、切换当前聊天是否读取或记录 memory、归档或清理条目、使用 `/memory view` 查看最近一次实际注入快照，或使用 `/memory remember <偏好>` 保存长期用户偏好。聊天策略会随 Session 恢复；开关只控制 learned Memory，与按需 Session 历史检索独立。
-- `/plan`：进入严格只读规划模式，回答结构化策略问题，并在批准计划后执行。普通 coding 中模型需要澄清时也会使用同一阻塞式问题窗口；在 coding 问题中取消会停止整个活动任务。执行器会拒绝 Plan step 未提供的工具，包括编辑和 Goal 写操作。
+- `/plan` 或 `/plan <需求>`：进入严格只读规划。审阅菜单提供 **Approve plan**（批准）、**Revise plan**（输入修订意见）、**Cancel plan**（取消）。批准后保持 Plan 模式并空闲等待；`/plan show` 查看已批准计划，`/plan execute` 才把完整正文交给正常编码与验证闭环。批准仅保留在当前进程、Session 和 Agent 中；继续讨论、`/plan exit`、成功切换会话或替换 Agent 会清除，重启或恢复不会重建。修订输入中 Esc 返回审阅菜单，菜单中 Esc 取消规划；两处 Ctrl+C 都取消活动任务。未处理的 Plan guidance 返回草稿，等待再次提交。普通 coding 中模型需要澄清时也会使用同一阻塞式问题窗口；在 coding 问题中取消会停止整个活动任务。执行器会拒绝 Plan step 未提供的工具，包括编辑和 Goal 写操作。
 - `/goal <目标> [--tokens N]`：创建、查看、暂停、恢复并自动持续执行当前 Session 目标。收到 usage 后达到预算或无法可靠计量时，会停止后续工具、模型请求和自动验证修复，并显示原因；正在进行的单次请求可能超过剩余额度。
 - `/compact`：压缩模型 context，同时保留完整可见 transcript。官方 OpenAI 使用原生 Responses 压缩；DeepSeek 和保守的兼容端点使用最多 8K token 的摘要，并保留最近两个完整交互单元及未闭合工具链。自动压缩会预留输出预算与安全余量；确认 context 超限后最多恢复一次，且不会重放工具。
 - `/reasoning off|low|high|max`：设置下一项任务捕获的推理档位，默认 `high`；官方 DeepSeek 会原样接收 `max`。

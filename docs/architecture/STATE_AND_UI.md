@@ -10,6 +10,7 @@
 | 模型注册 | [ModelRegistry](../../src/storage/model-registry.ts)，平台配置中的 `models.json` | 明文 Key；只保存 `auth_ref` |
 | 对话、context、主请求 usage | [SessionStore](../../src/storage/session-store.ts)，每 Session 一个 JSONL | 从历史恢复的权限授权 |
 | 当前视图、审批、运行状态 | [TUI App](../../src/tui/app/app.tsx) 及依赖 | 临时命令窗口不能变为聊天历史 |
+| 已批准待执行计划 | 当前 TUI 进程内，绑定 Session 与 Agent | JSONL、恢复后的执行授权、文件审批或验证成功 |
 | coding 结果与验证债务 | [workflow runtime](../../src/workflow/runtime.ts)，Session 只保存元数据 | 验证 stdout/stderr/error、文件检查点 |
 | 当前 coding 执行清单 | [TaskProgress](../../src/workflow/task-progress.ts)，Session 保存最新整体投影 | 验证成功、Goal 完成或权限授权 |
 | Goal | [GoalRuntime](../../src/goal/runtime.ts)，Session 绑定 | 无宿主验证的编码完成状态 |
@@ -110,11 +111,19 @@
 - 新指令可开启新任务预算，但旧未验证事实仍须保留；Goal 续跑不构成新任务授权。
 - Memory 是不可信背景，低于用户指令和项目规则；全局开关控制 learned Memory 读写，聊天策略随 Session 恢复，均不控制只读 Session 历史检索。成功学习、明确长期偏好、候选审核及后台队列的完整边界见 [MEMORY](MEMORY.md)。
 
+## Plan 审阅与显式执行
+
+`/plan` 和 `/plan <request>` 保持严格只读。审阅菜单为 `Approve plan / Revise plan / Cancel plan`；修订输入要求非空意见，通过当前 `submit_plan` 的配对结果先落盘再继续采样。修订输入的 Esc 返回菜单，菜单的 Esc 取消规划，两处 Ctrl+C 均取消活动任务。预先 aborted 的 signal 不打开窗口，回调只结算一次，迟到决定不能复活批准。
+
+批准后等待 runner 完成清理，保存标题、完整正文和当前 Session／Agent 身份，继续保持 Plan 模式并提示 `Plan approved. Run /plan execute to start.`。不新增 Session event，不从历史推断批准。`/plan show` 只读查看进程内计划，不发模型请求；手动压缩不影响这份正文。`/plan execute` 只在空闲且绑定有效时捕获并消费计划，通过包含完整正文的新 coding 输入启动共享 runner。消费后取消或失败不自动重试；计划批准不能代替 patch／shell 审批，也不恢复文件观察。
+
+新讨论、带需求的 `/plan` 在任务启动前清除旧批准；`/plan exit`、成功新建／切换／清空／fork 会话和 Agent 替换均使批准失效。失败的会话操作保持原批准；重启／恢复不重建。Plan 的 queued guidance 不自动进入另一轮任务，结束时连同现有草稿返回输入区，等待用户再次提交；coding 的实时 steering 继续沿用现有路径。相关回归见 [Plan runtime](../../tests/unit/plan/runtime.test.ts)、[审阅组件](../../tests/unit/tui/plan-surface.test.tsx)、[App](../../tests/unit/tui/app.test.tsx) 与 [生产闭环](../../tests/unit/runtime/plan-execution.test.tsx)。
+
 ## 非交互 exec
 
 [exec runtime](../../src/exec/runtime.ts) 不创建 Ink 组件。它通过 [production factory](../../src/runtime/production.ts) 取得与 TUI/benchmark 相同的 provider、历史/附件、Memory 读取、MCP、权限工具和请求账本，再用 `CodingTaskRunner` 完成后台收束、验证与修复。通过启动配置后建立可由 TUI `/resume` 打开的正常 Session；标题根据提示第一条非空行确定，聊天 Memory policy 固定为读取已有内容、关闭本次 capture。
 
-CLI 提示词只能来自一个位置参数或非 TTY stdin。模型解析先匹配注册 ID，再匹配唯一 `model_name`；不指定时仅允许一个凭据可用模型。exec 没有 Plan、resume 或自动批准路径；审批和结构化问题保存标准 function output 后返回 `interaction_required`。可选 token budget、deadline 和 task step 上限覆盖 coding、压缩、重试及所有修复轮。SIGINT/SIGTERM、deadline、stdout/stderr 关闭或写入失败都先取消任务并等待 Agent/后台资源清理；输出失败返回 1，信号保留 130/143。只有输出可写且此前没有半条 JSONL 记录时才尝试发布终态，不能向不完整末行拼接一个伪完整的最终事件。
+CLI 提示词只能来自一个位置参数或非 TTY stdin。模型解析先匹配注册 ID，再匹配唯一 `model_name`；不指定时仅允许一个凭据可用模型。`--resume` 创建同工作区的独立子 Session 并保留验证债务，不能与 `--model` 组合；`--plan` 只读规划并输出提交正文，从不自动批准／执行。审批和必须回答的结构化问题保存标准 function output 后返回 `interaction_required`。SDK `runTask` 复用此路径，边界不变。可选 token budget、deadline 和 task step 上限覆盖 coding、压缩、重试及所有修复轮。SIGINT/SIGTERM、deadline、stdout/stderr 关闭或写入失败都先取消任务并等待 Agent/后台资源清理；输出失败返回 1，信号保留 130/143。只有输出可写且此前没有半条 JSONL 记录时才尝试发布终态，不能向不完整末行拼接一个伪完整的最终事件。
 
 默认 stdout 只写最终 assistant 文本，stderr 写进度与宿主验证摘要。`--json` 通过 [exec-output](../../src/cli/exec-output.ts) 输出 schema version 1 JSONL：每行含 ISO 时间和白名单字段，可出现 `session_started`、`assistant_message`、`tool_started`、`tool_finished`、`workflow_updated`、`interaction_required`，并在任务清理后最多一次 `run_finished`。正文先整体去终端控制序列、脱敏，再分块转义写出；assistant 正文完整保留，其余事件连同换行最多 64 KiB，缩短预览时带 `truncated: true`。不导出 reasoning 正文、原始 provider response 或任意对象展开，usage 可以包含汇总 reasoning/cache 计数。退出码及用户调用格式见双语 README。
 

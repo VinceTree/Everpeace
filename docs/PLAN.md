@@ -1,19 +1,19 @@
 # 当前开发计划
 
-产品保持 DeepSeek 优先、Windows 优先、单 Agent、Node/TypeScript、Responses 与 inline TUI。当前版本、提交和验证证据只见 [HANDOFF](HANDOFF.md)。此前计划见 [连续性历史](archive/HANDOFF_CONTINUITY.md) 与 [PLAN_HISTORY](archive/PLAN_HISTORY.md)。
+产品保持 DeepSeek 优先、Windows 优先、单 Agent、Node/TypeScript、Responses 与 inline TUI。当前版本、提交和验证证据只见 [HANDOFF](HANDOFF.md)。上一轮见 [项目地图计划](archive/PLAN_PROJECT_MAP.md) 与 [交接](archive/HANDOFF_PROJECT_MAP.md)。
 
-## 当前里程碑：按需项目地图与受控容错编辑
+## 当前里程碑：Plan 修订、批准等待与显式执行
 
-用户授权离线实施并自动更新展示版本、提交推送 main；不创建／推送 tag、不更新 Release，不调用真实模型，保留原有未跟踪内容。提交包含 [skip publish]，不跳过测试 CI。默认 high／32,768、原生 sandbox、Responses 和宿主验证规则保持。
+用户授权实施既定计划并离线验收，随后授权更新展示版本、提交和推送，但禁止更新 Release；只推送 main，使用 `[skip publish]`，不创建或推送 tag，不调用真实模型，保留原有未跟踪内容。待执行计划仅存在当前进程和会话中，不增加 Session schema。
 
-- [x] 共享 coding／Plan 只读 project_map，按需枚举、Node 元数据、声明与候选分离、ignore／链接／工作区边界及完整上限。
-- [x] 显式 line_whitespace 唯一完整行块定位，默认 exact、拒绝歧义、预览／结果展示方式与行范围，保留审批／并发／回滚边界。
-- [x] Windows／Linux 非 TTY owned output writer，完成 callback ACK、父进程取消／超时、pending／close／exit 清理顺序和迟到错误处理。
-- [x] fake provider 生产闭环及地图／编辑／输出进程回归，IPC 就绪／取消／清理证据。
-- [x] 工具、运行时、状态、决策和双语说明更新，归档前一轮交接与实际 CI 失败。
-- [x] 串行重新发现并执行现有 typecheck → lint → test → build，首败停止，明确缺少 lint，差异与文档链接检查。
-- [x] 自动提交推送 main，等待 Windows／Linux Test CI，核对 Release job 跳过与已有 Release 不变；Windows 路径别名测试及写失败取消时序修复后双平台全部通过，本轮未重复递增版本。
+- [x] 分离公共／coding／Plan 指令，Plan 不携带实施或 Goal 完成行动要求。
+- [x] 审阅支持带非空意见修订，配对结果持久化后再继续；兼容旧字符串决定。
+- [x] 批准后保持 Plan 并等待，新增 /plan show 与 /plan execute，执行明确携带完整正文且只消费一次。
+- [x] 覆盖讨论、退出模式、成功会话变化和 Agent 替换的批准失效，以及取消、清理与 queued guidance 草稿恢复。
+- [x] 离线 production TUI 闭环、fork 验证债务、exec／SDK 只读输出和问题停止回归。
+- [x] 双语 README、运行时／状态契约、决策与历史归档同步。
+- [x] 最终重新发现并串行执行 typecheck → lint → test → build，首败停止，记录缺少 lint；检查差异和文档链接。
 
-## 独立后续
+## 独立验收
 
-离线回归证明工具行为与宿主闭环，不能证明真实 DeepSeek 编码成功率或 token 成本改善。真实 Windows Terminal 手工验收、Windows LSP backend 门禁和有数值预算的 live／dsh 评测独立处理；本轮不扩展 MCP、LSP、多 Agent 或新协议。
+真实 Windows Terminal 的修订输入、取消、resize／scrollback 和单 prompt 尚需手工验收。离线回归不证明真实模型规划质量、编码成功率或 token 收益；live 评测仍需明确授权及数值预算。

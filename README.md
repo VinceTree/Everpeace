@@ -106,7 +106,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.3.10) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.11) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -170,7 +170,7 @@ TUI commands:
 - `/mcp`: Reload Codex MCP configuration, connect enabled servers, and inspect server/tool/resource/prompt status.
 - `/skills`: Create, install, inspect, and explicitly invoke local Skills.
 - `/memory`: View learned experience and separate Memory-model usage, globally enable or disable both reading and learning, control reading/capture for the current chat, inspect the last snapshot actually injected with `/memory view`, archive or clear entries, or run `/memory remember <preference>` to save a lasting user preference. Chat policy is restored with its Session; these settings govern learned Memory, independently of on-demand Session history.
-- `/plan`: Enter strict read-only planning mode, answer structured strategy questions, and approve a plan before execution. The same blocking question surface is available during coding when the model needs clarification; coding cancellation stops the active task. Dispatch rejects tools not offered in a Plan step, including editing and Goal mutations.
+- `/plan` or `/plan <request>`: Enter strict read-only planning. Review a plan with **Approve plan**, **Revise plan** (enter your feedback), or **Cancel plan**. Approval keeps the agent idle in Plan mode; `/plan show` displays the approved plan and `/plan execute` explicitly starts its complete contents through the normal coding and verification workflow. Approval is held only for the current process, Session, and Agent; another discussion, `/plan exit`, a successful Session change, or Agent replacement clears it. Restarting or resuming never restores approval. Esc returns from revision input to review, or cancels planning from review; Ctrl+C cancels the active task in either surface. Pending Plan guidance returns to the draft for resubmission. The same blocking question surface is available during coding when the model needs clarification; coding cancellation stops the active task. Dispatch rejects tools not offered in a Plan step, including editing and Goal mutations.
 - `/goal <objective> [--tokens N]`: Create, inspect, pause, resume, and automatically continue a persistent session goal. Once returned usage reaches the budget or cannot be measured reliably, further tools, model requests, and automatic verification/repair stop with an explanation. An in-flight request can exceed the remaining budget.
 - `/compact`: Compact model context while keeping the full visible transcript. Official OpenAI uses native Responses compaction; DeepSeek and conservative compatible endpoints use an 8K-token summary that retains the latest two complete interaction units and open tool chains. Automatic compaction reserves output and safety headroom, and a confirmed context overflow can recover once without replaying tools.
 - `/reasoning off|low|high|max`: Set the reasoning level captured by the next task. The default is `high`; official DeepSeek receives `max` unchanged.

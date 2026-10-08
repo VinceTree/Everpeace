@@ -687,6 +687,21 @@ test("exec --plan submits a read-only plan, prints it, and never implements", as
     await testFixture.cleanup();
   }
 });
+
+test("exec --plan stops on a material question and preserves its paired interaction result", async () => {
+  const provider = fakeProvider(() => response("question", [{ type: "function_call", name: "request_user_input", call_id: "question", arguments: JSON.stringify({ questions: [{ id: "scope", header: "Scope", question: "Which scope?", options: [{ label: "Small", description: "One module" }, { label: "Large", description: "Several modules" }] }] }) }]));
+  const testFixture = await fixture(provider);
+  try {
+    const result = await runExec({ prompt: "Plan a change", plan: true, workspacePath: testFixture.workspacePath }, testFixture.dependencies);
+    assert.equal(result.exitCode, 5);
+    assert.equal(result.classification, "interaction_required");
+    assert.equal(provider.calls, 1);
+    const loaded = await testFixture.sessionStore.load(result.sessionId!);
+    const output = loaded.context.find((item) => item.type === "function_call_output" && item.call_id === "question");
+    assert.match(String(output?.output), /interaction_required/u);
+    assert.equal(loaded.workflow, undefined);
+  } finally { await testFixture.cleanup(); }
+});
 test("exec --permission-mode overrides the tier without weakening saved web restrictions", async () => {
   const provider = fakeProvider(() => assistant("done", "done"));
   const testFixture = await fixture(provider, { mode: "workspace-write", web: false });

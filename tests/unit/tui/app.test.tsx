@@ -36,6 +36,7 @@ import {
 } from "../../../src/tui/commands/slash-commands.js";
 import { textWidth } from "../../../src/tui/rendering/text-width.js";
 import { cloneTaskProgress, type TaskProgress } from "../../../src/workflow/task-progress.js";
+import { normalizePlanReview } from "../../../src/plan/runtime.js";
 
 test("formats active turn elapsed time with useful units", () => {
   assert.equal(formatElapsed(0), "0s");
@@ -355,6 +356,224 @@ function createFixture(options?: {
   };
   return { dependencies, registry, sessionStore };
 }
+
+const planModel: RegisteredModel = { id: "plan-test", model_name: "offline", base_url: "https://example.com/v1", api_key: "fixture" };
+const approvedBody = "Inspect src/value.ts\n\nKeep the user's changes.\nUse exact replacement and run all checks.\n\nEND_OF_APPROVED_PLAN";
+
+function createPlanFixture(options: { endTask?: () => Promise<void>; coding?: (signal?: AbortSignal) => Promise<void> } = {}) {
+  const inputs: Array<{ text: string; mode: string }> = [];
+  const starts: Array<{ mode: string; source: string }> = [];
+  let interaction!: AgentIO;
+  const fixture = createFixture({ initial: [planModel], createAgent: (_model, io, restore) => {
+    interaction = io;
+    return {
+      beginTask(input) { starts.push({ mode: input.mode, source: input.source }); },
+      async runTurn(text, signal, input) {
+        inputs.push({ text, mode: input.mode ?? "default" });
+        if (input.mode === "plan") {
+          const review = normalizePlanReview(await io.reviewPlan!({ title: "Approved offline plan", plan: approvedBody }, signal));
+          return { planDecision: review.decision, ...(review.decision === "approve" ? { approvedPlan: approvedBody, approvedPlanTitle: "Approved offline plan" } : {}) };
+        }
+        await options.coding?.(signal);
+        io.writeAssistant("Explicit execution finished");
+        return {};
+      },
+      async compact() {
+        const items = [{ role: "assistant", content: "A summary without the approved plan body" }];
+        await restore?.onContextCompacted?.(items, false, null);
+        return { items, usage: null };
+      },
+      async endTask() { await options.endTask?.(); },
+    };
+  } });
+  return { ...fixture, inputs, starts, interaction: () => interaction };
+}
+
+async function submitInput(view: ReturnType<typeof render>, text: string): Promise<void> {
+  view.stdin.write(text);
+  await tick();
+  view.stdin.write("\r");
+}
+
+async function approvePlan(view: ReturnType<typeof render>): Promise<void> {
+  await submitInput(view, "/plan inspect the implementation");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Approve plan"));
+  await tick();
+  view.stdin.write("\r");
+  try {
+    await waitFor(() => (view.lastFrame() ?? "").includes("Plan approved. Run /plan execute to start."));
+  } catch { assert.fail(view.lastFrame()); }
+}
+
+test("an approved plan waits, survives compaction, and executes its full body only once", async () => {
+  const fixture = createPlanFixture();
+  let commands = 0;
+  fixture.dependencies.runBash = async () => { commands++; return { stdout: "", stderr: "", exitCode: 0, signal: null }; };
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [planModel], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await tick();
+    await approvePlan(view);
+    assert.equal(fixture.inputs.length, 1);
+    assert.equal(commands, 0);
+    assert.equal(fixture.sessionStore.sessions.get("session-1")?.workflow, undefined);
+    await submitInput(view, "/plan show");
+    await waitFor(() => (view.lastFrame() ?? "").includes("/plan show · Approved offline plan"));
+    assert.match(view.lastFrame() ?? "", /END_OF_APPROVED_PLAN/u);
+    assert.equal(fixture.inputs.length, 1);
+    view.stdin.write("\u001b");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
+    await submitInput(view, "/compact");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Context compacted;"));
+    await submitInput(view, "/plan execute");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Explicit execution finished"));
+    assert.equal(fixture.inputs.length, 2);
+    assert.equal(fixture.inputs[1]?.mode, "default");
+    assert.ok(fixture.inputs[1]?.text.endsWith(approvedBody));
+    assert.match(fixture.inputs[1]?.text ?? "", /Approved offline plan/u);
+    await submitInput(view, "/plan execute");
+    await waitFor(() => (view.lastFrame() ?? "").includes("No approved plan is available"));
+    assert.equal(fixture.inputs.length, 2);
+  } finally { view.unmount(); }
+});
+
+test("discussion, exit, new, clear, fork, and Agent replacement invalidate approval", async (context) => {
+  for (const action of ["discussion", "/plan exit", "/new", "/clear", "/fork child", "/model"]) await context.test(action, async () => {
+    const fixture = createPlanFixture();
+    const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [planModel], missing: [] }} onReplayOutput={(update) => update()} />);
+    try {
+      await tick();
+      await approvePlan(view);
+      await submitInput(view, action);
+      if (action === "discussion") {
+        await waitFor(() => fixture.inputs.length === 2 && (view.lastFrame() ?? "").includes("Approve plan"));
+        assert.equal(fixture.inputs[1]?.mode, "plan");
+        await tick();
+        view.stdin.write("\u001b");
+        await waitFor(() => (view.lastFrame() ?? "").includes("Plan mode cancelled"));
+      } else if (action === "/model") {
+        await waitFor(() => (view.lastFrame() ?? "").includes("Enter confirm"));
+        await tick();
+        view.stdin.write("\r");
+        await waitFor(() => (view.lastFrame() ?? "").includes("conversation context was reset"));
+      } else {
+        await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace") && (action !== "/new" || fixture.sessionStore.sessions.size === 2) && (action !== "/fork child" || fixture.sessionStore.sessions.size === 2));
+      }
+      await submitInput(view, "/plan execute");
+      await waitFor(() => (view.lastFrame() ?? "").includes("No approved plan is available"));
+      assert.ok(fixture.inputs.every((input) => input.mode === "plan"));
+    } finally { view.unmount(); }
+  });
+});
+
+test("failed session creation or fork leaves the approved plan available", async (context) => {
+  for (const action of ["/new", "/fork child"]) await context.test(action, async () => {
+    const fixture = createPlanFixture();
+    const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [planModel], missing: [] }} onReplayOutput={(update) => update()} />);
+    try {
+      await tick();
+      await approvePlan(view);
+      fixture.sessionStore.create = async () => { throw new Error("Session operation failed"); };
+      fixture.sessionStore.fork = async () => { throw new Error("Session operation failed"); };
+      await submitInput(view, action);
+      await waitFor(() => (view.lastFrame() ?? "").includes("Session operation failed"));
+      await tick();
+      view.stdin.write("\u001b");
+      await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
+      await submitInput(view, "/plan show");
+      await waitFor(() => (view.lastFrame() ?? "").includes("/plan show · Approved offline plan"));
+    } finally { view.unmount(); }
+  });
+});
+
+test("already-cancelled review never opens a window and late decisions are ignored", async () => {
+  const fixture = createPlanFixture();
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [planModel], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await tick();
+    const controller = new AbortController();
+    controller.abort();
+    assert.equal(await fixture.interaction().reviewPlan!({ title: "Late plan", plan: "Do work" }, controller.signal), "cancel");
+    assert.doesNotMatch(view.lastFrame() ?? "", /Late plan/u);
+    await submitInput(view, "/plan plan a change");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Approve plan"));
+    await tick();
+    view.stdin.write("\u0003");
+    view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Model request cancelled"));
+    await submitInput(view, "/plan execute");
+    await waitFor(() => (view.lastFrame() ?? "").includes("No approved plan is available"));
+    assert.equal(fixture.inputs.length, 1);
+  } finally { view.unmount(); }
+});
+
+test("explicit execution is single-use through cancellation and refuses overlapping starts", async () => {
+  const fixture = createPlanFixture({ coding: async (signal) => {
+    await new Promise<void>((_resolve, reject) => {
+      const cancel = () => reject(signal?.reason ?? new Error("cancelled"));
+      if (signal?.aborted) cancel();
+      else signal?.addEventListener("abort", cancel, { once: true });
+    });
+  } });
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [planModel], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await tick();
+    await approvePlan(view);
+    await submitInput(view, "/plan execute");
+    await waitFor(() => fixture.inputs.length === 2 && (view.lastFrame() ?? "").includes("Add guidance"));
+    await submitInput(view, "/plan execute");
+    await waitFor(() => (view.lastFrame() ?? "").includes("A task or command is active"));
+    assert.equal(fixture.inputs.length, 2);
+    view.stdin.write("\u0003");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Model request cancelled"));
+    await submitInput(view, "/plan execute");
+    await waitFor(() => (view.lastFrame() ?? "").includes("No approved plan is available"));
+    assert.equal(fixture.inputs.length, 2);
+  } finally { view.unmount(); }
+});
+
+test("approval is unavailable during cleanup and cancellation there prevents publication", async () => {
+  let release!: () => void;
+  let cleaning = false;
+  const fixture = createPlanFixture({ endTask: async () => { cleaning = true; await new Promise<void>((resolve) => { release = resolve; }); } });
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [planModel], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await tick();
+    await submitInput(view, "/plan inspect");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Approve plan"));
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => cleaning && (view.lastFrame() ?? "").includes("Add guidance"));
+    await submitInput(view, "/plan execute");
+    await waitFor(() => (view.lastFrame() ?? "").includes("A task or command is active"));
+    assert.equal(fixture.inputs.length, 1);
+    view.stdin.write("\u0003");
+    release();
+    await waitFor(() => (view.lastFrame() ?? "").includes("Model request cancelled"));
+    await submitInput(view, "/plan execute");
+    await waitFor(() => (view.lastFrame() ?? "").includes("No approved plan is available"));
+  } finally { release?.(); view.unmount(); }
+});
+
+test("queued Plan guidance returns to the draft after approval or cancellation without sampling", async (context) => {
+  for (const decision of ["approve", "cancel"]) await context.test(decision, async () => {
+    let release!: () => void;
+    const fixture = createPlanFixture({ endTask: () => new Promise<void>((resolve) => { release = resolve; }) });
+    const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [planModel], missing: [] }} onReplayOutput={(update) => update()} />);
+    try {
+      await tick();
+      await submitInput(view, "/plan inspect");
+      await waitFor(() => (view.lastFrame() ?? "").includes("Approve plan"));
+      await tick();
+      view.stdin.write(decision === "approve" ? "\r" : "\u001b");
+      await waitFor(() => Boolean(release) && (view.lastFrame() ?? "").includes("Add guidance"));
+      await submitInput(view, "Include offline checks");
+      release();
+      await waitFor(() => (view.lastFrame() ?? "").includes("Pending guidance was returned to your draft"));
+      assert.equal(fixture.inputs.length, 1);
+      assert.match(view.lastFrame() ?? "", /Include offline checks/u);
+    } finally { release?.(); view.unmount(); }
+  });
+});
 
 test("Ctrl+C cancels direct commands, retains details, and accepts the next input", async () => {
   const model: RegisteredModel = { id: "cancel-model", model_name: "test", base_url: "https://example.com/v1", api_key: "secret" };
