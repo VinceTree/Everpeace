@@ -150,7 +150,7 @@ function parseOperation(value: unknown): ApplyPatchOperation {
       patchError("INVALID_ARGUMENTS", "Patch replace requires non-empty oldText and string newText");
     }
     if (replacement.matchMode !== undefined && replacement.matchMode !== "exact" && replacement.matchMode !== "line_whitespace") patchError("INVALID_ARGUMENTS", "replace.matchMode must be exact or line_whitespace");
-    if (replacement.matchMode === "line_whitespace" && !/[^ \t\r\n]/u.test(replacement.oldText)) patchError("INVALID_ARGUMENTS", "replace.oldText must contain non-whitespace text for line_whitespace");
+    if (replacement.matchMode === "line_whitespace" && !/\S/u.test(replacement.oldText)) patchError("INVALID_ARGUMENTS", "replace.oldText must contain non-whitespace text for line_whitespace");
     if (Object.keys(replacement).some((key) => !["oldText", "newText", "matchMode"].includes(key))) patchError("INVALID_ARGUMENTS", "Patch replace contains unsupported fields");
     replace = { oldText: replacement.oldText, newText: replacement.newText, ...(replacement.matchMode === undefined ? {} : { matchMode: replacement.matchMode }) };
   }

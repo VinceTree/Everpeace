@@ -68,7 +68,7 @@ test("tolerant blocks require unique complete lines and preserve internal charac
 test("invalid modes and whitespace-only targets have no side effects; changed preview bytes remain stale", async () => {
   await fixture(async (root, file) => {
     await fs.writeFile(file, "\tvalue\n");
-    for (const replace of [{ oldText: "value", newText: "new", matchMode: "fuzzy" }, { oldText: " \t\n", newText: "new", matchMode: "line_whitespace" }]) {
+    for (const replace of [{ oldText: "value", newText: "new", matchMode: "fuzzy" }, ...[" \t\n", "\u00a0", "\u3000", "\f"].map((oldText) => ({ oldText, newText: "new", matchMode: "line_whitespace" }))]) {
       assert.throws(() => parseApplyPatchArguments(JSON.stringify({ operations: [{ path: "file.ts", action: "update", replace }] })), /matchMode|oldText/u);
       assert.equal((await runApplyPatch([{ path: "file.ts", action: "update", replace } as ApplyPatchOperation], root)).errorCode, "INVALID_ARGUMENTS");
     }
