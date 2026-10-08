@@ -15,6 +15,7 @@ import {
 import type { ResolvedModels } from "../storage/model-registry.js";
 import { SessionStore, type LoadedSession } from "../storage/session-store.js";
 import { redactSecretsPreservingLayout } from "../util/redact-secrets.js";
+import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 import { CodingWorkflowRuntime } from "../workflow/runtime.js";
 import { CodingTaskRunner, type CodingTaskRunnerResult } from "../workflow/task-runner.js";
 import { cloneTaskProgress, type TaskProgress } from "../workflow/task-progress.js";
@@ -527,7 +528,12 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
     }
     if (result.interaction) await emit({ type: "interaction_required", ...result.interaction });
   } catch (error) {
-    if (deadlineExceeded) {
+    if (error instanceof ResourceCleanupError) {
+      result = runtimeResult("runtime_error", 1, "cleanup_failed", ledger, {
+        ...(sessionId ? { sessionId } : {}),
+        error: errorText(error),
+      });
+    } else if (deadlineExceeded) {
       result = runtimeResult("limit_reached", 4, "deadline_exceeded", ledger, {
         ...(sessionId ? { sessionId } : {}),
         stopReason: "deadline_exceeded",

@@ -45,3 +45,14 @@ test("SDK Plan prints without execution and stops on questions using an isolated
     assert.match(result.stdout, /SDK Plan output and question boundaries passed/u);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
+
+test("public SDK preserves a stream body cleanup failure and its reliable usage", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-sdk-stream-"));
+  try {
+    const result = await promisify(execFile)(process.execPath, ["--import", "tsx", "tests/fixtures/sdk-stream-offline.ts"], {
+      cwd: process.cwd(), timeout: 30_000,
+      env: { ...process.env, EVERPEACE_SDK_TEST_ROOT: root, APPDATA: root, LOCALAPPDATA: root, USERPROFILE: root, HOME: root, CODEX_HOME: path.join(root, "codex"), XDG_CONFIG_HOME: root, XDG_STATE_HOME: root },
+    });
+    assert.match(result.stdout, /SDK stream cleanup and reliable billing boundaries passed/u);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});

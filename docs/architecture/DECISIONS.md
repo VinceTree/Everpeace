@@ -355,6 +355,8 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 
 ## Coding capability 加固边界
 
+- 模型流和进程的关闭失败共用 typed ResourceCleanupError，但分别保留 model_stream/process 资源类型。SSE 终态、已计量用量或已取消不等于资源关闭：Agent 等待 iterator done 和 pending next，生产 provider 通过 SDK raw Response 保留 body reader，独立等待 cancel/read 和 lock 释放，仍复用 SDK SSE decoder。真正取消失败优先于普通取消、usage stop、steering 和 transport/context fallback；恢复流必须 await 消费后才释放恢复控制器。故障 attempt 保留可靠 terminal usage，未知用量仍 sticky；executor/Agent/runner/workflow 的故障不能被账本 reset 清除。Goal/成功 Memory 不结算，固定 request-ownership 原因的债务通过现有 workflow 保存，exec/SDK 返回 cleanup_failed，不新增 Session schema 或平行 runner。回归见 [Agent](../../tests/unit/agent/stream-lifecycle.test.ts)、[production provider](../../tests/unit/providers/stream-lifecycle.test.ts)、[结算](../../tests/unit/workflow/cleanup-settlement.test.ts) 和 [公开 SDK](../../tests/unit/exec/sdk.test.ts)。
+
 - coding task 是后台进程的所有者。`start_background` 在创建时绑定 task signal；取消、权限收紧、预算停止、异常和 Agent dispose 都必须终止并等待进程树。cleanup 未完成时，runner 不得结算成功或开始下一项 benchmark。运行中输出只保留有界 preview，完成记录按数量和总字节淘汰，Session 恢复不伪造进程。
 - buffered 原生 launcher 的取消和超时复用一次 process-tree cleanup，并同时等待 child close；时间经过不作为退出证据。Windows 等待 taskkill /T /F 结束，Unix 终止 detached process group；清理失败保留错误，观察 callback 异常不能放弃运行进程，close 后不再投递输出。真实 fixture 退出不等同于任意脱离进程组的后代隔离，宿主 Bash 与评测准备、验证、外部 harness、checkout worker、dsh 和快照复用 process-completion；评测清理失败以 cleanupFailed 保留，并停止 suite/campaign 后续任务，skipped 原因为 cleanup_failed。快照并发命令必须全部结算后返回；准备器清理失败时保留目录。后台任务、前台工具及宿主验证的清理故障通过 typed ProcessCleanupError 保留；Agent/runner/workflow 关闭当前所有者的后续准入，先收束所有 worker 再拒绝 Goal/成功 Memory。仅固定原因与未验证债务进入 workflow 元数据，错误正文不保存；生产 shell bridge 不在故障后启动快照，生产重复 dispose 共用同一完成／拒绝 promise。真正 native backend 的完整后代所有权仍需独立验收。
 - 后台完成 callback 只携带 job ID、终态、退出码和时间，并受 runner invocation generation 限制；下一普通 step 通过 durable context 保存后才确认通知。运行 job 与未送达通知共用 20 个槽位，任务结束关闭准入并丢弃余项，通知不唤醒 Session，输出仍由 `poll_background` 获取。
@@ -370,5 +372,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 - 非 TTY exec 输出在 Windows/Linux 统一隔离到宿主管理的 writer 子进程；每块流写入完成才 ACK，父进程控制停滞/取消，等待 pending write、代理 close 与进程退出后才移除监听器。TTY 保持现有路径，半条 JSONL 不补终态，不以强制宿主退出或放宽回归超时掩盖资源泄漏。
 - benchmark campaign 先持久化带 seed 的完整计划，再发出 live request。fixture 必须有 pinned source、setup、pristine assertion、reviewed seed/reference 和 evaluator-owned acceptance；评分在隔离材料上执行。baseline/candidate 使用命名 checkout、revision 与 source/build digest，并由同一个 fresh-process worker 动态导入 production adapter；请求准入固定 raw model ID、high reasoning 和 32,768 output tokens。`--preflight`、`--prove-fixtures`、`--live` 互斥，preflight 不读取 credential storage、不产生 scored result。外部 harness 必须在 LLM boundary 提供结构化 usage 与配置确认，不能从最终文本推断。真实请求仍需要独立显式授权和数值预算。
 - 不创建远程 tag/Release 的版本交付使用 Release workflow 专用 `[skip publish]` 提交标记；Test workflow 不读取该标记，仍在 `main` push 上执行 Windows/Linux 门禁。tag push 始终允许 Release workflow 运行。
+
+- coding/summary 的 Goal 计量绑定每次实际 provider attempt，先结算再判断恢复、重试和能力降级准入。Session coding 用量即时保存，压缩保持最终 context_compacted 增量与失败 usage 样本，不新增 schema、不重复收费；未知用量保持未知，prepareStep 的预算停止保留明确原因。
 
 - duplex、文件搜索／项目地图及 Skill Git 的子进程也通过共享 process-completion 维持所有权。child error、取消或期限不能在实际 close 及已请求的单次树终止前结算；typed 清理错误优先于普通取消。达到读取保留上限后 drain 到自然退出或既有期限，LSP 先给予 EOF 关闭机会再请求强制终止，期限不代表退出证据。导航故障关闭已排队／后续 server 准入；Skill manager 关闭取消并等待下载／Git，失败 stage 保留且禁止后续安装，TUI dispose 等待所有共享服务。真实 Windows native fixture 只证明受控 detached 后代，不证明任意后代或其他平台。

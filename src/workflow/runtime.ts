@@ -4,6 +4,7 @@ import type { ApplyPatchOperation, ApplyPatchResult } from "../tools/apply-patch
 import { TurnCheckpoint, type UndoResult } from "./checkpoint.js";
 import type { BashResult } from "../tools/bash.js";
 import { ProcessCleanupError } from "../tools/process-completion.js";
+import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 import { discoverVerificationCommands, runVerificationCommand, runVerificationSuite, selectVerificationCommand, selectVerificationCommands, verificationPrompt } from "./verifier.js";
 import { WorkspaceChangeTracker, type WorkspaceChangeObservation } from "./workspace-tracker.js";
 import { createWorkflowState, type VerificationSuiteResult, type WorkflowPatchFollowup, type WorkflowReviewResult, type WorkflowRunResult, type WorkflowState, type VerificationCommand, type WorkflowResultClassification, type WorkflowTaskSource } from "./types.js";
@@ -40,7 +41,7 @@ export class CodingWorkflowRuntime {
   #shellObserved = false;
   #trackingLimited = false;
   #gitTrackingComplete = false;
-  #cleanupFailure: ProcessCleanupError | undefined;
+  #cleanupFailure: ResourceCleanupError | undefined;
 
   constructor(options: WorkflowRuntimeOptions) {
     this.#workspacePath = options.workspacePath;
@@ -56,13 +57,15 @@ export class CodingWorkflowRuntime {
   get checkpointAvailable(): boolean { return this.#checkpoint.available; }
   get workspacePath(): string { return this.#workspacePath; }
 
-  /** Preserve debt without launching snapshots while process ownership is unknown. */
-  async recordCleanupFailure(failure = new ProcessCleanupError("Process ownership is unresolved")): Promise<void> {
+  /** Preserve debt without launching snapshots while resource ownership is unknown. */
+  async recordCleanupFailure(failure: ResourceCleanupError = new ProcessCleanupError("Process ownership is unresolved")): Promise<void> {
     this.#cleanupFailure ??= failure;
     this.#trackingLimited = true;
     await this.#set({
       phase: "blocked", result: "unverified", pending_verification: true, tracking_limited: true,
-      result_reason: "Process cleanup failed; process ownership is unresolved",
+      result_reason: this.#cleanupFailure.resource === "process"
+        ? "Process cleanup failed; process ownership is unresolved"
+        : "Model stream cleanup failed; request ownership is unresolved",
     });
   }
 

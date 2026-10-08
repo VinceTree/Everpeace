@@ -36,6 +36,12 @@ ReactAgent 在所有 step 来源准备成功后创建 `StepToolCatalog`，保持
 
 ## 优化路线边界
 
+流的终态事件还须通过资源清理边界，才能持久化为模型响应或执行工具。iterator.return 必须确认 done，并等待活动 next；生产 provider 另独立等待原始 body 的 cancel/read 和 reader lock 释放，沿用 SDK SSE decoder。取消信号或时间经过不构成清理成功；缺失关闭操作、未确认关闭或关闭错误以 ModelStreamCleanupError 停止，可靠终态 usage 仍计入消费。恢复流的消费必须 await，不能在返回其 promise 时提前取消恢复控制器。
+
+ResourceCleanupError 优先于取消、steering、usage/budget stop 和能力 fallback，不从错误 cause 中分类为可重试网络故障。故障 Agent、request executor、runner 和 workflow 阻止后续准入；Goal/Memory 拒绝和固定未验证债务由生产 runner 处理。语义回归见 [stream lifecycle](../../tests/unit/agent/stream-lifecycle.test.ts) 与 [底层 SDK body](../../tests/unit/providers/stream-lifecycle.test.ts)。
+
+实际 provider attempt 结束后先结算 usage，再进行恢复、重试或能力降级准入。未知样本不能被恢复成功覆盖；带预算 Goal 停止后不再发请求。自动压缩的 prepareStep 若触发 LoopStoppedError，循环返回 stopped 和对应原因，继续保持资源故障优先。压缩仍以现有 context_compacted 事件保存最终增量，其余 attempt 独立保存，见 [request settlement](../../tests/unit/agent/request-settlement.test.ts)。
+
 当前路线按正确性优先：守住 `response.completed` 后整批执行的 durable-record 不变量，使用能力声明和有界批次控制并发，最后在真实 provider 证据充分时评估 output-item 执行。item-level 执行只有在 provider 明确保证 `output_item.done` 顺序、durable record 和可恢复 cursor 时启用；未知端点继续整批路径。step snapshot 已通过 `prepareStep` 落地：采样重试复用当前 snapshot，工具 follow-up 重新捕获 MCP/Skill 状态；dispatch 仍重新检查当前权限。
 
 benchmark 只用于协议变更前建立证据，不是当前实现的替代品。hooks、多 Agent、MCP OAuth/elicitation/tasks、Plugin/远端 provider 和外部 app-server 不属于首轮 loop 优化，也不能用 no-op 或伪造成功暴露。并发已采用保守能力声明和共享资源键冲突检查；写操作作为串行屏障，不跨写操作重排，也不声称已实现通用读写锁调度器。

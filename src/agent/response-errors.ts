@@ -1,3 +1,18 @@
+import { normalizeTokenUsageSample, type TokenUsageSample } from "../status/model-status.js";
+import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
+
+export class ModelStreamCleanupError extends ResourceCleanupError {
+  readonly resource = "model_stream";
+  readonly usage: TokenUsageSample | null;
+
+  constructor(cause: unknown, usage?: unknown) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    super(`Model stream cleanup failed: ${message}`, { cause });
+    this.name = "ModelStreamCleanupError";
+    this.usage = normalizeTokenUsageSample(usage);
+  }
+}
+
 interface ErrorMetadata {
   status?: number;
   name?: string;
@@ -154,6 +169,7 @@ export function classifyModelError(error: unknown): ModelErrorCategory {
 
 export function modelErrorGuidance(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof ResourceCleanupError) return `${message}\n\nRestart the agent before starting another task.`;
   const hint: Record<ModelErrorCategory, string> = {
     authentication: "Check the API key for this model with /login.",
     balance: "Check the provider account balance or quota.",

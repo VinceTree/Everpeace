@@ -106,7 +106,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.3.19) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.20) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -133,7 +133,11 @@ Run this command? y
 
 For questions that depend on current or niche information, the model can call `web_search` and then use `web_fetch` to read promising sources. Search and page reads do not require Bash confirmation. Their function calls and results remain in the recoverable model context, while concise tool activity is shown in the TUI transcript. The model is instructed to cite the source URLs it used.
 
-The TUI's own interface is English throughout. While a turn is active, a provider-aware status such as `Waiting for DeepSeek (3s • ctrl+c to interrupt)` changes to `Working` during tool dispatch. A separate `Thinking` timer appears only after the provider emits a reasoning-stage event. Responses-capable providers stream assistant text and tool progress live; an endpoint is switched to buffered mode only after it explicitly rejects streaming before emitting any event. Interrupted or incomplete streams are retried from the last durable context and never execute half-received tools. Compatible buffered endpoints still show phase, approval, and command previews. Assistant replies render GitHub-flavored Markdown, including headings, lists, emphasis, links, tables, inline code, and fenced code. Fenced code and Bash/PowerShell commands use language-aware terminal highlighting with bounded-size safety fallbacks.
+The TUI's own interface is English throughout. While a turn is active, a provider-aware status such as `Waiting for DeepSeek (3s • ctrl+c to interrupt)` changes to `Working` during tool dispatch. A separate `Thinking` timer appears only after the provider emits a reasoning-stage event. Responses-capable providers stream assistant text and tool progress live; an endpoint is switched to buffered mode only after it explicitly rejects streaming before emitting any event. Interrupted or incomplete streams are retried from the last durable context after cleanup succeeds and never execute half-received tools. Compatible buffered endpoints still show phase, approval, and command previews. Assistant replies render GitHub-flavored Markdown, including headings, lists, emphasis, links, tables, inline code, and fenced code. Fenced code and Bash/PowerShell commands use language-aware terminal highlighting with bounded-size safety fallbacks.
+
+Stream cleanup failure stops the task before tools or another model request. Reliable usage already returned by the provider is still recorded, while Goal completion and successful Memory capture remain blocked and the Session retains unverified work. Restart the agent before another task. In exec and the SDK, cleanup failure returns `cleanup_failed` with exit code 1 even if cancellation or a deadline occurs at the same time.
+
+Recovery, retries, and compaction account for each actual model request separately. Unknown usage stays unknown after a later successful response. A Goal with a token budget stops further requests when usage becomes unknown, including recovery and capability fallback.
 
 Commands are visually separate from conversation text: active commands show `Running`, completed model commands show `Ran`, and direct commands show `You ran`, with status color, shell, duration, and retained output underneath. Standard unified diffs in assistant `diff` fences or command output include old/new line gutters, cyan headers, green additions, and red deletions. True-color terminals receive light/dark-aware backgrounds; lower-color and `NO_COLOR` environments retain structural markers without requiring color. Restored legacy UI messages are translated for display without modifying session JSONL or translating user/assistant content.
 

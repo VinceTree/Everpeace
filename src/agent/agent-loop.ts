@@ -3,7 +3,7 @@
 // Copyright 2025 OpenAI. Licensed under Apache-2.0; see third_party/codex/LICENSE.
 import { setTimeout as delay } from "node:timers/promises";
 import { PersistenceError } from "../storage/persistence-error.js";
-import { ProcessCleanupError } from "../tools/process-completion.js";
+import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 import { boundModelToolOutput, type PreparedToolOutput } from "./context-limits.js";
 import type { TokenUsageSample } from "../status/model-status.js";
 const MAX_PENDING_PARALLEL_TOOL_BYTES = 4 * 1024 * 1024;
@@ -120,6 +120,7 @@ export interface AgentLoopOptions {
 }
 
 export function classifySamplingError(error: unknown): SamplingErrorCategory {
+  if (error instanceof ResourceCleanupError) return "permanent";
   if (error instanceof PersistenceError || error instanceof LoopSteeredError || error instanceof LoopStoppedError) return "permanent";
   if (!error || typeof error !== "object") return "permanent";
   const { status, name, retryable: explicitlyRetryable } = error as {
@@ -180,6 +181,7 @@ async function sample(
         options.onEvent?.({ type: "timing_recorded", operation: "sampling", durationMs: performance.now() - started });
       }
     } catch (error) {
+      if (error instanceof ResourceCleanupError) throw error;
       signal?.throwIfAborted();
       if (error instanceof PersistenceError) throw error;
       const stopReason = await options.checkStop?.();
@@ -513,12 +515,17 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   } catch (error) {
     // Public output can fail after the response is durable. Close its outstanding
     // tool chain without attempting further delivery or side effects.
-    if (error instanceof ProcessCleanupError) {
-      await closeCalls([...pendingCalls.values()], "skipped", "process_cleanup_failed");
+    if (error instanceof ResourceCleanupError) {
+      await closeCalls([...pendingCalls.values()], "skipped", error.resource === "process" ? "process_cleanup_failed" : "model_stream_cleanup_failed");
+    } else if (error instanceof LoopStoppedError) {
+      await closeCalls([...pendingCalls.values()], "skipped", error.reason);
+      await steer();
+      options.onPhase?.("stopped");
+      return result(error.reason);
     } else if (error instanceof Error && outputFailures.has(error) && !(error instanceof PersistenceError)) {
       await closeCalls([...pendingCalls.values()], externalSignal?.aborted ? "cancelled" : "skipped", "output_delivery_failed");
     }
-    options.onPhase?.(externalSignal?.aborted ? "cancelled" : "failed");
+    options.onPhase?.(error instanceof ResourceCleanupError || !externalSignal?.aborted ? "failed" : "cancelled");
     throw error;
   } finally {
     if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);

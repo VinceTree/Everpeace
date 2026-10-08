@@ -106,7 +106,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.3.19) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.20) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -133,7 +133,11 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 
 对于依赖当前信息或冷门资料的问题，模型可以先调用 `web_search`，再使用 `web_fetch` 读取有价值的来源。搜索和网页读取不需要 Bash 确认；function call 及结果会保留在可恢复的模型上下文中，TUI transcript 则显示简短的工具动作。模型会被要求在最终回答中列出实际采用的来源 URL。
 
-TUI 自身界面现统一使用英文。任务运行时会显示按供应商识别的状态，例如 `Waiting for DeepSeek (3s • ctrl+c to interrupt)`，进入工具调度阶段后切换为 `Working`；只有供应商真正发出 reasoning 阶段事件时，才显示独立计时的 `Thinking`。支持 Responses 流式端点时，模型文字和工具进度会即时显示；只有端点在发出任何事件前明确拒绝 streaming 时才切换到 buffered，流式中断或不完整响应会从最后一个已持久化上下文有界重试，不会执行半截工具调用。兼容的 buffered 端点仍显示阶段、审批和命令预览。模型回复支持 GitHub Flavored Markdown，包括标题、列表、强调、链接、表格、行内代码和 fenced code；代码块及 Bash/PowerShell 命令使用语言感知的终端高亮，超大内容会安全退回纯文本。
+TUI 自身界面现统一使用英文。任务运行时会显示按供应商识别的状态，例如 `Waiting for DeepSeek (3s • ctrl+c to interrupt)`，进入工具调度阶段后切换为 `Working`；只有供应商真正发出 reasoning 阶段事件时，才显示独立计时的 `Thinking`。支持 Responses 流式端点时，模型文字和工具进度会即时显示；只有端点在发出任何事件前明确拒绝 streaming 时才切换到 buffered，流式中断或不完整响应在清理成功后从最后一个已持久化上下文有界重试，不会执行半截工具调用。兼容的 buffered 端点仍显示阶段、审批和命令预览。模型回复支持 GitHub Flavored Markdown，包括标题、列表、强调、链接、表格、行内代码和 fenced code；代码块及 Bash/PowerShell 命令使用语言感知的终端高亮，超大内容会安全退回纯文本。
+
+流清理失败会在工具执行或下一模型请求前停止任务。供应商已返回的可靠用量仍然计入，但 Goal 完成和成功 Memory 捕获被阻止，Session 保留未验证工作。开始下一任务前需重启 Agent。exec 和 SDK 即使同时取消或达到期限，也以 `cleanup_failed`、退出码 1 报告清理故障。
+
+恢复、重试和压缩按每次实际模型请求分别计量；后续成功响应不能覆盖先前的未知用量。带 token 预算的 Goal 在用量未知后停止后续请求，包括恢复和能力降级请求。
 
 命令与对话正文使用不同层级展示：运行中显示 `Running`，完成的模型命令显示 `Ran`，用户直接命令显示 `You ran`，并附带状态色、shell、耗时和保留输出。模型 `diff` 代码块及命令输出中的标准 unified diff 会显示新旧行号、青色文件/hunk 标题、绿色新增和红色删除；真彩终端使用随明暗背景调整的底色，低色彩及 `NO_COLOR` 环境仍保留结构标记。恢复旧 Session 时，已知旧中文系统/工具提示只在显示层翻译，不改写 JSONL，也不翻译用户或模型正文。
 

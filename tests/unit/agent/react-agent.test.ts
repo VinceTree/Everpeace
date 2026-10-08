@@ -2351,6 +2351,7 @@ test("agent rejects a clean stream EOF without response.completed", async () => 
 test("agent stops a stream that emits no events before the idle deadline", async () => {
   let requestSignal: AbortSignal | undefined;
   let iteratorClosed = false;
+  let nextSettled = false;
   const agent = new ReactAgent({
     model: "stream-idle-test",
     samplingRetryBudget: 0,
@@ -2363,7 +2364,11 @@ test("agent stops a stream that emits no events before the idle deadline", async
           return {
             [Symbol.asyncIterator]() {
               return {
-                next: () => new Promise<IteratorResult<Record<string, unknown>>>(() => undefined),
+                next: () => new Promise<IteratorResult<Record<string, unknown>>>((resolve) => {
+                  const close = () => { nextSettled = true; resolve({ done: true, value: undefined }); };
+                  if (requestSignal?.aborted) close();
+                  else requestSignal?.addEventListener("abort", close, { once: true });
+                }),
                 async return() {
                   iteratorClosed = true;
                   return { done: true, value: undefined };
@@ -2379,6 +2384,7 @@ test("agent stops a stream that emits no events before the idle deadline", async
   await assert.rejects(agent.runTurn("wait"), /idle for 5ms/u);
   assert.equal(requestSignal?.aborted, true);
   assert.equal(iteratorClosed, true);
+  assert.equal(nextSettled, true);
 });
 
 test("agent compacts once and retries after a context-limit response error", async () => {

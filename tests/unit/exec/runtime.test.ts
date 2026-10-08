@@ -447,6 +447,51 @@ test("an EPIPE event sink cancels execution and still disposes the production ha
   }
 });
 
+for (const stop of ["completed", "cancelled", "deadline"] as const) {
+  test(`exec reports stream cleanup failure after ${stop} through the production handle`, async () => {
+    const controller = new AbortController();
+    const provider = fakeProvider(() => assistant("unused", "unused"));
+    provider.responses.stream = async (_params, options) => {
+      provider.calls++;
+      const signal = options?.signal instanceof AbortSignal ? options.signal : undefined;
+      return { [Symbol.asyncIterator]() { return {
+        async next() {
+          if (stop === "deadline") await new Promise<void>((resolve) => {
+            if (signal?.aborted) resolve();
+            else signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return { done: false, value: { type: "response.completed", response: assistant("terminal", "done") } };
+        },
+        async return() {
+          if (stop === "cancelled") controller.abort();
+          throw new Error("stream cleanup fixture refused");
+        },
+      }; } };
+    };
+    const testFixture = await fixture(provider);
+    try {
+      const result = await runExec({
+        prompt: "work", workspacePath: testFixture.workspacePath, signal: controller.signal,
+        ...(stop === "deadline" ? { timeoutMs: 200 } : {}),
+      }, testFixture.dependencies);
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.classification, "runtime_error");
+      assert.equal(result.status, "cleanup_failed");
+      assert.match(result.error ?? "", /stream cleanup fixture refused/u);
+      assert.equal(result.usageComplete, true);
+      assert.deepEqual(result.usage?.attempts.map((attempt) => attempt.status), ["failed"]);
+      assert.equal(result.usage?.inputTokens, 2);
+      assert.equal(result.usage?.outputTokens, 1);
+      assert.equal(provider.calls, 1);
+      assert.ok(result.sessionId);
+      const session = await testFixture.sessionStore.load(result.sessionId);
+      assert.equal(session.workflow?.result, "unverified");
+      assert.equal(session.workflow?.pending_verification, true);
+      assert.equal(JSON.stringify(session.workflow).includes("stream cleanup fixture refused"), false);
+    } finally { await testFixture.cleanup(); }
+  });
+}
+
 test("context persistence and cleanup failures return runtime failure after disposing resources", async (t) => {
   await t.test("context persistence", async () => {
     const provider = fakeProvider(() => assistant("unexpected", "must not run"));

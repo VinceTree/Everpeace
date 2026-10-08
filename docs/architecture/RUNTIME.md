@@ -51,6 +51,12 @@ TUI / everpeace exec / everpeace/sdk / 内部 benchmark adapter
 
 [RequestExecutor](../../src/agent/request-executor.ts) 在请求前准入，完成、失败、取消均结算 attempt；被准入拒绝的调用记为 rejected，不假装已消费模型 tokens。编码、摘要、重试、传输 fallback 与生产辅助调用均经过此边界。
 
+ReactAgent 在每个实际 provider attempt 结束后立即结算 coding 的 Session/Goal 用量；流恢复、采样重试和能力降级各有独立样本，不能只记录逻辑请求的最终成功。账本触发停止仍须保存已发出请求的 unknown 样本。未准入的请求不产生 usage 样本；用量持久化失败不能被 steering、网络重试或 fallback 吞掉。
+
+压缩每个 attempt 结束后立即更新 Goal，再检查下一请求准入。Session 保留原有 context_compacted 事件的最终 usage 增量和上下文替换；此前失败样本另存 usage，压缩失败则保存全部样本。不得重复计量或改变既有 schema。prepareStep 中的预算停止返回明确 stop reason，不包装成压缩错误。回归见 [request settlement](../../tests/unit/agent/request-settlement.test.ts)。
+
+模型流关闭失败时，attempt 记为 failed，同时保留终态实际返回的可靠 usage；没有可靠 usage 则仍为 unknown。计量完整与资源关闭是独立事实：即使用量可计量、账本被重置，故障 executor/Agent 也不能再启动请求。ModelStreamCleanupError 和 ProcessCleanupError 共用 ResourceCleanupError 边界，资源故障优先于取消、steering、预算停止和能力降级。
+
 [RequestAttemptLedger](../../src/agent/request-attempt-ledger.ts) 以 input + output 结算预算；reasoning 单列展示，不与已包含它的 output 重复相加。已经发出的请求缺少可靠 usage 后，当前账本的 incomplete 状态不可被后续成功覆盖，禁止继续准入；新宿主任务仅能在没有未结束 attempt 时重置账本。
 
 TUI 分开显示主编码与辅助用量；Session 编码总量不混入标题请求。exec 的可选 task ledger 覆盖主请求、summary、retry 与 repair，并关闭结束后的 Memory capture，避免产生任务外辅助请求。预算耗尽时禁止下一请求，但已发出的请求可能超出剩余额度，超出量必须保留。usage、缓存命中及写入的完整性分别判断，缺字段不补造零成本或实际账单。
@@ -82,7 +88,9 @@ dispatch 仍检查实时权限、当前 step 目录、停止状态和取消。Pl
 
 采样默认最多两次重试；退避支持 `Retry-After` 和取消。普通重试不包含永久错误或上下文超限，也不重新执行已完成工具。传输 fallback 只在尚无流事件且端点明确拒绝 streaming 时使用。
 
-每个 attempt 有取消控制器；SSE 默认 60 秒空闲超时，结束时关闭 iterator/transport，前一次尚在运行时不能开始重试。仅可靠 reasoning delta 显示 Thinking，否则展示通用等待。
+每个 attempt 有取消控制器；SSE 默认 60 秒空闲超时。终态事件后先取消 transport，等待 iterator.return 确认 done 和尚未完成的 next；缺少关闭操作、done 非 true 或关闭拒绝都使当前所有者永久停止。自然 EOF 是已结束证据，不再多余 return。恢复后的流也须消费和清理结束才取消其恢复控制器；清理故障不能被原始中断替换或触发重试。仅可靠 reasoning delta 显示 Thinking，否则展示通用等待。
+
+生产 [response-stream](../../src/providers/response-stream.ts) 从 SDK 的原始 HTTP Response 接管 body reader，继续复用 SDK SSE 解码。它独立等待 reader.cancel、活动 read 和 reader lock 释放，不能依赖 SDK 在 abort 后快速返回或忽略取消错误。已经 errored 的 body 所重抛的同一个 transport error 不冒充新的清理故障；真正的 cancel 失败仍保留。回归见 [Agent stream](../../tests/unit/agent/stream-lifecycle.test.ts)、[真实 SDK body](../../tests/unit/providers/stream-lifecycle.test.ts) 与 [公开 SDK](../../tests/unit/exec/sdk.test.ts)。
 
 默认每个 turn 最多 32 个逻辑 step；可选 turn 时限、Goal token 限额与 usage 不完整产生明确 stop reason。sampling retry、stream recovery、context recovery 各自有独立预算。停止后不启动工具、自动修复或 Goal 续跑。
 
@@ -124,6 +132,8 @@ Plan 使用独立于 coding 的行为指令：先针对性读取实现与测试�
 Session 恢复使用 `resumeTurn` 重建进程内追踪，不清除任务身份、修复上限或验证债务；结构化 undo 检查点和文件观察版本不恢复。Goal 自动续跑只有在本轮结算允许时发生，不能利用空改动绕过旧债务。
 
 进程清理失败是宿主资源故障，不作为普通命令失败进入自动修复。Agent、runner 与 workflow 保留进程内故障，阻止同一所有者的后续操作；后台记录淘汰及新任务账本重置均不能消除故障。生产 shell bridge 在失败后不再启动工作区快照，所有后台 worker 收束后才拒绝待完成 Goal 并以 failed 结算 Memory。workflow 将固定的 process-ownership 原因、tracking_limited 和 pending_verification 保存为未验证债务，错误正文不进入 workflow 元数据；Session 恢复和空改动不把该债务变为成功。具体闭环见 [cleanup settlement](../../tests/unit/workflow/cleanup-settlement.test.ts)。
+
+模型流清理故障沿用同一 runner 结算：停止宿主验证／修复和 Goal 续跑、拒绝待完成 Goal、不捕获成功 Memory，持久化固定 request-ownership 原因的未验证债务。exec/SDK 报 runtime_error、cleanup_failed、退出码 1，即使同时取消或超时；重新恢复 Session 不把债务推断为成功。错误正文与 provider 响应不进入 workflow 元数据。
 
 文件搜索、项目地图和语义导航的 dispatch 同样重抛 ProcessCleanupError，进入当前调用 cleanup_failed、后续调用 skipped/process_cleanup_failed 的有序持久化与任务停止流程，不能被普通工具错误 envelope 吞掉。导航与 Skill 管理器另保留自身故障，阻止排队／后续子进程启动；各自清理等待及 stage 规则见 [TOOLS](TOOLS.md) 和 [CODEX_CAPABILITIES](CODEX_CAPABILITIES.md)。
 

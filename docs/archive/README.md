@@ -14,5 +14,7 @@
 - [Composer 生命周期交接](HANDOFF_COMPOSER_LIFECYCLE.md)、[对应计划](PLAN_COMPOSER_LIFECYCLE.md)：重复提交、新草稿保护、输入订阅回归与第六阶段交付记录。
 
 - [共享进程清理交接](HANDOFF_PROCESS_LIFECYCLE.md)：launcher、宿主 Bash 与评测 wrappers 的严格清理等待和授权交付证据。
+- [导航与读取进程清理交接](HANDOFF_READ_PROCESS_OWNERSHIP.md)：duplex、搜索、项目地图、导航和 Skill Git 的清理与交付记录。
+- [模型流资源清理交接](HANDOFF_MODEL_STREAM_OWNERSHIP.md)：iterator、恢复控制器、SDK body 取消、可靠计量及失败结算证据。
 
 新 Session 默认只读 [当前交接](../HANDOFF.md) 和 [当前计划](../PLAN.md)，仅在追溯历史时查阅这里。归档正文中的旧相对路径以当时 `docs/` 所在位置理解；当前文件定位以 [项目地图](../architecture/PROJECT_MAP.md) 为准。

@@ -9,6 +9,7 @@ import {
   isContextLimitError,
   isStreamUnsupportedError,
   ModelResponseError,
+  ModelStreamCleanupError,
   ResponseStreamIncompleteError,
 } from "./response-errors.js";
 import {
@@ -36,6 +37,7 @@ import { FILE_TOOL_DEFINITIONS, FileSearchSession, runFileTool } from "../tools/
 import { CODE_NAVIGATION_TOOL_DEFINITION, parseCodeNavigationArguments, type CodeNavigationRuntimeLike } from "../tools/code-navigation.js";
 import { BackgroundJobManager, parseBackgroundCommand, parseBackgroundJobId, type BackgroundJobCompletion, type BackgroundJobSnapshot } from "../tools/background-jobs.js";
 import { ProcessCleanupError } from "../tools/process-completion.js";
+import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 import {
   APPLY_PATCH_TOOL_DEFINITION,
   ApplyPatchError,
@@ -611,7 +613,7 @@ export class ReactAgent {
   readonly #streamIdleTimeoutMs: number;
   readonly #contextRecoveryBudget: number;
   readonly #backgroundJobs: BackgroundJobManager;
-  #cleanupFailure: ProcessCleanupError | undefined;
+  #cleanupFailure: ResourceCleanupError | undefined;
   #taskProgress: TaskProgress;
   #taskGeneration = 0;
   #taskStepsRemaining: number | undefined;
@@ -698,11 +700,11 @@ export class ReactAgent {
 
   async waitForBackgroundJobs(signal?: AbortSignal): Promise<BackgroundJobSnapshot[]> {
     try { return await this.#backgroundJobs.waitAll(signal); }
-    finally { this.#assertProcessCleanup(); }
+    finally { this.#assertResourceCleanup(); }
   }
 
   async beginTask(options: AgentTaskOptions): Promise<void> {
-    this.#assertProcessCleanup();
+    this.#assertResourceCleanup();
     this.#requestAttemptLedger?.reset();
     this.#taskStepsRemaining = this.#taskStepLimitEnabled ? this.#maxSteps : undefined;
     this.#taskGeneration += 1;
@@ -727,7 +729,7 @@ export class ReactAgent {
     this.#pendingBackgroundNotices.clear();
     this.#backgroundNoticeSlots.clear();
     try { return await this.#backgroundJobs.stopAll(reason); }
-    finally { this.#assertProcessCleanup(); }
+    finally { this.#assertResourceCleanup(); }
   }
 
   async dispose(): Promise<void> {
@@ -738,12 +740,12 @@ export class ReactAgent {
       this.#fileSearches.clear();
       this.#workspaceReviews.clear();
     }
-    this.#assertProcessCleanup();
+    this.#assertResourceCleanup();
   }
 
   async runTurn(userInput: string, signal?: AbortSignal, options: AgentTurnOptions = {}): Promise<AgentTurnResult> {
     if (this.#running) throw new Error("An agent turn is already running");
-    this.#assertProcessCleanup();
+    this.#assertResourceCleanup();
     signal?.throwIfAborted();
     this.#running = true;
     this.#pendingLearnedTurn = undefined;
@@ -847,6 +849,7 @@ export class ReactAgent {
           try {
             return await this.#requestResponse([...this.#history], loopSignal);
           } catch (error) {
+            if (error instanceof ResourceCleanupError) throw error;
             signal?.throwIfAborted();
             if (error instanceof PersistenceError) throw error;
             const stopped = await this.#checkStop();
@@ -916,7 +919,7 @@ export class ReactAgent {
       return { ...this.#turnResult };
     } catch (error) {
       persistenceFailed = error instanceof PersistenceError;
-      this.#assertProcessCleanup();
+      this.#assertResourceCleanup();
       throw error;
     } finally {
       try {
@@ -935,12 +938,13 @@ export class ReactAgent {
         this.#running = false;
         this.#streamRecoveryRemaining = 0;
         this.#turnItems = undefined;
+        this.#assertResourceCleanup();
       }
     }
   }
 
   async finalizePendingGoalCompletion(allow: boolean): Promise<void> {
-    if (allow) this.#assertProcessCleanup();
+    if (allow) this.#assertResourceCleanup();
     if (!this.#pendingGoalCompletion) return;
     if (!allow || !this.#goalRuntime) {
       this.#pendingGoalCompletion = false;
@@ -980,7 +984,7 @@ export class ReactAgent {
   }
 
   async finishMemoryTurn(outcome: LearnedTurnOutcome): Promise<void> {
-    if (outcome === "verified") this.#assertProcessCleanup();
+    if (outcome === "verified") this.#assertResourceCleanup();
     const turn = this.#pendingLearnedTurn;
     this.#pendingLearnedTurn = undefined;
     if (!turn || !this.#learnedMemory) return;
@@ -1042,7 +1046,7 @@ export class ReactAgent {
     let dispatched: string | { output: string; stop?: boolean };
     try { dispatched = await this.#dispatchToolInner(call, signal); }
     catch (error) {
-      if (error instanceof ProcessCleanupError) {
+      if (error instanceof ResourceCleanupError) {
         this.#cleanupFailure ??= error;
         return JSON.stringify({ status: "error", cleanup_failed: true, error: error.message });
       }
@@ -1060,7 +1064,7 @@ export class ReactAgent {
   }
 
   async #dispatchToolInner(call: ToolCall, signal?: AbortSignal): Promise<string | { output: string; stop?: boolean }> {
-    this.#assertProcessCleanup();
+    this.#assertResourceCleanup();
     signal?.throwIfAborted();
     if (!this.#stepToolCatalog?.has(call.name)) {
       return JSON.stringify({ status: "denied", error: `Tool is unavailable in the current step: ${call.name}`, errorCode: "TOOL_UNAVAILABLE", remedy: "Use only tools advertised in the current request. Do not use another tool to bypass a permission or Plan restriction." });
@@ -1345,7 +1349,7 @@ export class ReactAgent {
         this.#activeFiles.add(request.path);
         output = JSON.stringify({ status: "ok", data: await this.#codeNavigation.query(request, signal) });
       } catch (error) {
-        if (error instanceof ProcessCleanupError || signal?.aborted) throw error;
+        if (error instanceof ResourceCleanupError || signal?.aborted) throw error;
         output = JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error) });
       }
       this.#io.onToolProgress?.({ phase: "finished", name: call.name });
@@ -1394,7 +1398,7 @@ export class ReactAgent {
         }
         output = JSON.stringify({ status: "ok", data: result });
       } catch (error) {
-        if (error instanceof ProcessCleanupError || signal?.aborted) throw error;
+        if (error instanceof ResourceCleanupError || signal?.aborted) throw error;
         output = JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error), ...toolFeedbackFields(error) });
       }
       try {
@@ -1522,12 +1526,14 @@ export class ReactAgent {
     try {
       response = await this.#createResponse(input, requestSignal, recoveryBudget);
     } catch (error) {
-      if (error instanceof LoopStoppedError) throw error;
+      if (error instanceof ResourceCleanupError) {
+        this.#cleanupFailure ??= error;
+        throw error;
+      }
+      if (error instanceof LoopStoppedError || error instanceof PersistenceError) throw error;
       if (!signal?.aborted && controller.signal.aborted && this.#pendingSteering.length > 0) {
-        await this.#recordUnknownUsageAttempt();
         throw new LoopSteeredError();
       }
-      await this.#recordUnknownUsageAttempt();
       throw error;
     } finally {
       this.#streamRecoveryRemaining = recoveryBudget.remaining;
@@ -1537,10 +1543,6 @@ export class ReactAgent {
     if (response.output_text) this.#onEvent?.({ type: "model_progress", milestone: "first_text" });
     const usage = normalizeTokenUsageSample(response.usage);
     this.#contextTokens = usage?.total_tokens ?? null;
-    if (this.#onUsage) {
-      await persistState("Usage persistence failed", () => this.#onUsage!(usage));
-    }
-    await this.#recordGoalUsage(usage);
     signal?.throwIfAborted();
     if (response.status && response.status !== "completed") {
       throw new ModelResponseError(response);
@@ -1697,12 +1699,15 @@ export class ReactAgent {
       const input = projectConversationCheckpoints(repairToolContext(this.#history.filter((item) => !isPersistedProjectRuleSnapshot(item))));
       const workflowContext = automatic ? this.#stepWorkflowContext : this.#io.getWorkflowContext?.();
       const workflowInstructions = formatWorkflowContext(workflowContext === undefined ? undefined : projectWorkflowContext(workflowContext));
-      const observeAttempt = (raw: unknown): void => { attempts.push(normalizeTokenUsageSample(raw)); };
+      const observeAttempt = async (usage: TokenUsageSample | null): Promise<void> => {
+        attempts.push(usage);
+        await this.#recordGoalUsage(usage);
+      };
       const response = this.#providerCapabilities.compaction === "native"
         ? await this.#nativeCompact(input, signal, observeAttempt, workflowInstructions)
         : await this.#summaryCompact(input, signal, observeAttempt, workflowInstructions);
       while (persistedAttempts < Math.max(0, attempts.length - 1)) {
-        await this.#recordStandaloneUsage(attempts[persistedAttempts++]!);
+        await this.#recordSessionUsage(attempts[persistedAttempts++]!);
       }
       if (!Array.isArray(response.output) || !response.output.every((item) => item && typeof item === "object" && !Array.isArray(item))) {
         throw new Error("The compaction response returned an invalid context window");
@@ -1712,20 +1717,19 @@ export class ReactAgent {
       signal?.throwIfAborted();
       await persistState("Compaction persistence failed", () => this.#onContextCompacted?.(items, automatic, usage));
       persistedAttempts = attempts.length;
-      if (!this.#onContextCompacted) await this.#recordStandaloneUsage(usage);
+      if (!this.#onContextCompacted) await this.#recordSessionUsage(usage);
       this.#history = items;
       this.#lastCompactedRevision = this.#historyRevision;
       this.#contextTokens = null;
-      if (this.#onContextCompacted) await this.#recordGoalUsage(usage);
       const result = { items, usage };
       this.#onEvent?.({ type: "compaction_completed", automatic, usage });
       return result;
     } catch (error) {
       while (persistedAttempts < attempts.length) {
-        await this.#recordStandaloneUsage(attempts[persistedAttempts++]!);
+        await this.#recordSessionUsage(attempts[persistedAttempts++]!);
       }
       if (signal?.aborted) throw error;
-      if (error instanceof ContextCompactionError || error instanceof PersistenceError) throw error;
+      if (error instanceof ContextCompactionError || error instanceof PersistenceError || error instanceof ResourceCleanupError || error instanceof LoopStoppedError) throw error;
       throw new ContextCompactionError(
         error instanceof Error ? error.message : String(error),
         { cause: error },
@@ -1739,7 +1743,7 @@ export class ReactAgent {
   async #nativeCompact(
     input: Array<Record<string, unknown>>,
     signal?: AbortSignal,
-    observeAttempt?: (usage: unknown) => void,
+    observeAttempt?: (usage: TokenUsageSample | null) => Promise<void>,
     workflowInstructions = "",
   ): Promise<{ output: Array<Record<string, unknown>>; usage?: unknown }> {
     const compact = this.#client.responses.compact;
@@ -1757,40 +1761,34 @@ export class ReactAgent {
           },
           { maxRetries: 0, timeout: requestSettingsForPurpose("summary", this.#requestSettings).timeoutMs, ...(signal ? { signal } : {}), ...cache.options },
         ),
+        observeAttempt,
       );
-      observeAttempt?.(response.usage);
       return response;
     } catch (error) {
-      observeAttempt?.(undefined);
+      if (error instanceof ResourceCleanupError || error instanceof PersistenceError || error instanceof LoopStoppedError) throw error;
       if (signal?.aborted || !this.#advancedPromptCacheEnabled || !isUnsupportedPromptCacheOptionsError(error)) throw error;
       this.#advancedPromptCacheEnabled = false;
       const cache = this.#promptCacheRequest(false);
-      try {
-        const response = await this.#runProviderAttempt(
-          "summary",
-          () => compact(
-            {
-              model: this.#model,
-              input,
-              instructions: [runtimeIdentityInstructions(this.#providerCapabilities.provider, this.#model, this.#workspacePath), workflowInstructions].filter(Boolean).join("\n"),
-              ...cache.params,
-            },
-            { maxRetries: 0, timeout: requestSettingsForPurpose("summary", this.#requestSettings).timeoutMs, ...(signal ? { signal } : {}), ...cache.options },
-          ),
-        );
-        observeAttempt?.(response.usage);
-        return response;
-      } catch (retryError) {
-        observeAttempt?.(undefined);
-        throw retryError;
-      }
+      return this.#runProviderAttempt(
+        "summary",
+        () => compact(
+          {
+            model: this.#model,
+            input,
+            instructions: [runtimeIdentityInstructions(this.#providerCapabilities.provider, this.#model, this.#workspacePath), workflowInstructions].filter(Boolean).join("\n"),
+            ...cache.params,
+          },
+          { maxRetries: 0, timeout: requestSettingsForPurpose("summary", this.#requestSettings).timeoutMs, ...(signal ? { signal } : {}), ...cache.options },
+        ),
+        observeAttempt,
+      );
     }
   }
 
   async #summaryCompact(
     input: Array<Record<string, unknown>>,
     signal?: AbortSignal,
-    observeAttempt?: (usage: unknown) => void,
+    observeAttempt?: (usage: TokenUsageSample | null) => Promise<void>,
     workflowInstructions = "",
   ): Promise<{ output: Array<Record<string, unknown>>; usage?: unknown }> {
     const cut = checkpointRetentionCut(input);
@@ -1801,29 +1799,23 @@ export class ReactAgent {
     const effort = requestReasoningEffort(this.#providerCapabilities, summarySettings.reasoningEffort);
     const stableInstructions = this.#stableInstructions();
     const identityInstructions = [runtimeIdentityInstructions(this.#providerCapabilities.provider, this.#model, this.#workspacePath), workflowInstructions].filter(Boolean).join("\n");
-    let response: AgentResponse;
-    try {
-      response = await this.#runProviderAttempt(
-        "summary",
-        () => this.#client.responses.create({
-          model: this.#model,
-          input: [
-            { type: "message", role: "developer", content: stableInstructions },
-            ...prefix,
-            { type: "message", role: "developer", content: identityInstructions },
-            { type: "message", role: "user", content: CHECKPOINT_INSTRUCTION },
-          ],
-          tools: structuredClone(this.#stepToolCatalog?.definitions ?? []),
-          tool_choice: "none",
-          max_output_tokens: summarySettings.maxOutputTokens,
-          ...(effort ? { reasoning: { effort } } : {}),
-        }, { maxRetries: 0, timeout: summarySettings.timeoutMs, ...(signal ? { signal } : {}) }),
-      );
-      observeAttempt?.(response.usage);
-    } catch (error) {
-      observeAttempt?.(undefined);
-      throw error;
-    }
+    const response = await this.#runProviderAttempt(
+      "summary",
+      () => this.#client.responses.create({
+        model: this.#model,
+        input: [
+          { type: "message", role: "developer", content: stableInstructions },
+          ...prefix,
+          { type: "message", role: "developer", content: identityInstructions },
+          { type: "message", role: "user", content: CHECKPOINT_INSTRUCTION },
+        ],
+        tools: structuredClone(this.#stepToolCatalog?.definitions ?? []),
+        tool_choice: "none",
+        max_output_tokens: summarySettings.maxOutputTokens,
+        ...(effort ? { reasoning: { effort } } : {}),
+      }, { maxRetries: 0, timeout: summarySettings.timeoutMs, ...(signal ? { signal } : {}) }),
+      observeAttempt,
+    );
     if (response.status && response.status !== "completed") throw new ModelResponseError(response);
     const summary = response.output_text.trim();
     if (!summary) throw new Error("The summary request returned no text");
@@ -1850,8 +1842,8 @@ export class ReactAgent {
     try {
       return await this.#createResponseAttempt(input, signal, this.#advancedPromptCacheEnabled, recoveryBudget);
     } catch (error) {
+      if (error instanceof ResourceCleanupError || error instanceof PersistenceError || error instanceof LoopStoppedError) throw error;
       if (signal?.aborted || !this.#advancedPromptCacheEnabled || !isUnsupportedPromptCacheOptionsError(error)) throw error;
-      await this.#recordUnknownUsageAttempt();
       this.#advancedPromptCacheEnabled = false;
       return this.#createResponseAttempt(input, signal, false, recoveryBudget);
     }
@@ -1896,6 +1888,7 @@ export class ReactAgent {
             },
           );
         } catch (error) {
+          if (error instanceof ResourceCleanupError || error instanceof PersistenceError || error instanceof LoopStoppedError) throw error;
           const adapter = this.#client.responses.recovery;
           const state = error instanceof ResponseStreamIncompleteError
             ? (error as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState }).recoveryState
@@ -1913,7 +1906,7 @@ export class ReactAgent {
                 try {
                   const recovered = await adapter.resume(params, state, { ...options, signal: recoverySignal });
                   return isResponseStream(recovered)
-                    ? this.#consumeResponseStream(
+                    ? await this.#consumeResponseStream(
                         recovered,
                         () => { eventsSeen += 1; },
                         () => recoveryController.abort(new Error("Recovered model stream closed by host")),
@@ -1927,7 +1920,7 @@ export class ReactAgent {
               this.#onEvent?.({ type: "stream_recovery_finished" });
               return result;
             } catch (recoveryError) {
-              if (recoveryError instanceof PersistenceError) throw recoveryError;
+              if (recoveryError instanceof ResourceCleanupError || recoveryError instanceof PersistenceError || recoveryError instanceof LoopStoppedError) throw recoveryError;
               this.#onEvent?.({ type: "stream_recovery_finished", success: false });
               throw error;
             }
@@ -1935,9 +1928,9 @@ export class ReactAgent {
           throw error;
         }
       } catch (error) {
+        if (error instanceof ResourceCleanupError || error instanceof PersistenceError || error instanceof LoopStoppedError) throw error;
         if (signal?.aborted) throw error;
         if (eventsSeen === 0 && isStreamUnsupportedError(error)) {
-          await this.#recordUnknownUsageAttempt();
           this.#responseTransport = "buffered";
           this.#onEvent?.({ type: "sampling_started" });
           return this.#runProviderAttempt("coding", () => {
@@ -1954,16 +1947,41 @@ export class ReactAgent {
     });
   }
 
-  async #runProviderAttempt<T extends { usage?: unknown }>(purpose: RequestPurpose, run: () => Promise<T>): Promise<T> {
-    this.#assertProcessCleanup();
-    if (!this.#requestExecutor) return run();
+  async #runProviderAttempt<T extends { usage?: unknown }>(
+    purpose: RequestPurpose,
+    run: () => Promise<T>,
+    observeAttempt?: (usage: TokenUsageSample | null) => Promise<void>,
+  ): Promise<T> {
+    this.#assertResourceCleanup();
+    const goalStop = await this.#checkGoalStop();
+    if (goalStop) {
+      this.#requestAttemptLedger?.recordRejected(purpose);
+      throw new LoopStoppedError(goalStop);
+    }
+    const observe = purpose === "coding" ? (usage: TokenUsageSample | null) => this.#recordStandaloneUsage(usage) : observeAttempt;
+    let admitted = false;
+    let reported = false;
+    const execute = () => { admitted = true; return run(); };
     try {
-      return await this.#requestExecutor.execute(purpose, run);
+      const result = await (this.#requestExecutor ? this.#requestExecutor.execute(purpose, execute) : execute());
+      reported = true;
+      await observe?.(normalizeTokenUsageSample(result.usage));
+      return result;
     } catch (error) {
+      if (error instanceof ResourceCleanupError) {
+        this.#cleanupFailure ??= error;
+      }
+      if (admitted && !reported) {
+        reported = true;
+        await observe?.(error instanceof ModelStreamCleanupError ? error.usage : null);
+      }
+      if (error instanceof ResourceCleanupError || error instanceof PersistenceError) throw error;
       const snapshot = this.#requestAttemptLedger?.snapshot();
       if (snapshot && (!snapshot.complete || snapshot.remainingTokens !== undefined && snapshot.remainingTokens <= 0)) {
         throw new LoopStoppedError(snapshot.complete ? "budget_limited" : "usage_limited");
       }
+      const stoppedGoal = await this.#checkGoalStop();
+      if (stoppedGoal) throw new LoopStoppedError(stoppedGoal);
       throw error;
     }
   }
@@ -2074,13 +2092,12 @@ export class ReactAgent {
     });
   }
 
-  async #recordUnknownUsageAttempt(): Promise<void> {
-    if (this.#onUsage) await persistState("Usage persistence failed", () => this.#onUsage!(null));
-    await this.#recordGoalUsage(null);
+  async #recordSessionUsage(usage: TokenUsageSample | null): Promise<void> {
+    if (this.#onUsage) await persistState("Usage persistence failed", () => this.#onUsage!(usage));
   }
 
   async #recordStandaloneUsage(usage: TokenUsageSample | null): Promise<void> {
-    if (this.#onUsage) await persistState("Usage persistence failed", () => this.#onUsage!(usage));
+    await this.#recordSessionUsage(usage);
     await this.#recordGoalUsage(usage);
   }
 
@@ -2101,17 +2118,20 @@ export class ReactAgent {
     let reasoningActive = false;
     let firstEventSeen = false;
     let firstTextSeen = false;
+    let exhausted = false;
+    let pendingNext: Promise<IteratorResult<Record<string, unknown>>> | undefined;
     const iterator = stream[Symbol.asyncIterator]();
     try {
       while (true) {
         let timer: ReturnType<typeof setTimeout> | undefined;
+        pendingNext = Promise.resolve(iterator.next());
         const next = await Promise.race([
-          iterator.next(),
+          pendingNext,
           new Promise<never>((_resolve, reject) => {
             timer = setTimeout(() => reject(new ResponseStreamIncompleteError({ cause: new Error(`Model stream was idle for ${this.#streamIdleTimeoutMs}ms`) })), this.#streamIdleTimeoutMs);
           }),
         ]).finally(() => { if (timer) clearTimeout(timer); });
-        if (next.done) break;
+        if (next.done) { exhausted = true; break; }
         const event = next.value;
         onEvent();
         if (!firstEventSeen) {
@@ -2199,7 +2219,7 @@ export class ReactAgent {
       }
       }
     } catch (error) {
-      if (error instanceof ModelResponseError || error instanceof PersistenceError) throw error;
+      if (error instanceof ResourceCleanupError || error instanceof ModelResponseError || error instanceof PersistenceError) throw error;
       if (error instanceof ResponseStreamIncompleteError) {
         const incomplete = error as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState };
         if (!retainEvents) delete incomplete.recoveryState;
@@ -2224,8 +2244,18 @@ export class ReactAgent {
       throw error;
     } finally {
       abortRequest();
-      if (typeof iterator.return === "function") {
-        try { await iterator.return(); } catch { /* request abort remains authoritative */ }
+      if (!exhausted) {
+        try {
+          if (typeof iterator.return !== "function") throw new Error("The stream iterator exposes no close operation");
+          const closed = await iterator.return();
+          if (closed.done !== true) throw new Error("The stream iterator did not confirm closure");
+          // A timeout may leave next() active even after return() reports done.
+          await pendingNext?.then(() => {}, () => {});
+        } catch (cause) {
+          const failure = cause instanceof ModelStreamCleanupError ? cause : new ModelStreamCleanupError(cause, response?.usage);
+          this.#cleanupFailure ??= failure;
+          throw failure;
+        }
       }
     }
     if (reasoningActive) this.#onEvent?.({ type: "reasoning_finished" });
@@ -2306,7 +2336,7 @@ export class ReactAgent {
   }
 
   async #checkStop(): Promise<LoopStopReason | undefined> {
-    this.#assertProcessCleanup();
+    this.#assertResourceCleanup();
     if (this.#requestAttemptLedger) {
       const snapshot = this.#requestAttemptLedger.snapshot();
       if (!snapshot.complete) return "usage_limited";
@@ -2315,7 +2345,7 @@ export class ReactAgent {
     return this.#checkGoalStop();
   }
 
-  #assertProcessCleanup(): void {
+  #assertResourceCleanup(): void {
     if (this.#cleanupFailure) throw this.#cleanupFailure;
     this.#backgroundJobs.assertCleanupComplete();
   }

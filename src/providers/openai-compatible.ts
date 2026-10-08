@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { AgentResponse, ResponseStreamLike } from "../agent/react-agent.js";
+import { ownResponseStream } from "./response-stream.js";
 import {
   defaultModelRequestSettings,
   resolveProviderCapabilities,
@@ -101,10 +102,15 @@ export function createProviderRuntime(
       return sdk.responses.create(sanitizeProviderRequest(capabilities, params) as never, options as never) as unknown as Promise<AgentResponse>;
     },
     async stream(params, options) {
-      return await sdk.responses.create(
+      const controller = new AbortController();
+      const signal = options?.signal instanceof AbortSignal
+        ? AbortSignal.any([options.signal, controller.signal])
+        : controller.signal;
+      const response = await sdk.responses.create(
         { ...sanitizeProviderRequest(capabilities, params), stream: true } as never,
-        options as never,
-      ) as unknown as ResponseStreamLike;
+        { ...options, signal } as never,
+      ).asResponse();
+      return ownResponseStream(response, controller, signal, sdk);
     },
   };
   if (capabilities.compaction === "native") {

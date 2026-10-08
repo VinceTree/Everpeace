@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { RequestAttemptLedger } from "../../../src/agent/request-attempt-ledger.js";
 import { RequestExecutor } from "../../../src/agent/request-executor.js";
+import { ModelStreamCleanupError } from "../../../src/agent/response-errors.js";
 
 test("request attempt ledger keeps unknown usage sticky and stops later requests", () => {
   const ledger = new RequestAttemptLedger({ tokenBudget: 100 });
@@ -34,3 +35,21 @@ test("shared request executor settles thrown and rejected attempts without clear
   assert.deepEqual(ledger.snapshot().attempts.map((attempt) => attempt.status), ["failed", "rejected"]);
   assert.equal(ledger.snapshot().complete, false);
 });
+
+for (const usage of [{ input_tokens: 2, output_tokens: 1, total_tokens: 3 }, undefined]) {
+  test(`request executor keeps stream cleanup fatal with ${usage ? "known" : "unknown"} usage`, async () => {
+    const ledger = new RequestAttemptLedger({ tokenBudget: 100 });
+    const executor = new RequestExecutor(ledger);
+    const failure = new ModelStreamCleanupError("connection close refused", usage);
+    let calls = 0;
+    await assert.rejects(executor.execute("coding", async () => { calls++; throw failure; }), (error) => error === failure);
+    assert.equal(ledger.snapshot().complete, usage !== undefined);
+    assert.equal(ledger.snapshot().inputTokens, usage?.input_tokens ?? 0);
+    assert.deepEqual(ledger.snapshot().attempts[0]?.usage, usage ?? null);
+    await assert.rejects(executor.execute("summary", async () => { calls++; return { usage }; }), (error) => error === failure);
+    assert.deepEqual(ledger.snapshot().attempts.map((attempt) => attempt.status), ["failed", "rejected"]);
+    ledger.reset();
+    await assert.rejects(executor.execute("coding", async () => { calls++; return { usage }; }), (error) => error === failure);
+    assert.equal(calls, 1, "resetting accounting cannot clear a failed resource owner");
+  });
+}

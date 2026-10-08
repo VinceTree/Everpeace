@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { test } from "node:test";
 import { ReactAgent } from "../../../src/agent/react-agent.js";
+import { RequestAttemptLedger } from "../../../src/agent/request-attempt-ledger.js";
+import { ModelStreamCleanupError } from "../../../src/agent/response-errors.js";
 import { GoalRuntime } from "../../../src/goal/runtime.js";
 import { createProductionWorkflowAgentIO } from "../../../src/runtime/production.js";
 import type { LearnedTurnOutcome } from "../../../src/memory/learned-memory.js";
@@ -19,6 +21,76 @@ const failedCleanup: BashResult = {
   stdout: "partial", stderr: "", exitCode: 0, signal: null,
   cancelled: true, cleanupFailed: true, error: "termination refused",
 };
+
+test("real Agent stream cleanup failure keeps Goal active and persists unverified debt", async (t) => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "everpeace-stream-settlement-"));
+  t.after(() => rm(workspacePath, { recursive: true, force: true }));
+  let goal: SessionGoal | undefined;
+  const goalRuntime = new GoalRuntime({ async getGoal() { return goal; }, async setGoal(value) { goal = value; } });
+  await goalRuntime.create({ objective: "Complete the task" });
+  const ledger = new RequestAttemptLedger({ tokenBudget: 100 });
+  let requests = 0, verifications = 0, captures = 0;
+  const memory: LearnedTurnOutcome[] = [];
+  const workflow = new CodingWorkflowRuntime({ workspacePath });
+  const agent = new ReactAgent({
+    workspacePath, model: "offline-stream-settlement", goalRuntime, requestAttemptLedger: ledger,
+    learnedMemory: {
+      async loadPrompt() { return ""; }, scheduleCapture() { captures++; }, async finishTurn() { captures++; },
+      async remember() {}, async clear() {}, async setEnabled() {},
+      async status() { return { enabled: true, projectEntries: 0, userEntries: 0, recent: [] }; },
+    },
+    client: { responses: {
+      async create() { throw new Error("Unexpected buffered fallback"); },
+      stream() {
+        requests++;
+        const first = requests === 1;
+        return { [Symbol.asyncIterator]() { return {
+          async next() { return { done: false, value: { type: "response.completed", response: {
+            id: first ? "goal" : "done", output_text: "", status: "completed",
+            usage: { input_tokens: 2, output_tokens: 1, total_tokens: 3 },
+            output: first ? [{ type: "function_call", name: "update_goal", call_id: "complete", arguments: '{"status":"complete"}' }] : [],
+          } } }; },
+          async return() {
+            if (!first) throw new Error("private stream close details");
+            return { done: true, value: undefined };
+          },
+        }; } };
+      },
+    } },
+    io: createProductionWorkflowAgentIO({
+      workspacePath, workflow, policy: () => ({ mode: "workspace-write", web: false, shellNetwork: "deny" }),
+      async execute() { throw new Error("Unexpected command"); },
+    }),
+  });
+  t.after(() => assert.rejects(agent.dispose(), ModelStreamCleanupError));
+  const finishMemory = agent.finishMemoryTurn.bind(agent);
+  t.mock.method(agent, "finishMemoryTurn", async (outcome: LearnedTurnOutcome) => { memory.push(outcome); await finishMemory(outcome); });
+  const runner = new CodingTaskRunner({ agent, workflow, host: {
+    async executeVerification() { verifications++; throw new Error("Unexpected verification"); },
+    async getGoal() { return goal; }, async addGoalTime() { return goal; },
+  } });
+  await assert.rejects(runner.run({ text: "Complete the task" }), ModelStreamCleanupError);
+  assert.equal(goal?.status, "active");
+  assert.equal(goal?.tokens_used, 6);
+  assert.equal(goal?.usage_complete, true);
+  assert.equal(verifications, 0);
+  assert.deepEqual(memory, ["failed"]);
+  assert.equal(captures, 0);
+  assert.equal(workflow.state.result, "unverified");
+  assert.equal(workflow.state.pending_verification, true);
+  assert.equal(workflow.state.result_reason, "Model stream cleanup failed; request ownership is unresolved");
+  assert.equal(JSON.stringify(workflow.state).includes("private stream close details"), false);
+  assert.deepEqual(ledger.snapshot().attempts.map((attempt) => attempt.status), ["completed", "failed"]);
+  await assert.rejects(agent.finalizePendingGoalCompletion(true), ModelStreamCleanupError);
+  await assert.rejects(workflow.undo(), ModelStreamCleanupError);
+  await assert.rejects(workflow.runManualVerification([], async () => { throw new Error("Unexpected verification"); }, { supplemental: false }), ModelStreamCleanupError);
+  await assert.rejects(runner.run({ text: "Retry" }), ModelStreamCleanupError);
+  assert.equal(requests, 2);
+  const restored = new CodingWorkflowRuntime({ workspacePath, initialState: workflow.state });
+  await restored.beginTurn();
+  const resumed = await restored.finishTurn(async () => { throw new Error("Unexpected verification"); });
+  assert.equal(resumed.state.result, "unverified");
+});
 
 test("real Agent background cleanup failure denies Goal and successful Memory before verification", async (t) => {
   const workspacePath = await mkdtemp(join(tmpdir(), "everpeace-cleanup-settlement-"));
