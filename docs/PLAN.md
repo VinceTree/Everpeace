@@ -12,7 +12,7 @@
 - [x] fake provider 生产闭环及地图／编辑／输出进程回归，IPC 就绪／取消／清理证据。
 - [x] 工具、运行时、状态、决策和双语说明更新，归档前一轮交接与实际 CI 失败。
 - [x] 串行重新发现并执行现有 typecheck → lint → test → build，首败停止，明确缺少 lint，差异与文档链接检查。
-- [ ] 自动提交推送 main，等待 Windows／Linux Test CI，核对 Release job 跳过与已有 Release 不变；相关失败继续修复，本轮不重复递增版本。
+- [x] 自动提交推送 main，等待 Windows／Linux Test CI，核对 Release job 跳过与已有 Release 不变；Windows 路径别名测试及写失败取消时序修复后双平台全部通过，本轮未重复递增版本。
 
 ## 独立后续
 

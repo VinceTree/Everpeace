@@ -43,6 +43,8 @@ fake provider 的 [共享生产闭环](../tests/unit/runtime/project-editing.tes
 
 继续本轮时，一次本地重跑的 stdout stall 与独立 MCP stdio 回归均跨约 35 分钟后超时，原断言／超时未放宽，保留为无效交付运行；随后完整重跑恢复通过。独立定向复现还发现关闭 stdout 时 write Promise 已失败、Writable error 却等待异步 destroy 后才通知，导致 IPC 取消标记偶尔晚于任务清理。CLI host 已在写入失败边界立即通知取消，继续等待迟到 stream error／close 和 owned writer 清理。真实输出／MCP stdio／容错回归 25 项通过；新增不发 stream error 的失败注入明确验证 stdout／stderr 写失败先取消、后清理，CLI 回归 12 项全部通过。最终完整门禁结果见上，修复继续提交推送，不递增包版本。
 
+修复已提交推送为 `5e04fbc053399a3eb9b1590caf411e3abd259a0b`（fix: cancel failed output writes before cleanup [skip publish]）。[修复后 Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37731315535) completed／success：Linux 759 项、756 通过、0 失败、3 跳过，耗时 66,447.689328 ms；Windows 759 项、755 通过、0 失败、4 跳过，耗时 129,222.3676 ms。两平台安装、typecheck、完整 test、build 和差异检查均通过；Windows hosted runner 的原生 sandbox 跳过范围见 [开发指南](DEVELOPMENT.md)，不当作真实隔离／终端验收。本轮未扩增跳过或放宽输出进程回归超时。该提交没有触发 Release workflow；再次核对 27 份 Release 元数据和 26 个 tag 引用完全未变。实现／测试代码至此固定，交接文档的后续同步不递增包版本或改变发布条件。
+
 ## 保持的能力与限制
 
 结构化 assistant 压缩交接、冻结宿主 workflow 事实、 typed tool feedback、Session 历史与附件续读、恢复／fork 的验证债务和文件重新读取边界保持；详见运行时／工具／状态专题及连续性历史。TaskProgress 完成不等于验证成功，Goal 与成功 Memory 仍由 runner 结算。
