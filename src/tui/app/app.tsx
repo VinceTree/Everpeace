@@ -1154,18 +1154,22 @@ export function EverpeaceApp({
       openInfo("/memory · Cannot remember", "No active model is available for memory extraction.", "error");
       return;
     }
-    const operation = startCommandLoad("/memory · Remember preference", "Extracting user preference");
-    void dependencies.rememberMemory(activeModel, workspacePath, text)
-      .then(() => showMemory(false))
+    const controller = new AbortController();
+    const operation = startCommandLoad("/memory · Remember preference", "Extracting user preference", true, true, () => {
+      controller.abort();
+      returnToChat();
+    });
+    void dependencies.rememberMemory(activeModel, workspacePath, text, controller.signal)
+      .then(() => { if (isCurrentCommandOperation(operation) && !controller.signal.aborted) return showMemory(false); })
       .catch((error: unknown) => {
-        if (!isCurrentCommandOperation(operation)) return;
+        if (!isCurrentCommandOperation(operation) || controller.signal.aborted) return;
         replaceCommandView(infoView(
           "/memory · Could not remember",
           error instanceof Error ? error.message : String(error),
           "error",
         ));
       });
-  }, [activeModel, dependencies, isCurrentCommandOperation, openInfo, replaceCommandView, showMemory, startCommandLoad, workspacePath]);
+  }, [activeModel, dependencies, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, showMemory, startCommandLoad, workspacePath]);
 
   const openModelPicker = useCallback(async () => {
     const operation = startCommandLoad(

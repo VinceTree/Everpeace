@@ -14,6 +14,7 @@ import {
   LearnedMemoryStore,
   type LearnedMemoryPolicy,
   type LearnedMemoryRuntimeLike,
+  type MemoryRequestRunner,
 } from "../memory/learned-memory.js";
 import {
   createProviderRuntime,
@@ -76,7 +77,7 @@ export interface ProductionAgentOptions {
   requestAttemptLedger?: RequestAttemptLedger;
   restore?: ProductionAgentRestore;
   providerRuntime?: ProviderRuntime;
-  runMemoryRequest?<T extends { usage?: unknown; status?: unknown }>(run: (signal?: AbortSignal) => Promise<T>, scopeSignal?: AbortSignal): Promise<T>;
+  runMemoryRequest?: MemoryRequestRunner;
   codeNavigation?: CodeNavigationRuntimeLike | null;
   parallelReadTools?: boolean;
   maxSteps?: number;
@@ -145,18 +146,12 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
   let learnedMemory = options.learnedMemory;
   if (!learnedMemory && learnedMemoryStore) {
     ownsLearnedMemory = true;
-    const runMemoryRequest = options.runMemoryRequest ?? (async <T extends { usage?: unknown; status?: unknown }>(run: (signal?: AbortSignal) => Promise<T>) => run());
     learnedMemory = new LearnedMemoryRuntime({
       store: learnedMemoryStore,
-      client: {
-        responses: {
-          create(params, requestOptions) {
-            return runMemoryRequest((signal) => provider.responses.create(params, { ...requestOptions, ...(signal ? { signal } : {}) }), requestOptions?.signal);
-          },
-        },
-      },
+      client,
       model: options.model.model_name,
       sessionId: options.sessionId,
+      ...(options.runMemoryRequest ? { runRequest: options.runMemoryRequest } : {}),
       ...(options.memoryIdleDelayMs === undefined ? {} : { idleDelayMs: options.memoryIdleDelayMs }),
       ...(options.memoryMinTranscriptChars === undefined ? {} : { minTranscriptChars: options.memoryMinTranscriptChars }),
       ...(options.learnedMemoryPolicy === undefined ? {} : { policy: options.learnedMemoryPolicy }),

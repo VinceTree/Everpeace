@@ -63,9 +63,13 @@ ReactAgent 在每个实际 provider attempt 结束后立即结算 coding 的 Ses
 
 TUI 分开显示主编码与辅助用量；Session 编码总量不混入标题请求。exec 的可选 task ledger 覆盖主请求、summary、retry 与 repair，并关闭结束后的 Memory capture，避免产生任务外辅助请求。预算耗尽时禁止下一请求，但已发出的请求可能超出剩余额度，超出量必须保留。usage、缓存命中及写入的完整性分别判断，缺字段不补造零成本或实际账单。
 
-[AuxiliaryRequestExecutor](../../src/agent/auxiliary-request-executor.ts) 复用 RequestExecutor，把每项辅助操作的准入与 dependency 实例的累计显示分开。标题、Skill、doctor 和独立 Memory 操作拥有独立账本；同一后台 Memory job 的提取和合并按 job signal 共享账本，用量缺失后不再请求合并，也不自动重试该 job。后续独立操作可以增加已知用量，但不能把累计 unknown 改回完整。资源清理故障则关闭整个辅助所有者的后续准入。dispose 取消并等待所有活动辅助请求及计量；已可靠返回的用量即使结果因取消被丢弃也保留。回归见 [辅助请求所有权](../../tests/unit/agent/auxiliary-request-executor.test.ts)、[实际 SDK fixture](../../tests/fixtures/tui-auxiliary-offline.ts)。
+[AuxiliaryRequestExecutor](../../src/agent/auxiliary-request-executor.ts) 复用 RequestExecutor，把每项辅助操作的准入与 dependency 实例的累计显示分开。标题、Skill、doctor 和独立 Memory 操作拥有独立账本；同一后台 Memory job 的提取和合并共享 runtime 提供的 scope，用量缺失后不再请求合并，也不自动重试该 job。后续独立操作可以增加已知用量，但不能把累计 unknown 改回完整。资源清理故障则关闭整个辅助所有者的后续准入。dispose 取消并等待所有活动辅助请求及计量；已可靠返回的用量即使结果因取消被丢弃也保留。回归见 [辅助请求所有权](../../tests/unit/agent/auxiliary-request-executor.test.ts)、[实际 SDK fixture](../../tests/fixtures/tui-auxiliary-offline.ts)。
 
-Memory runtime 自身也用同一 job 的 RequestExecutor/ledger 包围提取和合并，错误路径检查该账本是否有缺口；网络、不完整或空白响应不能通过重新排队及新 controller 绕过未知用量限制。可靠响应 usage 在终态与正文校验前保存，已知用量的普通重试保持原行为。此约束不依赖 TUI 包装器，回归见 [Memory jobs](../../tests/unit/memory/learned-memory.test.ts)。
+ReactAgent 将 Memory 的任务暂停接入已有 beginTask/endTask，范围包含 Plan、宿主验证、修复和 Goal 连续轮次；dispose 只清理 Agent 任务状态，不发送恢复通知；异步 Memory 暂停返回后重新检查 Agent 可用性，关闭不能留下迟到的任务进度。轮次 outcome 只决定新材料能否入队，整项任务退出后才重置可靠队列的五分钟空闲期；没有 pending learned turn 的退出仍通知单轮结束，不能让旧队列永久搁置。runtime 重建同样重新计时。生产行为见 [Memory 空闲回归](../../tests/unit/runtime/memory-idle-lifecycle.test.ts)。
+
+Memory runtime 默认使用同一 job 的 RequestExecutor/ledger 执行提取和合并；生产 factory/TUI 的 host runner 将同一 RequestAccountingScope 交给辅助执行器，后者先检查所有者与取消，再使用该 executor 调用实际 provider。两种用量显示观察同一次结算，不把被拒绝的 wrapper 当成新 provider 请求。响应可靠但随后取消仍计量；准入前取消、关闭或旧资源故障没有新样本，旧故障中的 usage 不重复累计。scope 按 ledger 复用记录位置，换 signal 不清除未知用量，不能在同一 ledger 上悄悄替换 executor。回归见 [生产 Memory 准入](../../tests/unit/runtime/memory-request-ownership.test.ts) 和 [实际 SDK](../../tests/fixtures/memory-accounting-offline.ts)。
+
+错误路径继续检查 job 账本是否有缺口；网络、不完整或空白响应不能通过重新排队及新 controller 绕过未知用量限制。可靠响应 usage 在终态与正文校验前保存，已知用量的普通重试保持原行为。后台认领及 pending 写入后复核实时 capture 策略与 generation，尚未准入的停止仍是零用量。此约束也适用于无辅助包装器的默认 runtime，回归见 [Memory jobs](../../tests/unit/memory/learned-memory.test.ts)。
 
 回归入口：[attempt ledger](../../tests/unit/agent/request-attempt-ledger.test.ts)、[provider compatibility](../../tests/unit/providers/openai-compatible.test.ts)、[response errors](../../tests/unit/agent/response-errors.test.ts)。
 

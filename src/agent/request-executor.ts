@@ -3,6 +3,11 @@ import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 import { ModelStreamCleanupError } from "./response-errors.js";
 import { RequestAttemptLedger, type RequestAttemptStatus, type RequestPurpose } from "./request-attempt-ledger.js";
 
+export interface RequestAccountingScope {
+  readonly ledger: RequestAttemptLedger;
+  readonly executor: RequestExecutor;
+}
+
 /** Shared provider-attempt boundary for admission, cancellation-safe settlement, and usage accounting. */
 export class RequestExecutor {
   readonly #ledger: RequestAttemptLedger;

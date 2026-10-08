@@ -122,6 +122,19 @@ export function createDefaultTuiDependencies(
   const learnedMemoryStore = new LearnedMemoryStore();
   const auxiliaryExecutor = new AuxiliaryRequestExecutor();
   let activeLearnedMemory: LearnedMemoryRuntime | undefined;
+  const manualMemoryControllers = new Set<AbortController>();
+  const memoryOperations = new Set<Promise<unknown>>();
+  const memoryFailures = new Set<unknown>();
+  let disposed = false;
+  let disposal: Promise<void> | undefined;
+  const cancelManualMemory = (reason: Error) => {
+    for (const controller of manualMemoryControllers) controller.abort(reason);
+  };
+  const trackMemoryDisposal = (operation: Promise<void>) => {
+    const observed = operation.catch((error: unknown) => { memoryFailures.add(error); throw error; });
+    memoryOperations.add(observed);
+    return observed.finally(() => memoryOperations.delete(observed));
+  };
   const runAuxiliary = async <T extends { usage?: unknown; status?: unknown }>(
     purpose: "title" | "skill" | "memory" | "doctor",
     run: (signal: AbortSignal) => Promise<T>,
@@ -142,6 +155,8 @@ export function createDefaultTuiDependencies(
       return listOfficialModelIds(createProviderClient(baseUrl, apiKey), signal);
     },
     createAgent(model: RegisteredModel, io: AgentIO, restore) {
+      if (disposed) throw new Error("TUI services have been disposed");
+      cancelManualMemory(new Error("Active model changed"));
       let codeNavigation;
       try {
         codeNavigation = createCodeNavigationFromEnvironment(process.cwd(), {
@@ -161,7 +176,7 @@ export function createDefaultTuiDependencies(
         learnedMemoryStore,
         memoryIdleDelayMs: 5 * 60 * 1000,
         memoryMinTranscriptChars: 200,
-        runMemoryRequest: (run, signal) => runAuxiliary("memory", run, signal),
+        runMemoryRequest: (run, context) => auxiliaryExecutor.execute("memory", (signal) => run(signal), context.signal, context.signal, context),
         requestAttemptLedger: new RequestAttemptLedger(),
         ...(codeNavigation ? { codeNavigation } : {}),
         restore: {
@@ -177,7 +192,7 @@ export function createDefaultTuiDependencies(
           ...(restore?.onEvent === undefined ? {} : { onEvent: restore.onEvent }),
         },
       });
-      void activeLearnedMemory?.dispose();
+      if (activeLearnedMemory) void trackMemoryDisposal(activeLearnedMemory.dispose()).catch(() => undefined);
       activeLearnedMemory = handle.learnedMemory as LearnedMemoryRuntime | undefined;
       return handle.agent;
     },
@@ -191,35 +206,50 @@ export function createDefaultTuiDependencies(
         : "No memory snapshot has been injected in this agent session yet.";
     },
     async setMemoryEnabled(enabled) {
+      if (!enabled) cancelManualMemory(new Error("Memory disabled"));
       await (activeLearnedMemory?.setEnabled(enabled) ?? learnedMemoryStore.setEnabled(enabled));
     },
     async clearMemory(scope, workspacePath) {
+      cancelManualMemory(new Error("Memory cleared"));
       await (activeLearnedMemory?.clear(scope, workspacePath) ?? learnedMemoryStore.clear(scope, workspacePath));
     },
     async archiveMemory(scope, workspacePath, id) {
+      cancelManualMemory(new Error("Memory entry archived"));
       await (activeLearnedMemory?.archive(scope, workspacePath, id) ?? learnedMemoryStore.updateEntry(scope, workspacePath, id, { status: "archived" }));
     },
     async deleteMemoryEntry(scope, workspacePath, id) {
+      cancelManualMemory(new Error("Memory entry deleted"));
       await (activeLearnedMemory?.deleteEntry(scope, workspacePath, id) ?? learnedMemoryStore.deleteEntry(scope, workspacePath, id));
     },
     async rememberMemory(model, workspacePath, text, signal) {
+      if (disposed) throw new Error("TUI services have been disposed");
+      if (memoryFailures.size > 0) throw memoryFailures.values().next().value;
+      signal?.throwIfAborted();
+      const controller = new AbortController();
+      const ownedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
       const providerRuntime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
       const memoryRuntime = new LearnedMemoryRuntime({
         store: learnedMemoryStore,
         client: {
           responses: {
             create(params, options) {
-              return runAuxiliary("memory", (signal) => providerRuntime.responses.create(params, { ...options, signal }), options?.signal);
+              return providerRuntime.responses.create(params, { ...options });
             },
           },
         },
         model: model.model_name,
+        policy: { captureFuture: false },
+        runRequest: (run, context) => auxiliaryExecutor.execute("memory", (signal) => run(signal), context.signal, context.signal, context),
       });
-      try {
-        await memoryRuntime.remember(workspacePath, text, signal);
-      } finally {
-        await memoryRuntime.dispose();
-      }
+      manualMemoryControllers.add(controller);
+      const operation = (async () => {
+        await Promise.resolve();
+        try { await memoryRuntime.remember(workspacePath, text, ownedSignal); }
+        finally { await trackMemoryDisposal(memoryRuntime.dispose()); }
+      })();
+      memoryOperations.add(operation);
+      try { await operation; }
+      finally { manualMemoryControllers.delete(controller); memoryOperations.delete(operation); }
     },
     async generateSessionTitle(model, firstQuestion, signal) {
       const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
@@ -387,19 +417,26 @@ export function createDefaultTuiDependencies(
         ...(onOutput === undefined ? {} : { onOutput }),
       });
     },
-    async dispose() {
-      const results = await Promise.allSettled([
-        auxiliaryExecutor.dispose(),
-        activeLearnedMemory?.dispose() ?? Promise.resolve(),
-        mcp.close(),
-        skillManager.close(),
-      ]);
-      const failures = results
-        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
-        .map((result) => result.reason);
-      if (failures.length > 0) {
-        throw new AggregateError(failures, "Failed to dispose TUI services");
-      }
+    dispose() {
+      return disposal ??= (async () => {
+        disposed = true;
+        await Promise.resolve();
+        cancelManualMemory(new Error("TUI services have been disposed"));
+        const results = await Promise.allSettled([
+          auxiliaryExecutor.dispose(),
+          activeLearnedMemory?.dispose() ?? Promise.resolve(),
+          mcp.close(),
+          skillManager.close(),
+          ...memoryOperations,
+        ]);
+        const failures = new Set(results.slice(0, 4)
+          .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+          .map((result) => result.reason));
+        for (const failure of memoryFailures) failures.add(failure);
+        if (failures.size > 0) {
+          throw new AggregateError(failures, "Failed to dispose TUI services");
+        }
+      })();
     },
   };
 }

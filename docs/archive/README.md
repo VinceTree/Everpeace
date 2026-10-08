@@ -17,5 +17,10 @@
 - [导航与读取进程清理交接](HANDOFF_READ_PROCESS_OWNERSHIP.md)：duplex、搜索、项目地图、导航和 Skill Git 的清理与交付记录。
 - [模型流资源清理交接](HANDOFF_MODEL_STREAM_OWNERSHIP.md)：iterator、恢复控制器、SDK body 取消、可靠计量及失败结算证据。
 - [逐次请求计量交付](HANDOFF_REQUEST_SETTLEMENT_DELIVERY.md)：恢复、重试、压缩的实际 attempt 计量与授权提交、CI、跳过 Release 的核对记录。
+- [手动压缩与请求所有权交付](HANDOFF_REQUEST_OWNERSHIP_DELIVERY.md)：Goal 边界、辅助准入、Memory 重试与关闭等待，以及授权交付的真实 CI 和 Release 核对记录。
+- [Memory 持久请求恢复交接](HANDOFF_MEMORY_CAPTURE_RECOVERY.md)：请求 pending/usage 标记、租约绑定、真实进程中断恢复与持续存储故障的离线验证记录。
+- [手动 Memory 生命周期交接](HANDOFF_MEMORY_MANUAL_LIFECYCLE.md)：手动请求、Esc/迟到结果、延迟存储、重复与重入关闭、真实故障的生产及离线 SDK 验证。
+- [Memory 共享实际请求计量交接](HANDOFF_MEMORY_SHARED_ACCOUNTING.md)：Memory/辅助 scope、可靠取消、准入前零请求、旧资源错误和异步认领策略复核的离线验证。
+- [Memory 空闲生命周期交接](HANDOFF_MEMORY_IDLE_LIFECYCLE.md)：完整任务/单轮暂停、失败与 Plan 退出的旧队列恢复、重启重新计时和异步开始关闭竞态的生产回归。
 
 新 Session 默认只读 [当前交接](../HANDOFF.md) 和 [当前计划](../PLAN.md)，仅在追溯历史时查阅这里。归档正文中的旧相对路径以当时 `docs/` 所在位置理解；当前文件定位以 [项目地图](../architecture/PROJECT_MAP.md) 为准。

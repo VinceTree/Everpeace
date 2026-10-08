@@ -1,19 +1,17 @@
 import { applyUsageSample, createEmptySessionUsage, type SessionUsage } from "../status/model-status.js";
 import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 import { RequestAttemptLedger } from "./request-attempt-ledger.js";
-import { RequestExecutor } from "./request-executor.js";
+import { RequestExecutor, type RequestAccountingScope } from "./request-executor.js";
 
 type AuxiliaryPurpose = "title" | "skill" | "memory" | "doctor";
-interface RequestScope {
-  ledger: RequestAttemptLedger;
-  executor: RequestExecutor;
+interface RequestScope extends RequestAccountingScope {
   recorded: number;
 }
 
 /** Keep operation admission separate from the lifetime auxiliary usage display. */
 export class AuxiliaryRequestExecutor {
   #usage = createEmptySessionUsage();
-  readonly #scopes = new WeakMap<AbortSignal, RequestScope>();
+  readonly #scopes = new WeakMap<AbortSignal | RequestAttemptLedger, RequestScope>();
   #cleanupFailure: ResourceCleanupError | undefined;
   #disposed = false;
   #disposal: Promise<void> | undefined;
@@ -27,15 +25,18 @@ export class AuxiliaryRequestExecutor {
     run: (signal: AbortSignal) => Promise<T>,
     scopeSignal?: AbortSignal,
     signal = scopeSignal,
+    accounting?: RequestAccountingScope,
   ): Promise<T> {
     if (this.#cleanupFailure) throw this.#cleanupFailure;
     if (this.#disposed) throw new Error("Auxiliary requests have been disposed");
     signal?.throwIfAborted();
-    let scope = scopeSignal ? this.#scopes.get(scopeSignal) : undefined;
+    const scopeKey = accounting?.ledger ?? scopeSignal;
+    let scope = scopeKey ? this.#scopes.get(scopeKey) : undefined;
+    if (scope && accounting && scope.executor !== accounting.executor) throw new Error("Request accounting scope changed executors");
     if (!scope) {
-      const ledger = new RequestAttemptLedger();
-      scope = { ledger, executor: new RequestExecutor(ledger), recorded: 0 };
-      if (scopeSignal) this.#scopes.set(scopeSignal, scope);
+      const ledger = accounting?.ledger ?? new RequestAttemptLedger();
+      scope = { ledger, executor: accounting?.executor ?? new RequestExecutor(ledger), recorded: ledger.snapshot().attempts.length };
+      if (scopeKey) this.#scopes.set(scopeKey, scope);
     }
     const controller = new AbortController();
     this.#controllers.add(controller);

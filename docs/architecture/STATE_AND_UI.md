@@ -106,10 +106,11 @@
 
 - [model-status](../../src/status/model-status.ts) 分别累计 input、output、reasoning、cache hit 与 cache write；reasoning 不重复加到已经包含它的 output 上。
 - 缺失 usage 或缓存字段保留不完整状态，后来的完整样本不能掩盖缺口。缓存命中率仅用有对应统计的输入作分母；context 占用和累计消费不同，压缩后占用设为未知。
-- 主 coding/压缩 usage 随 Session 保存；手动压缩也计入 active Goal，预算或 usage 停止时 `/compact` 显示明确原因，Esc 返回同一 Session。标题、Skill、Memory、doctor 的辅助请求通过共享 executor 计量，`/status` 分栏显示。独立操作的准入账本与持续 incomplete 的累计显示分离；同一 Memory job 的提取/合并共享准入，资源故障关闭整个辅助所有者。当前辅助总数由 TUI dependency 实例持有，不伪称为恢复后的完整历史辅助账目。
+- 主 coding/压缩 usage 随 Session 保存；手动压缩也计入 active Goal，预算或 usage 停止时 `/compact` 显示明确原因，Esc 返回同一 Session。标题、Skill、Memory、doctor 的辅助请求通过共享 executor 计量，`/status` 分栏显示。独立操作的准入账本与持续 incomplete 的累计显示分离；同一 Memory job 的提取/合并在 runtime 与辅助服务之间共享实际请求 scope；准入前拒绝不产生 unknown，取消保留可靠返回的用量，旧故障不重复计量，资源故障关闭整个辅助所有者。当前辅助总数由 TUI dependency 实例持有，不伪称为恢复后的完整历史辅助账目。
 - Goal 仅按用户明确意图建立，预算仅在明确指定时设置。`paused`、`blocked`、`complete` 与预算/usage 停止各有独立语义；停止条件不得被 UI 的“本轮结束”覆盖。GoalRuntime 保留已有 usage 缺口，运行时重建或后来的可靠样本不能将其改回完整。
 - 编码完成意图先暂存，由 [CodingTaskRunner](../../src/workflow/task-runner.ts) 在完整、未过期验证通过并再次检查取消后结算。取消、预算停止、无检查和修复耗尽均不提交成功 Memory。
 - 新指令可开启新任务预算，但旧未验证事实仍须保留；Goal 续跑不构成新任务授权。
+- Plan 审批、宿主验证、修复和 Goal 续跑属于同一前台任务，Memory 后台请求持续暂停；整项任务最终退出或 runtime 重建后重新计满五分钟。失败、取消、受限停止、无改动和 Plan 退出仍恢复先前可靠队列，不把本次助手声明作为新学习。
 - Memory 是不可信背景，低于用户指令和项目规则；全局开关控制 learned Memory 读写，聊天策略随 Session 恢复，均不控制只读 Session 历史检索。成功学习、明确长期偏好、候选审核及后台队列的完整边界见 [MEMORY](MEMORY.md)。
 
 ## Plan 审阅与显式执行
@@ -154,6 +155,7 @@ workflow 提供路径列表时同时返回 `changed_paths_total` 和 `changed_pa
 - Plan 与 coding 共用结构化问题窗口。Plan 的 Esc 保持规划取消；coding 的 Esc 和 Ctrl+C 中止活动任务，触发相同的后台清理并恢复一个 prompt。迟到答案必须被忽略，已经 aborted 的 signal 不得打开窗口。
 - 命令窗口隐藏 banner、历史、composer 与全局状态栏，进入时同步清屏，Esc 从内存原子重放原 Session。窗口本身不得写入 `Static`、timeline 或 context。
 - 只有命令造成的真实变更进入对应状态存储。可取消加载使用操作身份检查，关闭窗口后忽略迟到结果。
+- `/memory remember` 绑定命令取消信号；Esc 取消提取并返回同一 Session。迟到成功和失败都复核操作身份，不能重新打开 Memory 或错误窗口。服务关闭等待手动 Memory 的存储结束，并保留真实存储及清理错误；临时手动 runtime 不处理共享自动学习队列。
 - 所有命令窗口共享居中布局，外框最多 80 列，窄屏有左右安全边距，字段左对齐；resize 后重新居中且不得泄露底层历史。
 - `/` 前缀菜单最多显示八项，保留方向键选择、Enter 执行、Tab 补全和 Esc 关闭。
 - resize 保留历史、单一 prompt 与输入的自动换行安全单元格；不得破坏滚轮或 Ctrl+滚轮缩放。
@@ -163,7 +165,7 @@ workflow 提供路径列表时同时返回 `changed_paths_total` 和 `changed_pa
 - Ctrl+C 在任务活动时取消；空闲且有草稿时清空；空闲且无草稿时退出。
 - 活动 coding turn 保留 guidance composer；支持 steering 的 Agent 即时记入可见 transcript，在采样/工具结果安全边界应用。未开始工具补 `steered` 结果；取消时仍保存已提交 guidance。不支持 steering 的替身保留 FIFO。
 - 取消、权限收紧、预算停止和异常都必须收束 task 拥有的后台进程树；清理完成前不能启动下一任务。最终检查期间也可取消，不能在取消后完成 Goal。
-- Agent 和辅助服务 dispose 关闭准入，取消并等待活动 turn、手动压缩、辅助请求及其持久化/计量；请求未结束前不释放所有权。预取消不产生请求或 unknown 样本，迟到的可靠 usage 仍计量，迟到结果不报告成功。
+- Agent 和辅助服务 dispose 关闭准入，取消并等待活动 turn、手动压缩、手动 Memory、辅助请求及其持久化/计量；provider 已返回也不提前结束 Memory 存储的所有权。重复关闭共用完成结果，真实清理或存储故障不被普通取消替代。预取消不产生请求或 unknown 样本，迟到的可靠 usage 仍计量，迟到结果不报告成功。
 - 用户直接 `!` 使用交互 PTY，由 Ink 单一 stdin 入口转发并独占输入；禁止同时注册原始 stdin 监听器。它由用户主动执行，不进模型 sandbox，也不进入模型 context，但可进入可恢复输出历史。
 - 原始 PTY 控制序列不能直接写入 Ink stdout；保持清洗、流式显示与终端模式复位。
 - SSE 可用时实时显示正文、审批与工具状态；否则显示 buffered 等待。只有实际 reasoning 事件才显示 Thinking，其耗时与整段请求耗时区分。

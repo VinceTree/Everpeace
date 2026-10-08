@@ -1532,6 +1532,56 @@ test("/memory opens a transient learned experience surface and supports pause", 
   view.unmount();
 });
 
+test("Esc cancels manual Memory and neither late success nor failure reopens the window", async (t) => {
+  for (const result of ["success", "failure"] as const) await t.test(result, async () => {
+    const model: RegisteredModel = { id: "memory-cancel", model_name: "offline", base_url: "https://compatible.invalid/v1", api_key: "fixture" };
+    const fixture = createFixture({ initial: [model], createAgent: (_model, io, restore) => ({
+      async runTurn(input) { await restore?.onContextAppend?.([{ role: "user", content: input }]); io.writeAssistant("Original Memory session"); return {}; },
+    }) });
+    let complete!: () => void, fail!: (error: Error) => void;
+    const request = new Promise<void>((resolve, reject) => { complete = resolve; fail = reject; });
+    let requestSignal: AbortSignal | undefined;
+    let requests = 0, statusReads = 0;
+    fixture.dependencies.rememberMemory = async (_model, _workspace, _text, signal) => { requests++; requestSignal = signal; return request; };
+    fixture.dependencies.getMemoryStatus = async () => { statusReads++; return { enabled: true, projectEntries: 0, userEntries: 1, recent: [] }; };
+    const app = <EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />;
+    const view = render(app);
+    const flushInputEffects = async () => {
+      const environment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+      const previous = environment.IS_REACT_ACT_ENVIRONMENT;
+      environment.IS_REACT_ACT_ENVIRONMENT = true;
+      try { await act(async () => { view.rerender(app); }); }
+      finally { if (previous === undefined) delete environment.IS_REACT_ACT_ENVIRONMENT; else environment.IS_REACT_ACT_ENVIRONMENT = previous; }
+    };
+    const submit = async (text: string) => {
+      await flushInputEffects();
+      view.stdin.write(text);
+      await waitFor(() => (view.lastFrame() ?? "").includes(`› ${text}`));
+      view.stdin.write("\r");
+    };
+    try {
+      await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
+      await submit("Original question");
+      await waitFor(() => (view.lastFrame() ?? "").includes("Original Memory session") && (view.lastFrame() ?? "").includes("Ask Everpeace"));
+      const sessionId = [...fixture.sessionStore.sessions.keys()][0];
+      await submit("/memory remember Use pnpm");
+      await waitFor(() => requests === 1 && (view.lastFrame() ?? "").includes("Extracting user preference"));
+      await flushInputEffects();
+      view.stdin.write("\u001b");
+      await waitFor(() => (view.lastFrame() ?? "").includes("Original Memory session") && (view.lastFrame() ?? "").includes("Ask Everpeace"));
+      if (result === "success") complete(); else fail(new Error("Late extraction failed"));
+      await tick();
+      await flushInputEffects();
+      assert.equal(statusReads, 0);
+      assert.equal(requestSignal?.aborted, true);
+      assert.equal(requests, 1);
+      assert.match(view.lastFrame() ?? "", /Original Memory session/u);
+      assert.doesNotMatch(view.lastFrame() ?? "", /Learned experience|Could not remember/u);
+      assert.deepEqual([...fixture.sessionStore.sessions.keys()], [sessionId]);
+    } finally { complete(); await request.catch(() => undefined); view.unmount(); }
+  });
+});
+
 test("Esc cancels an in-flight slash command load without reopening its window", async () => {
   const model: RegisteredModel = {
     id: "model-1",

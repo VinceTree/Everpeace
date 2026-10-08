@@ -7,7 +7,7 @@ import type { ResponsesClientLike } from "../agent/react-agent.js";
 import type { TokenUsageSample } from "../status/model-status.js";
 import { assertCompletedModelResponse } from "../providers/capabilities.js";
 import { RequestAttemptLedger, RequestUsageIncompleteError } from "../agent/request-attempt-ledger.js";
-import { RequestExecutor } from "../agent/request-executor.js";
+import { RequestExecutor, type RequestAccountingScope } from "../agent/request-executor.js";
 import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 import { redactSecretsPreservingLayout } from "../util/redact-secrets.js";
 
@@ -81,7 +81,10 @@ export interface LearnedMemoryRuntimeLike {
   loadSnapshot?(workspacePath: string, userInput?: string, activeFiles?: readonly string[]): Promise<MemorySnapshot>;
   getSnapshot?(): MemorySnapshot | undefined;
   isReadEnabled?(): boolean;
+  beginTask?(): Promise<void> | void;
+  endTask?(): Promise<void> | void;
   beginTurn?(): Promise<void> | void;
+  endTurn?(): Promise<void> | void;
   finishTurn?(turn: LearnedTurn, outcome: LearnedTurnOutcome): Promise<void>;
   lookup?(workspacePath: string, id: string): Promise<LearnedEntry | undefined>;
   dispose?(): Promise<void> | void;
@@ -279,9 +282,42 @@ interface MemoryCaptureJob {
   notBefore: string;
   attempts: number;
   status: "queued" | "running" | "failed";
+  requestPending?: boolean;
+  usageComplete?: boolean;
   error?: string;
   extracted?: ExtractedLesson[];
 }
+
+class MemoryOperationStoppedError extends Error {
+  constructor(message: string) { super(message); this.name = "AbortError"; }
+}
+
+function recoverCaptureJob(job: MemoryCaptureJob, now: number): MemoryCaptureJob {
+  const expired = job.status === "running" && Date.parse(job.notBefore) <= now;
+  const unsafeQueued = job.status === "queued" && (
+    job.requestPending !== undefined && job.requestPending !== false
+    || job.usageComplete !== undefined && job.usageComplete !== true
+    || !(job.requestPending === false && job.usageComplete === true)
+      && (job.attempts > 0 || job.error !== undefined || job.extracted !== undefined)
+  );
+  if (unsafeQueued || expired && !(job.requestPending === false && job.usageComplete === true)) {
+    return { ...job, status: "failed", usageComplete: false,
+      error: "Memory request usage is incomplete after interruption; automatic retry stopped" };
+  }
+  return expired ? { ...job, status: "queued" } : job;
+}
+
+function ownsCaptureJob(job: MemoryCaptureJob, claimed: MemoryCaptureJob): boolean {
+  return job.id === claimed.id && job.status === "running" && job.notBefore === claimed.notBefore;
+}
+
+/** The host runner uses this scope's executor at the actual provider callback. */
+export type MemoryRequestRunner = <T extends { usage?: unknown; status?: unknown }>(
+  run: (signal?: AbortSignal) => Promise<T>,
+  context: RequestAccountingScope & { signal?: AbortSignal },
+) => Promise<T>;
+
+type MemoryRequestExecutor = <T extends { usage?: unknown; status?: unknown }>(run: (signal?: AbortSignal) => Promise<T>) => Promise<T>;
 
 interface MemoryCandidate {
   id: string;
@@ -363,7 +399,8 @@ export class LearnedMemoryStore {
     return parseEntries(markdown).filter((entry) => entry.scope === scope);
   }
 
-  async append(scope: LearnedScope, workspacePath: string, entries: readonly (Partial<LearnedEntry> & Pick<LearnedEntry, "lesson" | "applyWhen">)[]): Promise<void> {
+  async append(scope: LearnedScope, workspacePath: string, entries: readonly (Partial<LearnedEntry> & Pick<LearnedEntry, "lesson" | "applyWhen">)[],
+    options: { beforeCommit?: () => void | Promise<void> } = {}): Promise<void> {
     if (entries.length === 0) return;
     const filePath = this.filePath(scope, workspacePath);
     await this.#enqueue(filePath, () => this.#locked(filePath, async () => {
@@ -381,7 +418,7 @@ export class LearnedMemoryStore {
       const inactive = combined.filter((entry) => entry.status !== "active").slice(0, MAX_ENTRIES * 2);
       const limited = [...active, ...inactive];
       await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-      await this.#atomicWrite(filePath, serializeEntries(limited));
+      await this.#atomicWrite(filePath, serializeEntries(limited), options.beforeCommit);
     }));
   }
 
@@ -525,14 +562,14 @@ export class LearnedMemoryStore {
     }));
   }
 
-  async updateCandidates(update: (candidates: MemoryCandidate[]) => MemoryCandidate[]): Promise<MemoryCandidate[]> {
+  async updateCandidates(update: (candidates: MemoryCandidate[]) => MemoryCandidate[], options: { beforeCommit?: () => void | Promise<void> } = {}): Promise<MemoryCandidate[]> {
     const filePath = path.join(this.#directory, CANDIDATES_FILE);
     let result: MemoryCandidate[] = [];
     await this.#enqueue(filePath, () => this.#locked(filePath, async () => {
       const current = parseArrayFile<MemoryCandidate>(await readText(filePath));
       const cutoff = this.#now().getTime() - CANDIDATE_RETENTION_MS;
       result = update(current).filter((candidate) => candidate.status !== "pending" || Date.parse(candidate.createdAt) >= cutoff);
-      await this.#atomicWrite(filePath, `${JSON.stringify(result, null, 2)}\n`);
+      await this.#atomicWrite(filePath, `${JSON.stringify(result, null, 2)}\n`, options.beforeCommit);
     }));
     return result;
   }
@@ -546,11 +583,12 @@ export class LearnedMemoryStore {
     });
   }
 
-  async #atomicWrite(filePath: string, contents: string): Promise<void> {
+  async #atomicWrite(filePath: string, contents: string, beforeCommit?: () => void | Promise<void>): Promise<void> {
     const temporary = `${filePath}.${process.pid}.${Date.now()}.tmp`;
     try {
       await fs.writeFile(temporary, contents, { encoding: "utf8", mode: 0o600 });
       for (let attempt = 0; ; attempt += 1) {
+        await beforeCommit?.();
         try {
           await fs.rename(temporary, filePath);
           break;
@@ -612,6 +650,7 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
   readonly #store: LearnedMemoryStore;
   readonly #client: ResponsesClientLike;
   readonly #model: string;
+  readonly #runRequest: MemoryRequestRunner;
   #captureQueue: Promise<void> = Promise.resolve();
   #captureTimer: ReturnType<typeof setTimeout> | undefined;
   #captureTimerRevision = 0;
@@ -620,7 +659,14 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
   #captureState: NonNullable<LearnedMemoryStatus["capture"]> = { state: "idle" };
   #snapshot: MemorySnapshot | undefined;
   #generation = 0;
+  #taskActive = false;
+  #turnActive = false;
   #disposed = false;
+  #disposal: Promise<void> | undefined;
+  #cleanupFailure: ResourceCleanupError | undefined;
+  #persistenceFailure: { error: unknown } | undefined;
+  readonly #operations = new Set<Promise<unknown>>();
+  readonly #manualControllers = new Set<AbortController>();
   #enabled = true;
   #usage: TokenUsageSample | null = { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
   readonly #startup: Promise<void>;
@@ -638,11 +684,13 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
     unrefTimers?: boolean;
     sessionId?: () => string | undefined;
     policy?: Partial<LearnedMemoryPolicy>;
+    runRequest?: MemoryRequestRunner;
   }) {
     const store = options.store;
     this.#store = store;
     this.#client = options.client;
     this.#model = options.model;
+    this.#runRequest = options.runRequest ?? ((run, context) => context.executor.execute("memory", () => run(context.signal)));
     this.#idleDelayMs = Math.max(0, options.idleDelayMs ?? 0);
     this.#minTranscriptChars = Math.max(0, options.minTranscriptChars ?? 0);
     this.#unrefTimers = options.unrefTimers ?? true;
@@ -650,8 +698,11 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
     this.#policy = { ...this.#policy, ...options.policy };
     this.#startup = (async () => {
       this.#enabled = await store.isEnabled();
-      if (this.#enabled) await this.#armCaptureTimer();
+      if (this.#enabled) await this.#restartIdleCapture();
     })().catch((error: unknown) => {
+      if (error instanceof ResourceCleanupError) this.#cleanupFailure ??= error;
+      else this.#persistenceFailure ??= { error };
+      this.#abortManual(error);
       this.#captureState = { state: "failed", lastAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error), usage: this.#usage };
     });
   }
@@ -680,16 +731,60 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
   }
 
   async beginTurn(): Promise<void> {
-    await this.#startup;
+    this.#assertAvailable();
+    this.#turnActive = true;
+    return this.#pauseForForeground();
+  }
+
+  async beginTask(): Promise<void> {
+    this.#assertAvailable();
+    this.#taskActive = true;
+    return this.#pauseForForeground();
+  }
+
+  async endTask(): Promise<void> {
+    return this.#runOwned(async () => {
+      await this.#startup;
+      this.#assertAvailable();
+      this.#taskActive = false;
+      this.#turnActive = false;
+      await this.#restartIdleCapture();
+    });
+  }
+
+  async endTurn(): Promise<void> {
+    return this.#runOwned(async () => {
+      await this.#startup;
+      this.#assertAvailable();
+      this.#turnActive = false;
+      await this.#restartIdleCapture();
+    });
+  }
+
+  #pauseForForeground(): Promise<void> {
     this.#generation += 1;
     this.#captureTimerRevision += 1;
     this.#captureController?.abort(new Error("Foreground work resumed"));
-    this.#captureController = undefined;
+    this.#abortManual(new Error("Foreground work resumed"));
     if (this.#captureTimer !== undefined) clearTimeout(this.#captureTimer);
     this.#captureTimer = undefined;
-    const notBefore = new Date(Date.now() + this.#idleDelayMs).toISOString();
-    await this.#store.updateJobs((jobs) => jobs.map((job) => job.status === "queued" ? { ...job, notBefore } : job));
-    this.#captureState = { state: "idle", usage: this.#usage };
+    return this.#runOwned(async () => {
+      await this.#startup;
+      this.#assertAvailable();
+      const notBefore = new Date(Date.now() + this.#idleDelayMs).toISOString();
+      await this.#store.updateJobs((jobs) => jobs.map((job) => job.status === "queued" ? { ...job, notBefore } : job));
+      this.#captureState = { state: "idle", usage: this.#usage };
+    });
+  }
+
+  async #restartIdleCapture(): Promise<void> {
+    if (!this.#taskActive && !this.#turnActive && this.#policy.captureFuture && this.#enabled) {
+      const generation = this.#generation;
+      const notBefore = new Date(Date.now() + this.#idleDelayMs).toISOString();
+      await this.#store.updateJobs((jobs) => generation !== this.#generation || this.#taskActive || this.#turnActive ? jobs
+        : jobs.map((job) => recoverCaptureJob(job, Date.now())).map((job) => job.status === "queued" ? { ...job, notBefore } : job));
+    }
+    await this.#armCaptureTimer();
   }
 
   scheduleCapture(turn: LearnedTurn): void {
@@ -699,58 +794,89 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
   }
 
   async finishTurn(turn: LearnedTurn, outcome: LearnedTurnOutcome): Promise<void> {
-    await this.#startup;
-    const explicit = explicitMemoryIntent(turn.userInput);
-    if (!this.#policy.captureFuture || (outcome !== "verified" && !explicit) || (turn.toolCallCount === 0 && !explicit) || (this.#minTranscriptChars > 0 && turn.transcript.length < this.#minTranscriptChars && !explicit)) {
-      this.#captureState = { state: "skipped", lastAt: new Date().toISOString(), usage: this.#usage };
-      return;
-    }
-    const sanitized: LearnedTurn = {
-      ...turn,
-      userInput: redactSecrets(turn.userInput, 8_000),
-      assistantText: redactSecrets(turn.assistantText, 12_000),
-      transcript: redactSecrets(turn.transcript, 24_000),
-    };
-    const now = new Date();
-    const id = createHash("sha256").update(`${turn.sessionId ?? ""}\n${turn.workspacePath}\n${sanitized.userInput}\n${sanitized.transcript}`).digest("hex").slice(0, 24);
-    const job: MemoryCaptureJob = {
-      id,
-      turn: sanitized,
-      outcome,
-      createdAt: now.toISOString(),
-      notBefore: new Date(now.getTime() + this.#idleDelayMs).toISOString(),
-      attempts: 0,
-      status: "queued",
-    };
-    const jobs = await this.#store.updateJobs((current) => current.some((item) => item.id === id) ? current : [...current, job]);
-    this.#ownedJobIds.add(id);
-    this.#captureState = { state: "queued", queued: jobs.filter((item) => item.status === "queued").length, usage: this.#usage };
-    await this.#armCaptureTimer();
+    return this.#runOwned(async () => {
+      await this.#startup;
+      this.#assertAvailable();
+      const explicit = explicitMemoryIntent(turn.userInput);
+      if (!(await this.#store.isEnabled()) || !this.#policy.captureFuture || (outcome !== "verified" && !explicit) || (turn.toolCallCount === 0 && !explicit) || (this.#minTranscriptChars > 0 && turn.transcript.length < this.#minTranscriptChars && !explicit)) {
+        this.#captureState = { state: "skipped", lastAt: new Date().toISOString(), usage: this.#usage };
+        this.#turnActive = false;
+        await this.#restartIdleCapture();
+        return;
+      }
+      const sanitized: LearnedTurn = {
+        ...turn,
+        userInput: redactSecrets(turn.userInput, 8_000),
+        assistantText: redactSecrets(turn.assistantText, 12_000),
+        transcript: redactSecrets(turn.transcript, 24_000),
+      };
+      const now = new Date();
+      const id = createHash("sha256").update(`${turn.sessionId ?? ""}\n${turn.workspacePath}\n${sanitized.userInput}\n${sanitized.transcript}`).digest("hex").slice(0, 24);
+      const job: MemoryCaptureJob = {
+        id,
+        turn: sanitized,
+        outcome,
+        createdAt: now.toISOString(),
+        notBefore: new Date(now.getTime() + this.#idleDelayMs).toISOString(),
+        attempts: 0,
+        status: "queued",
+        requestPending: false,
+        usageComplete: true,
+      };
+      const jobs = await this.#store.updateJobs((current) => current.some((item) => item.id === id) ? current : [...current, job]);
+      this.#ownedJobIds.add(id);
+      this.#captureState = { state: "queued", queued: jobs.filter((item) => item.status === "queued").length, usage: this.#usage };
+      this.#turnActive = false;
+      await this.#restartIdleCapture();
+    });
   }
 
   async remember(workspacePath: string, text: string, signal?: AbortSignal): Promise<void> {
+    this.#assertAvailable();
     const clean = redactSecrets(text);
     if (!clean) throw new Error("Memory text cannot be empty");
-    const entries = await this.#extract({
-      workspacePath,
-      userInput: `Remember this lasting user preference: ${clean}`,
-      transcript: "Explicit user request to store a preference.",
-      assistantText: "",
-      toolCallCount: 0,
-    }, true, signal);
-    const values = entries
-      .filter((entry) => typeof entry.lesson === "string" && typeof entry.applyWhen === "string")
-      .map((entry) => ({
-        lesson: entry.lesson as string,
-        applyWhen: entry.applyWhen as string,
-        kind: (entry.kind === "preference" || entry.kind === "convention" || entry.kind === "procedure" || entry.kind === "constraint" || entry.kind === "summary" ? entry.kind : "preference") as LearnedKind,
-        ...(entry.confidence === "low" || entry.confidence === "medium" || entry.confidence === "high" ? { confidence: entry.confidence as LearnedConfidence } : {}),
-      }));
-    await this.#store.append("user", workspacePath, values.length > 0 ? values : [{
-      lesson: clean,
-      applyWhen: "Apply this preference in future conversations across projects.",
-      kind: "preference",
-    }]);
+    const controller = new AbortController();
+    const ownedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    const generation = this.#generation;
+    this.#manualControllers.add(controller);
+    try {
+      await this.#runOwned(async () => {
+        await this.#startup;
+        await this.#checkWrite(generation, ownedSignal);
+        const ledger = new RequestAttemptLedger();
+        const executor = new RequestExecutor(ledger);
+        const execute: MemoryRequestExecutor = (run) => this.#executeRequest(ledger, executor, run, ownedSignal);
+        const entries = await this.#extract({
+          workspacePath,
+          userInput: `Remember this lasting user preference: ${clean}`,
+          transcript: "Explicit user request to store a preference.",
+          assistantText: "",
+          toolCallCount: 0,
+        }, true, ownedSignal, execute);
+        await this.#checkWrite(generation, ownedSignal);
+        const values = entries
+          .filter((entry) => typeof entry.lesson === "string" && typeof entry.applyWhen === "string")
+          .map((entry) => ({
+            lesson: entry.lesson as string,
+            applyWhen: entry.applyWhen as string,
+            kind: (entry.kind === "preference" || entry.kind === "convention" || entry.kind === "procedure" || entry.kind === "constraint" || entry.kind === "summary" ? entry.kind : "preference") as LearnedKind,
+            ...(entry.confidence === "low" || entry.confidence === "medium" || entry.confidence === "high" ? { confidence: entry.confidence as LearnedConfidence } : {}),
+          }));
+        try {
+          await this.#store.append("user", workspacePath, values.length > 0 ? values : [{
+            lesson: clean,
+            applyWhen: "Apply this preference in future conversations across projects.",
+            kind: "preference",
+          }], { beforeCommit: () => this.#checkWrite(generation, ownedSignal) });
+        } catch (error) {
+          if (!(error instanceof MemoryOperationStoppedError)) this.#persistenceFailure ??= { error };
+          throw error;
+        }
+        await this.#checkWrite(generation, ownedSignal);
+      }, false);
+    } finally {
+      this.#manualControllers.delete(controller);
+    }
   }
 
   async status(workspacePath: string): Promise<LearnedMemoryStatus> {
@@ -766,56 +892,72 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
   }
 
   async setEnabled(enabled: boolean): Promise<void> {
-    this.#enabled = enabled;
-    if (!enabled) {
-      this.#generation += 1;
-      this.#captureTimerRevision += 1;
-      this.#captureController?.abort(new Error("Memory disabled"));
-      if (this.#captureTimer !== undefined) clearTimeout(this.#captureTimer);
-      this.#captureTimer = undefined;
-      this.#snapshot = undefined;
-    }
-    await this.#store.setEnabled(enabled);
-    if (!enabled) await this.#store.updateJobs((jobs) => jobs.filter((job) => job.status === "failed"));
-    else void this.#armCaptureTimer().catch(() => undefined);
+    return this.#runOwned(async () => {
+      this.#enabled = enabled;
+      if (!enabled) {
+        this.#generation += 1;
+        this.#captureTimerRevision += 1;
+        this.#captureController?.abort(new Error("Memory disabled"));
+        this.#abortManual(new Error("Memory disabled"));
+        if (this.#captureTimer !== undefined) clearTimeout(this.#captureTimer);
+        this.#captureTimer = undefined;
+        this.#snapshot = undefined;
+      }
+      await this.#store.setEnabled(enabled);
+      if (!enabled) await this.#store.updateJobs((jobs) => jobs.filter((job) => job.status === "failed"));
+      else await this.#armCaptureTimer();
+    });
   }
 
   async clear(scope: LearnedScope, workspacePath: string): Promise<void> {
-    this.#generation += 1;
-    this.#captureTimerRevision += 1;
-    this.#captureController?.abort(new Error("Memory cleared"));
-    this.#snapshot = undefined;
-    await this.#store.clear(scope, workspacePath);
-    await this.#store.updateJobs((jobs) => jobs.filter((job) => normalizeWorkspacePath(job.turn.workspacePath) !== normalizeWorkspacePath(workspacePath)));
-    await this.#store.updateCandidates((candidates) => candidates.filter((candidate) => normalizeWorkspacePath(candidate.workspacePath) !== normalizeWorkspacePath(workspacePath) || candidate.scope !== scope));
+    return this.#runOwned(async () => {
+      this.#generation += 1;
+      this.#captureTimerRevision += 1;
+      this.#captureController?.abort(new Error("Memory cleared"));
+      this.#abortManual(new Error("Memory cleared"));
+      this.#snapshot = undefined;
+      await this.#store.clear(scope, workspacePath);
+      await this.#store.updateJobs((jobs) => jobs.filter((job) => normalizeWorkspacePath(job.turn.workspacePath) !== normalizeWorkspacePath(workspacePath)));
+      await this.#store.updateCandidates((candidates) => candidates.filter((candidate) => normalizeWorkspacePath(candidate.workspacePath) !== normalizeWorkspacePath(workspacePath) || candidate.scope !== scope));
+    });
   }
 
-  archive(scope: LearnedScope, workspacePath: string, id: string): Promise<void> {
-    this.#generation += 1;
-    this.#snapshot = undefined;
-    return this.#store.updateEntry(scope, workspacePath, id, { status: "archived" });
+  async archive(scope: LearnedScope, workspacePath: string, id: string): Promise<void> {
+    return this.#runOwned(async () => {
+      this.#generation += 1;
+      this.#snapshot = undefined;
+      this.#captureController?.abort(new Error("Memory entry archived"));
+      this.#abortManual(new Error("Memory entry archived"));
+      return this.#store.updateEntry(scope, workspacePath, id, { status: "archived" });
+    });
   }
 
-  deleteEntry(scope: LearnedScope, workspacePath: string, id: string): Promise<void> {
-    this.#generation += 1;
-    this.#snapshot = undefined;
-    return this.#store.deleteEntry(scope, workspacePath, id);
+  async deleteEntry(scope: LearnedScope, workspacePath: string, id: string): Promise<void> {
+    return this.#runOwned(async () => {
+      this.#generation += 1;
+      this.#snapshot = undefined;
+      this.#captureController?.abort(new Error("Memory entry deleted"));
+      this.#abortManual(new Error("Memory entry deleted"));
+      return this.#store.deleteEntry(scope, workspacePath, id);
+    });
   }
 
   setPolicy(policy: Partial<LearnedMemoryPolicy>): void {
+    this.#assertAvailable();
     this.#policy = { ...this.#policy, ...policy };
     if (policy.readExisting === false) this.#snapshot = undefined;
     if (policy.captureFuture === false) {
       this.#generation += 1;
       this.#captureTimerRevision += 1;
       this.#captureController?.abort(new Error("Memory capture disabled for this chat"));
+      this.#abortManual(new Error("Memory capture disabled for this chat"));
       if (this.#captureTimer !== undefined) clearTimeout(this.#captureTimer);
       this.#captureTimer = undefined;
       const sessionId = this.#sessionId?.();
-      void this.#store.updateJobs((jobs) => jobs.filter((job) => job.status !== "queued"
-        || !(this.#ownedJobIds.has(job.id) || sessionId !== undefined && job.turn.sessionId === sessionId))).catch(() => undefined);
+      void this.#runOwned(() => this.#store.updateJobs((jobs) => jobs.filter((job) => job.status !== "queued"
+        || !(this.#ownedJobIds.has(job.id) || sessionId !== undefined && job.turn.sessionId === sessionId)))).catch(() => undefined);
     } else if (policy.captureFuture === true) {
-      void this.#armCaptureTimer().catch(() => undefined);
+      void this.#runOwned(() => this.#armCaptureTimer()).catch(() => undefined);
     }
   }
 
@@ -828,27 +970,94 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
     return this.#store.lookup(workspacePath, id);
   }
 
-  async dispose(): Promise<void> {
-    this.#disposed = true;
-    this.#generation += 1;
-    this.#captureTimerRevision += 1;
-    if (this.#captureTimer !== undefined) clearTimeout(this.#captureTimer);
-    this.#captureTimer = undefined;
-    this.#captureController?.abort(new Error("Memory runtime disposed"));
-    await this.#startup;
-    await this.#captureQueue.catch(() => undefined);
+  dispose(): Promise<void> {
+    return this.#disposal ??= (async () => {
+      this.#disposed = true;
+      this.#generation += 1;
+      this.#captureTimerRevision += 1;
+      if (this.#captureTimer !== undefined) clearTimeout(this.#captureTimer);
+      this.#captureTimer = undefined;
+      await Promise.resolve();
+      this.#captureController?.abort(new Error("Memory runtime disposed"));
+      this.#abortManual(new Error("Memory runtime disposed"));
+      await Promise.allSettled([this.#startup, this.#captureQueue, ...this.#operations]);
+      if (this.#cleanupFailure) throw this.#cleanupFailure;
+      if (this.#persistenceFailure) throw this.#persistenceFailure.error;
+    })();
+  }
+
+  #assertAvailable(): void {
+    if (this.#cleanupFailure) throw this.#cleanupFailure;
+    if (this.#persistenceFailure) throw this.#persistenceFailure.error;
+    if (this.#disposed) throw new MemoryOperationStoppedError("Memory runtime disposed");
+  }
+
+  #abortManual(reason: unknown): void {
+    for (const controller of this.#manualControllers) controller.abort(reason);
+  }
+
+  #runOwned<T>(run: () => Promise<T>, writes = true): Promise<T> {
+    this.#assertAvailable();
+    const operation = Promise.resolve().then(() => { this.#assertAvailable(); return run(); }).catch((error: unknown) => {
+      if (error instanceof ResourceCleanupError) {
+        this.#cleanupFailure ??= error;
+        this.#captureController?.abort(error);
+        this.#abortManual(error);
+      } else if (writes && !(error instanceof MemoryOperationStoppedError)) this.#persistenceFailure ??= { error };
+      throw error;
+    });
+    this.#operations.add(operation);
+    return operation.finally(() => this.#operations.delete(operation));
+  }
+
+  async #checkWrite(generation: number, signal: AbortSignal, automatic = false): Promise<void> {
+    const check = () => {
+      this.#assertAvailable();
+      if (signal.aborted || generation !== this.#generation || this.#disposed || automatic && (!this.#policy.captureFuture || this.#taskActive || this.#turnActive)) throw new MemoryOperationStoppedError("Memory operation cancelled or stale");
+    };
+    check();
+    let enabled: boolean;
+    try { enabled = this.#enabled && await this.#store.isEnabled(); }
+    catch (error) {
+      this.#persistenceFailure ??= { error };
+      this.#captureController?.abort(error);
+      this.#abortManual(error);
+      throw error;
+    }
+    if (!enabled) throw new MemoryOperationStoppedError("Memory is disabled; enable it before remembering a preference");
+    check();
+  }
+
+  async #executeRequest<T extends { usage?: unknown; status?: unknown }>(ledger: RequestAttemptLedger, executor: RequestExecutor, run: (signal?: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    this.#assertAvailable();
+    signal?.throwIfAborted();
+    const accounted = ledger.snapshot().attempts.length;
+    try { return await this.#runRequest(run, { ledger, executor, ...(signal ? { signal } : {}) }); }
+    catch (error) {
+      if (error instanceof ResourceCleanupError) {
+        this.#cleanupFailure ??= error;
+        this.#captureController?.abort(error);
+        this.#abortManual(error);
+      }
+      throw error;
+    } finally {
+      for (const attempt of ledger.snapshot().attempts.slice(accounted)) {
+        if (attempt.status !== "rejected") this.#recordUsage(attempt.usage);
+      }
+    }
   }
 
   async #armCaptureTimer(): Promise<void> {
     const revision = ++this.#captureTimerRevision;
-    if (this.#disposed || !this.#policy.captureFuture || !(await this.#store.isEnabled())) return;
+    if (this.#disposed || this.#cleanupFailure || this.#persistenceFailure || !this.#policy.captureFuture || !(await this.#store.isEnabled())) return;
     let allJobs = await this.#store.loadJobs();
-    if (allJobs.some((job) => job.status === "running" && Date.parse(job.notBefore) <= Date.now())) {
-      allJobs = await this.#store.updateJobs((jobs) => jobs.map((job) => job.status === "running" && Date.parse(job.notBefore) <= Date.now()
-        ? { ...job, status: "queued" }
-        : job));
+    if (allJobs.some((job) => recoverCaptureJob(job, Date.now()) !== job)) {
+      allJobs = await this.#store.updateJobs((jobs) => jobs.map((job) => recoverCaptureJob(job, Date.now())));
     }
-    if (this.#disposed || revision !== this.#captureTimerRevision || !this.#policy.captureFuture) return;
+    if (allJobs.some((job) => job.usageComplete === false || job.status === "failed" && job.requestPending === true)) {
+      this.#usage = null;
+    }
+    if (this.#disposed || revision !== this.#captureTimerRevision || this.#taskActive || this.#turnActive || !this.#policy.captureFuture) return;
     if (this.#captureTimer !== undefined) clearTimeout(this.#captureTimer);
     const jobs = allJobs.filter((job) => job.status === "queued" || job.status === "running");
     if (jobs.length === 0) return;
@@ -858,9 +1067,10 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
   }
 
   #scheduleCaptureProcessing(wait: number, revision = ++this.#captureTimerRevision): void {
+    if (this.#disposed || this.#taskActive || this.#turnActive || !this.#policy.captureFuture) return;
     if (this.#captureTimer !== undefined) clearTimeout(this.#captureTimer);
     this.#captureTimer = setTimeout(() => {
-      if (this.#disposed || revision !== this.#captureTimerRevision) return;
+      if (this.#disposed || revision !== this.#captureTimerRevision || this.#taskActive || this.#turnActive) return;
       this.#captureTimer = undefined;
       this.#captureQueue = this.#captureQueue.catch(() => undefined).then(() => this.#processJobs());
       void this.#captureQueue.catch(() => undefined);
@@ -869,24 +1079,28 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
   }
 
   async #processJobs(): Promise<void> {
-    if (this.#disposed || !this.#policy.captureFuture || !(await this.#store.isEnabled())) return;
+    if (this.#disposed || this.#cleanupFailure || this.#persistenceFailure || this.#taskActive || this.#turnActive || !this.#policy.captureFuture || !(await this.#store.isEnabled())) return;
     const generation = this.#generation;
     let processed = 0;
-    while (processed < MAX_CAPTURE_JOBS_PER_IDLE && generation === this.#generation && this.#policy.captureFuture) {
+    while (processed < MAX_CAPTURE_JOBS_PER_IDLE && generation === this.#generation && !this.#taskActive && !this.#turnActive && this.#policy.captureFuture) {
       let claimed: MemoryCaptureJob | undefined;
       let jobs: MemoryCaptureJob[];
       try {
         jobs = await this.#store.updateJobs((current) => {
-          const index = current.findIndex((job) => job.status === "queued" && Date.parse(job.notBefore) <= Date.now());
-          if (index < 0) return current;
-          claimed = { ...current[index]!, status: "running", notBefore: new Date(Date.now() + CAPTURE_JOB_LEASE_MS).toISOString() };
-          return current.map((job, jobIndex) => jobIndex === index ? claimed! : job);
+          if (generation !== this.#generation || this.#taskActive || this.#turnActive) return current;
+          const recovered = current.map((job) => recoverCaptureJob(job, Date.now()));
+          const index = recovered.findIndex((job) => job.status === "queued" && Date.parse(job.notBefore) <= Date.now());
+          if (index < 0) return recovered;
+          claimed = { ...recovered[index]!, status: "running", requestPending: false, usageComplete: true,
+            notBefore: new Date(Date.now() + CAPTURE_JOB_LEASE_MS).toISOString() };
+          return recovered.map((job, jobIndex) => jobIndex === index ? claimed! : job);
         });
       } catch (error) {
         this.#captureState = { state: "failed", lastAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error), usage: this.#usage };
         this.#scheduleCaptureProcessing(Math.max(100, this.#idleDelayMs));
         return;
       }
+      if (jobs.some((job) => job.usageComplete === false)) this.#usage = null;
       if (!claimed) {
         const queued = jobs.filter((job) => job.status === "queued").length;
         this.#captureState = {
@@ -905,30 +1119,42 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
       const executor = new RequestExecutor(ledger);
       const timeout = AbortSignal.timeout(CAPTURE_TIMEOUT_MS);
       const signal = AbortSignal.any([controller.signal, timeout]);
+      const execute: MemoryRequestExecutor = (run) => this.#executeCaptureRequest(claimed!, ledger, executor, signal, generation, run);
       try {
-        const entries = claimed.extracted ?? await this.#extract(claimed.turn, false, signal, executor);
+        const entries = claimed.extracted ?? await this.#extract(claimed.turn, false, signal, execute);
         if (!claimed.extracted) {
           claimed.extracted = entries;
-          await this.#store.updateJobs((current) => current.map((job) => job.id === claimed!.id ? { ...job, extracted: entries } : job));
+          await this.#updateCaptureJob(claimed, (job) => ({ ...job, extracted: entries }));
         }
+        signal.throwIfAborted();
         if (generation !== this.#generation || !this.#policy.captureFuture || !(await this.#store.isEnabled())) throw new Error("Memory capture became stale");
-        await this.#stageCandidates(claimed, entries, signal, generation, executor);
-        await this.#store.updateJobs((current) => current.filter((job) => job.id !== claimed!.id));
+        await this.#stageCandidates(claimed, entries, signal, generation, execute);
+        await this.#checkWrite(generation, signal, true);
+        await this.#store.updateJobs((current) => current.filter((job) => !ownsCaptureJob(job, claimed!)));
+        await this.#checkWrite(generation, signal, true);
         this.#ownedJobIds.delete(claimed.id);
         this.#captureState = { state: "succeeded", lastAt: new Date().toISOString(), usage: this.#usage };
       } catch (error) {
-        const usageIncomplete = !ledger.snapshot().complete;
+        const usageIncomplete = claimed.usageComplete === false || !ledger.snapshot().complete;
         if (usageIncomplete) this.#usage = null;
-        const nonRetryable = usageIncomplete || error instanceof RequestUsageIncompleteError || error instanceof ResourceCleanupError;
+        const nonRetryable = claimed.requestPending === true || usageIncomplete || error instanceof RequestUsageIncompleteError || error instanceof ResourceCleanupError;
         const cancelled = !nonRetryable && (controller.signal.aborted || generation !== this.#generation || !this.#policy.captureFuture);
         const message = error instanceof Error ? error.message : String(error);
-        await this.#store.updateJobs((current) => current.map((job) => {
-          if (job.id !== claimed!.id) return job;
-          const attempts = cancelled ? job.attempts : job.attempts + 1;
-          return nonRetryable || attempts >= CAPTURE_MAX_ATTEMPTS
-            ? { ...job, attempts, status: "failed", error: message }
-            : { ...job, attempts, status: "queued", notBefore: new Date(Date.now() + this.#idleDelayMs).toISOString(), error: message };
-        }));
+        try {
+          await this.#store.updateJobs((current) => current.map((job) => {
+            if (!ownsCaptureJob(job, claimed!)) return job;
+            const attempts = cancelled ? job.attempts : job.attempts + 1;
+            const settled = { ...job, attempts, requestPending: false, usageComplete: !usageIncomplete, error: message };
+            return nonRetryable || attempts >= CAPTURE_MAX_ATTEMPTS
+              ? { ...settled, status: "failed" }
+              : { ...settled, status: "queued", notBefore: new Date(Date.now() + this.#idleDelayMs).toISOString() };
+          }));
+        } catch (storageError) {
+          this.#captureState = { state: "failed", lastAt: new Date().toISOString(), usage: this.#usage,
+            error: error instanceof ResourceCleanupError ? message
+              : `Memory capture state could not be saved: ${storageError instanceof Error ? storageError.message : String(storageError)}` };
+          return;
+        }
         this.#captureState = { state: cancelled ? "queued" : "failed", lastAt: new Date().toISOString(), error: message, usage: this.#usage };
         if (error instanceof ResourceCleanupError) return;
         if (cancelled) break;
@@ -939,7 +1165,46 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
     await this.#armCaptureTimer();
   }
 
-  async #stageCandidates(job: MemoryCaptureJob, entries: ExtractedLesson[], signal: AbortSignal, generation: number, executor: RequestExecutor): Promise<void> {
+  async #updateCaptureJob(claimed: MemoryCaptureJob, update: (job: MemoryCaptureJob) => MemoryCaptureJob): Promise<void> {
+    await this.#store.updateJobs((jobs) => {
+      if (!jobs.some((job) => ownsCaptureJob(job, claimed))) throw new Error("Memory capture ownership changed");
+      return jobs.map((job) => ownsCaptureJob(job, claimed) ? update(job) : job);
+    });
+  }
+
+  async #executeCaptureRequest<T extends { usage?: unknown; status?: unknown }>(
+    job: MemoryCaptureJob, ledger: RequestAttemptLedger, executor: RequestExecutor, signal: AbortSignal, generation: number, run: (signal?: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    await this.#checkWrite(generation, signal, true);
+    if (job.usageComplete === false || !ledger.snapshot().complete) throw new RequestUsageIncompleteError();
+    // A failed checkpoint can have committed before lock release failed. Never retry it automatically.
+    job.requestPending = true;
+    await this.#updateCaptureJob(job, (current) => ({ ...current, requestPending: true }));
+    let failure: unknown;
+    let response: T;
+    try {
+      await this.#checkWrite(generation, signal, true);
+      response = await this.#executeRequest(ledger, executor, run, signal);
+    } catch (error) {
+      failure = error;
+      throw error;
+    } finally {
+      const snapshot = ledger.snapshot();
+      const usageComplete = snapshot.complete;
+      job.usageComplete = usageComplete;
+      try {
+        await this.#updateCaptureJob(job, (current) => ({ ...current, requestPending: false, usageComplete }));
+        job.requestPending = false;
+      } catch (error) {
+        if (failure instanceof ResourceCleanupError) throw failure;
+        throw error;
+      }
+    }
+    signal.throwIfAborted();
+    return response;
+  }
+
+  async #stageCandidates(job: MemoryCaptureJob, entries: ExtractedLesson[], signal: AbortSignal, generation: number, execute: MemoryRequestExecutor): Promise<void> {
     const now = new Date().toISOString();
     const candidates: MemoryCandidate[] = entries.flatMap((entry) => {
       if (typeof entry.lesson !== "string" || typeof entry.applyWhen !== "string") return [];
@@ -975,7 +1240,8 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
         && other.lesson.toLowerCase() !== candidate.lesson.toLowerCase());
       if (storedConflict || extractedConflict) candidate.status = "review";
     }
-    await this.#store.updateCandidates((current) => [...current.filter((item) => !candidates.some((candidate) => candidate.id === item.id)), ...candidates]);
+    const beforeCommit = () => this.#checkWrite(generation, signal, true);
+    await this.#store.updateCandidates((current) => [...current.filter((item) => !candidates.some((candidate) => candidate.id === item.id)), ...candidates], { beforeCommit });
     const pending = candidates.filter((candidate) => candidate.status === "pending");
     const resolvedCandidateIds = new Set(pending.map((candidate) => candidate.id));
     const consolidated: MemoryCandidate[] = [];
@@ -986,15 +1252,14 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
         continue;
       }
       signal.throwIfAborted();
-      const response = await executor.execute("memory", () => this.#client.responses.create({
+      const response = await execute((requestSignal = signal) => this.#client.responses.create({
         model: this.#model,
         instructions: `${EXTRACTOR_INSTRUCTIONS} Consolidate duplicate or conflicting candidates. Preserve evidence-based claims only and return at most three entries.`,
         input: JSON.stringify({ scope, candidates: scoped }),
         store: false,
         max_output_tokens: 800,
         reasoning: { effort: "none" },
-      }, { signal, maxRetries: 0, timeout: 60_000 }));
-      this.#recordUsage(response.usage);
+      }, { signal: requestSignal, maxRetries: 0, timeout: 60_000 }));
       assertCompletedModelResponse(response, "memory");
       const proposed = parseExtractorOutput(response.output_text);
       if (proposed.length === 0) {
@@ -1026,13 +1291,13 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
       values.push({ lesson: candidate.lesson, applyWhen: candidate.applyWhen, kind: candidate.kind, confidence: candidate.confidence, evidence: candidate.evidence, ...(candidate.sourceSessionId ? { sourceSessionId: candidate.sourceSessionId } : {}) });
       grouped.set(candidate.scope, values);
     }
-    for (const [scope, values] of grouped) await this.#store.append(scope, job.turn.workspacePath, values);
-    await this.#store.updateCandidates((current) => current.map((candidate) => resolvedCandidateIds.has(candidate.id) ? { ...candidate, status: "consolidated" } : candidate));
+    for (const [scope, values] of grouped) await this.#store.append(scope, job.turn.workspacePath, values, { beforeCommit });
+    await this.#store.updateCandidates((current) => current.map((candidate) => resolvedCandidateIds.has(candidate.id) ? { ...candidate, status: "consolidated" } : candidate), { beforeCommit });
   }
 
-  async #extract(turn: LearnedTurn, forceUser: boolean, signal?: AbortSignal, executor?: RequestExecutor): Promise<ExtractedLesson[]> {
+  async #extract(turn: LearnedTurn, forceUser: boolean, signal?: AbortSignal, execute?: MemoryRequestExecutor): Promise<ExtractedLesson[]> {
     signal?.throwIfAborted();
-    const request = () => this.#client.responses.create({
+    const request = (requestSignal = signal) => this.#client.responses.create({
       model: this.#model,
       instructions: `${EXTRACTOR_INSTRUCTIONS}${forceUser ? " Return every accepted entry with scope user." : ""}`,
       input: JSON.stringify({
@@ -1043,9 +1308,9 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
       store: false,
       max_output_tokens: 800,
       reasoning: { effort: "none" },
-    }, { ...(signal ? { signal } : {}), maxRetries: 0, timeout: 60_000 });
-    const response = await (executor ? executor.execute("memory", request) : request());
-    this.#recordUsage(response.usage);
+    }, { ...(requestSignal ? { signal: requestSignal } : {}), maxRetries: 0, timeout: 60_000 });
+    const response = await (execute ? execute(request) : request());
+    if (!execute) this.#recordUsage(response.usage);
     assertCompletedModelResponse(response, "memory");
     return parseExtractorOutput(response.output_text).map((entry) => ({
       ...entry,

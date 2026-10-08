@@ -728,6 +728,8 @@ export class ReactAgent {
     this.#assertAvailable();
     if (this.#running) throw new Error("Cannot start a task while an agent turn is running");
     if (this.#compacting) throw new Error("Cannot start a task during context compaction");
+    await this.#learnedMemory?.beginTask?.();
+    this.#assertAvailable();
     this.#requestAttemptLedger?.reset();
     this.#taskStepsRemaining = this.#taskStepLimitEnabled ? this.#maxSteps : undefined;
     this.#taskGeneration += 1;
@@ -739,7 +741,12 @@ export class ReactAgent {
     }
   }
 
-  endTask(): void {
+  async endTask(): Promise<void> {
+    this.#clearTaskState();
+    if (!this.#disposed) await this.#learnedMemory?.endTask?.();
+  }
+
+  #clearTaskState(): void {
     this.#taskStepsRemaining = undefined;
     this.#backgroundNoticeAdmission = false;
     this.#taskGeneration += 1;
@@ -761,7 +768,7 @@ export class ReactAgent {
 
   async #dispose(): Promise<void> {
     this.#disposed = true;
-    this.endTask();
+    this.#clearTaskState();
     const reason = new Error("The agent has been disposed");
     this.#turnController?.abort(reason);
     this.#compactionController?.abort(reason);
@@ -1045,7 +1052,8 @@ export class ReactAgent {
     if (outcome === "verified") this.#assertResourceCleanup();
     const turn = this.#pendingLearnedTurn;
     this.#pendingLearnedTurn = undefined;
-    if (!turn || !this.#learnedMemory) return;
+    if (!this.#learnedMemory) return;
+    if (!turn) { await this.#learnedMemory.endTurn?.(); return; }
     if (this.#learnedMemory.finishTurn) await this.#learnedMemory.finishTurn(turn, outcome);
     else if (outcome === "verified") this.#learnedMemory.scheduleCapture(turn);
   }
