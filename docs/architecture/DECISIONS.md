@@ -26,6 +26,12 @@ MCP metadata 仅绑定当前广告工具，annotations 与供应商并行参数�
 
 stopAll 使用清理计数关闭准入，重叠清理全部返回后才允许新的显式启动；dispose 立即永久关闭，重复调用复用清理。停止与等待都等完整登记任务的 promise，不从 UI 标签判断结束。预先取消不能启动执行器，失败 job 可以正常查询并通知，`BACKGROUND_CLEANUP`／`BACKGROUND_DISPOSED` 使用现有结构化反馈，不增加重试或审批旁路。task generation、通知持久化、shell sandbox、文件观察和 runner 验证结算仍归原路径，公共参数、工具定义与 Session schema 不变。详见 [TOOLS](TOOLS.md#模型-shell-与后台任务) 与 [生命周期回归](../../tests/unit/tools/background-jobs.test.ts)。
 
+## Session 搜索返回快照
+
+第五阶段首轮明确 [SessionStore](../../src/storage/session-store.ts) 搜索缓存与返回快照的所有权。JSONL 是恢复事实的来源，LRU 保存内部投影，冷读与 warm hit 都在返回边界深度复制 summary；调用方修改自己的标题、模型、Goal、workflow、TaskProgress、Memory policy 或 lineage，不能污染后续查询。match／preview 沿用按值生成，缓存大小、失效条件、日志扫描和恢复流程保持原状，不新增事件或公共参数。
+
+使用已有 structuredClone 复制经过 JSONL 校验的普通数据，不冻结接口、不通过关闭缓存掩盖别名问题。回归绑定再次匹配、嵌套状态、fork 债务、usage unknown、实际 cache-hit／读取字节及真实 picker，见 [存储回归](../../tests/unit/storage/session-store.test.ts) 与 [选择入口](../../tests/unit/tui/session-picker.test.tsx)。其余重放／存储职责继续逐项细化，不在本轮拆分整个 SessionStore。
+
 ## 个人开发任务连续性与失败反馈
 
 参考固定 DeepSeek Harness `639ed015397290b3745d163aafe02ffee4aa3f84` 的 `compaction-basic/src/summarizer.ts`，采用结构化交接保留目标、最新纠正、失败证据和下一步，但继续使用现有 Responses 与单 Agent runner。模型摘要作为 assistant 背景；旧摘要仅做请求投影，避免将模型生成正文放入 developer 权威。八章结构验证失败时保留原 context，不以额外请求修复摘要；这保证失败关闭，不保证模型摘要语义无遗漏。

@@ -106,7 +106,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.3.14) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.15) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -181,6 +181,7 @@ TUI 命令：
 - `/new`：立即创建并进入一个新的本地 session。
 - `/fork [title]`：复制当前空闲本地 Session 已提交的末尾为独立子 Session 并进入；可选标题会替换默认分支标题，源模型必须仍然可用。
 - `/resume [query]`：搜索当前或全部工作区的标题与用户/assistant 消息，本地预览后恢复，也可批量永久删除本机 JSONL session。
+- 反复搜索和预览不会改变保存的会话标题或恢复状态。
 - `/resume` 后上下键浏览该会话保存的用户提问及带来源记录的直接命令，向下越过最新一条回到空输入。召回的斜杠命令在编辑前不打开候选菜单；`/history` 仍显示全局输入历史。
 - `/logout`：多选删除模型与对应系统凭据。
 - `/clear`：结束当前对话并清屏；下一次提问创建新 session，同时保留当前模型。

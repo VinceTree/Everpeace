@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import React from "react";
 import { render } from "ink-testing-library";
 import { SessionPicker } from "../../../src/tui/components/navigation/session-picker.js";
-import type { SessionSearchResult, SessionSummary } from "../../../src/storage/session-store.js";
+import { SessionStore, type SessionSearchResult, type SessionSummary } from "../../../src/storage/session-store.js";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
 
@@ -55,5 +58,45 @@ test("session picker toggles to all workspaces, shows local preview, and resumes
     assert.equal(selected?.id, summary.id);
   } finally {
     view.unmount();
+  }
+});
+
+test("session picker searches persisted titles after a selection callback changes its own snapshot", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-picker-snapshot-"));
+  const store = new SessionStore({ directory });
+  let unmount: (() => void) | undefined;
+  try {
+    const session = await store.create({ title: "Persisted picker title", titlePending: false, workspacePath: directory, model: summary.model });
+    const initialResult = await store.search({ query: "", workspacePath: directory });
+    const queried: string[] = [];
+    const selected: string[] = [];
+    const view = render(<SessionPicker
+      initialResult={initialResult}
+      search={async (query, allWorkspaces, offset, signal) => {
+        const result = await store.search({ query, ...(allWorkspaces ? {} : { workspacePath: directory }), offset, ...(signal ? { signal } : {}) });
+        queried.push(query);
+        return result;
+      }}
+      onSelect={(value) => {
+        selected.push(value.title);
+        if (selected.length === 1) value.title = "Caller-only title";
+      }}
+      onDelete={(ids) => store.deleteMany(ids)}
+      onCancel={() => {}}
+    />);
+    unmount = () => view.unmount();
+    await tick();
+    view.stdin.write("\r");
+    await waitFor(() => selected.length === 1);
+    view.stdin.write("persisted");
+    await waitFor(() => queried.includes("persisted") && (view.lastFrame() ?? "").includes("Persisted picker title"));
+    assert.doesNotMatch(view.lastFrame() ?? "", /Caller-only title/u);
+    view.stdin.write("\r");
+    await waitFor(() => selected.length === 2);
+    assert.deepEqual(selected, ["Persisted picker title", "Persisted picker title"]);
+    assert.equal((await store.load(session.id)).summary.title, "Persisted picker title");
+  } finally {
+    unmount?.();
+    await fs.rm(directory, { recursive: true, force: true });
   }
 });

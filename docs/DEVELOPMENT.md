@@ -76,7 +76,7 @@ pnpm exec tsx --test --test-name-pattern="cancel" tests/unit/agent/react-agent.t
 | Responses 能力与请求参数 | [provider tests](../tests/unit/providers/) |
 | 文件保护、后台命令、搜索、LSP | [tool tests](../tests/unit/tools/) |
 | 后台任务准入、清理与终态 | [background-jobs.test.ts](../tests/unit/tools/background-jobs.test.ts)、[Agent](../tests/unit/agent/react-agent.test.ts)、[runner](../tests/unit/workflow/task-runner.test.ts)；受控 worker 验证同步失败、重入、预取消、重复清理与迟到输出，真实进程和终端证据单独记录 |
-| Session schema 与恢复 | [session-store.test.ts](../tests/unit/storage/session-store.test.ts)、[app.test.tsx](../tests/unit/tui/app.test.tsx) |
+| Session schema、搜索快照与恢复 | [session-store.test.ts](../tests/unit/storage/session-store.test.ts)、[session-picker.test.tsx](../tests/unit/tui/session-picker.test.tsx)、[app.test.tsx](../tests/unit/tui/app.test.tsx)；返回引用隔离、fork 债务与 usage unknown，以及 warm hit 的实际日志读取成本 |
 | 历史、附件、分支与裁剪 | [session-history.test.ts](../tests/unit/storage/session-history.test.ts)、[session-outputs.test.ts](../tests/unit/storage/session-outputs.test.ts)、[react-agent.test.ts](../tests/unit/agent/react-agent.test.ts) |
 | `everpeace exec` 参数、JSONL 与生产运行 | [CLI tests](../tests/unit/cli/)、[exec tests](../tests/unit/exec/)、[runtime factory tests](../tests/unit/runtime/) |
 | 公开 SDK 非交互契约 | [SDK tests](../tests/unit/exec/sdk.test.ts) |

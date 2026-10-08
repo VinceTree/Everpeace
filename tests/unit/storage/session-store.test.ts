@@ -137,6 +137,88 @@ test("session search paginates newest-first and isolates corrupt JSONL files", a
   }
 });
 
+test("session search results cannot change cached titles or matching on later queries", async () => {
+  const fixture = await createFixture();
+  try {
+    const session = await fixture.store.create({ title: "Persisted title", titlePending: false, workspacePath: "C:\\repo", model });
+    const first = await fixture.store.search({ query: "persisted" });
+    assert.equal(first.total, 1);
+    const match = first.matches[0]!;
+    const expected = structuredClone(match.summary);
+    const counters = fixture.store.performanceTrace.snapshot().counters;
+    match.summary.title = "Caller-only title";
+    match.summary.model.model_name = "Caller-only model";
+
+    const next = await fixture.store.search({ query: "persisted" });
+    assert.equal(next.total, 1);
+    assert.deepEqual(next.matches[0]?.summary, expected);
+    const after = fixture.store.performanceTrace.snapshot().counters;
+    assert.equal(after.session_search_cache_hit, (counters.session_search_cache_hit ?? 0) + 1);
+    assert.equal(after.session_log_read_bytes, counters.session_log_read_bytes);
+    assert.equal((await fixture.store.search({ query: "Caller-only" })).total, 0);
+    assert.deepEqual((await fixture.store.load(session.id)).summary, expected);
+  } finally { await fixture.cleanup(); }
+});
+
+test("warm session search snapshots isolate nested recovery state and fork metadata", async () => {
+  const fixture = await createFixture();
+  try {
+    const parent = await fixture.store.create({ title: "Source", titlePending: false, workspacePath: "C:\\repo", model: { ...model, request_settings: { reasoningEffort: "high", maxOutputTokens: 16_384 } } });
+    const at = "2026-09-16T00:00:00.000Z";
+    await fixture.store.setGoal(parent.id, {
+      goal_id: "goal", objective: "Preserve recovery facts", status: "active", token_budget: 100,
+      tokens_used: 20, usage_complete: false, time_used_seconds: 3, created_at: at, updated_at: at,
+    });
+    await fixture.store.setWorkflow(parent.id, {
+      task_id: "task", task_source: "session_resume", phase: "blocked", repair_attempts: 1, max_repair_attempts: 3,
+      changed_paths: ["src/code.ts"], checkpoint_available: false, pending_verification: true, result: "failed", updated_at: at,
+      prior_unverified: { task_id: "earlier-task", result: "unverified", reason: "Checks still pending" },
+      last_verification_suite: {
+        status: "failed", results: [{
+          command: { id: "test", label: "Test", command: "pnpm test", tier: "full", timeoutMs: 1_000 },
+          passed: false, exitCode: 1, stdout: "", stderr: "", durationMs: 1, timedOut: false,
+        }], skipped: [{ id: "build", label: "Build", command: "pnpm build", tier: "full", timeoutMs: 1_000 }],
+      },
+    });
+    await fixture.store.setTaskProgress(parent.id, { plan: [{ step: "Verify", status: "in_progress" }], updated_at: at });
+    await fixture.store.setMemoryPolicy(parent.id, { readExisting: false, captureFuture: false });
+    await fixture.store.appendUsage(parent.id, null);
+    await fixture.store.appendUsage(parent.id, { input_tokens: 5, output_tokens: 2, total_tokens: 7 });
+    const child = await fixture.store.fork(parent.id);
+    const cold = await fixture.store.search({ query: "" });
+    const expected = cold.matches.map((match) => structuredClone(match.summary));
+    const warm = await fixture.store.search({ query: "" });
+    const source = warm.matches.find((match) => match.summary.id === parent.id)?.summary;
+    const branch = warm.matches.find((match) => match.summary.id === child.id)?.summary;
+    assert.ok(source?.model.request_settings && source.goal && source.workflow?.prior_unverified && source.workflow.last_verification_suite);
+    assert.ok(branch?.lineage && branch.task_progress && branch.memory_policy && branch.workflow);
+    const counters = fixture.store.performanceTrace.snapshot().counters;
+    source.model.request_settings.reasoningEffort = "off";
+    source.goal.status = "complete";
+    source.goal.usage_complete = true;
+    source.workflow.prior_unverified.result = "failed";
+    source.workflow.last_verification_suite.results[0]!.command.command = "caller-only command";
+    source.workflow.last_verification_suite.skipped[0]!.label = "caller-only label";
+    branch.lineage.parent_session_id = "caller-only-parent";
+    branch.fork_pending_resume = false;
+    branch.task_progress.plan[0]!.status = "completed";
+    branch.memory_policy.readExisting = true;
+    branch.workflow.changed_paths.length = 0;
+    branch.workflow.pending_verification = false;
+
+    const next = await fixture.store.search({ query: "" });
+    assert.deepEqual(next.matches.map((match) => match.summary), expected);
+    const after = fixture.store.performanceTrace.snapshot().counters;
+    assert.equal(after.session_search_cache_hit, (counters.session_search_cache_hit ?? 0) + 2);
+    assert.equal(after.session_log_read_bytes, counters.session_log_read_bytes);
+    const restarted = new SessionStore({ directory: fixture.directory });
+    assert.deepEqual((await restarted.list()).sessions, expected);
+    for (const summary of expected) assert.deepEqual((await restarted.load(summary.id)).summary, summary);
+    assert.equal((await restarted.load(parent.id)).usage.complete, false);
+    assert.deepEqual((await restarted.load(child.id)).usage, { input_tokens: 0, output_tokens: 0, context_tokens: 0, complete: true });
+  } finally { await fixture.cleanup(); }
+});
+
 test("session model request settings round-trip while legacy model refs stay valid", async () => {
   const fixture = await createFixture();
   try {

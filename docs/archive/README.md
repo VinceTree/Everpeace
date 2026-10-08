@@ -9,5 +9,6 @@
 - [整体框架与验证基线交接](HANDOFF_FRAMEWORK_BASELINE.md)、[对应计划](PLAN_FRAMEWORK_BASELINE.md)：完整 TSX 类型覆盖、依赖边界与架构记录，以及第一阶段交付证据。
 - [任务与会话协调交接](HANDOFF_APPLICATION_COORDINATION.md)、[对应计划](PLAN_APPLICATION_COORDINATION.md)：应用协调状态提取、TUI 竞态、资源清理与跨平台验收记录。
 - [Agent 工具目录交接](HANDOFF_STEP_TOOL_CATALOG.md)、[对应计划](PLAN_STEP_TOOL_CATALOG.md)：逻辑 step 广告／准入／binding 与并发归属，以及离线和交付验收记录。
+- [后台任务生命周期交接](HANDOFF_BACKGROUND_JOB_LIFECYCLE.md)、[对应计划](PLAN_BACKGROUND_JOB_LIFECYCLE.md)：登记／准入、原子终态、重复清理与迟到输出，以及第四阶段离线和交付验收记录。
 
 新 Session 默认只读 [当前交接](../HANDOFF.md) 和 [当前计划](../PLAN.md)，仅在追溯历史时查阅这里。归档正文中的旧相对路径以当时 `docs/` 所在位置理解；当前文件定位以 [项目地图](../architecture/PROJECT_MAP.md) 为准。

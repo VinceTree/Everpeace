@@ -106,7 +106,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.3.14) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.15) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -181,6 +181,7 @@ TUI commands:
 - `/new`: Immediately create and enter a new local session.
 - `/fork [title]`: Copy the committed end of the current idle local Session into an independent child and enter it; an optional title replaces the default fork title, and the source model must still be available.
 - `/resume [query]`: Search titles and user/assistant messages in this workspace or all workspaces, preview, resume, or permanently batch-delete local JSONL sessions.
+- Repeated searches and previews preserve the saved session title and recovery state.
 - After `/resume`, Up/Down browse that session's saved user prompts and direct commands with source metadata; Down past the newest entry returns to an empty draft. Recalled slash commands do not open the command menu until edited. `/history` still shows global input history.
 - `/logout`: Select and remove models with their operating system credentials.
 - `/clear`: End the current conversation and start a fresh session on the next prompt while retaining the active model.

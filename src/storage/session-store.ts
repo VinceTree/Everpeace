@@ -1664,7 +1664,8 @@ export class SessionStore implements SessionStoreLike {
           .slice(previewStart, previewStart + 3)
           .map((message) => ({ kind: message.kind, snippet: searchSnippet(message.text, normalizedQuery) }));
         matches.push({
-          summary: projection.summary,
+          // Returned snapshots belong to the caller, not the cached recovery projection.
+          summary: structuredClone(projection.summary),
           ...(match === undefined ? {} : { match }),
           ...(preview.length === 0 ? {} : { preview }),
         });

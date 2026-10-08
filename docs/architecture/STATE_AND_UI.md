@@ -82,7 +82,7 @@
 
 `SessionStore.search` 流式读取并校验 JSONL，只投影当前标题以及 user/assistant conversation message；tool output、模型 context 和 learned Memory 不参与匹配。匹配采用不区分大小写的字面量比较，每个 Session 只返回一项，按最新活动时间排序，并提供命中片段及最多三条本地对话预览。每页最多 50 项，界面显示八行；输入有 200ms debounce，新的 query/scope/page 会取消旧搜索并忽略迟到结果。
 
-搜索投影只存在进程内，采用 16 MiB LRU 上限；Session 追加和删除使对应条目失效，读取后再次核对文件元数据，避免缓存并发变化。搜索不创建持久索引或 schema migration；损坏 Session 单独跳过，未完成末行沿用现有兼容规则。删除仍使用原确认流程和 Session 写队列，搜索结果不改变恢复语义。
+搜索投影只存在进程内，采用 16 MiB LRU 上限；Session 追加和删除使对应条目失效，读取后再次核对文件元数据，避免缓存并发变化。冷读和缓存命中的返回 summary 都深度复制，调用方可以修改自己的快照，但不能改写缓存中的标题、模型设置、Goal、workflow 债务、TaskProgress、Memory policy 或 lineage。match 与 preview 按值生成；复制不增加日志扫描，后续搜索仍从内部投影匹配。搜索不创建持久索引或 schema migration；损坏 Session 单独跳过，未完成末行沿用现有兼容规则。删除仍使用原确认流程和 Session 写队列，搜索结果不改变恢复语义。
 
 ### Session 分支
 

@@ -30,6 +30,8 @@ Everpeace 是 DeepSeek 优先、Windows 优先的个人开发 CLI；保留官方
 
 Session 存储持久事实；timeline、模型 context、workflow 元数据保持既有分离，界面从它们建立状态投影。Plan 批准属于当前进程的会话／Agent 协调状态，文件观察属于工具实例，活动进程属于任务；恢复、fork 或历史文本不能重建这些授权和资源。后续按状态所有者提取协调模块，保持 runner 与存储为单一实现，不按文件行数拆分。详细生命周期见 [RUNTIME](RUNTIME.md) 与 [STATE_AND_UI](STATE_AND_UI.md)。
 
+Session 搜索的 LRU 投影归 SessionStore 持有，调用方取得深度隔离的 summary 快照；返回值中的临时修改不得改变后续匹配或恢复状态。该边界由 [存储回归](../../tests/unit/storage/session-store.test.ts) 与 [picker 回归](../../tests/unit/tui/session-picker.test.tsx) 验证。
+
 ## 目录职责
 
 | 路径 | 职责与依赖边界 |
