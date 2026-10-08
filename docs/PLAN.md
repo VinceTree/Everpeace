@@ -17,7 +17,7 @@
 - [x] 覆盖嵌套恢复状态、fork、usage、缓存读取成本和 picker 回调。
 - [x] 完成扩大恢复回归、同步文档及串行 typecheck → lint → test → build，首败停止；记录类型首败修正和 lint 缺项。
 - [x] 检查差异、文档链接和原有内容保留情况，完成交接。
-- [ ] 按新增授权更新版本、重新执行交付门禁、提交并推送 main；核对双平台 CI 与 Release 未变，不推送 tag。
+- [x] 按新增授权更新版本、重新执行交付门禁、提交并推送 main；双平台 Test CI 通过，Release workflow 实际跳过、Release 未变，未推送 tag；证据见交接。
 
 ## 后续顺序
 

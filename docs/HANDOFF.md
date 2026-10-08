@@ -7,7 +7,7 @@
 - 第五阶段开始 main HEAD：`6484320a03dfffa4e21755b2cff0de03a7b6903b`，与 origin/main 同步；package.json 与双语 README 为 `0.3.14`。
 - 用户要求开始第五阶段，随后明确授权更新版本、提交并推送，禁止更新 Release。首轮只修复 Session 搜索结果与内部缓存共享可变恢复状态的问题；继续使用现有 SessionStore、JSONL、LRU 与恢复路径。
 - 公共 CLI/SDK 参数、Session schema、匹配规则、分页、缓存大小和用户操作流程不变。Session 持有持久事实，搜索缓存持有内部投影，调用方拥有独立返回快照；搜索和预览不授予权限、文件观察或验证成功。
-- 本次交付将 package.json 与双语 README 更新为 `0.3.15`，提交均带 `[skip publish]`，只推送 main，不打 tag 或创建／更新 Release，不调用真实模型。已有 GitHub 凭据授权仍仅限在内存中用于 Release／CI 只读核对。
+- 本次交付已将 package.json 与双语 README 更新为 `0.3.15`，提交均带 `[skip publish]`，只推送 main，不打 tag 或创建／更新 Release，不调用真实模型。已有 GitHub 凭据授权仍仅限在内存中用于 Release／CI 只读核对。
 
 ## 第五阶段首轮实现
 
@@ -33,13 +33,15 @@
 
 版本更新后重新在宿主 Node 环境串行执行：pnpm typecheck 通过 → lint 脚本缺项 → pnpm test 857 项、854 通过、0 失败、3 个既有跳过，耗时 61,548.1775 ms → pnpm build 通过，构建产物已重新生成。日志为宿主临时目录 everpeace-search-isolation-delivery-test-20261008.log。git diff --check、15 份修改／新增文件空白及 13 份文档的 473 个本地链接／标题检查通过；package.json 与双语 README 版本一致。
 
-推送前 main 为上述基线，远端没有 v0.3.15 tag；27 条 Release 的 ID、tag 与 updated_at 已取得只读基线，推送后逐项比较。实际 Windows／Linux CI 与交付结果待推送后补记。
+第五阶段实现与版本更新已提交并推送 main：`ca93704e328c8cac454fedd63a3db4dc8df65826`，标题为 `fix: isolate session search snapshots [skip publish]`。远端 main 精确匹配该提交；推送前后 27 条 Release 的 ID、tag 与 updated_at 逐项一致，远端 v0.3.15 tag 不存在。[Release workflow](https://github.com/VinceTree/Everpeace/actions/runs/37788803971) 与 Publish version job 均实际 skipped；没有创建或更新 Release。
+
+[Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37788803972) 对上述实现提交的 Windows／Linux jobs 均 success，包含 typecheck、完整 test、build 与差异检查。Windows 857 项、853 通过、0 失败、4 跳过，耗时 198,367.7301 ms；Linux 857 项、854 通过、0 失败、3 跳过，耗时 100,948.783777 ms。Windows hosted runner 跳过原生 sandbox 真实初始化等既有平台项目，证据边界见 [开发指南](DEVELOPMENT.md#独立测试-ci-与证据范围)。收尾只更新交接和计划，不改变已验收的实现、测试或 package.json。
 
 ## 独立验收与后续
 
 本轮证据仅验证搜索返回对象、缓存和恢复事实的隔离，不代表完成所有存储优化。下一轮再细化 Session 重放／状态投影、usage、历史附件或 Memory 中的一个具体问题，随后进入终端交互；第四阶段原生进程取消的 500ms fallback 仍作为独立事项，不混入存储修复。
 
-真实 Windows Terminal 手工验收仍 pending：Ctrl+C、后台进程树、Plan 修订输入、resize／scrollback、恢复与单 prompt。Windows LSP backend 网络隔离门禁仍 unavailable，失败不回退宿主；live 评测需要独立授权和数值预算。交付 CI 待核对，不能把上轮结果当作当前验证。
+真实 Windows Terminal 手工验收仍 pending：Ctrl+C、后台进程树、Plan 修订输入、resize／scrollback、恢复与单 prompt。Windows LSP backend 网络隔离门禁仍 unavailable，失败不回退宿主；live 评测需要独立授权和数值预算。离线与双平台 CI 证据不替代真实终端验收。
 
 ## 用户原有内容
 
