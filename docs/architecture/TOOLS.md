@@ -18,7 +18,7 @@
 | 人工变更审阅 | [workspace-review.ts](../../src/tools/workspace-review.ts)、[workspace-diff-surface.tsx](../../src/tui/components/screens/workspace-diff-surface.tsx) | [workspace-review.test.ts](../../tests/unit/tools/workspace-review.test.ts)、[daily-use-surfaces.test.tsx](../../tests/unit/tui/daily-use-surfaces.test.tsx) |
 | 公共网页 | [web.ts](../../src/tools/web.ts) | [web.test.ts](../../tests/unit/tools/web.test.ts) |
 
-`ReactAgent` 负责广告工具、解析参数、观察读取、审批和 dispatch；工具实现不自行决定任务成功。新增工具要同时检查快照广告、Plan/权限、取消、结果持久化与最终变更追踪，不能只添加 schema。
+`ReactAgent` 使用 [StepToolCatalog](../../src/agent/step-tool-catalog.ts) 提供广告与准入，负责解析参数、观察读取、审批和 dispatch；工具实现不自行决定任务成功。新增工具要同时检查快照广告、Plan/权限、取消、结果持久化与最终变更追踪，不能只添加 schema。
 
 ## 文件读取与版本
 
@@ -133,6 +133,10 @@ README、HANDOFF 等按任务需要读取；规则链并不意味着自动装入
 模型 `bash` 使用固定原生后端，不能在 sandbox 启动失败后回退宿主执行。shell 网络和公共 web 开关分别管理，审批与命令规则必须在每次执行时检查。用户主动输入的 `!` 是另一条 PTY 路径，不代表模型 shell 也有宿主权限。
 
 `start_background`、`poll_background`、`stop_background` 复用模型 shell 的权限及执行器：最多两个运行任务，每项默认十分钟，没有交互 stdin。启动立即绑定 coding task 的 AbortSignal，poll 返回运行首尾预览和终态结果。
+
+[BackgroundJobManager](../../src/tools/background-jobs.ts) 在调用执行器之前登记占位与完成 promise，重入启动也受同一个限额约束。预先取消不调用执行器；同步启动抛错与异步拒绝都保留一个失败 job，沿用 poll 与完成通知，不自动重试。结果、终态与完成时间在同一次结算中发布，解绑父信号后通知观察者；观察者异常不改变任务结果。运行和取消清理期间的预览继续保留，终态后忽略迟到输出，快照不共享内部结果或预览数组。
+
+stop、waitAll 和 stopAll 等待已登记任务的完成 promise。stopAll 期间的新 start 返回 `BACKGROUND_CLEANUP`；重叠清理全部完成后才恢复准入。dispose 立即永久关闭启动，重复调用共用清理 promise；之后 start 返回 `BACKGROUND_DISPOSED`。等待中的取消也必须先等 worker 结束，空任务列表仍尊重已取消的信号。管理器等待既有执行器的结束边界，进程树停止仍由 Bash／原生后端实现负责。生命周期及 Agent／runner 配对证据见 [管理器回归](../../tests/unit/tools/background-jobs.test.ts)、[Agent 回归](../../tests/unit/agent/react-agent.test.ts) 和 [runner 回归](../../tests/unit/workflow/task-runner.test.ts)。
 
 前台 timeout JSON 与后台终态 result 都增加 `COMMAND_TIMEOUT` 和修正提示，保留 stdout/stderr 与原超时字段；提示先检查部分输出及已产生的副作用，不盲目重放。后台数量／通知积压上限提供 `BACKGROUND_LIMIT`，旧 job ID 明确 `BACKGROUND_JOB_UNAVAILABLE`；搜索过期 continuation 提供 `SEARCH_CONTINUATION_EXPIRED`。这些提示不增加自动 retry、审批或模型请求，取消、持久失败和预算停止保持原有收束顺序。
 

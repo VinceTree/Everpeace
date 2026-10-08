@@ -75,6 +75,9 @@ export function parseBackgroundJobId(argumentsJson: string): string | undefined 
 export class BackgroundJobManager {
   readonly #jobs = new Map<string, BackgroundJob>();
   readonly #run: (command: string, signal: AbortSignal, timeoutMs: number, onOutput: (output: BashOutputPreview) => void) => Promise<BashResult>;
+  #cleanupDepth = 0;
+  #disposed = false;
+  #disposal: Promise<BackgroundJobSnapshot[]> | undefined;
 
   constructor(run: (command: string, signal: AbortSignal, timeoutMs: number, onOutput: (output: BashOutputPreview) => void) => Promise<BashResult>) {
     this.#run = run;
@@ -85,13 +88,21 @@ export class BackgroundJobManager {
     parentSignal?: AbortSignal,
     onSettled?: (completion: BackgroundJobCompletion) => void,
   ): BackgroundJobSnapshot {
+    parentSignal?.throwIfAborted();
+    if (this.#disposed) {
+      throw new ToolFeedbackError("BACKGROUND_DISPOSED", "The background job manager has been disposed", "Start work only through the current active Agent. Disposed jobs cannot be restarted.");
+    }
+    if (this.#cleanupDepth > 0) {
+      throw new ToolFeedbackError("BACKGROUND_CLEANUP", "Background jobs are still cleaning up", "Wait for cleanup to finish before explicitly starting new work. Do not retry the interrupted command automatically.");
+    }
     if ([...this.#jobs.values()].filter((job) => job.status === "running").length >= MAX_RUNNING_JOBS) {
       throw new ToolFeedbackError("BACKGROUND_LIMIT", `At most ${MAX_RUNNING_JOBS} background jobs may run at once`, "Poll or wait for the running jobs to finish before starting another command.");
     }
     const controller = new AbortController();
     const abortFromParent = () => controller.abort(parentSignal?.reason ?? new Error("Task cancelled"));
-    parentSignal?.addEventListener("abort", abortFromParent, { once: true });
-    if (parentSignal?.aborted) abortFromParent();
+    let accept!: (result: BashResult | PromiseLike<BashResult>) => void;
+    let reject!: (error: unknown) => void;
+    const execution = new Promise<BashResult>((resolve, fail) => { accept = resolve; reject = fail; });
     const job: BackgroundJob = {
       job_id: randomUUID(),
       command,
@@ -101,35 +112,25 @@ export class BackgroundJobManager {
       promise: Promise.resolve(),
       ...(parentSignal ? { detachParent: () => parentSignal.removeEventListener("abort", abortFromParent) } : {}),
     };
-    job.promise = this.#run(command, controller.signal, DEFAULT_JOB_TIMEOUT_MS, (output) => {
-      job.preview = { ...output, headLines: [...output.headLines], tailLines: [...output.tailLines] };
-    })
-      .then((result) => {
-        job.result = { ...result, ...commandFailureFeedback(result) };
-        job.status = result.timedOut ? "timed_out" : result.cancelled ? "cancelled" : result.error || result.exitCode !== 0 ? "failed" : "completed";
-      })
-      .catch((error: unknown) => {
-        job.result = { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: controller.signal.aborted, error: error instanceof Error ? error.message : String(error) };
-        job.status = controller.signal.aborted ? "cancelled" : "failed";
-      })
-      .finally(() => {
-        job.finished_at = new Date().toISOString();
-        job.detachParent?.();
-        delete job.detachParent;
-        try {
-          onSettled?.({
-            job_id: job.job_id,
-            status: job.status as Exclude<BackgroundJobStatus, "running">,
-            exit_code: job.result?.exitCode ?? null,
-            finished_at: job.finished_at,
-          });
-        } catch {
-          // Settlement observers cannot change command completion or cleanup.
-        } finally {
-          this.#prune();
-        }
-      });
+    job.promise = execution.then(
+      (result) => this.#settle(job, result, onSettled),
+      (error: unknown) => this.#settle(job, {
+        stdout: "", stderr: "", exitCode: null, signal: null,
+        cancelled: controller.signal.aborted,
+        error: error instanceof Error ? error.message : String(error),
+      }, onSettled),
+    );
+    // Reserve both admission and the cleanup promise before invoking host code.
     this.#jobs.set(job.job_id, job);
+    parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+    if (parentSignal?.aborted) abortFromParent();
+    try {
+      controller.signal.throwIfAborted();
+      accept(this.#run(command, controller.signal, DEFAULT_JOB_TIMEOUT_MS, (output) => {
+        if (job.status !== "running") return;
+        job.preview = { ...output, headLines: [...output.headLines], tailLines: [...output.tailLines] };
+      }));
+    } catch (error) { reject(error); }
     return this.#snapshot(job);
   }
 
@@ -143,32 +144,49 @@ export class BackgroundJobManager {
     if (!job) return undefined;
     if (job.status === "running") {
       job.controller.abort(new Error("Background job stopped"));
-      await job.promise;
     }
+    await job.promise;
     return this.#snapshot(job);
   }
 
   async waitAll(signal?: AbortSignal): Promise<BackgroundJobSnapshot[]> {
-    const running = [...this.#jobs.values()].filter((job) => job.status === "running");
-    if (running.length === 0) return [...this.#jobs.values()].map((job) => this.#snapshot(job));
-    const abort = () => running.forEach((job) => job.controller.abort(signal?.reason ?? new Error("Cancelled")));
+    const jobs = [...this.#jobs.values()];
+    const abort = () => jobs.filter((job) => job.status === "running").forEach((job) => job.controller.abort(signal?.reason ?? new Error("Cancelled")));
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
-    try { await Promise.all(running.map((job) => job.promise)); }
+    try { await Promise.all(jobs.map((job) => job.promise)); }
     finally { signal?.removeEventListener("abort", abort); }
     signal?.throwIfAborted();
     return [...this.#jobs.values()].map((job) => this.#snapshot(job));
   }
 
   async stopAll(reason: unknown = new Error("Background jobs stopped")): Promise<BackgroundJobSnapshot[]> {
-    const running = [...this.#jobs.values()].filter((job) => job.status === "running");
-    for (const job of running) job.controller.abort(reason);
-    await Promise.allSettled(running.map((job) => job.promise));
-    return [...this.#jobs.values()].map((job) => this.#snapshot(job));
+    this.#cleanupDepth++;
+    try {
+      const jobs = [...this.#jobs.values()];
+      for (const job of jobs) if (job.status === "running") job.controller.abort(reason);
+      await Promise.allSettled(jobs.map((job) => job.promise));
+      return [...this.#jobs.values()].map((job) => this.#snapshot(job));
+    } finally { this.#cleanupDepth--; }
   }
 
   dispose(): Promise<BackgroundJobSnapshot[]> {
-    return this.stopAll(new Error("Agent disposed"));
+    this.#disposed = true;
+    return this.#disposal ??= this.stopAll(new Error("Agent disposed"));
+  }
+
+  #settle(job: BackgroundJob, result: BashResult, onSettled?: (completion: BackgroundJobCompletion) => void): void {
+    job.result = { ...result, ...commandFailureFeedback(result) };
+    const status = result.timedOut ? "timed_out" : result.cancelled ? "cancelled" : result.error || result.exitCode !== 0 ? "failed" : "completed";
+    job.finished_at = new Date().toISOString();
+    job.status = status;
+    job.detachParent?.();
+    delete job.detachParent;
+    try {
+      onSettled?.({ job_id: job.job_id, status, exit_code: result.exitCode, finished_at: job.finished_at });
+    } catch {
+      // Settlement observers cannot change command completion or cleanup.
+    } finally { this.#prune(); }
   }
 
   #prune(): void {

@@ -78,6 +78,8 @@ dispatch 仍检查实时权限、当前 step 目录、停止状态和取消。Pl
 
 活动 coding task 为每次 runner invocation 分配 generation。后台命令完成只排入该 generation 的元数据通知（job ID、终态、退出码、完成时间）；下一个普通 step 在工具结果配对和 steering 之后，通过既有 durable context 通道保存通知，成功后才确认出队，正文仍须用 `poll_background` 读取。通知不会唤醒空闲 Session 或额外发请求；任务结束会丢弃未送达项，迟到 callback 也因 generation 失效。运行中 job 与未送达通知合计最多 20 项，既有同时运行两个命令的限制继续生效。
 
+后台管理器先登记任务及完成 promise，再调用生产执行器；同步启动失败也保留可查询的失败 job 并沿用一次完成通知。stopAll 清理期间关闭启动，dispose 永久关闭；终态后不接受迟到预览。runner 的等待与取消沿用该完成边界，worker 未结束时保持任务准入占用，并阻止最终验证。具体状态契约见 [后台任务](TOOLS.md#模型-shell-与后台任务)，受控 worker 的真实 Agent／runner 回归见 [task runner](../../tests/unit/workflow/task-runner.test.ts)。
+
 采样默认最多两次重试；退避支持 `Retry-After` 和取消。普通重试不包含永久错误或上下文超限，也不重新执行已完成工具。传输 fallback 只在尚无流事件且端点明确拒绝 streaming 时使用。
 
 每个 attempt 有取消控制器；SSE 默认 60 秒空闲超时，结束时关闭 iterator/transport，前一次尚在运行时不能开始重试。仅可靠 reasoning delta 显示 Thinking，否则展示通用等待。

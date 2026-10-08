@@ -882,6 +882,56 @@ test("background completion is durably injected once at the next step", async ()
   assert.doesNotMatch(JSON.stringify(notices), /built/u);
 });
 
+test("synchronous background launch failure remains pollable and emits one durable notice", async (t) => {
+  const persisted: Array<Record<string, unknown>> = [];
+  let requests = 0, starts = 0;
+  let jobId: string | undefined;
+  const agent = new ReactAgent({
+    model: "offline-background-failure",
+    client: { responses: { async create(params) {
+      requests++;
+      if (requests === 1) return { id: "start", output_text: "", output: [{ type: "function_call", name: "start_background", call_id: "start-1", arguments: '{"command":"broken"}' }] };
+      const input = params.input as Array<Record<string, unknown>>;
+      if (requests === 2) {
+        const started = input.find((item) => item.type === "function_call_output" && item.call_id === "start-1");
+        assert.ok(started);
+        const result = JSON.parse(String(started.output)) as { status: string; job: { job_id: string } };
+        assert.equal(result.status, "ok");
+        assert.ok(result.job.job_id);
+        jobId = result.job.job_id;
+        return { id: "poll", output_text: "", output: [{ type: "function_call", name: "poll_background", call_id: "poll-1", arguments: JSON.stringify({ job_id: jobId }) }] };
+      }
+      const polled = input.find((item) => item.type === "function_call_output" && item.call_id === "poll-1");
+      assert.ok(polled);
+      const result = JSON.parse(String(polled.output)) as { job: { job_id: string; status: string; finished_at: string; result: { error: string } } };
+      assert.equal(result.job.job_id, jobId);
+      assert.equal(result.job.status, "failed");
+      assert.ok(result.job.finished_at);
+      assert.equal(result.job.result.error, "fixture launch failed");
+      return { id: "done", output_text: "done", output: [] };
+    } } },
+    io: {
+      async confirmBash() { return true; },
+      async runBash() { throw new Error("Unexpected foreground fallback"); },
+      runBackgroundBash() { starts++; throw new Error("fixture launch failed"); },
+      writeAssistant() {},
+    },
+    async onHistoryAppend(items) { persisted.push(...items); },
+  });
+  t.after(() => agent.dispose());
+  await agent.beginTask({ mode: "default", source: "user" });
+  await agent.runTurn("Start and inspect the failing background command.");
+  await agent.waitForBackgroundJobs();
+  agent.endTask();
+  assert.equal(starts, 1);
+  assert.equal(requests, 3);
+  const notices = persisted.filter((item) => item.role === "developer" && String(item.content).includes("Host background-job completion notice"));
+  assert.equal(notices.length, 1);
+  assert.ok(String(notices[0]?.content).includes(`- ${jobId}: failed; exit code unavailable; finished `));
+  assert.doesNotMatch(JSON.stringify(notices), /fixture launch failed/u);
+  assert.deepEqual(persisted.filter((item) => item.type === "function_call_output").map((item) => item.call_id), ["start-1", "poll-1"]);
+});
+
 test("background arrivals during notice persistence remain queued in order", async () => {
   let resolveSecond!: (result: BashResult) => void;
   let persistenceStarted!: () => void;

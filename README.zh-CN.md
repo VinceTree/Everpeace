@@ -106,7 +106,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.3.13) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.14) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -223,7 +223,7 @@ Skills 从工作区到仓库根的 `.agents/skills`、项目 `.codex/skills`、`
 - Git 状态使用 NUL 分隔的结构化结果解析，并把变更文件指纹与任务开始时的既有脏状态比较，因此模型 shell 对已有脏文件的再次修改、未跟踪文件和中文路径也会进入同一验证闭环。追踪超限、非 Git 项目的 shell 改动、审批拒绝或修复次数耗尽时都不能报告为已验证。模型可用 `list_workspace_changes` 捕获 staged、unstaged 和 untracked 列表，再用 `read_workspace_change` 惰性读取有界详情；列表快照刷新后旧引用会明确过期。既有 `workspace_status`、`workspace_diff` 调用保持兼容；审阅内容不授予写权限，也不表示变更归 Agent 所有。`/undo` 继续只覆盖未被再次修改的结构化编辑。
 - 模型回复结束与工作流验证完成采用不同状态。宿主会显示观察到的路径和完整检查结果，只有真正验证通过的 coding 回合才能进入成功经验提炼；活动 Goal 的完成请求会等宿主接受最终验证后才落盘。Session JSONL 只保存兼容的结果元数据，不保存检查输出、错误正文、文件内容或撤销检查点。
 - `/fork` 仅在当前本地 Session 完全空闲且其模型仍可用时接受。它固定源 EOF，复制 context、timeline、模型、聊天 Memory policy、标为继承的 TaskProgress 和最多 16 份保留输出附件，并在最后原子发布独立子副本；附件沿用 opaque ID，但父子各自拥有。usage、Goal、修复次数、审批、undo/文件观察及旧验证成功证据被重置，已变更路径和待验证债务保留。子 Session 持久保存 `fork_pending_resume`：首次及任何未结算后的 coding 输入继续使用 Session resume 语义，直到任务结算为 `verified` 或 `no_changes`；Plan、查看命令、取消、错误、限制停止及 failed/unverified 结果不会消耗它，也不会自动续跑 Goal。
-- 模型最多可在相同 sandbox 和权限策略中运行两个非交互后台命令，提供有界的运行中预览，并可查询或停止；默认上限十分钟，由当前 coding task 持有。终态元数据会在下一普通 step 持久送达模型，输出仍通过 poll 获取；运行 job 与未送达通知共用 20 个 task-local 槽位。取消、权限收紧、预算停止、异常、最终验证或销毁 Agent 都会终止并等待进程树、丢弃待送通知并忽略迟到 callback。后台任务只存在当前进程，不随 Session 恢复。
+- 模型最多可在相同 sandbox 和权限策略中运行两个非交互后台命令，提供有界的运行中预览，并可查询或停止；默认上限十分钟，由当前 coding task 持有。终态元数据会在下一普通 step 持久送达模型，输出仍通过 poll 获取；运行 job 与未送达通知共用 20 个 task-local 槽位。取消、权限收紧、预算停止、异常、最终验证或销毁 Agent 都会终止并等待进程树、丢弃待送通知并忽略迟到 callback。后台任务只存在当前进程，不随 Session 恢复。启动失败也保留可查询的 job 结果；清理期间或 Agent 销毁后拒绝新启动，终态预览忽略迟到输出。
 - 维护者可使用 `pnpm benchmark:campaign -- --config <campaign.json> --preflight|--prove-fixtures|--live`。preflight 会在无真实模型请求的情况下启动命名 checkout 的生产 adapter 与固定 dsh profile，核对源码/build digest、请求边界、固定 `high`/32K 设置和清理；`taskIds` 可固定 3 项 smoke 或完整 10 项计划。详见 [benchmark 文档](docs/BENCHMARKING.md)。固定 dsh adapter 会核对完整源码 revision，并通过专用 profile 在上游请求边界计量。Live 模式需要另行授权、已注册模型，以及每任务和 campaign 数值 token 预算，不会自动发起真实请求。
 - 普通聊天中，`read-only` 和 `ask` 会在每个网页请求前审批；`workspace-write` 与 `full-access` 跳过该确认。Plan 模式把已开启的公共网页访问视为只读调研并跳过逐次确认，关闭网页工具时仍会拒绝请求。搜索词会先发送给 Bing，失败时回退到 DuckDuckGo；打开搜索结果时会向对应网站发送请求。
 - 网页读取只允许公共 HTTP/HTTPS 地址，会逐次检查重定向、阻止本机和内网地址，并限制超时与响应大小；返回内容始终作为不可信数据处理。

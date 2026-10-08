@@ -1,46 +1,45 @@
 # 当前交接
 
-更新日期：2026-10-08。先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 选择专题。第二阶段任务与会话协调的 [交接](archive/HANDOFF_APPLICATION_COORDINATION.md) 和 [计划](archive/PLAN_APPLICATION_COORDINATION.md) 已归档；更早验证见 [归档索引](archive/README.md)。
+更新日期：2026-10-08。先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 选择专题。第三阶段工具目录的 [交接](archive/HANDOFF_STEP_TOOL_CATALOG.md) 和 [计划](archive/PLAN_STEP_TOOL_CATALOG.md) 已归档；更早证据见 [归档索引](archive/README.md)。
 
 ## 当前基线与范围
 
-- 第三阶段开始 main HEAD：`1139804fd7f50b6031004fea9b005bd4e61286e3`，与 origin/main 同步；本次交付按用户授权将 package.json 与双语 README 从 `0.3.12` 同步更新为 `0.3.13`，依赖声明与 lockfile 不变。
-- 用户本次要求开始第三阶段。首轮仅整理 Agent 引擎的逻辑 step 工具目录，逐项推进，不一次拆分整个 ReactAgent。
-- 共享 production factory、Responses、单 Agent、Windows／DeepSeek 优先和离线验收保持；公共 CLI/SDK 参数、Session schema、工具定义及用户操作不变。
-- 用户明确授权提交、推送、更新版本，禁止更新 Release。本次使用 `[skip publish]`，只推送 main，不创建或推送 tag；不调用真实模型。此前交付记录见第二阶段归档，已有 GitHub 凭据授权仍仅限在内存中用于 Release／CI 只读核对。
+- 第四阶段开始 main HEAD：`9e65c4ea413d00de76d1bed03b255d6fe9356938`，与 origin/main 同步；package.json 与双语 README 为 `0.3.13`。
+- 用户要求开始第四阶段，随后明确授权更新版本、提交并推送，禁止更新 Release。首轮聚焦工具与进程中的后台任务准入和完整结算，继续使用现有 BackgroundJobManager、shell、原生 sandbox 和 runner。
+- 公共 CLI/SDK 参数、Session schema、工具定义、权限与文件观察边界不变。双语 README 同步可查询启动失败和清理／销毁期间拒绝启动的行为。
+- 本次交付将 package.json 与双语 README 更新为 `0.3.14`，使用 `[skip publish]` 提交标记，只推送 main，不打 tag 或创建／更新 Release，不调用真实模型。已有 GitHub 凭据授权仍仅限在内存中用于 Release／CI 只读核对。
 
-## 第三阶段首轮实现
+## 第四阶段首轮实现
 
-- 新增 [StepToolCatalog](../src/agent/step-tool-catalog.ts)，拥有当前逻辑 step 的广告工具定义、名称准入、MCP binding 和并发资格。保持既有 Plan／coding 工具集合和顺序，按可用宿主能力选择工具；外部定义和 metadata 深复制并冻结。
-- [ReactAgent](../src/agent/react-agent.ts) 不再分别保存工具数组、名称 Set 和 MCP Map。请求参数、稳定前缀、context inspection、dispatch 与 loop 的并发准入共用目录；所有独立 step 来源准备成功后构建，普通 retry 复用，follow-up／steering 刷新，turn 收尾释放。
-- MCP metadata 只为当前广告工具保留 binding；MCP annotations 或内置工具形状的 MCP 名称不能取得本地读取的并发资格。返回的能力对象独立，不让调用方修改目录内事实；LSP 保持串行。
-- 工具实际路由、实时权限、审批、取消／预算、文件观察、durable record 和 runner 验证结算保持原职责；目录不授权操作、不执行工具、不保存权限、不从 Session 恢复。
-- 运行时、Agent loop、项目地图、架构决策、开发指南和计划同步上述边界，第二阶段证据归档到现有知识库；没有新增平行知识库或空模块目录。
+- [BackgroundJobManager](../src/tools/background-jobs.ts) 在调用执行器前登记运行占位及真实完成 promise。预先取消不启动 worker；同步抛错和异步失败统一为可查询的失败 job，释放父信号监听并发出一次完成通知，不自动重放。
+- 结果、终态和完成时间一起发布；完成观察者异常不改变结算。运行及取消清理期间保留有效预览，终态后忽略迟到 callback；poll 快照不共享内部结果或数组。
+- stop、waitAll 与 stopAll 等待已登记任务的完成 promise；等待中的取消先收束 worker，空列表也尊重已取消信号。stopAll 期间的新启动返回 BACKGROUND_CLEANUP，重叠清理全部完成后恢复；dispose 立即永久关闭启动，重复调用共用清理 promise，后续 start 返回 BACKGROUND_DISPOSED。
+- Agent 沿用当前 generation／完成通知／durable record；runner 沿用后台等待和任务准入。没有第二套进程、通知、runner 或存储实现，工具／运行时契约、项目地图、决策与开发指南同步状态归属。
 
 ## 验证证据
 
-严格类型检查通过。首次检查暴露 MCP 定义缺少 Record 索引签名，沿用原有对象复制方式构建定义解决，没有扩大生产接口、使用 any 或忽略错误。
+修改前新增 7 项管理器语义回归，全部复现现有缺口，原有 5 项通过；日志为宿主临时目录 everpeace-background-baseline-20261008.log。实现后 12 项全通过，再补启动期间重入 dispose 回归及空列表预取消断言。
 
-新增 [目录回归](../tests/unit/agent/step-tool-catalog.test.ts) 6 项，覆盖 Plan 排除执行能力、可选工具准入、嵌套定义隔离、binding 隔离和保守并发。强化既有 MCP hints 回归以实际启用宿主并发；新增 [loop 集成回归](../tests/unit/agent/loop-boundaries.test.ts) 2 项，覆盖真实本地读取并发与 MCP 屏障、按模型顺序落盘、准备失败不得采样和跨 turn 清除准入。原有断言保留。
+[管理器回归](../tests/unit/tools/background-jobs.test.ts) 新增 8 项，覆盖同步抛错及父信号解绑、预取消、重入限额、启动期间销毁、原子终态、快照隔离、重叠清理与迟到输出。新增 [Agent 回归](../tests/unit/agent/react-agent.test.ts) 验证同步失败可 poll、按序配对持久化、一次失败通知及不重放；新增 [runner 回归](../tests/unit/workflow/task-runner.test.ts) 使用真实 ReactAgent 和受控 worker，验证取消后仍占用入口且不开始宿主验证，worker 完成后才返回取消。
 
-Agent、workflow context、context inspection／pruning、production factory、Plan 生产闭环和 SDK 定向共 122 项通过，0 失败、0 跳过，耗时 6,522.2306 ms。日志：宿主临时目录 everpeace-step-catalog-targeted-20261008.log。
+严格类型检查通过。Agent 集成初次定向失败来自新断言误以为完成通知是 JSON；按既有文本格式绑定 job ID 与 failed 状态修正，不改变生产输出或放宽原有断言。修正后后台、Agent、loop、runner、生产入口、Plan、SDK、Bash 和原生启动定向 134 项，133 通过、0 失败、1 个原有 Unix 平台跳过，耗时 5,253.3247 ms。日志为宿主临时目录 everpeace-background-lifecycle-targeted-final-20261008.log。
 
-实现完成后在宿主 Node 环境串行执行：pnpm typecheck 通过 → scripts 缺少 lint，明确缺项 → pnpm test 844 项、841 通过、0 失败、3 个既有跳过，耗时 59,330.4523 ms → pnpm build 通过。日志：宿主临时目录 everpeace-agent-catalog-final-test-20261008.log；构建已生成新工具目录的 JS 与声明文件。git diff --check、14 份修改／新增文件空白和 14 份相关文档的 468 个本地链接／标题检查通过，双语 README 的知识库入口保持一致。测试包含现有依赖边界、Plan／TUI／Session／SDK 与生产 runner 回归。
+实现完成后在宿主 Node 环境串行执行：pnpm typecheck 通过 → scripts 缺少 lint，明确缺项 → pnpm test 854 项、851 通过、0 失败、3 个既有跳过，耗时 54,365.0849 ms → pnpm build 通过。日志为宿主临时目录 everpeace-background-lifecycle-final-test-20261008.log。git diff --check、16 份修改／新增文件空白及 14 份文档的 536 个本地链接／标题检查通过。全部门禁覆盖现有权限、文件观察、Plan／TUI／Session／SDK、资源与 runner 回归。
 
-## 本次交付结果
+## 授权交付
 
-更新展示版本后重新在宿主串行执行 typecheck → 记录缺少 lint → test → build，所有存在项通过。测试 844 项、841 通过、0 失败、3 个既有跳过，耗时 59,678.5638 ms；日志为宿主临时目录 everpeace-agent-catalog-delivery-test-20261008.log。17 份修改／新增文件空白与 14 份文档的 468 个本地链接／标题检查通过。
+版本更新后重新在宿主 Node 环境串行执行：pnpm typecheck 通过 → lint 脚本缺项 → pnpm test 854 项、851 通过、0 失败、3 个既有跳过，耗时 53,249.6519 ms → pnpm build 通过。日志为宿主临时目录 everpeace-background-lifecycle-delivery-test-20261008.log，构建产物已重新生成。git diff --check、17 份修改／新增文件空白及 14 份文档的 536 个本地链接／标题检查通过，package.json 与双语 README 版本一致。
 
-第三阶段实现与展示版本已提交并推送 main：`f355b96ab2af7ca2784dabbbe41e3a9a02120ba1`，标题为 `refactor: unify step tool admission [skip publish]`。推送前后只读核对 27 条 Release 的 ID、tag 和更新时间完全一致，远端 `v0.3.13` tag 不存在。[Release workflow](https://github.com/VinceTree/Everpeace/actions/runs/37777947178) 与 Publish version job 均实际 skipped；没有创建或更新 Release。
-
-[Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37777947141) 对上述实现提交的 Windows／Linux jobs 均 success，包含 typecheck、完整 test、build 与差异检查。Windows 844 项、840 通过、0 失败、4 跳过，耗时 198,045.9137 ms；Linux 844 项、841 通过、0 失败、3 跳过，耗时 98,721.445625 ms。Windows hosted runner 额外跳过原生 sandbox 真实初始化，证据边界见 [开发指南](DEVELOPMENT.md#独立测试-ci-与证据范围)。基线文档提交的 [Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37772227355) 也已 success。收尾只更新交接和计划，不改变已验收的实现与测试。
+推送前 main 为上述基线，远端无 v0.3.14 tag；27 条 Release 的 ID、tag 与 updated_at 已取得只读基线，推送后逐项比较。实际 Windows／Linux CI 和交付结果待推送后补记。
 
 ## 独立验收与后续
 
-真实 Windows Terminal 手工验收仍 pending：Plan 修订输入、取消、resize／scrollback、恢复及单 prompt。Windows LSP backend 网络隔离门禁仍 unavailable，失败不回退宿主；live 评测需要独立授权和数值预算。自动回归不能代替这些验收。
+本轮新增证据验证管理器和受控 worker 的 Promise 完成边界。底层 runBash／runCodexProcess 取消路径仍保留既有 500ms fallback，进程树停止／失败的实际结算应在下一轮单独复核。原生 sandbox、真实 Windows Terminal 和真实模型质量不由受控 Promise 测试证明。
 
-后续按 [PLAN](PLAN.md) 从 Agent 请求投影／上下文中选择一个具体问题；随后依次推进工具与进程、存储与恢复、终端交互。不因交接待办自动启动下一模块。TypeScript unstable 解析 API 在升级编译器时仍须复核。
+真实 Windows Terminal 手工验收仍 pending：Ctrl+C、后台进程树、Plan 修订输入、resize／scrollback、恢复与单 prompt。Windows LSP backend 网络隔离门禁仍 unavailable，失败不回退宿主；live 评测需要独立授权与数值预算。
+
+后续按 [PLAN](PLAN.md) 细化工具／进程的下一项具体问题，再推进存储与恢复、终端交互；第三阶段其余请求／上下文职责保留为独立后续事项。不因交接待办自动启动新模块。TypeScript unstable 解析 API 在升级编译器时仍须复核。
 
 ## 用户原有内容
 
-第三阶段开始时没有 tracked 修改。原有未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}` 全部保留，未修改或纳入本轮内容。
+第四阶段开始时没有 tracked 修改。原有未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}` 全部保留，未修改或纳入本轮内容。

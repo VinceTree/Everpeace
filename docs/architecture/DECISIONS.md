@@ -20,6 +20,12 @@ Session 保存持久事实，界面使用投影。批准、文件观察和活动
 
 MCP metadata 仅绑定当前广告工具，annotations 与供应商并行参数都不能授予本地并发能力。宿主审定的读取可以并发，LSP 与 MCP 保持串行屏障；返回的能力对象独立，外部修改不能改变目录。工具路由、实时权限、审批、取消、预算、文件观察、durable record 与 runner 结算继续归既有实现，不因目录存在而获得操作授权。回归覆盖嵌套定义／binding 隔离、失败准备不得采样、跨 turn 准入丢弃和真实本地读取顺序，见 [目录回归](../../tests/unit/agent/step-tool-catalog.test.ts) 与 [loop boundaries](../../tests/unit/agent/loop-boundaries.test.ts)。后续请求／上下文职责逐项细化，不机械拆分整个 ReactAgent。
 
+## 后台任务准入与完整结算
+
+第四阶段首轮由现有 [BackgroundJobManager](../../src/tools/background-jobs.ts) 拥有启动占位、父信号绑定、执行器完成 promise 和一次终态发布。登记先于执行器调用，同步抛错与异步拒绝使用同一结算路径；结果和完成时间随终态一起可见，终态之后忽略输出 callback。先建立完成 promise 也使执行器重入清理时仍能等待自己的 worker，不通过临时空 promise 跳过任务。
+
+stopAll 使用清理计数关闭准入，重叠清理全部返回后才允许新的显式启动；dispose 立即永久关闭，重复调用复用清理。停止与等待都等完整登记任务的 promise，不从 UI 标签判断结束。预先取消不能启动执行器，失败 job 可以正常查询并通知，`BACKGROUND_CLEANUP`／`BACKGROUND_DISPOSED` 使用现有结构化反馈，不增加重试或审批旁路。task generation、通知持久化、shell sandbox、文件观察和 runner 验证结算仍归原路径，公共参数、工具定义与 Session schema 不变。详见 [TOOLS](TOOLS.md#模型-shell-与后台任务) 与 [生命周期回归](../../tests/unit/tools/background-jobs.test.ts)。
+
 ## 个人开发任务连续性与失败反馈
 
 参考固定 DeepSeek Harness `639ed015397290b3745d163aafe02ffee4aa3f84` 的 `compaction-basic/src/summarizer.ts`，采用结构化交接保留目标、最新纠正、失败证据和下一步，但继续使用现有 Responses 与单 Agent runner。模型摘要作为 assistant 背景；旧摘要仅做请求投影，避免将模型生成正文放入 developer 权威。八章结构验证失败时保留原 context，不以额外请求修复摘要；这保证失败关闭，不保证模型摘要语义无遗漏。
