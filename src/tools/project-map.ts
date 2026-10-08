@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { constants, promises as fs } from "node:fs";
 import path from "node:path";
 import { resolveBundledRipgrep, type RipgrepPathResolver } from "./ripgrep.js";
-import { stopProcessTree } from "./process-cancel.js";
+import { observeProcessCompletion } from "./process-completion.js";
 import { invalidToolArgument, POLICY_DENIED_REMEDY, ToolFeedbackError } from "./tool-feedback.js";
 
 export const projectMapLimits = { timeoutMs: 5_000, scanBytes: 2 * 1024 * 1024, paths: 10_000, manifests: 32, manifestBytes: 256 * 1024, totalManifestBytes: 1024 * 1024, outputBytes: 32 * 1024 } as const;
@@ -40,47 +40,46 @@ async function safePath(root: string, relative: string): Promise<string> {
 
 async function enumerate(cwd: string, resolveRipgrep: RipgrepPathResolver, limits: MapLimits, signal?: AbortSignal): Promise<{ files: string[]; reasons: string[] }> {
   signal?.throwIfAborted();
+  if (limits.timeoutMs <= 0) return { files: [], reasons: ["enumeration_timeout"] };
   const executable = await resolveRipgrep();
   signal?.throwIfAborted();
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, ["--no-config", "--files", "--hidden", "--null", ...[...excluded].flatMap((name) => ["--glob", `!**/${name}/**`]), "--", "."], { cwd, shell: false, windowsHide: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
-    const files: string[] = [];
-    const reasons: string[] = [];
-    let pending = Buffer.alloc(0);
-    let bytes = 0;
-    let stopped = false;
-    let stderr = "";
-    const stop = () => { if (child.pid) stopProcessTree(child.pid); else child.kill(); };
-    const limit = (reason: string) => { if (!stopped) { stopped = true; reasons.push(reason); stop(); } };
-    const abort = () => { stopped = true; stop(); };
-    signal?.addEventListener("abort", abort, { once: true });
-    if (signal?.aborted) abort();
-    const timer = setTimeout(() => limit("enumeration_timeout"), limits.timeoutMs);
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (stopped) return;
-      const remaining = limits.scanBytes - bytes;
-      bytes += chunk.length;
-      pending = Buffer.concat([pending, chunk.subarray(0, remaining)]);
-      let delimiter: number;
-      while ((delimiter = pending.indexOf(0)) >= 0) {
-        if (files.length >= limits.paths) { limit("path_limit"); return; }
-        try { files.push(new TextDecoder("utf-8", { fatal: true }).decode(pending.subarray(0, delimiter))); }
-        catch { limit("invalid_path_encoding"); return; }
-        pending = pending.subarray(delimiter + 1);
-      }
-      if (bytes > limits.scanBytes) limit("enumeration_byte_limit");
-    });
-    child.stderr.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString("utf8")).slice(0, 2048); });
-    child.once("error", (error) => { clearTimeout(timer); signal?.removeEventListener("abort", abort); reject(error); });
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      if (signal?.aborted) { reject(signal.reason); return; }
-      if (!stopped && code !== 0 && code !== 1) { reject(new ToolFeedbackError("TOOL_UNAVAILABLE", `Project map enumeration failed (${code}): ${stderr}`, "Check bundled ripgrep availability and directory access, then retry with a smaller path.")); return; }
-      if (pending.length && !reasons.length) reasons.push("unterminated_path");
-      resolve({ files, reasons });
-    });
+  const child = spawn(executable, ["--no-config", "--files", "--hidden", "--null", ...[...excluded].flatMap((name) => ["--glob", `!**/${name}/**`]), "--", "."], { cwd, shell: false, windowsHide: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
+  const owned = observeProcessCompletion(child, { ...(signal ? { signal } : {}) });
+  const files: string[] = [];
+  const reasons: string[] = [];
+  let pending = Buffer.alloc(0);
+  let bytes = 0;
+  let stopped = false;
+  let stderr = "";
+  const stop = () => owned.stop();
+  const limit = (reason: string) => { if (!stopped) { stopped = true; reasons.push(reason); } };
+  const timer = setTimeout(() => { limit("enumeration_timeout"); stop(); }, limits.timeoutMs);
+  child.stdout.on("data", (chunk: Buffer) => {
+    if (stopped || owned.closed || owned.stopping) return;
+    const remaining = limits.scanBytes - bytes;
+    bytes += chunk.length;
+    pending = Buffer.concat([pending, chunk.subarray(0, remaining)]);
+    let delimiter: number;
+    while ((delimiter = pending.indexOf(0)) >= 0) {
+      if (files.length >= limits.paths) { limit("path_limit"); return; }
+      try { files.push(new TextDecoder("utf-8", { fatal: true }).decode(pending.subarray(0, delimiter))); }
+      catch { limit("invalid_path_encoding"); return; }
+      pending = pending.subarray(delimiter + 1);
+    }
+    if (bytes > limits.scanBytes) limit("enumeration_byte_limit");
   });
+  child.stderr.on("data", (chunk: Buffer) => {
+    if (!owned.closed) stderr = (stderr + chunk.toString("utf8")).slice(0, 2048);
+  });
+  let result;
+  try { result = await owned.completion; }
+  finally { clearTimeout(timer); }
+  if (result.cleanupError) throw result.cleanupError;
+  if (result.error) throw result.error;
+  signal?.throwIfAborted();
+  if (!stopped && result.exitCode !== 0 && result.exitCode !== 1) throw new ToolFeedbackError("TOOL_UNAVAILABLE", `Project map enumeration failed (${result.exitCode}): ${stderr}`, "Check bundled ripgrep availability and directory access, then retry with a smaller path.");
+  if (pending.length && !reasons.length) reasons.push("unterminated_path");
+  return { files, reasons };
 }
 
 function metadata(value: unknown): { name?: string; packageManager?: string; scripts: Record<string, string>; declaredEntries: Array<{ field: string; value: string }>; metadataTruncated: boolean } {

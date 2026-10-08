@@ -414,6 +414,7 @@ export function createDefaultTuiDependencies(
       const results = await Promise.allSettled([
         activeLearnedMemory?.dispose() ?? Promise.resolve(),
         mcp.close(),
+        skillManager.close(),
       ]);
       const failures = results
         .filter((result): result is PromiseRejectedResult => result.status === "rejected")

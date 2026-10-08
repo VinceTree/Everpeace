@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { CodeNavigationRuntime, LanguageServerIsolationError, parseCodeNavigationArguments, type LanguageServerProcessFactory } from "../../../src/tools/code-navigation.js";
 import { createLspSandboxPolicy } from "../../../src/tools/sandbox-policy.js";
+import { ProcessCleanupError } from "../../../src/tools/process-completion.js";
 
 const startTestProcess: LanguageServerProcessFactory = ({ command, args, cwd }) => {
   const child = spawn(command, [...args], { cwd, shell: false, stdio: ["pipe", "pipe", "pipe"] });
@@ -131,6 +132,31 @@ test("code navigation validates one-based UTF-16 positions", () => {
     column: 2,
   });
   assert.throws(() => parseCodeNavigationArguments('{"operation":"hover","path":"x.ts","line":0,"column":2}'), /Invalid/u);
+});
+
+test("navigation cleanup failure prevents queued and later servers from starting", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-navigation-owner-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const server = path.join(root, "server.mjs");
+  await fs.writeFile(server, fakeServer);
+  await fs.writeFile(path.join(root, "sample.ts"), "export const value = 1;\n");
+  let starts = 0;
+  const runtime = new CodeNavigationRuntime({
+    workspacePath: root, command: process.execPath, args: [server], policy: createLspSandboxPolicy(root),
+    startProcess(options) {
+      starts++;
+      const handle = startTestProcess(options);
+      return { ...handle, async terminate() { await handle.terminate(); throw new ProcessCleanupError("fixture tree refused"); } };
+    },
+  });
+  const request = { operation: "hover" as const, path: "sample.ts", line: 1, column: 1 };
+  const outcomes = await Promise.allSettled([runtime.query(request), runtime.query(request)]);
+  for (const outcome of outcomes) {
+    assert.equal(outcome.status, "rejected");
+    if (outcome.status === "rejected") assert.ok(outcome.reason instanceof ProcessCleanupError);
+  }
+  await assert.rejects(runtime.query(request), ProcessCleanupError);
+  assert.equal(starts, 1);
 });
 
 test("code navigation accepts fragmented frames and rejects malformed frames", async () => {
@@ -391,7 +417,7 @@ test("isolation probe accepts only explicit socket denial after a passing host p
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
-test("isolation evidence remains inconclusive after probe cleanup failure", async () => {
+test("isolation evidence remains inconclusive and fatal after probe cleanup failure", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-navigation-probe-cleanup-"));
   try {
     const runtime = new CodeNavigationRuntime({
@@ -403,8 +429,10 @@ test("isolation evidence remains inconclusive after probe cleanup failure", asyn
         return { stdout, exit, async write() {}, closeInput() { stdout.end('{"outcome":"denied","code":"EACCES"}'); finish(); }, async terminate() { throw new Error("fixture cleanup failed"); } };
       },
     });
-    await assert.rejects(runtime.probeIsolation(), LanguageServerIsolationError);
+    await assert.rejects(runtime.probeIsolation(), ProcessCleanupError);
     assert.equal(runtime.getIsolationEvidence()?.outcome, "inconclusive");
     assert.equal(runtime.getIsolationEvidence()?.reason, "probe_cleanup_failed");
+    await assert.rejects(runtime.probeIsolation(AbortSignal.abort()), ProcessCleanupError);
+    await assert.rejects(runtime.query({ operation: "hover", path: "sample.ts", line: 1, column: 1 }), ProcessCleanupError);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });

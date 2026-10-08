@@ -5,6 +5,7 @@ import path from "node:path";
 import type { Readable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startCodexDuplexProcess, type CodexDuplexExit, type CodexDuplexProcess } from "../codex/cli.js";
+import { ProcessCleanupError } from "./process-completion.js";
 import { decodeTextFile } from "./file-version.js";
 import { createLspSandboxPolicy, modelShellEnvironment, nativeLspPermissionProfileArgs, type LspSandboxPolicy } from "./sandbox-policy.js";
 
@@ -207,8 +208,22 @@ class JsonRpcProcess {
   }
 
   async close(): Promise<void> {
-    this.#process.closeInput();
-    await this.#process.terminate();
+    try { this.#process.closeInput(); }
+    finally {
+      // Give EOF a chance to close the server and its native job. The deadline
+      // requests termination; it never substitutes for observed process exit.
+      let forced: Promise<unknown> | undefined;
+      const timer = setTimeout(() => {
+        forced = Promise.resolve().then(() => this.#process.terminate());
+        void forced.catch(() => undefined);
+      }, 100);
+      try {
+        await this.#process.exit.catch(() => undefined);
+        await (forced ?? this.#process.terminate());
+      } catch (error) {
+        throw error instanceof ProcessCleanupError ? error : new ProcessCleanupError(error);
+      } finally { clearTimeout(timer); }
+    }
   }
 
   #write(message: Record<string, unknown>): Promise<void> {
@@ -353,6 +368,7 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
   readonly #verifyIsolation: boolean;
   #isolationProbe: Promise<void> | undefined;
   #isolationEvidence: Readonly<LanguageServerIsolationEvidence> | undefined;
+  #cleanupFailure: ProcessCleanupError | undefined;
   #tail: Promise<void> = Promise.resolve();
 
   constructor(options: {
@@ -382,6 +398,7 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
   }
 
   probeIsolation(signal?: AbortSignal): Promise<void> {
+    if (this.#cleanupFailure) return Promise.reject(this.#cleanupFailure);
     if (!this.#isolationProbe) {
       const attempt = this.#probeNetworkIsolation(signal);
       this.#isolationProbe = attempt.catch((error: unknown) => {
@@ -399,6 +416,7 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
   }
 
   async #query(request: CodeNavigationRequest, signal?: AbortSignal): Promise<CodeNavigationResult> {
+    if (this.#cleanupFailure) throw this.#cleanupFailure;
     const timeout = new AbortController();
     const policyChange = new AbortController();
     const expectedRevision = this.#permissionRevision?.();
@@ -479,7 +497,11 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
       try {
         if (rpc && openedUri && !combined.aborted && !rpc.closed) await rpc.notify("textDocument/didClose", { textDocument: { uri: openedUri } });
       } finally {
-        await rpc?.close();
+        try { await rpc?.close(); }
+        catch (error) {
+          if (error instanceof ProcessCleanupError) this.#cleanupFailure ??= error;
+          throw error;
+        }
       }
     }
   }
@@ -575,7 +597,8 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
     } finally {
       try {
         try { await processHandle?.terminate(); }
-        catch {
+        catch (error) {
+          this.#cleanupFailure ??= error instanceof ProcessCleanupError ? error : new ProcessCleanupError(error);
           evidence = { ...evidence, outcome: "inconclusive", reason: "probe_cleanup_failed" };
         }
       } finally {
@@ -583,6 +606,7 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
         if (listener.listening) await new Promise<void>((resolve) => listener.close(() => resolve()));
         this.#isolationEvidence = Object.freeze(evidence);
       }
+      if (this.#cleanupFailure) throw this.#cleanupFailure;
     }
     if (evidence.outcome !== "denied") throw new LanguageServerIsolationError(this.#isolationEvidence!);
   }

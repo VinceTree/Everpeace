@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants, promises as fs } from "node:fs";
 import path from "node:path";
-import { stopProcessTree } from "./process-cancel.js";
+import { observeProcessCompletion } from "./process-completion.js";
 import { decodeTextFile } from "./file-version.js";
 import { resolveBundledRipgrep, type RipgrepPathResolver } from "./ripgrep.js";
 import { invalidToolArgument, POLICY_DENIED_REMEDY, ToolFeedbackError } from "./tool-feedback.js";
@@ -204,70 +204,57 @@ async function runRipgrep(
   signal?.throwIfAborted();
   const executable = await resolveRipgrep();
   signal?.throwIfAborted();
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) { reject(signal.reason ?? new Error("Cancelled")); return; }
-    const child = spawn(executable, ["--no-config", ...args], { cwd, windowsHide: true, shell: false, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
-    const lines: string[] = [];
-    let pending = "";
-    let retainedBytes = 0;
-    let stderr = "";
-    let incomplete = false;
-    let stoppedByHost = false;
-    let settled = false;
-    const stop = () => { if (child.pid) stopProcessTree(child.pid); else child.kill(); };
-    const abort = () => stop();
-    signal?.addEventListener("abort", abort, { once: true });
-    const timer = setTimeout(() => { incomplete = true; stoppedByHost = true; stop(); }, SEARCH_TIMEOUT_MS);
-    timer.unref?.();
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      if (stoppedByHost) return;
-      if (retainedBytes + Buffer.byteLength(pending, "utf8") + Buffer.byteLength(chunk, "utf8") > MAX_SEARCH_BYTES) {
+  const child = spawn(executable, ["--no-config", ...args], { cwd, windowsHide: true, shell: false, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+  const owned = observeProcessCompletion(child, { ...(signal ? { signal } : {}) });
+  const lines: string[] = [];
+  let pending = "";
+  let retainedBytes = 0;
+  let stderr = "";
+  let incomplete = false;
+  let stoppedByHost = false;
+  const stop = () => owned.stop();
+  const timer = setTimeout(() => { incomplete = true; stoppedByHost = true; stop(); }, SEARCH_TIMEOUT_MS);
+  timer.unref?.();
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    if (stoppedByHost || owned.closed || owned.stopping) return;
+    if (retainedBytes + Buffer.byteLength(pending, "utf8") + Buffer.byteLength(chunk, "utf8") > MAX_SEARCH_BYTES) {
+      incomplete = true;
+      stoppedByHost = true;
+      return;
+    }
+    pending += chunk;
+    let newline: number;
+    while ((newline = pending.indexOf("\n")) >= 0) {
+      const line = pending.slice(0, newline).replace(/\r$/u, "");
+      pending = pending.slice(newline + 1);
+      const bytes = Buffer.byteLength(line, "utf8") + 1;
+      if (retainedBytes + bytes > MAX_SEARCH_BYTES) {
         incomplete = true;
         stoppedByHost = true;
-        stop();
         return;
       }
-      pending += chunk;
-      let newline: number;
-      while ((newline = pending.indexOf("\n")) >= 0) {
-        const line = pending.slice(0, newline).replace(/\r$/u, "");
-        pending = pending.slice(newline + 1);
-        const bytes = Buffer.byteLength(line, "utf8") + 1;
-        if (retainedBytes + bytes > MAX_SEARCH_BYTES) {
-          incomplete = true;
-          stoppedByHost = true;
-          stop();
-          return;
-        }
-        retainedBytes += bytes;
-        if (line) lines.push(line);
-      }
-    });
-    child.stderr.on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-32 * 1024); });
-    child.once("error", (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      reject(error);
-    });
-    child.once("close", (exitCode) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      if (signal?.aborted) { reject(signal.reason ?? new Error("Cancelled")); return; }
-      if (!stoppedByHost && pending) {
-        const bytes = Buffer.byteLength(pending, "utf8");
-        if (retainedBytes + bytes <= MAX_SEARCH_BYTES) lines.push(pending.replace(/\r$/u, ""));
-        else incomplete = true;
-      }
-      if (!stoppedByHost && exitCode !== 0 && exitCode !== 1) { reject(new Error(stderr.trim() || `ripgrep exited with ${exitCode}`)); return; }
-      resolve({ lines, exitCode, incomplete });
-    });
+      retainedBytes += bytes;
+      if (line) lines.push(line);
+    }
   });
+  child.stderr.on("data", (chunk: string) => {
+    if (!owned.closed) stderr = `${stderr}${chunk}`.slice(-32 * 1024);
+  });
+  let result;
+  try { result = await owned.completion; }
+  finally { clearTimeout(timer); }
+  if (result.cleanupError) throw result.cleanupError;
+  if (result.error) throw result.error;
+  signal?.throwIfAborted();
+  if (!stoppedByHost && pending) {
+    const bytes = Buffer.byteLength(pending, "utf8");
+    if (retainedBytes + bytes <= MAX_SEARCH_BYTES) lines.push(pending.replace(/\r$/u, ""));
+    else incomplete = true;
+  }
+  if (!stoppedByHost && result.exitCode !== 0 && result.exitCode !== 1) throw new Error(stderr.trim() || `ripgrep exited with ${result.exitCode}`);
+  return { lines, exitCode: result.exitCode, incomplete };
 }
 
 export const fileSearchLimits = {

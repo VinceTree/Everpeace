@@ -6,7 +6,7 @@ import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } fr
 import { lookup } from "node:dns/promises";
 import { unzip } from "fflate";
 import { parseSkillMetadata, type SkillMetadata, type SkillSnapshot, SkillCatalog } from "./catalog.js";
-import { stopProcessTree } from "../tools/process-cancel.js";
+import { observeProcessCompletion, ProcessCleanupError } from "../tools/process-completion.js";
 import { validatePublicUrl, type FetchLike, type HostLookup } from "../tools/web.js";
 
 const DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024;
@@ -422,6 +422,12 @@ export class SkillManager implements SkillManagerLike {
   readonly #fetch: FetchLike;
   readonly #lookup: HostLookup;
   readonly #preparations = new Map<string, PreparationRecord>();
+  readonly #preparing = new Set<Promise<PreparedSkillInstall>>();
+  readonly #gitProcesses = new Set<ReturnType<typeof observeProcessCompletion>>();
+  readonly #lifetime = new AbortController();
+  #closed = false;
+  #disposal: Promise<void> | undefined;
+  #cleanupFailure: ProcessCleanupError | undefined;
 
   constructor(options: SkillManagerOptions) {
     this.#workspacePath = options.workspacePath;
@@ -445,6 +451,7 @@ export class SkillManager implements SkillManagerLike {
   }
 
   async saveCreated(skillMarkdown: string, scope: SkillTargetScope): Promise<SkillInstallResult> {
+    this.#assertAvailable();
     const normalized = normalizeGeneratedSkillMarkdown(skillMarkdown);
     const metadata = validateManagedSkillMarkdown(normalized);
     await this.#assertNameAvailable(metadata.name);
@@ -461,6 +468,15 @@ export class SkillManager implements SkillManagerLike {
   }
 
   async prepareInstall(source: string, signal?: AbortSignal): Promise<PreparedSkillInstall> {
+    this.#assertAvailable();
+    const combined = AbortSignal.any([this.#lifetime.signal, ...(signal ? [signal] : [])]);
+    const preparation = this.#prepareInstall(source, combined);
+    this.#preparing.add(preparation);
+    try { return await preparation; }
+    finally { this.#preparing.delete(preparation); }
+  }
+
+  async #prepareInstall(source: string, signal: AbortSignal): Promise<PreparedSkillInstall> {
     const sourceUrl = this.#parseSourceUrl(source);
     signal?.throwIfAborted();
     const temporaryDirectory = await fs.mkdtemp(join(tmpdir(), "everpeace-skill-install-"));
@@ -493,7 +509,9 @@ export class SkillManager implements SkillManagerLike {
           : sourceUrl;
         discoveryRoot = await this.#cloneRepository(repositoryUrl, discoveryRoot, signal);
       }
+      signal.throwIfAborted();
       const candidates = await discoverCandidates(discoveryRoot);
+      signal.throwIfAborted();
       const record: PreparationRecord = { id, sourceUrl: sourceUrl.toString(), temporaryDirectory, candidates };
       this.#preparations.set(id, record);
       return {
@@ -502,6 +520,10 @@ export class SkillManager implements SkillManagerLike {
         candidates: candidates.map(({ sourceDirectory: _sourceDirectory, ...candidate }) => ({ ...candidate })),
       };
     } catch (error) {
+      if (error instanceof ProcessCleanupError) {
+        this.#cleanupFailure ??= error;
+        throw error;
+      }
       await fs.rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined);
       if (signal?.aborted) throw signal.reason ?? error;
       throw error;
@@ -509,6 +531,7 @@ export class SkillManager implements SkillManagerLike {
   }
 
   async installPrepared(preparationId: string, candidateId: string, scope: SkillTargetScope): Promise<SkillInstallResult> {
+    this.#assertAvailable();
     const preparation = this.#preparations.get(preparationId);
     if (!preparation) throw new Error("This Skill installation preview has expired");
     const candidate = preparation.candidates.find((item) => item.id === candidateId);
@@ -530,8 +553,24 @@ export class SkillManager implements SkillManagerLike {
     await fs.rm(preparation.temporaryDirectory, { recursive: true, force: true }).catch(() => undefined);
   }
 
-  async close(): Promise<void> {
-    await Promise.all([...this.#preparations.keys()].map((id) => this.discardPrepared(id)));
+  close(): Promise<void> {
+    if (this.#disposal) return this.#disposal;
+    this.#closed = true;
+    this.#lifetime.abort(new Error("Skill manager is closed"));
+    return this.#disposal = (async () => {
+      const processes = [...this.#gitProcesses];
+      for (const owned of processes) owned.stop();
+      const results = await Promise.all(processes.map((owned) => owned.completion));
+      for (const result of results) if (result.cleanupError) this.#cleanupFailure ??= result.cleanupError;
+      await Promise.allSettled([...this.#preparing]);
+      await Promise.all([...this.#preparations.keys()].map((id) => this.discardPrepared(id)));
+      if (this.#cleanupFailure) throw this.#cleanupFailure;
+    })();
+  }
+
+  #assertAvailable(): void {
+    if (this.#cleanupFailure) throw this.#cleanupFailure;
+    if (this.#closed) throw new Error("Skill manager is closed");
   }
 
   #parseSourceUrl(source: string): URL {
@@ -575,54 +614,49 @@ export class SkillManager implements SkillManagerLike {
   }
 
   async #runGit(args: readonly string[], signal: AbortSignal, stdoutLimit = 0): Promise<Uint8Array> {
-    return new Promise<Uint8Array>((resolveGit, rejectGit) => {
-      const child = spawn("git", [...args], {
-        shell: false,
-        windowsHide: true,
-        stdio: ["ignore", stdoutLimit > 0 ? "pipe" : "ignore", "pipe"],
-        env: {
-          ...process.env,
-          GIT_TERMINAL_PROMPT: "0",
-          GIT_ASKPASS: "",
-          GIT_LFS_SKIP_SMUDGE: "1",
-        },
-      });
-      const chunks: Buffer[] = [];
-      let stdoutBytes = 0;
-      let stderr = "";
-      let outputError: Error | undefined;
-      let settled = false;
-      child.stderr!.setEncoding("utf8");
-      child.stderr!.on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-16_384); });
-      child.stdout?.on("data", (chunk: Buffer) => {
-        if (outputError) return;
-        stdoutBytes += chunk.byteLength;
-        if (stdoutBytes > stdoutLimit) {
-          outputError = new Error(`Git output exceeds ${stdoutLimit} bytes`);
-          if (child.pid) stopProcessTree(child.pid);
-          return;
-        }
-        chunks.push(chunk);
-      });
-      const cancel = () => { if (child.pid) stopProcessTree(child.pid); };
-      if (signal.aborted) cancel();
-      else signal.addEventListener("abort", cancel, { once: true });
-      child.on("error", (error) => {
-        if (settled) return;
-        settled = true;
-        signal.removeEventListener("abort", cancel);
-        rejectGit(error);
-      });
-      child.on("close", (code) => {
-        if (settled) return;
-        settled = true;
-        signal.removeEventListener("abort", cancel);
-        if (outputError) rejectGit(outputError);
-        else if (signal.aborted) rejectGit(signal.reason ?? new Error("Git operation was cancelled"));
-        else if (code !== 0) rejectGit(new Error(conciseGitError(stderr, code)));
-        else resolveGit(Buffer.concat(chunks, stdoutBytes));
-      });
+    this.#assertAvailable();
+    signal.throwIfAborted();
+    const child = spawn("git", [...args], {
+      shell: false,
+      windowsHide: true,
+      detached: process.platform !== "win32",
+      stdio: ["ignore", stdoutLimit > 0 ? "pipe" : "ignore", "pipe"],
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_ASKPASS: "",
+        GIT_LFS_SKIP_SMUDGE: "1",
+      },
     });
+    const owned = observeProcessCompletion(child, { signal });
+    this.#gitProcesses.add(owned);
+    const chunks: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderr = "";
+    let outputError: Error | undefined;
+    child.stderr!.setEncoding("utf8");
+    child.stderr!.on("data", (chunk: string) => {
+      if (!owned.closed) stderr = `${stderr}${chunk}`.slice(-16_384);
+    });
+    child.stdout?.on("data", (chunk: Buffer) => {
+      if (outputError || owned.closed || owned.stopping) return;
+      stdoutBytes += chunk.byteLength;
+      if (stdoutBytes > stdoutLimit) {
+        outputError = new Error(`Git output exceeds ${stdoutLimit} bytes`);
+        owned.stop();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    let result;
+    try { result = await owned.completion; }
+    finally { this.#gitProcesses.delete(owned); }
+    if (result.cleanupError) { this.#cleanupFailure ??= result.cleanupError; throw result.cleanupError; }
+    if (result.error) throw result.error;
+    if (outputError) throw outputError;
+    signal.throwIfAborted();
+    if (result.exitCode !== 0) throw new Error(conciseGitError(stderr, result.exitCode));
+    return Buffer.concat(chunks, stdoutBytes);
   }
 
   async #cloneRepository(

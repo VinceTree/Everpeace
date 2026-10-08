@@ -102,6 +102,8 @@ README、HANDOFF 等按任务需要读取；规则链并不意味着自动装入
 
 搜索结果行列来自 ripgrep，其中 column 是字节偏移加一；LSP column 则是 UTF-16 位置，中文行中不能直接等同。
 
+搜索和项目地图枚举通过 [process-completion](../../src/tools/process-completion.ts) 保持子进程所有权。传输错误、取消或期限到达后，必须等待 child close 和已请求的单次进程树终止；typed ProcessCleanupError 优先于普通取消，不能变成可继续采样的工具反馈。达到输出／路径保留上限后停止收集并排空后续输出，原有期限仍会请求终止；短命生产者自然退出不再触发多余 taskkill。期限已经耗尽的地图不启动枚举。受控生命周期及实际 Agent 结果配对见 [read process lifecycle](../../tests/unit/tools/read-process-lifecycle.test.ts)。
+
 大输出返回 `status: truncated`、`output_id`、首尾预览、原始/保留字节数和续读入口，不能直接截断原 JSON。超过保留上限的内容明确 `retention_truncated`，此时也不能宣称续读可取回全部正文。引用对应 Session 目录内的脱敏输出附件，模型不接收宿主路径；提交、读取、淘汰、清理和删除在 Session 跨进程事务锁内协调；压缩、Agent dispose 和重启不删除已提交附件。`read_tool_output` 的可选 `session_id` 默认当前会话，跨会话读取重新校验完全相同的规范化工作区；淘汰、删除或旧进程内正文明确不可用。正文先脱敏再截断、保存和分页，offset 以脱敏 UTF-8 字节计算；容不下一个完整字符的页明确返回范围错误。
 
 终端展示与模型上下文限制分离；模型结果压缩不能悄悄缩小已有 `/outputs` 或 scrollback 的保留语义。命令输出实现还需查看 [command-record](../../src/tools/command-record.ts) 和 [bash-output-preview](../../src/tools/bash-output-preview.ts)。
@@ -161,6 +163,8 @@ stop、waitAll 和 stopAll 等待已登记任务的完成 promise。cleanupFaile
 每次查询通过 pinned Codex backend 的 duplex 接口直接启动 executable/argv，不经过 shell wrapper，也不回退宿主执行。专用 `:read-only` 子策略拒绝 workspace 写入与应用全局状态，并请求 native network denial；该隔离不受用户选择 full access 影响。配置的 language server 启动前，宿主先用同一监听目标完成宿主连接正对照，再在相同策略中运行直接 socket 探针。只有明确的 `EACCES`/`EPERM` 才记为 denied；连接成功记为 allowed，拒绝连接、超时、无效输出或清理失败记为 inconclusive。只有 denied 可继续，其余均返回 unavailable。证据仅描述本次 TCP/IPv4 及 loopback/non-loopback 目标，不证明其他网络协议或地址都被隔离。传输保持 raw stdout、处理 stdin backpressure、持续 drain 有界 stderr，并等待进程清理后才推进队列或结算成功。任务取消或权限 revision 变化会取消查询。
 
 `:read-only` 的平台 ambient system read 与临时目录能力仍然存在；额外源码根用于明确记录所需依赖，并不表示其余 ambient reads 被移除。Windows 上的固定 `@openai/codex@0.155.1` 已实测拒绝 workspace 写入与 Everpeace 应用状态读取，但仍允许直接网络探针，因此当前 Windows 原生 LSP 导航会失败关闭。原生可用性必须按平台验收，不能从 profile 名称或 CLI 参数推断；通用 language-server registry 和进程池尚未启用。
+
+duplex 的重复 terminate 共用同一清理 promise，不使用固定延时冒充进程退出。普通传输错误与成功资源清理分开报告，真正清理失败始终保留为 ProcessCleanupError。RPC 关闭先发送 stdin EOF，短暂等待自然退出后才请求强制终止；这个期限仅触发清理，不能提前结算。查询或隔离探针的清理失败永久关闭当前 navigation runtime 的准入，已排队查询也不能启动替代 server；隔离证据保留 inconclusive/probe_cleanup_failed。回归见 [duplex lifecycle](../../tests/unit/codex/process-lifecycle.test.ts)、[navigation](../../tests/unit/tools/code-navigation.test.ts) 和 [Agent settlement](../../tests/unit/workflow/cleanup-settlement.test.ts)。
 
 ## 外部工具与修改检查表
 

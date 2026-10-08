@@ -140,6 +140,38 @@ test("foreground cleanup failure closes durable tool pairs and stops later tools
   assert.equal(requests, 1);
 });
 
+test("navigation cleanup failure remains fatal through Agent tool feedback", async (t) => {
+  const workspacePath = await mkdtemp(join(tmpdir(), "everpeace-navigation-settlement-"));
+  t.after(() => rm(workspacePath, { recursive: true, force: true }));
+  let requests = 0, queries = 0;
+  const persisted: Array<Record<string, unknown>> = [];
+  const agent = new ReactAgent({
+    workspacePath, model: "offline-navigation-cleanup",
+    codeNavigation: {
+      describe() { return "controlled navigation"; },
+      async query() { queries++; throw new ProcessCleanupError("fixture tree refused"); },
+    },
+    client: { responses: { async create() {
+      requests++;
+      return { id: "navigation", output_text: "", output: [
+        { type: "function_call", name: "code_navigation", call_id: "first", arguments: '{"operation":"hover","path":"sample.ts","line":1,"column":1}' },
+        { type: "function_call", name: "code_navigation", call_id: "second", arguments: '{"operation":"hover","path":"sample.ts","line":1,"column":1}' },
+      ] };
+    } } },
+    io: { async confirmBash() { return true; }, async runBash() { throw new Error("Unexpected shell"); }, writeAssistant() {} },
+    async onHistoryAppend(items) { persisted.push(...items); },
+  });
+  t.after(() => assert.rejects(agent.dispose(), ProcessCleanupError));
+  await assert.rejects(agent.runTurn("Inspect the symbol"), ProcessCleanupError);
+  const outputs = persisted.filter((item) => item.type === "function_call_output");
+  assert.deepEqual(outputs.map((item) => item.call_id), ["first", "second"]);
+  assert.equal(JSON.parse(String(outputs[0]?.output)).cleanup_failed, true);
+  assert.equal(JSON.parse(String(outputs[1]?.output)).reason, "process_cleanup_failed");
+  await assert.rejects(agent.runTurn("Retry"), ProcessCleanupError);
+  assert.equal(requests, 1);
+  assert.equal(queries, 1);
+});
+
 test("cleanup failure during cancellation remains the runner error and blocks reuse", async () => {
   const controller = new AbortController();
   const failure = new ProcessCleanupError(new Error("termination refused"));

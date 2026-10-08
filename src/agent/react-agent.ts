@@ -1345,7 +1345,7 @@ export class ReactAgent {
         this.#activeFiles.add(request.path);
         output = JSON.stringify({ status: "ok", data: await this.#codeNavigation.query(request, signal) });
       } catch (error) {
-        if (signal?.aborted) throw error;
+        if (error instanceof ProcessCleanupError || signal?.aborted) throw error;
         output = JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error) });
       }
       this.#io.onToolProgress?.({ phase: "finished", name: call.name });
@@ -1394,7 +1394,7 @@ export class ReactAgent {
         }
         output = JSON.stringify({ status: "ok", data: result });
       } catch (error) {
-        if (signal?.aborted) throw error;
+        if (error instanceof ProcessCleanupError || signal?.aborted) throw error;
         output = JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error), ...toolFeedbackFields(error) });
       }
       try {

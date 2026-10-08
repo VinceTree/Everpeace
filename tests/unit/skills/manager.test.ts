@@ -25,6 +25,32 @@ async function workspace(t: TestContext) {
 
 const skill = (name: string) => `---\nname: ${name}\ndescription: Handle ${name} tasks when this workflow applies.\n---\n\nFollow the ${name} workflow.\n`;
 
+test("closing a Skill manager cancels an active download and rejects further preparation", async (t) => {
+  const root = await workspace(t);
+  let started!: () => void;
+  const downloading = new Promise<void>((resolve) => { started = resolve; });
+  let fetches = 0;
+  const manager = new SkillManager({
+    workspacePath: root, catalog: new SkillCatalog(root), lookup: publicLookup,
+    async fetch(_url, options) {
+      fetches++;
+      const signal = options?.signal;
+      assert.ok(signal);
+      started();
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    },
+  });
+  const preparation = assert.rejects(manager.prepareInstall("https://example.com/SKILL.md"), /closed/i);
+  await downloading;
+  const first = manager.close(), second = manager.close();
+  assert.equal(first, second);
+  await Promise.all([first, second, preparation]);
+  await assert.rejects(manager.prepareInstall("https://example.com/SKILL.md"), /closed/i);
+  assert.equal(fetches, 1);
+});
+
 test("created skills are validated, installed atomically, and become discoverable", async (t) => {
   const root = await workspace(t);
   const catalog = new SkillCatalog(root);

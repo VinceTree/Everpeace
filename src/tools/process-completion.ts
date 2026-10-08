@@ -36,7 +36,7 @@ export function observeProcessCompletion(child: ChildProcess, options: {
   signal?: AbortSignal;
   timeoutMs?: number;
   platform?: NodeJS.Platform;
-} = {}): { readonly closed: boolean; completion: Promise<ProcessCompletion> } {
+} = {}): { readonly closed: boolean; readonly stopping: boolean; completion: Promise<ProcessCompletion>; stop(): void } {
   let closed = false;
   let settled = false;
   let timedOut = false;
@@ -91,5 +91,5 @@ export function observeProcessCompletion(child: ChildProcess, options: {
   }
   options.signal?.addEventListener("abort", stop, { once: true });
   if (options.signal?.aborted) stop();
-  return { get closed() { return closed; }, completion };
+  return { get closed() { return closed; }, get stopping() { return cleanup !== undefined; }, completion, stop };
 }

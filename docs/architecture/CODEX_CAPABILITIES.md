@@ -83,6 +83,8 @@ MCP 的真实 stdio 恢复回归见 [stdio-recovery.test.ts](../../tests/unit/mc
 
 当前仍只把已安装内容作为主机文件 Skill 使用；没有接入 Codex plugins、orchestrator/executor Skill provider、远端资源 authority、动态 selector、`agents/openai.yaml` UI metadata 或 `[[skills.config]]` 开关。Skill 内容和 MCP 返回内容都属于用户启用的扩展数据，不能改变应用权限，也不能绕过 sandbox 或审批。
 
+[SkillManager](../../src/skills/manager.ts) 记录所有活动准备和 Git 子进程，Unix Git 使用独立进程组。close 永久关闭准入，取消下载和 Git，等待准备、child close 与单次进程树终止后才删除安全预览；重复 close 复用同一 promise。清理失败以 typed ProcessCleanupError 保留，不能被用户取消替换，也不删除可能仍被后代使用的 stage；故障管理器拒绝后续安装。TUI 共享 dispose 同时等待 Memory、MCP 和 Skill 管理器，任一失败不阻止其他服务清理或终端恢复。回归见 [manager](../../tests/unit/skills/manager.test.ts)、[read process lifecycle](../../tests/unit/tools/read-process-lifecycle.test.ts) 和 [TUI lifecycle](../../src/tui/index.tsx)。
+
 ## Session 与兼容性
 
 Session JSONL 现以兼容方式追加 `workflow_updated` 事件，保存当前 workflow phase、变更路径、repair 次数和最后一次有界验证结果；持久化快照清空验证 stdout/stderr/error，旧文件缺少该事件时按无 workflow 元数据读取。工作流不会把文件 before/after 内容或检查点写入 JSONL，检查点只存在当前进程。Skill catalog、MCP 连接和权限授权都不从 session 恢复；function call 与结果仍按既有 context 事件持久化。原有兼容端点如果不能接受动态 function tool schema，会把服务端错误正常返回给当前模型请求，不会改写注册信息或泄露凭据。

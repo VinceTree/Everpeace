@@ -3,11 +3,13 @@ import childProcess, { ChildProcess } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
 import { PassThrough } from "node:stream";
 import { test, type TestContext } from "node:test";
-import { runCodexProcess } from "../../../src/codex/cli.js";
+import { runCodexProcess, startCodexDuplexProcess } from "../../../src/codex/cli.js";
+import { ProcessCleanupError } from "../../../src/tools/process-completion.js";
 
 function processFixture(context: TestContext) {
   const child = new ChildProcess();
   Object.defineProperty(child, "pid", { value: 123456789 });
+  child.stdin = new PassThrough();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
   const killers: ChildProcess[] = [];
@@ -27,6 +29,7 @@ function processFixture(context: TestContext) {
   context.after(() => {
     context.mock.restoreAll();
     syncBuiltinESMExports();
+    child.stdin?.destroy();
     child.stdout?.destroy();
     child.stderr?.destroy();
   });
@@ -34,6 +37,73 @@ function processFixture(context: TestContext) {
 }
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+test("duplex termination shares one cleanup and cannot finish on a five-second watchdog", async (context) => {
+  const fixture = processFixture(context);
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  const handle = startCodexDuplexProcess(["sandbox", "--", "fixture"]);
+  const first = handle.terminate(), second = handle.terminate();
+  let finished = false;
+  void first.then(() => { finished = true; }, () => { finished = true; });
+  const results = Promise.allSettled([first, second]);
+  await flush();
+  for (const killer of fixture.killers) killer.emit("close", 0);
+  await flush();
+  context.mock.timers.tick(5_100);
+  await flush();
+  const finishedBeforeClose = finished;
+  fixture.child.emit("close", null, "SIGKILL");
+  assert.ok((await results).every((result) => result.status === "fulfilled"));
+  assert.equal(finishedBeforeClose, false, "elapsed time is not process-close evidence");
+  assert.equal(first, second);
+  assert.equal(handle.terminate(), first);
+  assert.equal(fixture.killRequests(), 1);
+});
+
+test("duplex retains typed tree failure when the launcher closes before taskkill", async (context) => {
+  const fixture = processFixture(context);
+  const handle = startCodexDuplexProcess(["sandbox", "--", "fixture"], { platform: "win32" });
+  let finished = false;
+  void handle.exit.then(() => { finished = true; }, () => { finished = true; });
+  const termination = handle.terminate();
+  const results = Promise.allSettled([handle.exit, termination]);
+  await flush();
+  fixture.child.emit("close", null, "SIGKILL");
+  await flush();
+  const finishedBeforeCleanup = finished;
+  fixture.killers[0]!.emit("close", 1);
+  const outcomes = await results;
+  assert.equal(finishedBeforeCleanup, false);
+  for (const outcome of outcomes) {
+    assert.equal(outcome.status, "rejected");
+    if (outcome.status === "rejected") assert.ok(outcome.reason instanceof ProcessCleanupError);
+  }
+  await assert.rejects(handle.terminate(), ProcessCleanupError);
+});
+
+test("duplex transport error after spawn retains ownership until cleanup and close", async (context) => {
+  const fixture = processFixture(context);
+  const handle = startCodexDuplexProcess(["sandbox", "--", "fixture"]);
+  let finished = false;
+  void handle.exit.then(() => { finished = true; }, () => { finished = true; });
+  fixture.child.emit("error", new Error("duplex transport failed"));
+  await flush();
+  const finishedBeforeClose = finished;
+  fixture.killers[0]?.emit("close", 0);
+  fixture.child.emit("close", null, "SIGKILL");
+  await assert.rejects(handle.exit, /duplex transport failed/);
+  assert.equal((await handle.terminate()).signal, "SIGKILL", "an observed transport error is separate from successful cleanup");
+  assert.equal(finishedBeforeClose, false);
+  assert.equal(fixture.killRequests(), 1);
+});
+
+test("pre-cancelled duplex launch does not start a process", async (context) => {
+  const fixture = processFixture(context);
+  assert.throws(() => startCodexDuplexProcess(["sandbox", "--", "fixture"], {
+    signal: AbortSignal.abort(new Error("cancelled before launch")),
+  }), /cancelled before launch/);
+  assert.equal(fixture.killRequests(), 0);
+});
 
 test("sandbox cancellation waits beyond the old watchdog for process close and tree cleanup", async (context) => {
   const fixture = processFixture(context);

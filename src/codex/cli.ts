@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createRequire } from "node:module";
 import type { Readable } from "node:stream";
 import { BoundedOutputBuffer } from "../tools/command-record.js";
-import { observeProcessCompletion, terminateProcessTree } from "../tools/process-completion.js";
+import { observeProcessCompletion } from "../tools/process-completion.js";
 
 const require = createRequire(import.meta.url);
 
@@ -76,7 +76,6 @@ export interface CodexDuplexProcess {
 
 export interface CodexDuplexOptions extends CodexCliOptions {
   stderrMaxBytes?: number;
-  terminationTimeoutMs?: number;
 }
 
 /** Start one raw-stdio command inside the pinned native sandbox launcher. */
@@ -84,6 +83,7 @@ export function startCodexDuplexProcess(
   args: readonly string[],
   options: CodexDuplexOptions = {},
 ): CodexDuplexProcess {
+  options.signal?.throwIfAborted();
   const launch = codexCliLaunch(args, options);
   const child: ChildProcessWithoutNullStreams = spawn(launch.command, launch.args, {
     cwd: options.cwd ?? process.cwd(),
@@ -93,25 +93,25 @@ export function startCodexDuplexProcess(
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });
+  const owned = observeProcessCompletion(child, {
+    platform: options.platform ?? process.platform,
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+  });
   const stderr = new BoundedOutputBuffer(options.stderrMaxBytes ?? 64 * 1024);
-  child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk.toString("utf8")));
-  let settled = false;
-  let settle!: (value: CodexDuplexExit) => void;
-  let rejectExit!: (error: Error) => void;
-  const exit = new Promise<CodexDuplexExit>((resolve, reject) => { settle = resolve; rejectExit = reject; });
-  child.once("error", (error) => {
-    if (settled) return;
-    settled = true;
-    rejectExit(error);
+  child.stderr.on("data", (chunk: Buffer) => {
+    if (!owned.closed) stderr.append(chunk.toString("utf8"));
   });
-  child.once("close", (exitCode, signal) => {
-    if (settled) return;
-    settled = true;
-    settle({ exitCode, signal, stderr: stderr.text, stderrTruncated: stderr.truncated });
+  const exit = owned.completion.then((result): CodexDuplexExit => {
+    if (result.cleanupError) throw result.cleanupError;
+    if (result.error) throw result.error;
+    return { exitCode: result.exitCode, signal: result.signal, stderr: stderr.text, stderrTruncated: stderr.truncated };
   });
+  let inputClosed = false;
+  let termination: Promise<CodexDuplexExit> | undefined;
 
   const write = async (data: Uint8Array | string): Promise<void> => {
-    if (settled || child.stdin.destroyed) throw new Error("Sandboxed process stdin is closed");
+    if (owned.closed || owned.stopping || inputClosed || child.stdin.destroyed) throw new Error("Sandboxed process stdin is closed");
     if (child.stdin.write(data)) return;
     await new Promise<void>((resolve, reject) => {
       const cleanup = () => {
@@ -132,35 +132,20 @@ export function startCodexDuplexProcess(
     stdout: child.stdout,
     exit,
     write,
-    closeInput() { if (!child.stdin.destroyed) child.stdin.end(); },
-    async terminate() {
-      let terminationError: unknown;
-      if (!settled) {
-        try {
-          if (child.pid) await terminateProcessTree(child.pid, options.platform ?? process.platform);
-          else child.kill();
-        } catch (error) {
-          if (!settled) {
-            terminationError = error;
-            try { child.kill(); } catch { /* preserve the process-tree cleanup error */ }
-          }
-        }
+    closeInput() {
+      if (inputClosed) return;
+      inputClosed = true;
+      if (!child.stdin.destroyed) child.stdin.end();
+    },
+    terminate() {
+      if (!termination) {
+        owned.stop();
+        termination = owned.completion.then((result): CodexDuplexExit => {
+          if (result.cleanupError) throw result.cleanupError;
+          return { exitCode: result.exitCode, signal: result.signal, stderr: stderr.text, stderrTruncated: stderr.truncated };
+        });
       }
-      const timeoutMs = options.terminationTimeoutMs ?? 5_000;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        const result = await Promise.race([
-          exit,
-          new Promise<never>((_resolve, reject) => {
-            timer = setTimeout(() => reject(new Error(`Sandboxed process did not exit within ${timeoutMs}ms`)), timeoutMs);
-            timer.unref?.();
-          }),
-        ]);
-        if (terminationError) throw new Error(`Sandboxed process-tree cleanup failed: ${terminationError instanceof Error ? terminationError.message : String(terminationError)}`);
-        return result;
-      } finally {
-        if (timer) clearTimeout(timer);
-      }
+      return termination;
     },
   };
 }

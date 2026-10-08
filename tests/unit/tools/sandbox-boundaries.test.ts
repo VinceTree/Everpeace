@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { runCodexProcess } from "../../../src/codex/cli.js";
+import { runCodexProcess, startCodexDuplexProcess } from "../../../src/codex/cli.js";
 import { resolveBashLaunch, runBash } from "../../../src/tools/bash.js";
 import { CodeNavigationRuntime } from "../../../src/tools/code-navigation.js";
 import {
@@ -157,6 +157,49 @@ test("native workspace profile blocks model shell writes to .everpeace", {
     await fs.rm(root, { recursive: true, force: true });
     await fs.rm(stateParent, { recursive: true, force: true });
   }
+});
+
+test("native Windows sandbox cancellation stops a detached payload descendant", {
+  skip: process.platform !== "win32" ? "Windows-only native process ownership integration"
+    : process.env.GITHUB_ACTIONS === "true" ? "GitHub-hosted Windows cannot initialize the nested native sandbox" : false,
+  timeout: 30_000,
+}, async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-native-process-"));
+  try {
+    const script = [
+      "const { spawn } = require('node:child_process');",
+      "const child = spawn(process.execPath, ['-e', 'console.log(process.pid); setInterval(() => {}, 1000); setTimeout(() => process.exit(0), 5000);'], { detached: true, windowsHide: true, stdio: ['ignore', 'pipe', 'inherit'] });",
+      "child.stdout.once('data', data => console.log(JSON.stringify({ parent: process.pid, child: Number(String(data).trim()) })));",
+      "setInterval(() => {}, 1000); setTimeout(() => process.exit(0), 5000);",
+    ].join("");
+    const args = ["sandbox", "-P", ":read-only", "-C", root, "--include-managed-config", "--", process.execPath, "-e", script];
+    for (const mode of ["buffered", "duplex"] as const) {
+      const controller = new AbortController();
+      let captured!: (value: { parent: number; child: number }) => void;
+      const pids = new Promise<{ parent: number; child: number }>((resolve) => { captured = resolve; });
+      let output = "";
+      const observe = (chunk: string) => {
+        output += chunk;
+        if (!output.includes("\n")) return;
+        captured(JSON.parse(output.trim()));
+        if (mode === "buffered") controller.abort();
+      };
+      if (mode === "buffered") {
+        const result = await runCodexProcess(args, { cwd: root, env: modelShellEnvironment(process.env), signal: controller.signal, timeoutMs: 10_000, onStdout: observe });
+        assert.equal(result.cancelled, true, result.stderr);
+        assert.equal(result.error, undefined, result.stderr);
+        assert.notEqual(result.exitCode, 0, "the fixture cannot finish naturally before cancellation");
+      } else {
+        const handle = startCodexDuplexProcess(args, { cwd: root, env: modelShellEnvironment(process.env), timeoutMs: 10_000 });
+        handle.stdout.on("data", (chunk: Buffer) => observe(chunk.toString("utf8")));
+        await Promise.race([pids, handle.exit.then((result) => { throw new Error(`Native fixture exited before reporting PIDs: ${result.stderr}`); })]);
+        assert.notEqual((await handle.terminate()).exitCode, 0, "the fixture cannot finish naturally before cancellation");
+      }
+      for (const pid of Object.values(await pids)) {
+        assert.throws(() => process.kill(pid, 0), (error: unknown) => (error as NodeJS.ErrnoException).code === "ESRCH", `${mode}: payload PID ${pid} must have exited`);
+      }
+    }
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
 test("native LSP profile denies writes/state and fails closed when networking remains available", {
