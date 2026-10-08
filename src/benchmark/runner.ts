@@ -16,7 +16,7 @@ import type {
 } from "./types.js";
 import { createBenchmarkMetricsCollector } from "./metrics.js";
 import { BoundedOutputBuffer } from "../tools/command-record.js";
-import { stopProcessTree } from "../tools/process-cancel.js";
+import { observeProcessCompletion, ProcessCleanupError } from "../tools/process-completion.js";
 import { captureWorkspaceSnapshot } from "./workspace.js";
 import { RequestAttemptLedger } from "../agent/request-attempt-ledger.js";
 
@@ -45,86 +45,42 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function runBenchmarkVerification(spec: BenchmarkVerification, workspacePath: string, signal: AbortSignal): Promise<BenchmarkVerificationResult> {
+export async function runBenchmarkVerification(spec: BenchmarkVerification, workspacePath: string, signal: AbortSignal): Promise<BenchmarkVerificationResult> {
   const startedAt = Date.now();
-  const timeoutMs = Math.max(1, spec.timeoutMs ?? DEFAULT_VERIFICATION_TIMEOUT_MS);
-  return new Promise((resolve) => {
-    const stdout = new BoundedOutputBuffer(MAX_OUTPUT_BYTES);
-    const stderr = new BoundedOutputBuffer(MAX_OUTPUT_BYTES);
-    let timedOut = false;
-    let cancelled = false;
-    let terminationRequested = false;
-    let settled = false;
-    let timer: NodeJS.Timeout | undefined;
-    let cancelTimer: NodeJS.Timeout | undefined;
-
-    const finish = (exitCode: number | null, error?: string) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      if (cancelTimer) clearTimeout(cancelTimer);
-      signal.removeEventListener("abort", cancel);
-      const cancellationError = timedOut ? "Verification timed out" : cancelled ? "Verification was cancelled" : undefined;
-      const failure = cancellationError ?? error;
-      const expectedExitCode = spec.expectedExitCode ?? 0;
-      resolve({
-        attempted: true,
-        passed: cancellationError === undefined && error === undefined && exitCode === expectedExitCode,
-        exitCode: cancellationError === undefined ? exitCode : null,
-        stdout: stdout.text,
-        stderr: stderr.text,
-        durationMs: Math.max(0, Date.now() - startedAt),
-        timedOut,
-        cancelled,
-        ...(failure === undefined ? {} : { error: failure }),
-      });
-    };
-
-    const cancel = () => {
-      if (settled || terminationRequested) return;
-      terminationRequested = true;
-      if (!timedOut) cancelled = true;
-      if (child.pid) stopProcessTree(child.pid);
-      else child.kill();
-      cancelTimer = setTimeout(() => {
-        if (settled) return;
-        try { child.kill(); } catch {}
-      }, 500);
-    };
-
-    let child: ReturnType<typeof spawn>;
-    try {
-      const invocation = resolveBenchmarkProcess(spec.command, spec.args ?? []);
-      child = spawn(invocation.command, invocation.args, {
-        cwd: spec.cwd ?? workspacePath,
-        env: { ...process.env, ...spec.env },
-        detached: process.platform !== "win32",
-        shell: false,
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch (error) {
-      finish(null, errorMessage(error));
-      return;
-    }
-
-    child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      stdout.append(chunk);
+  if (signal.aborted) return {
+    attempted: false, passed: false, exitCode: null, stdout: "", stderr: "",
+    durationMs: 0, timedOut: false, cancelled: true, error: "Verification was cancelled",
+  };
+  const stdout = new BoundedOutputBuffer(MAX_OUTPUT_BYTES);
+  const stderr = new BoundedOutputBuffer(MAX_OUTPUT_BYTES);
+  let child;
+  try {
+    const invocation = resolveBenchmarkProcess(spec.command, spec.args ?? []);
+    child = spawn(invocation.command, invocation.args, {
+      cwd: spec.cwd ?? workspacePath, env: { ...process.env, ...spec.env },
+      detached: process.platform !== "win32", shell: false, windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
     });
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk: string) => {
-      stderr.append(chunk);
-    });
-    child.once("error", (error) => finish(null, error.message));
-    child.once("close", (exitCode) => finish(exitCode));
-    timer = setTimeout(() => {
-      timedOut = true;
-      cancel();
-    }, timeoutMs);
-    signal.addEventListener("abort", cancel, { once: true });
-    if (signal.aborted) cancel();
-  });
+  } catch (error) {
+    return { attempted: true, passed: false, exitCode: null, stdout: "", stderr: "",
+      durationMs: Math.max(0, Date.now() - startedAt), timedOut: false, cancelled: false, error: errorMessage(error) };
+  }
+  const owned = observeProcessCompletion(child, { signal, timeoutMs: spec.timeoutMs ?? DEFAULT_VERIFICATION_TIMEOUT_MS });
+  child.stdout?.setEncoding("utf8");
+  child.stderr?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk: string) => { if (!owned.closed) stdout.append(chunk); });
+  child.stderr?.on("data", (chunk: string) => { if (!owned.closed) stderr.append(chunk); });
+  const result = await owned.completion;
+  const error = result.cleanupError?.message ?? result.error?.message
+    ?? (result.timedOut ? "Verification timed out" : result.cancelled ? "Verification was cancelled" : undefined);
+  return {
+    attempted: true, passed: !error && result.exitCode === (spec.expectedExitCode ?? 0),
+    exitCode: result.cancelled || result.timedOut ? null : result.exitCode,
+    stdout: stdout.text, stderr: stderr.text, durationMs: Math.max(0, Date.now() - startedAt),
+    timedOut: result.timedOut, cancelled: result.cancelled,
+    ...(result.cleanupError ? { cleanupFailed: true } : {}),
+    ...(error ? { error } : {}),
+  };
 }
 
 export interface BenchmarkRunOptions {
@@ -169,7 +125,7 @@ async function runAdapterAttempt(
       if (adapter.settlesOnCancellation) {
         void runPromise.then(
           () => finish(() => reject(error)),
-          () => finish(() => reject(error)),
+          (failure: unknown) => finish(() => reject(failure instanceof ProcessCleanupError ? failure : error)),
         );
       } else {
         finish(() => reject(error));
@@ -234,6 +190,7 @@ export async function runBenchmarkTask(
   let diagnosticRounds: number | undefined;
   let firstVerificationSuiteStatus: BenchmarkHarnessResult["firstVerificationSuiteStatus"];
   let harnessPermitsSuccess = true;
+  let cleanupFailed = workspaceBefore.cleanupFailed === true;
   const requestAttemptLedger = options.liveApi === true
     ? new RequestAttemptLedger({ ...(tokenBudget === undefined ? {} : { tokenBudget }) })
     : undefined;
@@ -252,6 +209,7 @@ export async function runBenchmarkTask(
     };
 
   try {
+    if (cleanupFailed) throw new ProcessCleanupError(workspaceBefore.error);
     const maxRepairAttempts = Math.min(10, Math.max(0, task.maxRepairAttempts ?? 3));
     while (true) {
       if (options.liveApi === true && (remainingBudget === undefined || remainingBudget <= 0)) {
@@ -281,6 +239,7 @@ export async function runBenchmarkTask(
         }, controller.signal);
       } catch (error) {
         attemptError = error;
+        if (error instanceof ProcessCleanupError) cleanupFailed = true;
       }
       manualInterventions += result?.manualInterventions ?? 0;
       unsafeActions += result?.unsafeActions ?? 0;
@@ -371,6 +330,10 @@ export async function runBenchmarkTask(
       verification = await runBenchmarkVerification(verificationSpec, task.workspacePath, controller.signal);
       metrics.onEvent({ type: "timing_recorded", operation: "verification", durationMs: verification.durationMs });
       verificationAttempts.push(verification);
+      if (verification.cleanupFailed) {
+        cleanupFailed = true;
+        throw new ProcessCleanupError(verification.error);
+      }
       if (verification.cancelled) {
         status = timedOut ? "timed_out" : "error";
         failure = timedOut ? `Benchmark task exceeded ${task.timeoutMs ?? DEFAULT_TASK_TIMEOUT_MS}ms` : "Benchmark task was cancelled";
@@ -394,6 +357,7 @@ export async function runBenchmarkTask(
       if (attempts > maxRepairAttempts) break;
     }
   } catch (error) {
+    cleanupFailed ||= error instanceof ProcessCleanupError;
     status = timedOut ? "timed_out" : "error";
     failure = errorMessage(error);
   } finally {
@@ -401,11 +365,16 @@ export async function runBenchmarkTask(
     options.signal?.removeEventListener("abort", abortFromParent);
     controller.abort();
     options.onTaskPhase?.("summarize", attempts);
-    if (timedOut || options.signal?.aborted) {
+    if (timedOut || options.signal?.aborted || cleanupFailed) {
       workspaceAfter = workspaceBefore;
     } else {
       const workspaceAfterStarted = now();
       workspaceAfter = await captureWorkspaceSnapshot(task.workspacePath, { now });
+      if (workspaceAfter.cleanupFailed) {
+        cleanupFailed = true;
+        status = "error";
+        failure = workspaceAfter.error;
+      }
       metrics.onEvent({ type: "timing_recorded", operation: "workspace_snapshot", durationMs: Math.max(0, now() - workspaceAfterStarted) });
     }
   }
@@ -431,6 +400,7 @@ export async function runBenchmarkTask(
     metrics: metrics.snapshot(now()),
     manualInterventions,
     unsafeActions,
+    ...(cleanupFailed ? { cleanupFailed: true, stopReason: "process_cleanup_failed" } : {}),
     ...(verification === undefined ? {} : { verification }),
     ...(verificationAttempts.length === 0 ? {} : { verificationAttempts }),
     workspaceBefore,
@@ -441,7 +411,7 @@ export async function runBenchmarkTask(
     ...(notes === undefined ? {} : { notes }),
     ...(usage === undefined ? {} : { usage }),
     ...(terminalOutcome === undefined ? {} : { terminalOutcome }),
-    ...(stopReason === undefined ? {} : { stopReason }),
+    ...(stopReason === undefined || cleanupFailed ? {} : { stopReason }),
     ...(workflowOutcome === undefined ? {} : { workflowOutcome }),
     ...(diagnosticRounds === undefined ? {} : { diagnosticRounds }),
     ...(firstVerificationSuiteStatus === undefined ? {} : { firstVerificationSuiteStatus }),
@@ -509,10 +479,16 @@ export async function runBenchmarkSuite(
           unsafeActions: 0,
           error: `Benchmark preparation failed: ${message}`,
           preparationError: message,
+          ...(error instanceof ProcessCleanupError ? { cleanupFailed: true } : {}),
           ...(repetitions === 1 ? {} : { repetition }),
         };
         results.push(failed);
         options.onResult?.(failed);
+        if (failed.cleanupFailed) {
+          stopLiveSuite = true;
+          stopReason = "Campaign stopped because process cleanup failed";
+          break;
+        }
         continue;
       }
       const runBudget = remaining === undefined
@@ -529,6 +505,11 @@ export async function runBenchmarkSuite(
       results.push(repeated);
       tokensConsumed += (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
       options.onResult?.(repeated);
+      if (result.cleanupFailed) {
+        stopLiveSuite = true;
+        stopReason = "Campaign stopped because process cleanup failed";
+        break;
+      }
       if (options.signal?.aborted) {
         stopLiveSuite = true;
         stopReason = "Campaign was cancelled";
@@ -545,7 +526,8 @@ export async function runBenchmarkSuite(
 
   if (results.length < planned) {
     const executed = new Set(results.map((result) => `${result.taskId}:${result.repetition ?? 1}`));
-    const reason = stopReason?.includes("unknown") ? "usage_unknown" as const
+    const reason = stopReason?.includes("cleanup") ? "cleanup_failed" as const
+      : stopReason?.includes("unknown") ? "usage_unknown" as const
       : options.signal?.aborted ? "cancelled" as const
         : "budget_exhausted" as const;
     for (const task of tasks) for (let repetition = 1; repetition <= repetitions; repetition += 1) {
@@ -554,7 +536,7 @@ export async function runBenchmarkSuite(
   }
 
   const passed = results.filter((result) => result.status === "passed").length;
-  const verified = results.filter((result) => result.verification !== undefined).length;
+  const verified = results.filter((result) => result.verification?.attempted === true).length;
   const verificationPassed = results.filter((result) => result.verification?.passed === true).length;
   const usageSamples = results.flatMap((result) => result.usage ? [result.usage] : []);
   return {
@@ -562,7 +544,7 @@ export async function runBenchmarkSuite(
     planned,
     executed: results.length,
     skipped,
-    statisticsComplete: results.length === planned && results.every((result) => result.usage?.complete !== false),
+    statisticsComplete: results.length === planned && results.every((result) => result.usage?.complete !== false && !result.cleanupFailed),
     ...(stopReason === undefined ? {} : { stopReason }),
     total: planned,
     passed,

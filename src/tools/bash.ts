@@ -3,7 +3,7 @@ import {
   BashOutputPreviewBuffer,
   type BashOutputPreview,
 } from "./bash-output-preview.js";
-import { stopProcessTree } from "./process-cancel.js";
+import { observeProcessCompletion } from "./process-completion.js";
 import { BoundedOutputBuffer } from "./command-record.js";
 import { commandFailureFeedback } from "./tool-feedback.js";
 import { codexCliLaunch, runCodexProcess } from "../codex/cli.js";
@@ -21,6 +21,7 @@ export type { BashOutputPreview } from "./bash-output-preview.js";
 export const DEFAULT_MODEL_BASH_TIMEOUT_MS = 120_000;
 
 export interface BashResult {
+  cleanupFailed?: boolean;
   truncated?: boolean;
   cancelled?: boolean;
   timedOut?: boolean;
@@ -107,6 +108,7 @@ export function serializeBashResult(result: BashResult): string {
     signal: result.signal,
     ...(result.truncated ? { truncated: true } : {}),
     ...(result.timedOut ? { timed_out: true } : {}),
+    ...(result.cleanupFailed ? { cleanup_failed: true } : {}),
     ...(result.error === undefined ? {} : { error: result.error }),
     ...commandFailureFeedback(result),
   });
@@ -209,11 +211,12 @@ async function runSandboxBash(
     truncated: result.truncated === true,
     cancelled: result.cancelled,
     ...(result.timedOut ? { timedOut: true } : {}),
+    ...(result.cleanupFailed ? { cleanupFailed: true } : {}),
     ...(result.error ? { error: result.error } : {}),
   };
 }
 
-export function runBash(
+export async function runBash(
   command: string,
   options: BashOptions = {},
 ): Promise<BashResult> {
@@ -243,121 +246,52 @@ export function runBash(
     return runSandboxBash(command, options, env, bashPath, cwd, streamOutput);
   }
 
-  return new Promise((resolve) => {
-    if (options.signal?.aborted) { resolve({ stdout: "", stderr: "", exitCode: null, signal: null, cancelled: true }); return; }
-    const stdout = new BoundedOutputBuffer(1024 * 1024);
-    const stderr = new BoundedOutputBuffer(1024 * 1024);
-    let settled = false;
-    let timedOut = false;
-    let previewTimer: ReturnType<typeof setTimeout> | undefined;
-    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
-    let cancelTimer: ReturnType<typeof setTimeout> | undefined;
-    let effectiveTimeoutMs: number | undefined;
-    const previewOutput = options.onOutput
-      ? new BashOutputPreviewBuffer()
-      : undefined;
-    const preview = () => {
-      if (!options.onOutput || !previewOutput || previewTimer) return;
+  const stdout = new BoundedOutputBuffer(1024 * 1024);
+  const stderr = new BoundedOutputBuffer(1024 * 1024);
+  let child;
+  try {
+    const launch = resolveBashLaunch(command, options);
+    child = spawn(launch.command, launch.args, {
+      detached: process.platform !== "win32", cwd, env, shell: false,
+      stdio: terminal ? "inherit" : ["ignore", "pipe", "pipe"], windowsHide: true,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { stdout: "", stderr: "", exitCode: null, signal: null, error: message };
+  }
+  const owned = observeProcessCompletion(child, {
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+  });
+  const previewOutput = options.onOutput ? new BashOutputPreviewBuffer() : undefined;
+  let previewTimer: ReturnType<typeof setTimeout> | undefined;
+  const append = (kind: "stdout" | "stderr", chunk: string) => {
+    if (owned.closed) return;
+    (kind === "stdout" ? stdout : stderr).append(chunk);
+    previewOutput?.push(chunk);
+    if (previewOutput && !previewTimer) {
       previewTimer = setTimeout(() => {
         previewTimer = undefined;
-        options.onOutput?.(previewOutput.snapshot());
+        if (owned.closed) return;
+        try { options.onOutput?.(previewOutput.snapshot()); } catch { /* observers do not own the process */ }
       }, 80);
-    };
-
-    const finish = (result: BashResult): void => {
-      if (settled) return;
-      settled = true;
-      if (previewTimer) clearTimeout(previewTimer);
-      if (timeoutTimer) clearTimeout(timeoutTimer);
-      if (cancelTimer) clearTimeout(cancelTimer);
-      resolve(result);
-    };
-
-    let child;
-    try {
-      const launch = resolveBashLaunch(command, options);
-      child = spawn(launch.command, launch.args, {
-        detached: process.platform !== "win32",
-        cwd,
-        env,
-        shell: false,
-        stdio: terminal ? "inherit" : ["ignore", "pipe", "pipe"],
-        windowsHide: true,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (streamOutput) process.stderr.write(`Failed to start ${options.sandbox ? "Codex sandbox" : "Bash"}: ${message}\n`);
-      finish({ stdout: stdout.text, stderr: stderr.text, exitCode: null, signal: null, error: message });
-      return;
     }
-
-    const cancel = () => {
-      if (child.pid) stopProcessTree(child.pid);
-      if (cancelTimer) return;
-      cancelTimer = setTimeout(() => {
-        if (settled) return;
-        try { child.kill(); } catch { /* the process may already be gone */ }
-        options.signal?.removeEventListener("abort", cancel);
-        finish({
-          stdout: stdout.text,
-          stderr: stderr.text,
-          exitCode: null,
-          signal: null,
-          cancelled: options.signal?.aborted ?? false,
-          ...(timedOut ? { timedOut: true, error: `Bash command timed out after ${effectiveTimeoutMs ?? 0} ms` } : {}),
-        });
-      }, 500);
-    };
-    options.signal?.addEventListener("abort", cancel, { once: true });
-    if (options.signal?.aborted) cancel();
-
-    const timeoutMs = options.timeoutMs;
-    if (typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0) {
-      effectiveTimeoutMs = Math.max(1, Math.min(Math.floor(timeoutMs), 2_147_483_647));
-      timeoutTimer = setTimeout(() => {
-        timedOut = true;
-        cancel();
-      }, effectiveTimeoutMs);
-    }
-
-    if (child.stdout) {
-      child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
-        previewOutput?.push(chunk);
-        stdout.append(chunk);
-        preview();
-        if (streamOutput) process.stdout.write(chunk);
-      });
-    }
-
-    if (child.stderr) {
-      child.stderr.setEncoding("utf8");
-      child.stderr.on("data", (chunk: string) => {
-        previewOutput?.push(chunk);
-        stderr.append(chunk);
-        preview();
-        if (streamOutput) process.stderr.write(chunk);
-      });
-    }
-
-    child.on("error", (error) => {
-      options.signal?.removeEventListener("abort", cancel);
-      const message = error.message;
-      if (streamOutput) process.stderr.write(`Failed to start ${options.sandbox ? "Codex sandbox" : "Bash"}: ${message}\n`);
-      finish({ stdout: stdout.text, stderr: stderr.text, exitCode: null, signal: null, error: message });
-    });
-
-    child.on("close", (exitCode, signal) => {
-      options.signal?.removeEventListener("abort", cancel);
-      finish({
-        stdout: stdout.text,
-        stderr: stderr.text,
-        exitCode,
-        signal,
-        truncated: stdout.truncated || stderr.truncated,
-        cancelled: options.signal?.aborted ?? false,
-        ...(timedOut ? { timedOut: true, error: `Bash command timed out after ${effectiveTimeoutMs ?? 0} ms` } : {}),
-      });
-    });
-  });
+    if (streamOutput) (kind === "stdout" ? process.stdout : process.stderr).write(chunk);
+  };
+  child.stdout?.setEncoding("utf8");
+  child.stderr?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk: string) => append("stdout", chunk));
+  child.stderr?.on("data", (chunk: string) => append("stderr", chunk));
+  try { options.onProcessStarted?.(); } catch { /* observers do not own the process */ }
+  const result = await owned.completion;
+  if (previewTimer) clearTimeout(previewTimer);
+  const error = result.cleanupError?.message ?? result.error?.message
+    ?? (result.timedOut ? `Bash command timed out after ${options.timeoutMs ?? 0} ms` : undefined);
+  return {
+    stdout: stdout.text, stderr: stderr.text, exitCode: result.exitCode, signal: result.signal,
+    truncated: stdout.truncated || stderr.truncated, cancelled: result.cancelled,
+    ...(result.timedOut ? { timedOut: true } : {}),
+    ...(result.cleanupError ? { cleanupFailed: true } : {}),
+    ...(error ? { error } : {}),
+  };
 }

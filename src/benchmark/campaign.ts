@@ -104,6 +104,11 @@ export async function runBenchmarkCampaign(
     if (!result) throw new Error(`Campaign item ${item.index} produced no result`);
     const repeated = { ...result, repetition: item.repetition };
     results.push(repeated);
+    if (result.cleanupFailed) {
+      tokens += (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
+      stopReason = "Campaign stopped because process cleanup failed";
+      break;
+    }
     if (result.preparationError) continue;
     tokens += (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
     if (result.usage === undefined || result.usage.complete !== true) {
@@ -118,7 +123,8 @@ export async function runBenchmarkCampaign(
       adapter: item.harness,
       taskId: item.taskId,
       repetition: item.repetition,
-      reason: stopReason?.includes("unknown") ? "usage_unknown"
+      reason: stopReason?.includes("cleanup") ? "cleanup_failed"
+        : stopReason?.includes("unknown") ? "usage_unknown"
         : stopReason?.includes("cancel") ? "cancelled"
           : "budget_exhausted",
     }));
@@ -129,7 +135,7 @@ export async function runBenchmarkCampaign(
     results,
     skipped,
     tokenUsage: tokens,
-    statisticsComplete: results.length === plan.length && results.every((result) => result.usage?.complete === true),
+    statisticsComplete: results.length === plan.length && results.every((result) => result.usage?.complete === true && !result.cleanupFailed),
     ...(stopReason ? { stopReason } : {}),
   };
 }

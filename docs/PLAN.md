@@ -1,29 +1,37 @@
 # 当前开发计划
 
-产品保持 DeepSeek 优先、Windows 优先、单 Agent、Node/TypeScript、Responses 与 inline TUI。当前版本、提交和验证证据只见 [HANDOFF](HANDOFF.md)。第五阶段 Session 搜索快照的 [计划](archive/PLAN_SESSION_SEARCH_SNAPSHOTS.md) 和 [交接](archive/HANDOFF_SESSION_SEARCH_SNAPSHOTS.md) 已归档。
+目标：把既定 Agent 定位实现完整、补齐功能与验收证据，使用户可以开始有预算的付费模型测试。产品定位仍是 DeepSeek 优先、Windows 优先的个人 Node/TypeScript 单包编码 CLI；能力清单以 [OVERVIEW](OVERVIEW.md) 和双语 README 为依据。不能把某轮局部修复或通过单测等同于完成此目标。
 
-## 第六阶段首轮：Composer 提交与草稿生命周期
+第六阶段已交付的 Composer 修复见 [归档计划](archive/PLAN_COMPOSER_LIFECYCLE.md) 与 [归档交接](archive/HANDOFF_COMPOSER_LIFECYCLE.md)。当前基线、执行记录和限制只在 [HANDOFF](HANDOFF.md) 维护。
 
-本轮只处理一个输入状态边界：提交等待中，React 状态更新前可重复调用宿主；旧完成回调又可以覆盖共享输入引用中的新草稿。沿用现有 Prompt、App 与应用协调，不建立第二套任务准入或存储。
+## 完整定位验收清单
 
-1. 使用实际 Ink 输入和受控 Promise 复现连续 Enter、同步重入及旧回调覆盖草稿。
-2. 在调用宿主前同步占用输入，阻止当前挂载的重复提交、输入和粘贴；React 状态只控制显示／订阅。
-3. 成功接收前核对挂载、提交与原 ComposerState；宿主恢复草稿或卸载后的迟到回调不得修改新草稿、历史导航或界面。
-4. 保留 false、同步抛错、Promise 拒绝后草稿与显式重交；正常提交、resize 与任务切换保持可用。
-5. 用真实附件解析和 App 证明 guidance、任务收束、空闲 Ctrl+C、命令 Esc 重放与单 prompt；同步双语 README、状态契约、结构、决策、项目地图、开发指南及交接。
-6. 串行执行实际存在的 typecheck → lint → test → build，首败停止；记录 lint 缺项，并检查差异、文档链接和原有内容。
+每一项都须核对当前实现、失败回归与生产路径；现有文档和历史测试只提供定位，不能替代本轮证据。发现缺陷就修复，缺失功能就按既定定位补齐，不以标成“不支持”代替实现。
 
-- [x] 取得修复前的语义失败证据并确认状态所有者。
-- [x] 同步占用输入，完成回调绑定原挂载与草稿；不改变公共接口或 Session schema。
-- [x] 覆盖重复输入、粘贴、重挂载、宿主替换、失败重交与实际 App 附件／guidance／replay。
-- [x] 完成定向离线回归，同步稳定契约并归档第五阶段证据。
-- [x] 完成最终串行门禁、差异与文档链接检查，更新交接证据；lint 脚本缺项，真实 Windows Terminal 验收仍独立 pending。
-- [x] 按新增授权更新展示版本、提交并推送 main；修正 CI 暴露的测试输入订阅时序，重新通过本地门禁与双平台 Test CI，Release workflow 实际跳过，未推送 tag；证据见交接。
+| 要求 | 完成依据 | 当前状态与下一动作 |
+| --- | --- | --- |
+| DeepSeek/Responses 请求、原始模型 ID、用途配置与计量 | provider/attempt/stream/预算回归；生产 fake provider 实际请求与停止证据 | 待逐项复核，真实付费效果留到授权评测 |
+| 理解项目、规则、搜索、文件编辑与变更审阅 | root-to-target 规则、地图、观察版本、审批并发修改、undo、搜索/附件/审阅生产回归 | 待逐项复核；Windows 语义导航网络隔离缺口需实证解决，不能静默放开 |
+| 编码、修复与宿主验证闭环 | 当前 manifest 全 suite、首败停止、修复次数、过期检查、Goal/Memory 结算生产回归 | 待逐项复核；无检查、环境失败、取消不得成功 |
+| 长任务、进程、权限与取消 | 原生 shell/后台命令/评测进程的真实退出、错误保留、迟到输出及准入回归 | 正在实施：buffered launcher 不再用固定延时冒充清理完成；继续审计宿主和评测 wrappers、原生 backend 后代归属 |
+| Session、恢复、分支、上下文、usage 与 Memory | 持久化故障、重启、fork、压缩/裁剪、unknown usage 与验证债务的生产闭环 | 待逐项复核；不能借恢复或压缩重建授权 |
+| Windows inline TUI、审批与输入所有权 | Ink 回归 + 实际 Windows Terminal 的取消、审批、命令 Esc、resize/scrollback/单 prompt 验收 | Composer 已有证据，剩余输入所有权与真实终端仍待验收 |
+| 公共 exec/SDK、Web、MCP 与 Skills | 当前公开接口、错误/取消/重连/安装确认与真实协议 fixture；文档与广告能力一致 | 待逐项复核，不把附带能力清单当作完整可用性证明 |
+| 付费测试准备 | 当前 candidate identity 的无凭据 preflight、fixture proof、独立评分、可审阅 task/campaign 数值预算与计划 | 待按最终代码重新核对；不提前调用真实模型 |
+| 交付门禁与可追溯记录 | 串行 typecheck → lint → test → build、缺项记录、双语文档和本地链接、真实平台限制 | 每轮执行，最终逐项复查以上所有要求才能关闭总目标 |
 
-## 后续顺序
+架构重构、额外平台或协议扩展是否必要，按定位与真实缺陷判定。保持单 Agent 与共享 production runner；不另建平行的任务/验证/存储实现。任何未完成或证据不足的行都使总目标保持 active。
 
-第六阶段后续先细化审批、命令输入、取消、resize 或重放中的一个实际问题，再逐项处理；真实 Windows Terminal 验收单独保留，不用自动测试替代。此前 Agent 请求／上下文、原生进程取消与存储事项不在本轮混合实施。整体框架见 [PROJECT_MAP](architecture/PROJECT_MAP.md#整体分层与状态归属)。
+## 当前实施：原生命令取消生命周期
 
-## 独立验收
+1. 取得定时器提前结算、重复清理、迟到输出和 observer 异常的语义失败证据。
+2. 在现有 native launcher 内以一次 cleanup promise 绑定取消/超时，等待 child close 与进程树终止请求；保留清理失败。
+3. 用受控事件以及 Windows/Linux 真实 Node 父子进程验证，另记录原生 sandbox、脱离进程组后代和真实终端的证据边界。
+4. 验证上层 Bash/后台任务/runner 回归，更新双语行为说明与稳定契约，执行最终门禁。
+5. 继续清单中的剩余项目，不把当前切片标成产品全部完成。
 
-仅执行离线回归，不调用真实模型。用户已明确授权更新版本、提交并推送，提交使用 `[skip publish]`，不创建或更新 Release、不推送 tag，保留用户所有原有未跟踪内容。真实终端步骤见 [DEVELOPMENT](DEVELOPMENT.md#离线-windows-terminal-手工验收)，执行后才记录终端版本、步骤与结果。
+原生 launcher、宿主 Bash 和评测 wrappers 已接入共享清理等待；suite/campaign 已保留清理失败并停止后续任务。实际验证证据见交接；后台任务清理失败到 coding runner、Goal/Memory 的传播，以及真正原生 backend 的后代所有权仍需继续验收。
+
+## 授权边界
+
+用户已明确授权本次更新展示版本、提交与推送，禁止更新 Release；按补丁号递增，提交使用 [skip publish]，不推 tag。保持原有未跟踪内容；本次交付不代表完整产品验收已完成。付费模型测试另需明确授权及 task/campaign 数值预算；不创建或更新 Release。真实终端必须取得实际操作证据，自动测试不能代替。

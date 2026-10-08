@@ -2,11 +2,12 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createRequire } from "node:module";
 import type { Readable } from "node:stream";
 import { BoundedOutputBuffer } from "../tools/command-record.js";
-import { stopProcessTree } from "../tools/process-cancel.js";
+import { observeProcessCompletion, terminateProcessTree } from "../tools/process-completion.js";
 
 const require = createRequire(import.meta.url);
 
 export interface CodexCliResult {
+  cleanupFailed?: boolean;
   stdout: string;
   stderr: string;
   exitCode: number | null;
@@ -78,21 +79,6 @@ export interface CodexDuplexOptions extends CodexCliOptions {
   terminationTimeoutMs?: number;
 }
 
-async function terminateDuplexProcessTree(pid: number, platform: NodeJS.Platform): Promise<void> {
-  if (platform !== "win32") {
-    try { process.kill(-pid, "SIGKILL"); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-    }
-    return;
-  }
-  await new Promise<void>((resolve, reject) => {
-    const killer = spawn("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
-    killer.once("error", reject);
-    killer.once("close", (code) => code === 0 ? resolve() : reject(new Error(`taskkill exited with ${code ?? "no exit code"}`)));
-  });
-}
-
 /** Start one raw-stdio command inside the pinned native sandbox launcher. */
 export function startCodexDuplexProcess(
   args: readonly string[],
@@ -151,7 +137,7 @@ export function startCodexDuplexProcess(
       let terminationError: unknown;
       if (!settled) {
         try {
-          if (child.pid) await terminateDuplexProcessTree(child.pid, options.platform ?? process.platform);
+          if (child.pid) await terminateProcessTree(child.pid, options.platform ?? process.platform);
           else child.kill();
         } catch (error) {
           if (!settled) {
@@ -180,133 +166,63 @@ export function startCodexDuplexProcess(
 }
 
 /** Execute a Codex CLI command with one bounded Windows sandbox retry. */
-export function runCodexProcess(
+export async function runCodexProcess(
   args: readonly string[],
   options: CodexCliOptions & CodexProcessCallbacks = {},
 ): Promise<CodexCliResult> {
-  return new Promise((resolve) => {
-    if (options.signal?.aborted) {
-      resolve({ stdout: "", stderr: "", exitCode: null, cancelled: true });
-      return;
+  if (options.signal?.aborted) return { stdout: "", stderr: "", exitCode: null, cancelled: true };
+  const platform = options.platform ?? process.platform;
+  // Payload output cannot prove that a command has not run.
+  const retryable = platform === "win32" && args.length === 3 && args[0] === "sandbox"
+    && args[1] === "-P" && [":read-only", ":workspace", ":danger-full-access"].includes(args[2]!);
+  for (let attempts = 1; ; attempts++) {
+    const stdout = new BoundedOutputBuffer(1024 * 1024);
+    const stderr = new BoundedOutputBuffer(1024 * 1024);
+    let child;
+    try {
+      const launch = codexCliLaunch(args, options);
+      child = spawn(launch.command, launch.args, {
+        cwd: options.cwd ?? process.cwd(), env: options.env ?? process.env,
+        detached: platform !== "win32", shell: false,
+        stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
+      });
+    } catch (error) {
+      return { stdout: "", stderr: "", exitCode: null, cancelled: false, attempts,
+        error: error instanceof Error ? error.message : String(error) };
     }
-
-    const platform = options.platform ?? process.platform;
-    // stdout/stderr cannot prove that a payload has not started. Only the legacy
-    // profile-only invocation is known to contain no command (with or without --).
-    const retryable = platform === "win32" && args.length === 3 && args[0] === "sandbox"
-      && args[1] === "-P" && [":read-only", ":workspace", ":danger-full-access"].includes(args[2]!);
-    let attempts = 0;
-    const timeoutMs = typeof options.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
-      ? Math.max(1, Math.min(Math.floor(options.timeoutMs), 2_147_483_647))
-      : undefined;
-
-    const runAttempt = () => {
-      const stdoutBuffer = new BoundedOutputBuffer(1024 * 1024);
-      const stderrBuffer = new BoundedOutputBuffer(1024 * 1024);
-      let settled = false;
-      let timedOut = false;
-      let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
-      let cancelTimer: ReturnType<typeof setTimeout> | undefined;
-      let child;
-      const finish = (result: CodexCliResult) => {
-        if (settled) return;
-        settled = true;
-        if (timeoutTimer) clearTimeout(timeoutTimer);
-        if (cancelTimer) clearTimeout(cancelTimer);
-        resolve({ ...result, attempts: attempts + 1, truncated: result.truncated === true || stdoutBuffer.truncated || stderrBuffer.truncated });
-      };
-      try {
-        const launch = codexCliLaunch(args, options);
-        child = spawn(launch.command, launch.args, {
-          cwd: options.cwd ?? process.cwd(),
-          env: options.env ?? process.env,
-          detached: platform !== "win32",
-          shell: false,
-          stdio: ["ignore", "pipe", "pipe"],
-          windowsHide: true,
-        });
-        options.onSpawned?.();
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        finish({ stdout: stdoutBuffer.text, stderr: stderrBuffer.text, exitCode: null, cancelled: false, error: message });
-        return;
-      }
-
-      const cancel = () => {
-        if (child.pid) stopProcessTree(child.pid);
-        if (cancelTimer) return;
-        cancelTimer = setTimeout(() => {
-          if (settled) return;
-          try { child.kill(); } catch { /* process may already be gone */ }
-          options.signal?.removeEventListener("abort", cancel);
-          finish({
-            stdout: stdoutBuffer.text,
-            stderr: stderrBuffer.text,
-            exitCode: null,
-            cancelled: options.signal?.aborted ?? false,
-            ...(timedOut ? { timedOut: true, error: `Codex CLI command timed out after ${timeoutMs ?? 0} ms` } : {}),
-          });
-        }, 500);
-      };
-      options.signal?.addEventListener("abort", cancel, { once: true });
-      if (options.signal?.aborted) cancel();
-
-      child.stdout?.setEncoding("utf8");
-      child.stdout?.on("data", (chunk: string) => {
-        options.onStdout?.(chunk);
-        stdoutBuffer.append(chunk);
-      });
-      child.stderr?.setEncoding("utf8");
-      child.stderr?.on("data", (chunk: string) => {
-        options.onStderr?.(chunk);
-        stderrBuffer.append(chunk);
-      });
-      child.on("error", (error) => {
-        options.signal?.removeEventListener("abort", cancel);
-        finish({
-          stdout: stdoutBuffer.text,
-          stderr: stderrBuffer.text,
-          exitCode: null,
-          cancelled: options.signal?.aborted ?? false,
-          error: error.message,
-        });
-      });
-      child.on("close", (exitCode) => {
-        if (settled) return;
-        options.signal?.removeEventListener("abort", cancel);
-        const helperError = retryable && exitCode !== 0 && isSandboxHelperSetupError(stderrBuffer.text);
-        if (
-          retryable
-          && !options.signal?.aborted
-          && !timedOut
-          && helperError
-          && attempts < WINDOWS_SANDBOX_HELPER_RETRY_LIMIT
-        ) {
-          attempts += 1;
-          if (timeoutTimer) clearTimeout(timeoutTimer);
-          if (cancelTimer) clearTimeout(cancelTimer);
-          settled = true;
-          runAttempt();
-          return;
-        }
-        finish({
-          stdout: stdoutBuffer.text,
-          stderr: stderrBuffer.text,
-          exitCode,
-          cancelled: options.signal?.aborted ?? false,
-          ...(timedOut ? { timedOut: true, error: `Codex CLI command timed out after ${timeoutMs ?? 0} ms` } : {}),
-          ...(helperError && attempts >= WINDOWS_SANDBOX_HELPER_RETRY_LIMIT
-            ? { error: "Codex sandbox helper setup failed after a bounded retry" }
-            : {}),
-        });
-      });
-      if (timeoutMs !== undefined) {
-        timeoutTimer = setTimeout(() => { timedOut = true; cancel(); }, timeoutMs);
-      }
+    const owned = observeProcessCompletion(child, {
+      platform,
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+    });
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      if (owned.closed) return;
+      stdout.append(chunk);
+      try { options.onStdout?.(chunk); } catch { /* observers do not own process lifetime */ }
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      if (owned.closed) return;
+      stderr.append(chunk);
+      try { options.onStderr?.(chunk); } catch { /* observers do not own process lifetime */ }
+    });
+    try { options.onSpawned?.(); } catch { /* observers do not own process lifetime */ }
+    const result = await owned.completion;
+    const helperError = retryable && result.exitCode !== 0 && isSandboxHelperSetupError(stderr.text);
+    if (helperError && !result.cancelled && !result.timedOut && !result.error && !result.cleanupError
+      && attempts <= WINDOWS_SANDBOX_HELPER_RETRY_LIMIT) continue;
+    const error = result.cleanupError?.message ?? result.error?.message
+      ?? (result.timedOut ? `Codex CLI command timed out after ${options.timeoutMs ?? 0} ms` : undefined)
+      ?? (helperError ? "Codex sandbox helper setup failed after a bounded retry" : undefined);
+    return {
+      stdout: stdout.text, stderr: stderr.text, exitCode: result.exitCode, cancelled: result.cancelled,
+      attempts, truncated: stdout.truncated || stderr.truncated,
+      ...(result.timedOut ? { timedOut: true } : {}),
+      ...(result.cleanupError ? { cleanupFailed: true } : {}),
+      ...(error ? { error } : {}),
     };
-
-    runAttempt();
-  });
+  }
 }
 
 export function runCodexCli(

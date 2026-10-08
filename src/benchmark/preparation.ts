@@ -3,7 +3,7 @@ import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import type { BenchmarkTask, BenchmarkVerificationResult } from "./types.js";
 import { resolveBenchmarkProcess, runBenchmarkVerification } from "./runner.js";
-import { stopProcessTree } from "../tools/process-cancel.js";
+import { observeProcessCompletion, ProcessCleanupError } from "../tools/process-completion.js";
 import { BoundedOutputBuffer } from "../tools/command-record.js";
 
 interface CommandResult {
@@ -14,48 +14,25 @@ interface CommandResult {
 
 const MAX_COMMAND_OUTPUT = 256 * 1024;
 
-function run(command: string, args: readonly string[], cwd: string | undefined, signal?: AbortSignal): Promise<CommandResult> {
-  return new Promise((resolveResult, reject) => {
-    let child: ReturnType<typeof spawn>;
-    try {
-      const invocation = resolveBenchmarkProcess(command, args);
-      child = spawn(invocation.command, invocation.args, {
-        ...(cwd === undefined ? {} : { cwd }),
-        detached: process.platform !== "win32",
-        shell: false,
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch (error) {
-      reject(error);
-      return;
-    }
-    const stdout = new BoundedOutputBuffer(MAX_COMMAND_OUTPUT);
-    const stderr = new BoundedOutputBuffer(MAX_COMMAND_OUTPUT);
-    let settled = false;
-    const finish = (callback: () => void) => {
-      if (settled) return;
-      settled = true;
-      signal?.removeEventListener("abort", cancel);
-      callback();
-    };
-    let cancellationError: unknown;
-    const cancel = () => {
-      cancellationError = signal?.reason ?? new Error("Benchmark preparation was cancelled");
-      if (child.pid) stopProcessTree(child.pid);
-      else child.kill();
-    };
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => { stdout.append(chunk); });
-    child.stderr?.on("data", (chunk: string) => { stderr.append(chunk); });
-    child.once("error", (error) => finish(() => reject(cancellationError ?? error)));
-    child.once("close", (exitCode) => finish(() => cancellationError === undefined
-      ? resolveResult({ exitCode, stdout: stdout.text, stderr: stderr.text })
-      : reject(cancellationError)));
-    signal?.addEventListener("abort", cancel, { once: true });
-    if (signal?.aborted) cancel();
+async function run(command: string, args: readonly string[], cwd: string | undefined, signal?: AbortSignal): Promise<CommandResult> {
+  signal?.throwIfAborted();
+  const invocation = resolveBenchmarkProcess(command, args);
+  const child = spawn(invocation.command, invocation.args, {
+    ...(cwd === undefined ? {} : { cwd }), detached: process.platform !== "win32",
+    shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
   });
+  const owned = observeProcessCompletion(child, signal ? { signal } : {});
+  const stdout = new BoundedOutputBuffer(MAX_COMMAND_OUTPUT);
+  const stderr = new BoundedOutputBuffer(MAX_COMMAND_OUTPUT);
+  child.stdout?.setEncoding("utf8");
+  child.stderr?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk: string) => { if (!owned.closed) stdout.append(chunk); });
+  child.stderr?.on("data", (chunk: string) => { if (!owned.closed) stderr.append(chunk); });
+  const result = await owned.completion;
+  if (result.cleanupError) throw result.cleanupError;
+  signal?.throwIfAborted();
+  if (result.error) throw result.error;
+  return { exitCode: result.exitCode, stdout: stdout.text, stderr: stderr.text };
 }
 
 async function mustNotExist(path: string): Promise<void> {
@@ -161,12 +138,14 @@ export async function prepareBenchmarkFixture(
     }
     if (preparedTask.fixture?.setup) {
       const setup = await runBenchmarkVerification(preparedTask.fixture.setup, destination, preparationSignal);
+      if (setup.cleanupFailed) throw new ProcessCleanupError(setup.error);
       if (!setup.passed) {
         throw new Error(`Benchmark ${task.id} setup failed${setup.error ? `: ${setup.error}` : ` with exit ${setup.exitCode ?? "unknown"}`}`);
       }
     }
     if (preparedTask.fixture?.pristineVerification) {
       const pristine = await runBenchmarkVerification(preparedTask.fixture.pristineVerification, destination, preparationSignal);
+      if (pristine.cleanupFailed) throw new ProcessCleanupError(pristine.error);
       if (!pristine.passed) {
         const reason = pristine.error
           ?? (pristine.timedOut ? "Verification timed out" : pristine.cancelled ? "Verification was cancelled" : `exited with ${pristine.exitCode ?? "unknown"}`);
@@ -176,6 +155,7 @@ export async function prepareBenchmarkFixture(
     await applyPatch(fixturePath(options.fixtureRoot, task.fixture.seedPatch), destination, options.signal);
     return preparedTask;
   } catch (error) {
+    if (error instanceof ProcessCleanupError) throw error;
     // The destination was proven absent above and belongs exclusively to this preparation attempt.
     await rm(destination, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
     throw error;
@@ -211,12 +191,14 @@ export async function proveBenchmarkFixture(
   if (options.signal?.aborted) abort();
   try {
     const seeded = await runBenchmarkVerification(verification, prepared.workspacePath, controller.signal);
+    if (seeded.cleanupFailed) throw new ProcessCleanupError(seeded.error);
     if (seeded.timedOut || seeded.error || seeded.exitCode === null) {
       throw new Error(`Benchmark ${task.id} seed proof failed because verification infrastructure was unavailable: ${seeded.error ?? "no exit code"}`);
     }
     if (seeded.passed) throw new Error(`Benchmark ${task.id} seed did not fail its acceptance assertion`);
     await applyBenchmarkReferenceRepair(prepared, options.fixtureRoot, controller.signal);
     const repaired = await runBenchmarkVerification(verification, prepared.workspacePath, controller.signal);
+    if (repaired.cleanupFailed) throw new ProcessCleanupError(repaired.error);
     if (!repaired.passed) throw new Error(`Benchmark ${task.id} reference repair did not pass its acceptance assertion${repaired.error ? `: ${repaired.error}` : ""}`);
     return { seeded, repaired };
   } finally {

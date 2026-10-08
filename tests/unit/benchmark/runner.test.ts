@@ -1,3 +1,4 @@
+import { ProcessCleanupError } from "../../../src/tools/process-completion.js";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -412,4 +413,30 @@ test("suite records preparation failures and continues with the remaining run pl
   assert.equal(summary.executed, 2);
   assert.equal(summary.errored, 1);
   assert.match(summary.results[0]?.preparationError ?? "", /fixture proof failed/u);
+});
+
+
+test("cleanup failure survives cancellation and stops subsequent suite work", async () => {
+  const controller = new AbortController();
+  let runs = 0;
+  let preparations = 0;
+  const adapter: BenchmarkHarnessAdapter = {
+    name: "cleanup-failure", settlesOnCancellation: true,
+    async run() {
+      runs++;
+      controller.abort(new Error("cancelled"));
+      throw new ProcessCleanupError(new Error("termination refused"));
+    },
+  };
+  const result = await runBenchmarkSuite([task({ id: "first" }), task({ id: "second" })], adapter, {
+    signal: controller.signal,
+    async prepareRun(value) { preparations++; return value; },
+  });
+  assert.equal(runs, 1);
+  assert.equal(preparations, 1);
+  assert.equal(result.results[0]?.cleanupFailed, true);
+  assert.match(result.results[0]?.error ?? "", /termination refused/u);
+  assert.equal(result.results[0]?.verification, undefined);
+  assert.equal(result.skipped[0]?.reason, "cleanup_failed");
+  assert.equal(result.statisticsComplete, false);
 });

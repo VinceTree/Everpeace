@@ -42,6 +42,8 @@ export const task: BenchmarkTask = {
 
 超时、缺少依赖、命令启动失败和 `exitCode: null` 都是基础设施失败，不算有效 seed。验证结果把 `timedOut` 与 `cancelled` 分开记录；任务或 campaign 取消不能伪装成验证超时。重复运行使用 `createIsolatedBenchmarkPreparer()` 创建 `campaign/harness/task/repetition` 目录，避免 harness 和 repetition 相互覆盖。
 
+准备、验证、外部 harness、checkout worker、dsh 与工作区快照的取消会等待进程 close 和进程树终止请求。清理失败保留 `cleanupFailed`，suite/campaign 停止后续任务并以 `cleanup_failed` 记录 skipped，统计完整性为 false；准备器保留清理失败的工作目录。预取消验证不启动进程，`attempted` 为 false。并发快照命令全部结算后才返回。
+
 ## Production and external adapters
 
 TUI、公开 `everpeace exec` 与 benchmark 通过 `src/runtime/production.ts` 共用生产 Agent/命令 factory 和 `CodingTaskRunner`。`createProductionBenchmarkAdapter()` 在无 Ink 环境中显式覆盖评测参数与批准策略，并构造 Session、权限、原生 sandbox、workflow 和 runner；同一个 Agent/Session 内完成工具循环、最多三轮诊断、完整最终验证、Goal 及 Memory 结算。adapter 标记 `managesRepairs`，因此 evaluator 只运行独立 acceptance，不会叠加另一套自动修复循环。公开 exec 使用正常模型注册/keyring 和交互停止语义，不直接暴露此 benchmark adapter 或 evaluator contract。

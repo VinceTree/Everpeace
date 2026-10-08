@@ -1,3 +1,4 @@
+import { ProcessCleanupError } from "../../../src/tools/process-completion.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createBenchmarkCampaignPlan, runBenchmarkCampaign } from "../../../src/benchmark/campaign.js";
@@ -52,4 +53,24 @@ test("campaign stops all harnesses after an unknown request attempt", async () =
   assert.equal(result.skipped.length, 1);
   assert.equal(result.statisticsComplete, false);
   assert.match(result.stopReason ?? "", /unknown usage/u);
+});
+
+
+test("preparation cleanup failure stops the entire campaign before another harness", async () => {
+  let preparations = 0;
+  const result = await runBenchmarkCampaign(tasks, harnesses, {
+    campaignId: "cleanup-failure", seed: 1, repetitions: 1, liveApi: true,
+    taskTokenBudget: 100, campaignTokenBudget: 1_000,
+    async prepareRun() {
+      preparations++;
+      throw new ProcessCleanupError(new Error("termination refused"));
+    },
+  });
+  assert.equal(preparations, 1);
+  assert.equal(result.results.length, 1);
+  assert.equal(result.results[0]?.cleanupFailed, true);
+  assert.match(result.results[0]?.preparationError ?? "", /termination refused/u);
+  assert.equal(result.skipped.length, 5);
+  assert.ok(result.skipped.every((item) => item.reason === "cleanup_failed"));
+  assert.equal(result.statisticsComplete, false);
 });

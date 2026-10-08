@@ -6,7 +6,7 @@ import type {
   BenchmarkTask,
 } from "./types.js";
 import { BoundedOutputBuffer } from "../tools/command-record.js";
-import { stopProcessTree } from "../tools/process-cancel.js";
+import { observeProcessCompletion } from "../tools/process-completion.js";
 import type { CodingTaskRunner } from "../workflow/task-runner.js";
 
 const MAX_PROCESS_OUTPUT_BYTES = 1024 * 1024;
@@ -70,47 +70,24 @@ export function createProcessHarnessAdapter(options: ProcessHarnessAdapterOption
     settlesOnCancellation: true,
     async run(task, context) {
       const args = [...(options.prefixArgs ?? []), ...options.argumentsForTask(task, context)];
-      const result = await new Promise<{ stdout: string; stderr: string; exitCode: number | null }>((resolve, reject) => {
-        let child: ReturnType<typeof spawn>;
-        try {
-          child = spawn(options.command, args, {
-            cwd: task.workspacePath,
-            env: { ...process.env, ...options.env },
-            windowsHide: true,
-            shell: false,
-            detached: process.platform !== "win32",
-            stdio: ["ignore", "pipe", "pipe"],
-          });
-        } catch (error) {
-          reject(error);
-          return;
-        }
-        const stdout = new BoundedOutputBuffer(MAX_PROCESS_OUTPUT_BYTES);
-        const stderr = new BoundedOutputBuffer(MAX_PROCESS_OUTPUT_BYTES);
-        let settled = false;
-        const finish = (callback: () => void) => {
-          if (settled) return;
-          settled = true;
-          context.signal.removeEventListener("abort", cancel);
-          callback();
-        };
-        let cancellationError: unknown;
-        const cancel = () => {
-          cancellationError = context.signal.reason ?? new Error("Harness process was cancelled");
-          if (child.pid) stopProcessTree(child.pid);
-          else child.kill();
-        };
-        child.stdout?.setEncoding("utf8");
-        child.stderr?.setEncoding("utf8");
-        child.stdout?.on("data", (chunk: string) => { stdout.append(chunk); });
-        child.stderr?.on("data", (chunk: string) => { stderr.append(chunk); });
-        child.once("error", (error) => finish(() => reject(cancellationError ?? error)));
-        child.once("close", (exitCode) => finish(() => cancellationError === undefined
-          ? resolve({ stdout: stdout.text, stderr: stderr.text, exitCode })
-          : reject(cancellationError)));
-        context.signal.addEventListener("abort", cancel, { once: true });
-        if (context.signal.aborted) cancel();
+      context.signal.throwIfAborted();
+      const child = spawn(options.command, args, {
+        cwd: task.workspacePath, env: { ...process.env, ...options.env },
+        windowsHide: true, shell: false, detached: process.platform !== "win32",
+        stdio: ["ignore", "pipe", "pipe"],
       });
+      const owned = observeProcessCompletion(child, { signal: context.signal });
+      const stdout = new BoundedOutputBuffer(MAX_PROCESS_OUTPUT_BYTES);
+      const stderr = new BoundedOutputBuffer(MAX_PROCESS_OUTPUT_BYTES);
+      child.stdout?.setEncoding("utf8");
+      child.stderr?.setEncoding("utf8");
+      child.stdout?.on("data", (chunk: string) => { if (!owned.closed) stdout.append(chunk); });
+      child.stderr?.on("data", (chunk: string) => { if (!owned.closed) stderr.append(chunk); });
+      const completion = await owned.completion;
+      if (completion.cleanupError) throw completion.cleanupError;
+      context.signal.throwIfAborted();
+      if (completion.error) throw completion.error;
+      const result = { stdout: stdout.text, stderr: stderr.text, exitCode: completion.exitCode };
       await context.writeArtifact?.("harness-stdout.txt", result.stdout);
       await context.writeArtifact?.("harness-stderr.txt", result.stderr);
       if (result.exitCode !== 0) throw new Error(`${options.name} exited with ${result.exitCode ?? "no exit code"}: ${result.stderr.trim() || "no error output"}`);

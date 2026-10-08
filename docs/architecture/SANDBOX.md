@@ -30,7 +30,7 @@ For this project's Windows-first local TypeScript architecture, retaining the pi
 5. **P1 — application metadata remains shell-writable:** native Windows smoke verified `.git` protection, but `.everpeace` was writable under the built-in workspace profile. The new host-editor guard does not close this shell route.
 6. **P1 — rule parsing is narrower than an execution policy:** current command rules match raw string prefixes. Compound commands, interpreters, substitutions and rule intersection need a dedicated parser and tests. A prefix match is not a sandbox boundary.
 7. **P1 — incomplete common filesystem boundary:** file tools, patching, workflow snapshots and MCP execute in the host process. MCP can perform remote side effects that local process confinement cannot undo.
-8. **P2 — process lifecycle and observability:** process-tree termination is requested, but the 500 ms result watchdog does not prove every descendant is dead. Sandbox readiness/denial currently lacks a dedicated diagnostic surface.
+8. **P2 — process lifecycle and observability:** the buffered native launcher now joins process close with its single tree-termination request, retains cleanup errors, and suppresses late observer output. It no longer treats 500 ms elapsed as termination evidence. Windows and Linux fixture trees exercise the launcher path. Host Bash and benchmark subprocess wrappers now share the close/termination join; benchmark cleanup failure stops later suite/campaign work. Detached descendants, native backend ownership, and task-level Goal/Memory error propagation still need separate evidence. Sandbox readiness/denial currently lacks a dedicated diagnostic surface.
 
 ## Phase A — implemented local hardening
 
@@ -70,6 +70,8 @@ Protocol parsing separately limits headers to 8 KiB, frames to 2 MiB, aggregate 
 4. Benchmark fixed harmless commands with warm/cold backend startup, cancellation and output size. Only consider reusable workers after tests prove policy, cwd, environment and descendant isolation between requests. No promised percentage speedup.
 
 Acceptance: fake launch failures cause no fallback or replay; cancellation leaves no surviving fixture descendants; output remains bounded; a test fixture cannot mutate metadata, escape roots or use blocked networking. Real provider requests are unnecessary for these sandbox checks. Repeat native probes on Windows, Linux/WSL and macOS before claiming cross-platform acceptance.
+
+The buffered launcher uses the same strict tree-kill primitive as the duplex transport: Windows awaits `taskkill /T /F`, Unix targets the detached process group. Cancellation and timeout share one cleanup promise; command results wait for both it and child `close`. A tree-kill failure remains an error even if the launcher closes. Observer exceptions cannot abandon ownership, and output after close is ignored. This does not infer that arbitrarily detached descendants are contained. See [controlled lifecycle regressions](../../tests/unit/codex/process-lifecycle.test.ts) and the [real fixture tree](../../tests/unit/codex/cli.test.ts).
 
 ## Native smoke evidence and limits
 

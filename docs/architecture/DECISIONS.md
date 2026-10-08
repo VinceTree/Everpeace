@@ -356,6 +356,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 ## Coding capability 加固边界
 
 - coding task 是后台进程的所有者。`start_background` 在创建时绑定 task signal；取消、权限收紧、预算停止、异常和 Agent dispose 都必须终止并等待进程树。cleanup 未完成时，runner 不得结算成功或开始下一项 benchmark。运行中输出只保留有界 preview，完成记录按数量和总字节淘汰，Session 恢复不伪造进程。
+- buffered 原生 launcher 的取消和超时复用一次 process-tree cleanup，并同时等待 child close；时间经过不作为退出证据。Windows 等待 taskkill /T /F 结束，Unix 终止 detached process group；清理失败保留错误，观察 callback 异常不能放弃运行进程，close 后不再投递输出。真实 fixture 退出不等同于任意脱离进程组的后代隔离，宿主 Bash 与评测准备、验证、外部 harness、checkout worker、dsh 和快照复用 process-completion；评测清理失败以 cleanupFailed 保留，并停止 suite/campaign 后续任务，skipped 原因为 cleanup_failed。快照并发命令必须全部结算后返回；准备器清理失败时保留目录。后台任务到 Goal/Memory 的错误传播及原生 backend 的完整所有权仍需单独验收。
 - 后台完成 callback 只携带 job ID、终态、退出码和时间，并受 runner invocation generation 限制；下一普通 step 通过 durable context 保存后才确认通知。运行 job 与未送达通知共用 20 个槽位，任务结束关闭准入并丢弃余项，通知不唤醒 Session，输出仍由 `poll_background` 获取。
 - 搜索 continuation 只在 Agent 进程内保留最多 16 个搜索和 8 MiB 序列化 UTF-8 payload，按创建顺序淘汰；读完最后一页或 dispose 立即释放。单次 ripgrep 的 2 MiB 输入限额同时计算未终止记录，`has_more` 与 `incomplete` 保持不同含义。
 - `CodingTaskRunner` 是最终结算的唯一入口。验证完成后、Goal/Memory 写入前必须重查取消；异常路径统一拒绝待完成 Goal、停止后台作业并以 failed/stopped 结算学习。benchmark 必须返回 runner 的真实终态、workflow outcome、诊断轮和首次 suite，独立 acceptance 不能把 stopped/预算失败改写成整体成功。

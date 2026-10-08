@@ -6,7 +6,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { BoundedOutputBuffer } from "../tools/command-record.js";
-import { stopProcessTree } from "../tools/process-cancel.js";
+import { observeProcessCompletion } from "../tools/process-completion.js";
 import { modelShellEnvironment } from "../tools/sandbox-policy.js";
 import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult } from "./types.js";
 
@@ -137,48 +137,30 @@ async function assertPinnedSource(options: InstrumentedDshAdapterOptions): Promi
   if (statusOutput.trim()) throw new Error("dsh checkout contains tracked modifications");
 }
 
-function runDsh(
+async function runDsh(
   options: InstrumentedDshAdapterOptions,
   args: readonly string[],
   cwd: string,
   env: NodeJS.ProcessEnv,
   signal: AbortSignal,
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  return new Promise((resolvePromise, reject) => {
-    const stdout = new BoundedOutputBuffer(MAX_PROCESS_OUTPUT_BYTES);
-    const stderr = new BoundedOutputBuffer(MAX_PROCESS_OUTPUT_BYTES);
-    const child = spawn(process.execPath, [resolve(options.entryPath), ...args], {
-      cwd,
-      env,
-      shell: false,
-      windowsHide: true,
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let cancellation: unknown;
-    let settled = false;
-    const finish = (callback: () => void) => {
-      if (settled) return;
-      settled = true;
-      signal.removeEventListener("abort", cancel);
-      callback();
-    };
-    const cancel = () => {
-      cancellation = signal.reason ?? new Error("dsh benchmark run was cancelled");
-      if (child.pid) stopProcessTree(child.pid);
-      else child.kill();
-    };
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => stdout.append(chunk));
-    child.stderr?.on("data", (chunk: string) => stderr.append(chunk));
-    child.once("error", (error) => finish(() => reject(cancellation ?? error)));
-    child.once("close", (exitCode) => finish(() => cancellation === undefined
-      ? resolvePromise({ stdout: stdout.text, stderr: stderr.text, exitCode })
-      : reject(cancellation)));
-    signal.addEventListener("abort", cancel, { once: true });
-    if (signal.aborted) cancel();
+  signal.throwIfAborted();
+  const child = spawn(process.execPath, [resolve(options.entryPath), ...args], {
+    cwd, env, shell: false, windowsHide: true, detached: process.platform !== "win32",
+    stdio: ["ignore", "pipe", "pipe"],
   });
+  const owned = observeProcessCompletion(child, { signal });
+  const stdout = new BoundedOutputBuffer(MAX_PROCESS_OUTPUT_BYTES);
+  const stderr = new BoundedOutputBuffer(MAX_PROCESS_OUTPUT_BYTES);
+  child.stdout?.setEncoding("utf8");
+  child.stderr?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk: string) => { if (!owned.closed) stdout.append(chunk); });
+  child.stderr?.on("data", (chunk: string) => { if (!owned.closed) stderr.append(chunk); });
+  const result = await owned.completion;
+  if (result.cleanupError) throw result.cleanupError;
+  signal.throwIfAborted();
+  if (result.error) throw result.error;
+  return { stdout: stdout.text, stderr: stderr.text, exitCode: result.exitCode };
 }
 
 function nonNegativeInteger(value: unknown, field: string): number {

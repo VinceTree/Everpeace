@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import type { RegisteredModel } from "../storage/model-registry.js";
 import { BoundedOutputBuffer } from "../tools/command-record.js";
-import { stopProcessTree } from "../tools/process-cancel.js";
+import { observeProcessCompletion } from "../tools/process-completion.js";
 import { modelShellEnvironment } from "../tools/sandbox-policy.js";
 import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult, BenchmarkTask } from "./types.js";
 
@@ -114,48 +114,36 @@ export async function preflightBenchmarkCheckout(
   const stderr = new BoundedOutputBuffer(MAX_OUTPUT_BYTES);
   const root = await mkdtemp(path.join(tmpdir(), "everpeace-checkout-preflight-"));
   try {
-    let timedOut = false;
-    const exitCode = await new Promise<number | null>((resolve, reject) => {
-      const child = spawn(process.execPath, [...process.execArgv, checkoutWorkerPath()], {
-        cwd: options.sourceRoot,
-        env: {
-          ...modelShellEnvironment(process.env),
-          EVERPEACE_CHECKOUT_PREFLIGHT: "1",
-          NODE_OPTIONS: `--import=${pathToFileURL(preflightNetworkGuardPath()).href}`,
-        },
-        shell: false,
-        windowsHide: true,
-        detached: process.platform !== "win32",
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      const timer = setTimeout(() => {
-        timedOut = true;
-        if (child.pid) stopProcessTree(child.pid);
-        else child.kill();
-      }, PREFLIGHT_TIMEOUT_MS);
-      timer.unref?.();
-      child.stdout.setEncoding("utf8");
-      child.stderr.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => stdout.append(chunk));
-      child.stderr.on("data", (chunk: string) => stderr.append(chunk));
-      child.once("error", (error) => { clearTimeout(timer); reject(error); });
-      child.once("close", (code) => { clearTimeout(timer); resolve(code); });
-      child.stdin.end(JSON.stringify({
-        mode: "preflight",
-        productionModule: pathToFileURL(identity.entryPath).href,
-        task: { id: "checkout-preflight", prompt: "Return a short preflight acknowledgement without using tools.", workspacePath: root },
-        tokenBudget: 100,
-        sessionsRoot: path.join(root, "sessions"),
-        model: {
-          id: "checkout-preflight",
-          model_name: options.modelName ?? "preflight-model",
-          base_url: "https://api.deepseek.com",
-          api_key: "preflight-dummy",
-          request_settings: { reasoningEffort: "high", maxOutputTokens: 32_768 },
-        },
-      }));
+    const input = JSON.stringify({
+      mode: "preflight",
+      productionModule: pathToFileURL(identity.entryPath).href,
+      task: { id: "checkout-preflight", prompt: "Return a short preflight acknowledgement without using tools.", workspacePath: root },
+      tokenBudget: 100,
+      sessionsRoot: path.join(root, "sessions"),
+      model: {
+        id: "checkout-preflight", model_name: options.modelName ?? "preflight-model",
+        base_url: "https://api.deepseek.com", api_key: "preflight-dummy",
+        request_settings: { reasoningEffort: "high", maxOutputTokens: 32_768 },
+      },
     });
-    if (timedOut) throw new Error(`Checkout preflight exceeded ${PREFLIGHT_TIMEOUT_MS}ms`);
+    const child = spawn(process.execPath, [...process.execArgv, checkoutWorkerPath()], {
+      cwd: options.sourceRoot,
+      env: { ...modelShellEnvironment(process.env), EVERPEACE_CHECKOUT_PREFLIGHT: "1",
+        NODE_OPTIONS: `--import=${pathToFileURL(preflightNetworkGuardPath()).href}` },
+      shell: false, windowsHide: true, detached: process.platform !== "win32",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const owned = observeProcessCompletion(child, { timeoutMs: PREFLIGHT_TIMEOUT_MS });
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => { if (!owned.closed) stdout.append(chunk); });
+    child.stderr.on("data", (chunk: string) => { if (!owned.closed) stderr.append(chunk); });
+    child.stdin.end(input);
+    const result = await owned.completion;
+    if (result.cleanupError) throw result.cleanupError;
+    if (result.error) throw result.error;
+    if (result.timedOut) throw new Error(`Checkout preflight exceeded ${PREFLIGHT_TIMEOUT_MS}ms`);
+    const exitCode = result.exitCode;
     const line = stdout.text.split(/\r?\n/u).find((value) => value.startsWith(PREFLIGHT_MARKER));
     if (exitCode !== 0 || !line) {
       throw new Error(`Checkout preflight failed: ${stderr.text.trim() || `exit ${exitCode ?? "unknown"}`}`);
@@ -186,43 +174,26 @@ export function createCheckoutBenchmarkAdapter(options: CheckoutBenchmarkAdapter
       const identity = await assertBenchmarkCheckoutIdentity(options);
       const stdout = new BoundedOutputBuffer(MAX_OUTPUT_BYTES);
       const stderr = new BoundedOutputBuffer(MAX_OUTPUT_BYTES);
-      const result = await new Promise<{ exitCode: number | null }>((resolve, reject) => {
-        const child = spawn(process.execPath, [...process.execArgv, checkoutWorkerPath()], {
-          cwd: task.workspacePath,
-          shell: false,
-          windowsHide: true,
-          detached: process.platform !== "win32",
-          stdio: ["pipe", "pipe", "pipe"],
-        });
-        let cancellation: unknown;
-        let settled = false;
-        const finish = (callback: () => void) => {
-          if (settled) return;
-          settled = true;
-          context.signal.removeEventListener("abort", cancel);
-          callback();
-        };
-        const cancel = () => {
-          cancellation = context.signal.reason ?? new Error("Checkout benchmark was cancelled");
-          if (child.pid) stopProcessTree(child.pid);
-          else child.kill();
-        };
-        child.stdout.setEncoding("utf8");
-        child.stderr.setEncoding("utf8");
-        child.stdout.on("data", (chunk: string) => stdout.append(chunk));
-        child.stderr.on("data", (chunk: string) => stderr.append(chunk));
-        child.once("error", (error) => finish(() => reject(cancellation ?? error)));
-        child.once("close", (exitCode) => finish(() => cancellation === undefined ? resolve({ exitCode }) : reject(cancellation)));
-        context.signal.addEventListener("abort", cancel, { once: true });
-        child.stdin.end(JSON.stringify({
-          productionModule: pathToFileURL(identity.entryPath).href,
-          task,
-          tokenBudget: context.tokenBudgetRemaining,
-          sessionsRoot: options.sessionsRoot,
-          model: { ...options.model, request_settings: { reasoningEffort: "high", maxOutputTokens: 32_768 } },
-        }));
-        if (context.signal.aborted) cancel();
+      context.signal.throwIfAborted();
+      const input = JSON.stringify({
+        productionModule: pathToFileURL(identity.entryPath).href, task,
+        tokenBudget: context.tokenBudgetRemaining, sessionsRoot: options.sessionsRoot,
+        model: { ...options.model, request_settings: { reasoningEffort: "high", maxOutputTokens: 32_768 } },
       });
+      const child = spawn(process.execPath, [...process.execArgv, checkoutWorkerPath()], {
+        cwd: task.workspacePath, shell: false, windowsHide: true,
+        detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"],
+      });
+      const owned = observeProcessCompletion(child, { signal: context.signal });
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => { if (!owned.closed) stdout.append(chunk); });
+      child.stderr.on("data", (chunk: string) => { if (!owned.closed) stderr.append(chunk); });
+      child.stdin.end(input);
+      const result = await owned.completion;
+      if (result.cleanupError) throw result.cleanupError;
+      context.signal.throwIfAborted();
+      if (result.error) throw result.error;
       await context.writeArtifact?.("checkout-stdout.txt", stdout.text);
       await context.writeArtifact?.("checkout-stderr.txt", stderr.text);
       if (result.exitCode !== 0) throw new Error(`${options.name} worker exited with ${result.exitCode ?? "no exit code"}: ${stderr.text.trim() || "no error output"}`);

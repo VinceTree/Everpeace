@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { isSandboxHelperSetupError, runCodexCli, startCodexDuplexProcess } from "../../../src/codex/cli.js";
+import { isSandboxHelperSetupError, runCodexCli, runCodexProcess, startCodexDuplexProcess } from "../../../src/codex/cli.js";
 
 async function withFakeCodex(script: string, callback: (scriptPath: string, statePath: string) => Promise<void>): Promise<void> {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-codex-cli-"));
@@ -117,4 +117,36 @@ test("duplex sandbox transport applies backpressure and truncates noisy stderr",
       assert.equal(result.stderrTruncated, true);
     },
   );
+});
+
+test("launcher cancellation returns only after a real child and grandchild stop", { timeout: 20_000 }, async () => {
+  await withFakeCodex([
+    "import { spawn } from 'node:child_process';",
+    "const descendant = spawn(process.execPath, ['-e', 'console.log(process.pid); setInterval(() => {}, 1000)'], { stdio: ['ignore', 'pipe', 'inherit'], windowsHide: true });",
+    "descendant.stdout.once('data', data => console.log(JSON.stringify({ parent: process.pid, child: Number(String(data).trim()) })));",
+    "setInterval(() => {}, 1000);",
+  ].join("\n"), async (scriptPath) => {
+    const controller = new AbortController();
+    let pids: { parent: number; child: number } | undefined;
+    let output = "";
+    const result = await runCodexProcess(["sandbox", "--", "fixture"], {
+      codexCliPath: scriptPath,
+      signal: controller.signal,
+      timeoutMs: 15_000,
+      onStdout(chunk) {
+        output += chunk;
+        if (!output.includes("\n")) return;
+        pids = JSON.parse(output.trim()) as { parent: number; child: number };
+        controller.abort();
+      },
+    });
+    assert.ok(pids, "fixture must start the descendant before cancellation");
+    assert.equal(result.cancelled, true);
+    assert.equal(result.timedOut, undefined);
+    assert.equal(result.error, undefined);
+    for (const pid of [pids.parent, pids.child]) {
+      assert.throws(() => process.kill(pid, 0), (error: unknown) =>
+        error instanceof Error && "code" in error && error.code === "ESRCH");
+    }
+  });
 });

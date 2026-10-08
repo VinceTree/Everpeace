@@ -60,6 +60,7 @@ export interface BenchmarkWorkspaceGitSnapshot {
 }
 
 export interface BenchmarkWorkspaceSnapshot {
+  cleanupFailed?: boolean;
   capturedAt: string;
   workspacePath: string;
   git?: BenchmarkWorkspaceGitSnapshot;
@@ -155,7 +156,9 @@ export interface BenchmarkHarnessAdapter {
 }
 
 export interface BenchmarkVerificationResult {
-  attempted: true;
+  /** False when cancellation prevented the process from being launched. */
+  attempted: boolean;
+  cleanupFailed?: boolean;
   passed: boolean;
   exitCode: number | null;
   stdout: string;
@@ -167,6 +170,7 @@ export interface BenchmarkVerificationResult {
 }
 
 export interface BenchmarkRunResult {
+  cleanupFailed?: boolean;
   taskId: string;
   adapter: string;
   status: BenchmarkRunStatus;
@@ -226,5 +230,5 @@ export interface BenchmarkSkippedRun {
   adapter?: string;
   taskId: string;
   repetition: number;
-  reason: "budget_exhausted" | "usage_unknown" | "cancelled";
+  reason: "budget_exhausted" | "usage_unknown" | "cancelled" | "cleanup_failed";
 }

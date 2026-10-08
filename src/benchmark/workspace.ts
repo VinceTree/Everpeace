@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import type { BenchmarkWorkspaceGitSnapshot, BenchmarkWorkspaceSnapshot } from "./types.js";
 import { BoundedOutputBuffer } from "../tools/command-record.js";
-import { stopProcessTree } from "../tools/process-cancel.js";
+import { observeProcessCompletion, ProcessCleanupError } from "../tools/process-completion.js";
 
 const MAX_GIT_OUTPUT_BYTES = 2 * 1024 * 1024;
 
@@ -16,56 +16,24 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function runGit(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<GitCommandResult> {
-  return new Promise((resolve, reject) => {
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn("git", [...args], {
-        cwd,
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch (error) {
-      reject(error);
-      return;
-    }
-
-    const stdout = new BoundedOutputBuffer(MAX_GIT_OUTPUT_BYTES);
-    const stderr = new BoundedOutputBuffer(MAX_GIT_OUTPUT_BYTES);
-    let settled = false;
-    let cancelled = false;
-    const finish = (callback: () => void) => {
-      if (settled) return;
-      settled = true;
-      signal?.removeEventListener("abort", cancel);
-      callback();
-    };
-    const cancel = () => {
-      cancelled = true;
-      if (child.pid) stopProcessTree(child.pid);
-      else child.kill();
-    };
-
-    child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      stdout.append(chunk);
-    });
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk: string) => {
-      stderr.append(chunk);
-    });
-    child.once("error", (error) => {
-      if (cancelled) finish(() => resolve({ exitCode: null, stdout: stdout.text, stderr: `${stderr.text}\nGit command was cancelled` }));
-      else finish(() => reject(error));
-    });
-    child.once("close", (exitCode) => finish(() => resolve({
-      exitCode: cancelled ? null : exitCode,
-      stdout: stdout.text,
-      stderr: cancelled ? `${stderr.text}\nGit command was cancelled` : stderr.text,
-    })));
-    signal?.addEventListener("abort", cancel, { once: true });
-    if (signal?.aborted) cancel();
+async function runGit(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<GitCommandResult> {
+  signal?.throwIfAborted();
+  const child = spawn("git", [...args], {
+    cwd, detached: process.platform !== "win32", windowsHide: true, shell: false,
+    stdio: ["ignore", "pipe", "pipe"],
   });
+  const owned = observeProcessCompletion(child, signal ? { signal } : {});
+  const stdout = new BoundedOutputBuffer(MAX_GIT_OUTPUT_BYTES);
+  const stderr = new BoundedOutputBuffer(MAX_GIT_OUTPUT_BYTES);
+  child.stdout?.setEncoding("utf8");
+  child.stderr?.setEncoding("utf8");
+  child.stdout?.on("data", (chunk: string) => { if (!owned.closed) stdout.append(chunk); });
+  child.stderr?.on("data", (chunk: string) => { if (!owned.closed) stderr.append(chunk); });
+  const result = await owned.completion;
+  if (result.cleanupError) throw result.cleanupError;
+  signal?.throwIfAborted();
+  if (result.error) throw result.error;
+  return { exitCode: result.exitCode, stdout: stdout.text, stderr: stderr.text };
 }
 
 function commandText(result: GitCommandResult, args: readonly string[]): string {
@@ -94,12 +62,19 @@ export async function captureWorkspaceSnapshot(
       return { capturedAt, workspacePath, error: commandText(rootResult, ["rev-parse", "--show-toplevel"]) };
     }
     const root = rootResult.stdout.trim();
-    const [headResult, branchResult, statusResult, diffResult] = await Promise.all([
+    const commands = await Promise.allSettled([
       runGit(["rev-parse", "HEAD"], workspacePath, options.signal),
       runGit(["branch", "--show-current"], workspacePath, options.signal),
       runGit(["status", "--porcelain=v1"], workspacePath, options.signal),
       runGit(["diff", "--binary", "--no-ext-diff"], workspacePath, options.signal),
     ]);
+    const failures = commands.filter((result) => result.status === "rejected");
+    const failure = failures.find((result) => result.reason instanceof ProcessCleanupError) ?? failures[0];
+    if (failure) throw failure.reason;
+    const [headResult, branchResult, statusResult, diffResult] = commands.map((result) => {
+      if (result.status === "rejected") throw result.reason;
+      return result.value;
+    }) as [GitCommandResult, GitCommandResult, GitCommandResult, GitCommandResult];
     const diffBuffer = new BoundedOutputBuffer(MAX_GIT_OUTPUT_BYTES);
     diffBuffer.append(diffResult.stdout);
     const diff = diffBuffer.result();
@@ -120,6 +95,7 @@ export async function captureWorkspaceSnapshot(
       ...(failed === undefined ? {} : { error: "One or more Git snapshot commands failed" }),
     };
   } catch (error) {
-    return { capturedAt, workspacePath, error: errorMessage(error) };
+    return { capturedAt, workspacePath, error: errorMessage(error),
+      ...(error instanceof ProcessCleanupError ? { cleanupFailed: true } : {}) };
   }
 }
