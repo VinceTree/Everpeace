@@ -20,7 +20,7 @@
 - [x] TUI、Plan、Session、runner、SDK 和生产闭环定向回归通过；原有断言保留。
 - [x] 更新项目地图、运行时／状态契约、TUI 结构、决策及交接。
 - [x] 最终串行执行实际 typecheck → lint → test → build，记录缺少 lint；差异、文档链接通过。
-- [ ] 推送后核对 Windows/Linux Test CI 和 Release 状态，补录交接。
+- [x] 推送后核对 Windows/Linux Test CI 均通过，Release 未改变；证据见交接。
 
 ## 后续模块顺序
 
