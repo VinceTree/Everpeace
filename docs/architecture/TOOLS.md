@@ -22,6 +22,10 @@
 
 ## 文件读取与版本
 
+内置文件／搜索、shell／后台命令和 patch 的已知失败增加可执行的 `errorCode`／`remedy`，成功结果和已有错误字段保持兼容。分类来自显式参数检查、`ToolFeedbackError`、已有 patch 错误码或 `timedOut`，不解析错误文案猜测；未知异常仍保留原错误。文件参数先校验字段、类型和上限再访问目标或启动搜索，拒绝广告 schema 之外的参数。`INVALID_ARGUMENTS` 指出字段及允许范围；`TOOL_UNAVAILABLE` 提供当前能力下的处理方式；`POLICY_DENIED` 明确禁止换工具绕过；`RULES_REFRESH_REQUIRED` 要求先阅读下一请求的规则。现有 `FILE_NOT_OBSERVED`、`STALE_VERSION` 与 patch 匹配错误继续要求重新读取或修正编辑。
+
+[tool-feedback](../../src/tools/tool-feedback.ts) 的 `ToolArgumentError` 保存字段名，使 Composer 的越界行范围继续给出原有可操作提示，不依赖旧错误文案。回归见 [tool feedback tests](../../tests/unit/agent/tool-feedback.test.ts)，包含错误参数无执行、输出顺序、已知类型与任意异常区分、权限拒绝及前后台超时不重放。
+
 - `read_file` 限定工作区内的普通 UTF-8 文本文件，最大 16 MiB；二进制和非法 UTF-8 拒绝。
 - 参数 `start_line` 为一基行号，`max_lines` 默认 200、最多 1,000；返回 `start_line`、`end_line`、`total_lines` 和 `next_line`，中段内容可以继续读取。
 - 返回的 `sha256` 是完整原始字节指纹，不是当前页或解码后文本指纹。不存在的文件返回 `exists: false` 和空版本。
@@ -119,6 +123,8 @@ README、HANDOFF 等按任务需要读取；规则链并不意味着自动装入
 模型 `bash` 使用固定原生后端，不能在 sandbox 启动失败后回退宿主执行。shell 网络和公共 web 开关分别管理，审批与命令规则必须在每次执行时检查。用户主动输入的 `!` 是另一条 PTY 路径，不代表模型 shell 也有宿主权限。
 
 `start_background`、`poll_background`、`stop_background` 复用模型 shell 的权限及执行器：最多两个运行任务，每项默认十分钟，没有交互 stdin。启动立即绑定 coding task 的 AbortSignal，poll 返回运行首尾预览和终态结果。
+
+前台 timeout JSON 与后台终态 result 都增加 `COMMAND_TIMEOUT` 和修正提示，保留 stdout/stderr 与原超时字段；提示先检查部分输出及已产生的副作用，不盲目重放。后台数量／通知积压上限提供 `BACKGROUND_LIMIT`，旧 job ID 明确 `BACKGROUND_JOB_UNAVAILABLE`；搜索过期 continuation 提供 `SEARCH_CONTINUATION_EXPIRED`。这些提示不增加自动 retry、审批或模型请求，取消、持久失败和预算停止保持原有收束顺序。
 
 完成 callback 只向当前 coding task 报告 job ID、终态、退出码和时间，不携带命令或输出。通知在下一普通 Agent step 持久化并送入 context，模型仍用 poll 取得输出；它不会主动唤醒 Session。运行 job 与尚未送达的完成通知共用 20 个 task-local 槽位，满时新的 start 返回可操作的 backlog 错误，通知成功落盘后才释放槽位。
 

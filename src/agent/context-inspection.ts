@@ -3,6 +3,7 @@ import type { McpSnapshot } from "../mcp/runtime.js";
 import type { SkillTurnContext } from "../skills/catalog.js";
 import type { ProjectRuleSnapshot } from "./project-context.js";
 import type { RequestSnapshot } from "./request-snapshot.js";
+import { isConversationCheckpoint } from "./conversation-checkpoint.js";
 
 export interface ContextAttachmentSummary {
   path: string;
@@ -106,11 +107,11 @@ function countItems(input: readonly Record<string, unknown>[]): Record<string, n
     if (item.type === "function_call") add("tool_calls");
     else if (item.type === "function_call_output") add("tool_results");
     else if (item.type === "reasoning") add("opaque_reasoning");
+    else if (isConversationCheckpoint(item)) add("model_checkpoints");
     else if (item.role === "user") add("user_messages");
     else if (item.role === "assistant") add("assistant_messages");
     else if (item.role === "developer") {
-      const summary = inputTextBlocks(item).some((text) => text.startsWith("Host-maintained conversation summary:"));
-      add(summary ? "host_summaries" : "developer_messages");
+      add("developer_messages");
     } else add(String(item.type ?? "opaque_items"));
   }
   return counts;
@@ -158,8 +159,8 @@ export function createContextInspectionSnapshot(options: {
       if (attachment) {
         attachments.push(attachment.summary);
         previews.push(attachment.preview);
-      } else if (text.startsWith("Host-maintained conversation summary:")) {
-        previews.push({ kind: "summary", label: "Host-maintained summary", text: redactSecrets(text, 2_000) });
+      } else if (isConversationCheckpoint(item)) {
+        previews.push({ kind: "summary", label: "Model-generated checkpoint", text: redactSecrets(text, 2_000) });
       } else if ((item.role === "user" || item.role === "assistant") && text.trim()) {
         conversationPreviews.push({
           kind: "conversation",

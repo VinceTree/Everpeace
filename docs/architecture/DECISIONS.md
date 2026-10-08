@@ -1,5 +1,11 @@
 # Architecture Decisions
 
+## 个人开发任务连续性与失败反馈
+
+参考固定 DeepSeek Harness `639ed015397290b3745d163aafe02ffee4aa3f84` 的 `compaction-basic/src/summarizer.ts`，采用结构化交接保留目标、最新纠正、失败证据和下一步，但继续使用现有 Responses 与单 Agent runner。模型摘要作为 assistant 背景；旧摘要仅做请求投影，避免将模型生成正文放入 developer 权威。八章结构验证失败时保留原 context，不以额外请求修复摘要；这保证失败关闭，不保证模型摘要语义无遗漏。
+
+工作流只读投影通过共享 production IO 注入每个逻辑 step，复用已有状态和持久化；它不包含验证正文、权限、凭据或检查点，并保留未知字段与历史验证债务。工具反馈使用显式类型和状态分类，补充原因及修正方式，不靠错误文案判断，不自动重放可能已产生副作用的命令。默认请求参数、sandbox 与宿主成功判定继续复用；效果证据限定离线机制回归，真实 DS 成功率和成本需另行有界实测。
+
 ## 文档分层与按任务阅读
 
 开发知识统一放在 `docs/`，`dosc/` 只保留导航入口。根 [AGENTS](../../AGENTS.md) 保存启动流程与全局约束；[知识库索引](../README.md) 路由专题；[PROJECT_MAP](PROJECT_MAP.md) 关联实际源码和回归测试。新 Session 只必读 AGENTS 与 [HANDOFF](../HANDOFF.md)，然后按任务选择必要专题与修改点，不重复全仓调查。

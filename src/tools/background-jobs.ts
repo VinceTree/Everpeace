@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { BashOutputPreview, BashResult } from "./bash.js";
+import { commandFailureFeedback, ToolFeedbackError } from "./tool-feedback.js";
 
 const MAX_RUNNING_JOBS = 2;
 const DEFAULT_JOB_TIMEOUT_MS = 10 * 60_000;
@@ -59,7 +60,7 @@ function stringArgument(argumentsJson: string, key: "command" | "job_id"): strin
   try {
     const value = JSON.parse(argumentsJson) as Record<string, unknown>;
     const result = value && typeof value === "object" ? value[key] : undefined;
-    return typeof result === "string" && result.trim() ? result : undefined;
+    return typeof result === "string" && result.trim() && !result.includes("\0") && Object.keys(value).every((field) => field === key) ? result : undefined;
   } catch { return undefined; }
 }
 
@@ -85,7 +86,7 @@ export class BackgroundJobManager {
     onSettled?: (completion: BackgroundJobCompletion) => void,
   ): BackgroundJobSnapshot {
     if ([...this.#jobs.values()].filter((job) => job.status === "running").length >= MAX_RUNNING_JOBS) {
-      throw new Error(`At most ${MAX_RUNNING_JOBS} background jobs may run at once`);
+      throw new ToolFeedbackError("BACKGROUND_LIMIT", `At most ${MAX_RUNNING_JOBS} background jobs may run at once`, "Poll or wait for the running jobs to finish before starting another command.");
     }
     const controller = new AbortController();
     const abortFromParent = () => controller.abort(parentSignal?.reason ?? new Error("Task cancelled"));
@@ -104,7 +105,7 @@ export class BackgroundJobManager {
       job.preview = { ...output, headLines: [...output.headLines], tailLines: [...output.tailLines] };
     })
       .then((result) => {
-        job.result = result;
+        job.result = { ...result, ...commandFailureFeedback(result) };
         job.status = result.timedOut ? "timed_out" : result.cancelled ? "cancelled" : result.error || result.exitCode !== 0 ? "failed" : "completed";
       })
       .catch((error: unknown) => {

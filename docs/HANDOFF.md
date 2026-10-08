@@ -1,16 +1,22 @@
 # 当前交接
 
-更新日期：2026-10-07。新 Session 先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 选择专题。本文件只保存当前状态；此前完整记录见 [历史交接](archive/HANDOFF_HISTORY.md)。
+更新日期：2026-10-08。新 Session 先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 选择专题。本文件只保存当前状态；此前完整记录见 [历史交接](archive/HANDOFF_HISTORY.md)。
 
 ## 当前基线与范围
 
-- 产品保持 DeepSeek 优先、Windows 优先、单 Agent、Node/TypeScript、Responses 与 inline TUI，包版本为 `0.3.8`。
-- 当前已交付的 `main` 基线为 commit `ef443c745bb67a34ae3a90bc552fc495e8f0d38b`；比较参考仍固定为本地 DeepSeek Harness 官方 checkout `639ed015397290b3745d163aafe02ffee4aa3f84`。实验调度与 Agent Teams 不在本轮基线。
-- 用户授权本轮可靠性、MCP 资源访问、Windows LSP 原生门禁与长会话成本优化；既有历史/附件、exec、分支、重连和压力裁剪继续复用。模型默认参数、权限和宿主验证规则保持不变。
-- 用户随后明确授权更新版本、提交并推送，包与双语 README 同步为 `0.3.8`，依赖版本未变。交付 commit 以 Git `HEAD` 为准；仅推送 `main`，提交使用 `[skip publish]`，不创建或推送 tag、不创建或更新远程 Release。已核对 Release workflow 的分支跳过条件及独立 Test CI；未读取模型凭据或发送 live 模型请求。
-- 本轮继续按用户授权自动提交、推送；交付 commit 为 `5f0f575`（main，已推送）。新增 `everpeace exec --resume <session-id>`：把同工作区 Session 分支为独立子副本并恢复其 context、workflow、TaskProgress 与已保存模型（`--resume` 与 `--model` 互斥），子副本结算 `verified`/`no_changes` 后清除 `fork_pending_resume`，JSONL `session_started` 附带 `parent_session_id`；runtime instructions 增加自主性/保留用户改动/失败重跑/仅授权动作可执行的约束，summary/compaction 请求也附带 host runtime identity 块。真实 dsh coding-task 比较仍未执行，不能据此宣称质量领先。
+- 产品保持 DeepSeek 优先、Windows 优先、单 Agent、Node/TypeScript、Responses 与 inline TUI；包版本为 `0.3.9`，双语 README 展示同步。
+- 本轮开始时 `main` 的实际 HEAD 为 `0052d4b7e292b9176a796f770d449582645de090`；比较参考固定为 DeepSeek Harness `639ed015397290b3745d163aafe02ffee4aa3f84`。旧交接中的提交、授权和验证证据已归档，不能作为本轮证据。
+- 用户授权结构化压缩交接、当前工作流上下文和内置工具失败反馈，仅离线优化；随后明确授权更新版本、提交与推送，但不更新 Release。只推送 `main`，使用 `[skip publish]` 保持 Test CI 并跳过分支发布 job，不创建或推送 tag，不创建或更新 GitHub Release。不调用真实模型；默认 `high`／32,768 输出预算、原生 sandbox 和宿主验证规则不变。
+- TUI、exec、SDK 和 benchmark 复用共享 production factory／runner；MCP、LSP、多 Agent 和新协议不扩展。
 
 ## 已完成能力
+
+### 编码任务连续性与工具反馈
+
+- [conversation-checkpoint](../src/agent/conversation-checkpoint.ts) 规定八章摘要交接，assistant 背景回注；旧 developer 摘要仅在请求投影中转换，Session 原日志不改写。`/context` 以 `model_checkpoints` 计数和英文模型交接标签展示。
+- 连续压缩指令要求合并旧交接与新证据、淘汰过时内容，保留精确路径、命令、错误和恢复引用。保留最近两个完整交互单元，不拆并行工具 batch。缺章／重章／乱序／空章、空白／未完成／未缩小摘要以及取消或落盘失败保留原 context，不追加模型修复请求；已发出 usage 仍结算。
+- [workflow model context](../src/workflow/model-context.ts) 从共享 production IO 提供每 step 冻结的任务来源、phase/result、待验证和 tracking 状态、修复次数。coding retry 和自动压缩复用快照，手动压缩读取当前宿主事实。历史债务也投影为待验证；缺字段不推断成功，摘要和清单不能改变结算。不新增 Session 事件或保存敏感 workflow 正文。
+- [tool feedback](../src/tools/tool-feedback.ts) 为内置文件／搜索、shell／后台和 patch 的已知失败提供错误码与修正提示。参数检查先于目标读取／进程启动；权限拒绝不得绕过；超时保留部分输出，先检查副作用。分类仅用显式类型／状态，不猜测未知异常、不自动重放。
 
 ### 历史与持久输出
 
@@ -48,7 +54,7 @@
 - [CLI](../src/cli/commands/exec.ts) 暴露 `everpeace exec [prompt] [-C <directory>] [--model <id-or-name>] [--json] [--token-budget <n>] [--timeout-ms <n>] [--max-steps <n>]`。提示词来自一个位置参数或非 TTY stdin，二者同时提供或都缺失均为参数错误；管道输入最多 8 MiB。
 - 模型先按注册 ID、再按唯一模型名解析；省略模型只允许恰好一个凭据可用模型。帮助路径在 registry/keyring、MCP 和 TUI 之前返回。
 - [production factory](../src/runtime/production.ts) 由 TUI、exec 和 benchmark 共用，统一 Session、历史附件、Memory、MCP、权限、sandbox、workflow、预算、验证和清理。通过启动阶段的 exec 任务创建正常 Session，标题来自首条非空提示行，之后可由 TUI `/resume` 打开。
-- exec 读取已有 learned Memory，但固定关闭本次自动 capture。`--resume <session-id>` 把同工作区 Session 分支为独立子副本并恢复其 context、workflow、TaskProgress 与已保存模型（`--resume` 与 `--model` 互斥，模型注册变化或凭据缺失属于参数错误）；子副本在续跑结算为 `verified`/`no_changes` 后清除 `fork_pending_resume`。不支持 Plan 或自动批准；审批或结构化问题先保存配对结果，再以 `interaction_required` 停止并清理。
+- exec 读取已有 learned Memory，但固定关闭本次自动 capture。`--resume <session-id>` 把同工作区 Session 分支为独立子副本并恢复其 context、workflow、TaskProgress 与已保存模型（`--resume` 与 `--model` 互斥，模型注册变化或凭据缺失属于参数错误）；子副本在续跑结算为 `verified`/`no_changes` 后清除 `fork_pending_resume`。支持只读 --plan，并将提交计划作为输出，绝不自动批准执行；审批或结构化问题先保存配对结果，再以 `interaction_required` 停止并清理。
 - token budget 覆盖主请求、压缩、retry 和 repair；timeout 与 max steps 也跨全部修复轮共享。默认 stdout 只写最终助手文本，stderr 写进度和宿主验证摘要。
 - `--json` 在 exec 输出层初始化后输出 schema 1 的脱敏 JSONL：`session_started`、`assistant_message`、`tool_started`、`tool_finished`、`workflow_updated`、`interaction_required`，以及清理后唯一的 `run_finished`。不导出 reasoning 正文或原始 provider response；终态 usage 可含汇总 reasoning tokens。顶层参数语法或模块启动错误发生在 JSONL 启动前；EPIPE 无法补写终态。退出码为 `0` verified/no_changes、`1` 运行/清理/EPIPE、`2` 参数/启动配置、`3` failed/unverified、`4` 预算/usage/step/deadline、`5` 需要交互、`130/143` 信号。
 
@@ -79,33 +85,17 @@ stdout/stderr 使用有序 writer，编码块最多 16 KiB、待写编码总量�
 
 ## 验证状态
 
-新增和扩展的离线回归位于 [MCP tests](../tests/unit/mcp/runtime.test.ts)、[ripgrep tests](../tests/unit/tools/ripgrep.test.ts)、[exec tests](../tests/unit/exec/)、[CLI tests](../tests/unit/cli/)、[Session tests](../tests/unit/storage/session-store.test.ts)、[history tests](../tests/unit/storage/session-history.test.ts)、[pruning tests](../tests/unit/agent/context-pruning.test.ts) 和 [TUI tests](../tests/unit/tui/app.test.tsx)。fixture 覆盖重连/关闭竞态和不重放、工具目录通知/分页/binding、缺平台 rg、JSONL/退出/信号/EPIPE、父子独立/重启/删除、pending resume、Unicode/CRLF/恢复引用、裁剪持久失败与重启恢复。
+本轮定向离线回归已覆盖摘要结构、最新纠正、连续压缩、并行工具边界、旧摘要投影、无效摘要／取消／落盘失败、workflow retry 冻结、恢复债务／预算停止和工具错误反馈。共享 production 集成场景贯通规则刷新 → 盲写拒绝 → 快速检查失败 → 压缩 → fork／重启 → 重新读取 → 修正 → runner 完整验证；父 Session 保持失败，子 Session 独立结算。
 
-版本同步后使用 Windows Node 22 工具链串行完成 `pnpm typecheck → pnpm test → pnpm build`，三项均通过；最近一次完整测试共 713 项，710 通过、3 跳过、0 失败、0 取消（43,257.0673 ms）。三个既有跳过分别是文件 symlink 权限、Windows 临时目录别名和 Unix child timeout 场景；原生 Windows sandbox fixture 在本机实际执行，不能把 CI 的平台跳过当成同一证据。构建后 CLI 与 exec 的 `--help` 都以 0 退出。上一轮验证已移到历史归档，仓库没有 lint script。
+更新展示版本后的交付检查使用 Windows Node `v22.19.0`／`pnpm@10.22.0`，按 typecheck → lint → test → build 顺序执行：`pnpm typecheck` 通过；实际 scripts 中没有 lint，明确记为缺项；`pnpm test` 共 743 项，740 通过、0 失败、3 跳过，耗时 52,566.8104 ms；`pnpm build` 通过。跳过项分别为当前文件系统不允许的 file symlink、由 clean-checkout CI 覆盖的 Windows 临时目录 alias 和 Unix-only timeout。`git diff --check` 与本轮新增文件空白检查、本轮文档链接检查通过。
 
-2026-10-05 在 Windows Node 22 上以提交 `ef443c745bb67a34ae3a90bc552fc495e8f0d38b` 重新运行 credential-free benchmark preflight：Everpeace checkout 与 pinned dsh `639ed015397290b3745d163aafe02ffee4aa3f84` 均通过，provider boundary 各自被观察，network calls 为 0，process cleanup 为 awaited，usage ledger 完整；当前 checkout source digest 为 `15a059fa65d905c5d66b381af406adcab3c8f02c59559e3ba01bec4ff258862a`。这只是启动、装配和请求边界证据，不是 coding-task 质量比较。
+默认外层隔离进程不能初始化两个 Windows 原生 backend fixture，首次全量检查首败后停止，没有继续构建。诊断同时修正 Composer 对字段化参数错误的兼容提示、project-context 的旧 free-text fake 摘要，以及 benchmark 将 Git 快照时间计入 90 ms 墙钟阈值的不稳定断言；新的 timeout 测试直接证明 runner 在 adapter 未完成时返回超时，不修改生产超时逻辑。定向兼容回归 42 项全部通过；随后在获准的宿主进程中执行原生 sandbox 回归，10 项全部通过，再重新执行上述完整门禁；模型 shell 的 sandbox 路径与失败关闭规则不变。
 
-同日使用同一份十项 pinned Node 清单执行 `--prove-fixtures`：Chalk 三项、Commander 三项和 Day.js 四项均完成 `seed=1 → reference=0`；Day.js 的四项 pristine/acceptance 采用 120 秒 Windows 冷启动 deadline。该 proof 只证明 fixture 与 evaluator 的可复现性，不是模型 coding-task 质量比较，也不读取凭据或发送模型请求。
+最终全量测试日志位于本机临时目录 `everpeace-continuity-0.3.9-delivery-test.log`，不纳入仓库。交接消息的 assistant 文本输入通过本地 Responses SDK 的 `EasyInputMessage` 类型检查。补齐压缩请求的工作流事实后，摘要／工作流／production 连续性定向回归 9 项全部通过，再执行最终完整门禁。定向启动时 `pnpm exec tsx` 在当前 Windows shim 环境未解析成功，已使用同一 Node 22 工具链的 `node --import tsx --test` 执行；没有修改依赖或工具链配置。
 
-本轮 tracked 差异使用 `git diff --check -- . ':(exclude).gitignore' ':(exclude)LICENSE'` 并以 0 退出；两个排除项是任务开始前已有的 CRLF 差异，不把结果描述成全局检查。11 个新增实现/fixture 的独立空白检查通过；13 份变更 Markdown 的 500 个本地目标路径检查通过。Windows/Linux Test CI 继续完整门禁并增加有界超时；发布标记不跳过 Test CI。远程执行状态需按实际 push 后的 workflow 核对，不将本机结果当作 Linux 或 hosted runner 证据。
+交付提交使用 `feat: preserve task continuity and actionable tool feedback [skip publish]`。已核对 [Release workflow](../.github/workflows/release.yml) 仅在分支提交不含该标记时运行发布 job；tag push 不受标记保护，因此本轮只推送 `main`。独立 [Test workflow](../.github/workflows/test.yml) 不读取该标记。推送前已通过 GitHub API 保存现有 Release 元数据基线，以便核对没有新增或修改 Release。
 
-
-所有模型路径使用 fake provider 或确定性 fixture；本轮没有真实模型性能证据。真实 Windows Terminal 的恢复、分支、取消、resize/scrollback 和单 prompt 手工验收尚未执行。
-
-开发专用 [离线 TUI fixture](../tests/fixtures/tui-offline.ts) 可从真实 Windows Terminal 运行 `pnpm exec tsx tests/fixtures/tui-offline.ts --root <绝对空目录>`。它在指定根下独立保存工作区、Session 和输入历史，不加载用户 keyring、模型配置、MCP、Memory、Skills 或导航。`large` 检查中文/emoji 长输出，`wait` 检查取消；`Offline debt seed` 可测试恢复、分支及待验证债务，具体步骤见 [开发指南](DEVELOPMENT.md)。帮助和非 TTY 拒绝启动已自动检查，不能代替真实终端验收。
-
-### 离线宿主性能证据
-
-同一台 Windows Node 22、独立 worker、同一份 134,461,921 字节日志（2,048 次 64 KiB 追加、64 次压缩，最终 context 一项、timeline 空）对照上一提交与当前实现：
-
-| 操作 | 原实现耗时／进程峰值 RSS | 当前实现耗时／进程峰值 RSS |
-| --- | --- | --- |
-| load | 421.44 ms／391,636 KiB | 401.03 ms／114,052 KiB |
-| list | 361.83 ms／389,116 KiB | 255.77 ms／86,756 KiB |
-
-两实现读取相同日志字节且最终投影一致。当前最大单记录 65,649 字节、原始输入保留上界观测 131,185 字节；load 结束 GC 前 heap 从原实现 280,235,768 字节变为 16,221,280 字节，异步抽样 heap 峰值为 27,445,824 字节。耗时是一次离线诊断；heap 抽样可能漏过同步峰值，RSS 为进程高水位，且空 timeline 的 fixture 不能证明所有长会话恒定内存。临时对照模块与工作区已清理。
-
-历史附件 16 页 fixture 观测：首次历史扫描 3,213,801 字节，累计历史来源 I/O 4,212,951 字节，附件 I/O 458,816 字节，定位缓存一 miss／十五 hit。后续页不从日志起点重定位，仍重验来源区间。实施阶段门禁中的 100 个含附件 Session：启动/冷列表 315.01 ms，热列表 77.29 ms，冷/热搜索 106.51／11.04 ms；启动引用扫描与列表日志各 2,931,690 字节，热列表新增相同日志读取而不重复启动引用扫描，冷搜索再新增相同日志读取，热搜索命中 100 项缓存。全程附件正文读取为 0，orphan 正确清理。确定性门禁以最终状态、原始缓冲和读取量为准，耗时仅作诊断，不据此宣称真实模型速度、质量或 token 提升。
+所有模型请求使用 fake provider，不读取用户 keyring／模型凭据、不发送 live 请求；离线机制验收不能证明真实 DS 成功率、缓存命中或 token 成本改善。真实 Windows Terminal 恢复、分支、取消、resize／scrollback 与单 prompt 仍待手工验收。旧 native sandbox／benchmark preflight／fixture proof 与宿主性能结果见 [历史交接](archive/HANDOFF_HISTORY.md)，不作为本轮新验证。
 
 ## 当前限制与后续
 
@@ -119,4 +109,4 @@ stdout/stderr 使用有序 writer，编码块最多 16 KiB、待写编码总量�
 
 ## 用户已有差异
 
-本轮开始前已有 `.gitignore`、`LICENSE` 未暂存 CRLF 差异，以及未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`。这些内容没有清理、覆盖或纳入本轮实现；下一轮仍须检查实时 Git 状态。
+本轮开始时 tracked 差异为空；已有未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}` 全部保留，不纳入实现或清理。

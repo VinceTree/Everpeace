@@ -1,5 +1,6 @@
 import { constants, promises as fs } from "node:fs";
 import path from "node:path";
+import { ToolFeedbackError } from "./tool-feedback.js";
 
 interface RipgrepModule {
   rgPath?: unknown;
@@ -10,9 +11,11 @@ export type RipgrepModuleLoader = () => Promise<unknown>;
 
 function unavailable(error: unknown): Error {
   const detail = error instanceof Error ? error.message : String(error);
-  return new Error(
+  return new ToolFeedbackError(
+    "TOOL_UNAVAILABLE",
     `Bundled ripgrep is unavailable for ${process.platform}-${process.arch}. `
       + `Reinstall Everpeace with optional dependencies enabled. ${detail}`,
+    "Reinstall with optional dependencies enabled for a supported platform, or use read_file/list_directory for focused inspection. Do not use another execution path to bypass permissions.",
     { cause: error },
   );
 }

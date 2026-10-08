@@ -9,6 +9,8 @@ Everpeace is a DeepSeek-first, Windows-first personal development CLI with an in
 
 Model API keys are never read from environment variables or written to the project or configuration JSON. Everpeace stores them in the operating system credential store. Its local model registry contains only the model name, base URL, and credential reference. Separately, user-configured MCP servers may reference bearer tokens or headers through environment-variable names, following Codex MCP configuration.
 
+Summary compaction keeps a structured checkpoint of your goals and corrections, decisions, file changes, check evidence, unfinished work, and next steps, alongside the latest two complete interactions. `/context` labels it as a model-generated checkpoint. The Agent receives the current host workflow state on each step, including pending verification and repair limits. Known file, edit, and command failures include a reason and corrective guidance; timed-out commands retain partial output so the Agent can inspect possible side effects before continuing. These mechanisms have offline regression coverage; real-model quality and token savings remain unmeasured.
+
 ## Requirements
 
 - Node.js 22+
@@ -102,7 +104,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.3.8) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.9) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │

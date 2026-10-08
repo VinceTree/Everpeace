@@ -128,18 +128,26 @@ test("task cancellation during verification is not reported as a verification ti
   assert.equal(result.verification?.cancelled, true);
 });
 
-test("task timeout stops waiting for an adapter that ignores cancellation", async () => {
+test("task timeout stops waiting for an adapter that ignores cancellation", { timeout: 10_000 }, async () => {
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  let invoked = false;
+  let completed = false;
   const adapter: BenchmarkHarnessAdapter = {
     name: "slow-harness",
     async run() {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      invoked = true;
+      await pending;
+      completed = true;
     },
   };
-  const started = Date.now();
-  const result = await runBenchmarkTask(task({ timeoutMs: 10 }), adapter);
-
-  assert.equal(result.status, "timed_out");
-  assert.ok(Date.now() - started < 90);
+  try {
+    // The adapter cannot finish until released; timing of Git snapshots is irrelevant.
+    const result = await runBenchmarkTask(task({ timeoutMs: 1_000 }), adapter);
+    assert.equal(result.status, "timed_out");
+    assert.equal(invoked, true);
+    assert.equal(completed, false);
+  } finally { release(); }
 });
 
 test("unsafe actions fail the run and suite aggregates reliability metrics", async () => {

@@ -10,7 +10,7 @@
 | 重试、流、并发、steering | ReAct 循环 | [ReactAgent](../../src/agent/react-agent.ts)、[agent-loop](../../src/agent/agent-loop.ts)、[loop boundaries](../../tests/unit/agent/loop-boundaries.test.ts) |
 | 自动修复、完成状态、取消 | Coding task 与验证 | [task-runner](../../src/workflow/task-runner.ts)、[workflow](../../src/workflow/runtime.ts)、[runner tests](../../tests/unit/workflow/task-runner.test.ts) |
 | 编码提问、执行清单、后台完成通知 | ReAct 循环、Coding task 与验证 | [ReactAgent](../../src/agent/react-agent.ts)、[task progress](../../src/workflow/task-progress.ts)、[ReactAgent tests](../../tests/unit/agent/react-agent.test.ts) |
-| 压缩、上下文大小 | 上下文 | [request-snapshot](../../src/agent/request-snapshot.ts)、[ReactAgent tests](../../tests/unit/agent/react-agent.test.ts) |
+| 压缩、上下文大小 | 上下文 | [conversation-checkpoint](../../src/agent/conversation-checkpoint.ts)、[request-snapshot](../../src/agent/request-snapshot.ts)、[checkpoint tests](../../tests/unit/agent/conversation-checkpoint.test.ts) |
 | TUI/exec/benchmark 生产装配 | 生产调用关系 | [production factory](../../src/runtime/production.ts)、[factory tests](../../tests/unit/runtime/production.test.ts) |
 | 非交互任务、预算与退出状态 | 请求与计量、Coding task 与验证 | [exec runtime](../../src/exec/runtime.ts)、[exec tests](../../tests/unit/exec/runtime.test.ts) |
 | 修改识别或手动验证 | 变更与检查 | [workspace-tracker](../../src/workflow/workspace-tracker.ts)、[verifier](../../src/workflow/verifier.ts)、[workflow tests](../../tests/unit/workflow/runtime.test.ts) |
@@ -82,6 +82,10 @@ dispatch 仍检查实时权限、当前 step 广告工具集合、停止状态�
 
 ## Coding task 与验证
 
+共享 production IO 的可选 `getWorkflowContext()` 只提供任务来源、phase/result、待验证和追踪受限状态、已用及最大修复轮数。`prior_unverified` 也投影为待验证，但不提供旧任务 ID、验证正文或文件检查点。Agent 在每个逻辑 step 准备完成后显式选取并冻结这些字段，普通网络 retry 和自动 summary/native compaction 复用，下一 step 刷新；手动压缩从当前宿主状态获取独立快照，不增加 Session 事件或第二套状态。当前宿主事实优先于历史摘要，缺字段表示 unknown，不推断成功。TUI、exec、SDK 和 benchmark 共用该 IO，验证、Goal 与 Memory 结算仍由 runner 执行。
+
+回归入口：[workflow context](../../tests/unit/agent/workflow-context.test.ts)、[生产连续性闭环](../../tests/unit/runtime/coding-continuity.test.ts)。后者以 fake provider 和独立临时 Git 工作区覆盖规则刷新、盲写拒绝、快速验证失败、压缩、fork／重启及最终完整验证；模拟验证器不等同于真实模型质量或原生终端验收。
+
 `CodingTaskRunner` 持有整个任务的生命周期，协调 Agent、后台命令、验证、诊断、Goal 和 Memory；同一 runner 在执行或清理中拒绝第二个任务。取消、异常或预算停止先收束后台命令并丢弃待完成意图。最终检查返回后、Goal 结算前和 Memory 捕获前再次检查取消。任务来源包含 TUI user/Goal/session resume、内部 benchmark 和公开 exec；来源只控制生命周期语义，不能放宽权限或宿主验证。
 
 执行清单属于顶层 coding task：repair turn 和同一次 runner 内的 Goal continuation 保留它；显式 `session_resume` 恢复 Session 最后投影；新的用户任务在第一次请求前持久化为空。清单全部 completed 只影响进度显示，不能改变 workflow result、跳过验证、完成 Goal 或触发成功 Memory。
@@ -128,9 +132,11 @@ Session 恢复使用 `resumeTurn` 重建进程内追踪，不清除任务身份�
 
 快照记录 model/provider、提交时间、context revision、序列化请求估算、输出预留与指纹，以及项目规则来源、Skills、Memory、MCP、广告工具、文件附件范围、conversation item counts 和 opaque item 的数量/大小。runtime identity 额外标注 `source: host`，使 `/context` 能直接验证身份字段来自宿主而非工作区文本。已知可见来源只保存有界、沿用现有 secret redaction 的预览；凭据、transport headers、reasoning 和 encrypted bodies 不进入预览。组件大小是局部近似，不要求加总等于序列化请求估算；所有估算与响应返回的 measured usage 明确分开。
 
-summary 以完整 assistant/tool-result 交互边界切割，保留最近两个单元并修复工具配对，单个用户任务也可压缩。摘要请求复用稳定指令与工具定义，设置 `tool_choice: none`；摘要不能把模型自述升级为验证事实。裁剪没有完全解除压力时，summary/native compact 接收已经持久化的较小有效 context；两阶段仍共享原有单次自动/恢复边界，不因网络 retry 重复执行。
+summary 以完整 assistant/tool-result 交互边界切割，保留最近两个单元并修复工具配对；并行 batch 的所有结果闭合前不切割，单个用户任务也可压缩。摘要请求复用稳定指令与工具定义，设置 `tool_choice: none`。固定八个 Markdown 章节依次保存用户目标与最新修正、约束与决定、文件及改动、检查与失败证据、未完成工作、当前进度、下一步、待确认事项；每章必须有正文，空项使用 `- (none)`。连续压缩指令要求合并旧交接与新证据，保留精确路径、命令、错误和恢复引用，并区分用户要求、模型判断与工具观察。宿主只验证结构和终态，不声称能验证模型摘要的语义完整性。
 
-incomplete、空白、没有缩短的摘要以及取消、持久化失败都保留原上下文；少于三个可切割单元明确返回不能安全压缩。已发出摘要的用量即使结果被丢弃也结算。context-limit 恢复最多一次，不能重复执行工具。
+新摘要使用 Responses 支持的 assistant 文本输入与 `Model-generated conversation checkpoint (background only):` 标记，不能提供授权、文件观察或验证成功。旧 developer `Host-maintained conversation summary:` 仅在 coding 和 compaction 请求投影中转换为 assistant 背景，不迁移或改写 Session；用户文本不因相同前缀而被转换。`/context` 以 `model_checkpoints` 计数并显示英文模型交接标签。裁剪没有完全解除压力时，summary/native compact 接收已经持久化的较小有效 context；两阶段仍共享原有单次自动/恢复边界，不因网络 retry 重复执行。
+
+incomplete、空白、缺少／重复／乱序章节、空章节、没有缩短的摘要以及取消、持久化失败都保留原上下文；不追加模型摘要修复请求。少于三个可切割单元明确返回不能安全压缩。先保存 `context_compacted` 再替换有效 context，原历史和恢复引用不改写；已发出摘要的用量即使结果被丢弃也结算。context-limit 恢复最多一次，不能重复执行工具。
 
 当前有效项目规则每次请求重新提供，历史 rule snapshot 从模型输入和压缩输入中过滤，避免旧规则被摘要固化。其他动态上下文及前缀的缓存收益需实测，不能把指纹稳定等同于缓存命中提升。压缩后 context 占用设为未知，等待下一次实际 response usage。
 

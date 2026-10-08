@@ -5,6 +5,7 @@ import {
 } from "./bash-output-preview.js";
 import { stopProcessTree } from "./process-cancel.js";
 import { BoundedOutputBuffer } from "./command-record.js";
+import { commandFailureFeedback } from "./tool-feedback.js";
 import { codexCliLaunch, runCodexProcess } from "../codex/cli.js";
 import {
   materializeSandboxControlPaths,
@@ -85,7 +86,9 @@ export function parseBashCommand(argumentsJson: string): string | undefined {
       value !== null &&
       "command" in value &&
       typeof value.command === "string" &&
-      value.command.length > 0
+      value.command.trim().length > 0 &&
+      !value.command.includes("\0") &&
+      Object.keys(value).every((key) => key === "command")
     ) {
       return value.command;
     }
@@ -105,6 +108,7 @@ export function serializeBashResult(result: BashResult): string {
     ...(result.truncated ? { truncated: true } : {}),
     ...(result.timedOut ? { timed_out: true } : {}),
     ...(result.error === undefined ? {} : { error: result.error }),
+    ...commandFailureFeedback(result),
   });
 }
 

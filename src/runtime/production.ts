@@ -39,6 +39,8 @@ import {
 import type { SessionGoal } from "../storage/session-store.js";
 import type { TaskProgress } from "../workflow/task-progress.js";
 import type { CodingWorkflowRuntime } from "../workflow/runtime.js";
+import { projectWorkflowContext } from "../workflow/model-context.js";
+import { POLICY_DENIED_REMEDY } from "../tools/tool-feedback.js";
 
 export type ProductionAgentRestore = Pick<
   ReactAgentOptions,
@@ -351,6 +353,7 @@ export function createProductionWorkflowAgentIO(options: ProductionWorkflowAgent
     ...(session?.getId ? { getSessionId: session.getId } : {}),
     getPermissions: () => ({ ...options.policy() }),
     isToolExecutionBlocked: () => workflowFrom(options).state.phase === "blocked",
+    getWorkflowContext: () => projectWorkflowContext(workflowFrom(options).state),
     confirmBash: (command) => confirm("bash", command),
     confirmPatch: (summary) => confirm("patch", summary),
     confirmWeb: (request) => confirm("web", request),
@@ -374,7 +377,7 @@ export function createProductionWorkflowAgentIO(options: ProductionWorkflowAgent
       signal?.throwIfAborted();
       const policy = options.policy();
       if (policy.mode === "read-only") {
-        return { status: "rejected", files: [], error: "The read-only profile does not allow file edits" };
+        return { status: "rejected", files: [], error: "The read-only profile does not allow file edits", errorCode: "POLICY_DENIED", remedy: POLICY_DENIED_REMEDY };
       }
       return runApplyPatch(operations, options.workspacePath, { allowProtectedPaths: policy.mode === "full-access" });
     },

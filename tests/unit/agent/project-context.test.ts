@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { checkpointText } from "../../fixtures/conversation-checkpoint.js";
 import { loadProjectContext, loadProjectRuleSnapshot } from "../../../src/agent/project-context.js";
 import { ReactAgent } from "../../../src/agent/react-agent.js";
 import { resolveProviderCapabilities } from "../../../src/providers/capabilities.js";
@@ -176,7 +177,7 @@ test("current project rules remain effective after context compaction", async ()
       client: { responses: { async create(params) {
         if (params.tool_choice === "none") {
           compactInput = params.input;
-          return { id: "summary", status: "completed", output_text: "Earlier work was summarized.", output: [] };
+          return { id: "summary", status: "completed", output_text: checkpointText("Continue earlier work"), output: [] };
         }
         codingInputs.push(params.input);
         return { id: `answer-${codingInputs.length}`, status: "completed", output_text: "done", output: [] };

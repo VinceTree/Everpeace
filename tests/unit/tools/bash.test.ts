@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { resolveBashLaunch, runBash, serializeBashResult } from "../../../src/tools/bash.js";
+import { COMMAND_TIMEOUT_REMEDY } from "../../../src/tools/tool-feedback.js";
 
 test("Bash abort stops a running child and leaves the next command usable", { timeout: 15000 }, async () => {
   const controller = new AbortController();
@@ -69,6 +70,8 @@ test("serializeBashResult preserves timeout failures for the model", () => {
     signal: null,
     timed_out: true,
     error: "Bash command timed out after 120000 ms",
+    errorCode: "COMMAND_TIMEOUT",
+    remedy: COMMAND_TIMEOUT_REMEDY,
   });
 });
 

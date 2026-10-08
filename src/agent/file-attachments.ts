@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { runFileTool } from "../tools/files.js";
+import { ToolArgumentError } from "../tools/tool-feedback.js";
 import { resolveBundledRipgrep, type RipgrepPathResolver } from "../tools/ripgrep.js";
 
 export const MAX_FILE_ATTACHMENTS = 8;
@@ -199,7 +200,7 @@ export async function resolveFileAttachments(
         max_lines: requestedEnd - startLine + 1,
       }), workspacePath, signal) as FileReadResult;
     } catch (error) {
-      if (error instanceof Error && error.message === "Invalid file tool arguments") {
+      if (error instanceof ToolArgumentError && error.field === "start_line") {
         throw new Error(`Referenced range starts after the end of ${reference.path}`, { cause: error });
       }
       throw error;

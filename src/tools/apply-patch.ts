@@ -85,7 +85,7 @@ export class ApplyPatchError extends Error {
 }
 
 function patchError(code: ApplyPatchErrorCode, message: string, remedy?: string): never {
-  throw new ApplyPatchError(code, message, remedy);
+  throw new ApplyPatchError(code, message, remedy ?? (code === "INVALID_ARGUMENTS" ? `Correct the apply_patch arguments described by this error: ${message}. Use the advertised operations schema before resubmitting.` : undefined));
 }
 
 export const APPLY_PATCH_TOOL_DEFINITION = {

@@ -9,6 +9,8 @@ Everpeace 是一个 DeepSeek 优先、Windows 优先的个人开发 CLI，提供
 
 模型 API Key 不从环境变量读取，也不会写入项目或配置 JSON。Everpeace 使用操作系统凭据库保存 Key，并在本地模型注册表中只保存模型名、base URL 和凭据引用。用户自行配置的 MCP server 可按 Codex MCP 配置通过环境变量名引用 bearer token 或 header；两类凭据边界彼此独立。
 
+摘要压缩会以结构化交接保留你的目标与纠正、决定、文件改动、检查证据、未完成工作和下一步，并保留最近两个完整交互。`/context` 将它标为模型生成的交接摘要。Agent 每一步都收到当前宿主工作流状态，包括待验证状态和修复轮数限制。已知的文件、编辑和命令失败提供原因与修正提示；命令超时仍保留部分输出，便于 Agent 先检查可能产生的副作用再继续。这些机制已有离线回归覆盖，真实模型质量与 token 节省仍未实测。
+
 ## 需求
 
 - Node.js 22+
@@ -102,7 +104,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.3.8) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.9) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │

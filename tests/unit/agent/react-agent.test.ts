@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { checkpointText } from "../../fixtures/conversation-checkpoint.js";
 import {
   ReactAgent,
   type AgentIO,
@@ -353,7 +354,7 @@ test("DeepSeek summary compaction keeps the latest two interaction units", async
       request = params;
       return {
         id: "summary",
-        output_text: "Old requirement and verified evidence.",
+        output_text: checkpointText("Old requirement", "Earlier command evidence"),
         output: [],
         usage: { input_tokens: 20, output_tokens: 5, total_tokens: 25 },
       };
@@ -363,7 +364,9 @@ test("DeepSeek summary compaction keeps the latest two interaction units", async
   const result = await agent.compact();
   assert.equal(request?.max_output_tokens, 8_192);
   assert.deepEqual(request?.reasoning, { effort: "none" });
-  assert.match(String((result.items[0]?.content as Array<Record<string, unknown>>)?.[0]?.text), /Host-maintained conversation summary/u);
+  assert.equal(result.items[0]?.role, "assistant");
+  assert.equal(typeof result.items[0]?.content, "string");
+  assert.match(String(result.items[0]?.content), /Model-generated conversation checkpoint/u);
   assert.ok(result.items.some((item) => item.content === "recent one"));
   assert.ok(result.items.some((item) => item.content === "recent two"));
   assert.ok(!result.items.some((item) => item.content === "old request"));
@@ -387,7 +390,7 @@ test("DeepSeek summary compaction can shorten one user task with several tool in
       { type: "message", role: "assistant", content: "latest diagnosis" },
     ],
     client: { responses: { async create() {
-      return { id: "summary", status: "completed", output_text: "The first diagnostic failed.", output: [] };
+      return { id: "summary", status: "completed", output_text: checkpointText("Fix this one task", "The first diagnostic failed."), output: [] };
     } } },
     io: { async confirmBash() { return true; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
   });
