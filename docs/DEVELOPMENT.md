@@ -81,6 +81,7 @@ pnpm exec tsx --test --test-name-pattern="cancel" tests/unit/agent/react-agent.t
 | `everpeace exec` 参数、JSONL 与生产运行 | [CLI tests](../tests/unit/cli/)、[exec tests](../tests/unit/exec/)、[runtime factory tests](../tests/unit/runtime/) |
 | 公开 SDK 非交互契约 | [SDK tests](../tests/unit/exec/sdk.test.ts) |
 | 终端布局、输入、slash 窗口 | [TUI tests](../tests/unit/tui/) |
+| Composer 提交与草稿归属 | [prompt-submission.test.tsx](../tests/unit/tui/prompt-submission.test.tsx)、[prompt-history.test.tsx](../tests/unit/tui/prompt-history.test.tsx)、[App](../tests/unit/tui/app.test.tsx)；连续 Enter、粘贴、回调重入、旧挂载／草稿回调、失败重交，以及真实附件提交后的 guidance／resize／Esc 重放 |
 | Memory、Skills、MCP | [memory](../tests/unit/memory/)、[skills](../tests/unit/skills/)、[mcp](../tests/unit/mcp/) |
 | 评测预算、fixture、独立评分 | [benchmark tests](../tests/unit/benchmark/) |
 
@@ -114,6 +115,8 @@ pnpm exec tsx tests/fixtures/tui-offline.ts --root "$env:TEMP\everpeace-tui-offl
 Plan 专项验收另检查：在审阅选择 `Revise plan` 输入意见，resize 后意见仍保留；Esc 返回菜单，菜单 Esc／两处 Ctrl+C 恢复聊天且仅一个 prompt。重新规划并批准后应保持空闲，`/plan show` 可查看正文，`/plan execute` 才启动 coding；取消执行后不能再次消费旧批准。重启、fork 或继续讨论后必须重新批准。自动化生产闭环见 [Plan execution](../tests/unit/runtime/plan-execution.test.tsx)，SDK 通过隔离临时用户目录和本地 fake HTTP provider 验证只读计划输出／问题停止；均不调用真实模型，不代替本节手工验收。
 
 审阅组件回归复用生产 CommandScreen 布局，并等待实际菜单、输入和回调状态后发送下一按键；固定延时不能代替 Ink 的 Esc 缓冲和 React 更新完成。resize 必须确认实际边框宽度已改变，再检查修订正文与提交结果。
+
+Composer 另检查带有效文件引用的提交：连续按 Enter 只启动一次，进入运行中 guidance 后新草稿能正常编辑，resize 和任务结束不清空它；无效引用保留草稿，纠正后显式重交。再打开命令窗口并按 Esc，确认同一 Session 历史及单 prompt。受控 Promise 与 Ink 输入回归只证明本地生命周期，真实 Windows Terminal 的按键、滚轮与缩放仍须按本节单独记录。
 
 App 回归在每项测试结束后统一清理渲染器和捕获的输出帧，即使断言失败也释放。ink-testing-library 会保留渲染器引用，仅 unmount 不会释放捕获帧；所有历史、resize 和隐私断言仍在清理前执行。不通过增大 CI 堆或跳过断言绕过资源问题。
 

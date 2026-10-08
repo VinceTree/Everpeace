@@ -1,5 +1,5 @@
 import { Box, Text, useInput, usePaste, useStdout } from "ink";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   filterSlashCommands,
   type SlashCommand,
@@ -184,6 +184,15 @@ export function Prompt({
   const [selectedFileIndex, setSelectedFileIndex] = useState(0);
   const [dismissedFileValue, setDismissedFileValue] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
+  const lifetimeRef = useRef<symbol | undefined>(undefined);
+  const submissionRef = useRef<symbol | undefined>(undefined);
+  useLayoutEffect(() => {
+    lifetimeRef.current = Symbol();
+    return () => {
+      lifetimeRef.current = undefined;
+      submissionRef.current = undefined;
+    };
+  }, []);
   const placeholder = placeholderOverride ?? (activeModelName
     ? "Ask Everpeace to do anything"
     : "Enter /login to get started");
@@ -262,10 +271,12 @@ export function Prompt({
     setFileSuggestions([]);
   };
 
-  usePaste((text) => updateState((current) => insertComposerText(current, text)), { isActive: !disabled && !submitting });
+  usePaste((text) => {
+    if (submissionRef.current === undefined) updateState((current) => insertComposerText(current, text));
+  }, { isActive: !disabled && !submitting });
   useInput(
     (input, key) => {
-      if (key.eventType === "release") return;
+      if (key.eventType === "release" || submissionRef.current !== undefined) return;
       if (key.ctrl && input === "c") {
         if (stateRef.current.value) updateState(() => createComposerState());
         else onEmptyInterrupt?.();
@@ -279,10 +290,26 @@ export function Prompt({
         } else if (selectedFile) {
           completeFileReference(selectedFile);
         } else {
-          const submittedValue = selectedSlashCommand ?? stateRef.current.value;
+          const submittedState = stateRef.current;
+          const submittedValue = selectedSlashCommand ?? submittedState.value;
+          const lifetime = lifetimeRef.current;
+          const submission = Symbol();
+          // Claim input before calling the host: React has not rendered the
+          // disabled state yet, and the callback can synchronously reenter Ink.
+          submissionRef.current = submission;
+          const isCurrentSubmission = () =>
+            lifetimeRef.current === lifetime && submissionRef.current === submission;
           const accept = () => {
+            // The host may restore guidance or mount another prompt while a
+            // submission waits. Only the original mounted draft can be cleared.
+            if (!isCurrentSubmission() || stateRef.current !== submittedState) return;
             navigation.current = { index: undefined, draft: "" };
             updateState(() => createComposerState());
+          };
+          const finish = () => {
+            if (!isCurrentSubmission()) return;
+            submissionRef.current = undefined;
+            setSubmitting(false);
           };
           try {
             const result = onSubmit(submittedValue);
@@ -291,12 +318,14 @@ export function Prompt({
               void Promise.resolve(result)
                 .then((accepted) => { if (accepted !== false) accept(); })
                 .catch(() => undefined)
-                .finally(() => setSubmitting(false));
-            } else if (result !== false) {
-              accept();
+                .finally(finish);
+            } else {
+              if (result !== false) accept();
+              finish();
             }
           } catch {
             // The draft remains available for correction when submission fails.
+            finish();
           }
         }
         return;

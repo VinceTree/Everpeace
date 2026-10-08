@@ -147,6 +147,7 @@ workflow 提供路径列表时同时返回 `changed_paths_total` 和 `changed_pa
 - `/status`、`/outputs`、`/history`、`/terminal-setup`、信息窗口及 picker/wizard 使用独立命令窗口；`/new`、`/clear`、`/exit` 是立即动作。
 - `/fork` 使用可取消 loading/结果窗口；任务、审批、直接命令或其他 command load 活动时拒绝。只有子日志原子发布并加载成功后才重放并切换 UI。
 - Composer 中 `@` 候选最多显示八项，Esc 只关闭候选；提交文件引用时异步读取，失败保留草稿。摘录只进入该 user context item，不复制进可见历史或标题请求。
+- Composer 在调用提交回调前同步占用当前输入，防止 React 更新前的重复 Enter、输入、粘贴或回调重入。接收成功只清空仍属于同一挂载、同一提交和原 ComposerState 对象的草稿；宿主替换草稿或输入框卸载后，旧回调不得清空编辑状态、历史导航或修改新界面的提交显示。false、同步抛错和异步拒绝保留原草稿并释放当前输入，等待用户明确重交。该占用仅属于输入适配，不代替应用协调的任务准入、取消或 runner 清理。回归见 [提交生命周期](../../tests/unit/tui/prompt-submission.test.tsx) 和 [App](../../tests/unit/tui/app.test.tsx)。
 - `/diff` 先显示 staged/unstaged/untracked 文件列表，Enter 惰性加载分页详情；Esc 从详情回列表、再回聊天。`/resume` 搜索和预览保持八行列表与 50 项分页，并提供当前/全部工作区开关。
 - `/context` 展示当前 Agent 在已准入 provider-call 边界捕获的 “Last submitted coding request”。打开和刷新只读取不可变内存快照，不刷新文件、不压缩 context、也不发送模型请求；进程重启、Agent 替换或首次 coding 请求前显示明确空状态。
 - `/tasks` 只读显示当前完整清单及最新宿主 workflow result；状态栏仅显示完成数/总数。界面不得把全部步骤 completed 渲染为验证成功。
@@ -175,6 +176,7 @@ workflow 提供路径列表时同时返回 `changed_paths_total` 和 `changed_pa
 | Session schema、恢复、usage | [Session 测试](../../tests/unit/storage/session-store.test.ts)、[status 测试](../../tests/unit/status/model-status.test.ts)、[App 测试](../../tests/unit/tui/app.test.tsx)；旧缺字段、损坏尾行、串行追加 |
 | Session 搜索与请求检查 | [Session 搜索](../../tests/unit/storage/session-store.test.ts)、[picker](../../tests/unit/tui/session-picker.test.tsx)、[context](../../tests/unit/agent/context-inspection.test.ts)、[surfaces](../../tests/unit/tui/daily-use-surfaces.test.tsx)；scope、分页、缓存失效、迟到结果、空状态与不可变快照 |
 | UI 命令或布局 | [命令目录](../../src/tui/commands/slash-commands.ts)、[command surface 测试](../../tests/unit/tui/command-surface.test.tsx)、[App 测试](../../tests/unit/tui/app.test.tsx)；Esc、resize、迟到结果、历史重放 |
+| 输入提交、草稿与历史导航 | [提交生命周期](../../tests/unit/tui/prompt-submission.test.tsx)、[输入历史](../../tests/unit/tui/prompt-history.test.tsx)、[App](../../tests/unit/tui/app.test.tsx)；连续 Enter、粘贴、重挂载、宿主草稿替换、失败重交和真实附件解析 |
 | TaskProgress 与结构化问题 | [task progress 测试](../../tests/unit/workflow/task-progress.test.ts)、[ReactAgent 测试](../../tests/unit/agent/react-agent.test.ts)、[App 测试](../../tests/unit/tui/app.test.tsx)；旧 Session、持久化失败、resume/new、压缩、Esc/Ctrl+C 与单 prompt |
 | Goal/Memory 结算 | [task runner 测试](../../tests/unit/workflow/task-runner.test.ts)、[Goal 测试](../../tests/unit/goal/runtime.test.ts)、[Memory 测试](../../tests/unit/memory/learned-memory.test.ts)；取消和验证债务 |
 | 权限与审批 | [PERMISSIONS](PERMISSIONS.md)、[SANDBOX](SANDBOX.md)；运行时权限 revision、取消、原生启动失败关闭 |

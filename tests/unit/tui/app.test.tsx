@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { render as renderInk } from "ink-testing-library";
 import React from "react";
@@ -1784,6 +1787,55 @@ test("Tab completes a slash command without executing it", async () => {
   assert.match(view.lastFrame() ?? "", /Esc to return to session/);
   assert.doesNotMatch(lastBorderedSurface(view.lastFrame() ?? ""), /Everpeace Agent/);
   view.unmount();
+});
+
+test("asynchronous file submission starts once and leaves a fresh guidance draft through replay", async () => {
+  const root = await mkdtemp(join(tmpdir(), "everpeace-prompt-submission-"));
+  assert.ok(root.startsWith(join(tmpdir(), "everpeace-prompt-submission-")));
+  await writeFile(join(root, "note.txt"), "attachment 中文 🙂\n");
+  let release: (() => void) | undefined;
+  const calls: string[] = [];
+  const fixture = createFixture({ initial: [planModel], createAgent: (_model, io) => ({
+    async runTurn(text, _signal, options) {
+      calls.push(text);
+      assert.equal(options?.attachments?.[0]?.content, "attachment 中文 🙂\n");
+      await new Promise<void>((resolve) => { release = resolve; });
+      io.writeAssistant("attachment task finished");
+      return {};
+    },
+  }) });
+  fixture.dependencies.workspacePath = root;
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies}
+    initialModels={{ available: [planModel], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await submitInput(view, 'Review @"note.txt"');
+    view.stdin.write("\r");
+    await waitFor(() => calls.length === 1 && (view.lastFrame() ?? "").includes("Add guidance while working"));
+    view.stdin.write("fresh guidance");
+    await waitFor(() => (view.lastFrame() ?? "").includes("fresh guidance"));
+    assert.match(view.lastFrame() ?? "", /›\s+fresh guidance/u);
+    assert.match((view.lastFrame() ?? "").split("\n").filter((line) => line.trimStart().startsWith("›")).at(-1) ?? "", /›\s+fresh guidance/u);
+    Object.defineProperty(view.stdout, "columns", { configurable: true, value: 60 });
+    view.stdout.emit("resize");
+    await new Promise<void>((resolve) => setTimeout(resolve, RESIZE_REDRAW_DEBOUNCE_MS + 30));
+    assert.match(view.lastFrame() ?? "", /›\s+fresh guidance/u);
+    release?.();
+    await waitFor(() => (view.lastFrame() ?? "").includes("attachment task finished") && !(view.lastFrame() ?? "").includes("ctrl+c to interrupt"));
+    assert.match(view.lastFrame() ?? "", /›\s+fresh guidance/u);
+    view.stdin.write("\u0003");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything"));
+    await submitInput(view, "/status");
+    await waitFor(() => (view.lastFrame() ?? "").includes("/status · Session status"));
+    view.stdin.write("\u001b");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything"));
+    assert.match(view.lastFrame() ?? "", /attachment task finished/u);
+    assert.equal((view.lastFrame() ?? "").match(/Ask Everpeace to do anything/gu)?.length, 1);
+    assert.deepEqual(calls, ['Review @"note.txt"']);
+  } finally {
+    release?.();
+    view.unmount();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("malformed explicit file references keep the App composer draft", async () => {

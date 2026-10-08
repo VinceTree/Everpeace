@@ -106,7 +106,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.3.15) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.16) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -148,6 +148,8 @@ Everpeace also keeps a separate learned-experience memory. After workflow verifi
 `/status` opens a centered, isolated command screen showing the active model, actual Responses protocol, compaction strategy, reasoning level, endpoint, workspace, Session ID, context occupancy, and cumulative input, output, reasoning, cache-hit, and cache-write tokens. Coding and auxiliary model usage are displayed separately; auxiliary requests include title, Skill, Memory, and live doctor work. Cache reads and writes are tracked independently; a hit rate is calculated only over samples that included cache data and is marked partial when some samples omitted it. DeepSeek uses automatic prefix caching without sending OpenAI cache fields. Official OpenAI models may use a Session-scoped cache key and native compaction. Coding usage and request settings persist with the Session.
 
 Composer shortcuts follow Codex conventions: `Enter` submits; `Shift+Enter`, `Alt+Enter`, or `Ctrl+J` inserts a newline; `Home`/`End` and `Ctrl+A`/`Ctrl+E` move to the current line's start/end; `Ctrl+U`/`Ctrl+K` delete to the current line's start/end; `Ctrl+W` deletes the previous word; and `Ctrl+Y` restores the most recently killed text. Arrow keys, `Ctrl+B/F/P/N`, and `Alt+B/F` also move the cursor.
+
+While a submission is waiting to be accepted, repeated `Enter` does not submit it again. Failed submissions preserve the draft; a late result from a previous input screen cannot clear your current draft.
 
 Typing `@` opens a bounded workspace-file picker. Selecting a file inserts an explicit reference such as `@"src/example.ts"`; add `#L10-L40` for a range. On submission Everpeace reads each reference afresh and attaches its labeled excerpt once to model context while keeping the original prompt in input history and title generation. References in inline or fenced code stay literal. A message may contain up to eight excerpts, with a default 200 lines, an explicit maximum of 1,000 lines, 32 KiB per excerpt, and 64 KiB total. Invalid, missing, binary, or oversized references keep the draft and show an error. Attachments do not authorize later edits.
 

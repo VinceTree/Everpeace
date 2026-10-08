@@ -106,7 +106,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.3.15) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.16) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -148,6 +148,8 @@ Everpeace 还会维护独立的 learned 经验记忆。workflow 验证完成并�
 `/status` 会打开居中的独立命令窗口，显示当前模型、实际 Responses 协议、压缩策略、推理档位、接口地址、工作目录、Session ID、context 占用，以及累计输入、输出、推理、缓存命中和缓存写入 token。主 coding 与辅助模型用量分开显示；辅助请求包括标题、Skill、Memory 与 live doctor。缓存读取与写入独立统计；命中率只使用供应商确实返回缓存数据的样本，数据不完整时标为 partial。DeepSeek 使用自动前缀缓存，不发送 OpenAI 缓存字段；官方 OpenAI 型号可使用 Session 级缓存 key 和原生压缩。主 coding 的 Usage 与请求设置随 Session 持久化。
 
 输入快捷键与 Codex composer 保持一致：`Enter` 提交，`Shift+Enter`、`Alt+Enter` 或 `Ctrl+J` 换行，`Home`/`End` 与 `Ctrl+A`/`Ctrl+E` 移动到当前行首/行尾，`Ctrl+U`/`Ctrl+K` 删除到当前行首/行尾，`Ctrl+W` 删除前一个词，`Ctrl+Y` 恢复最近删除的内容。方向键、`Ctrl+B/F/P/N` 和 `Alt+B/F` 也可移动光标。
+
+提交等待接收时，连续按 `Enter` 不会重复提交。提交失败会保留草稿；旧输入界面的迟到结果不能清空当前草稿。
 
 输入 `@` 会打开有界的工作区文件选择器。选择后插入 `@"src/example.ts"` 形式的显式引用，也可追加 `#L10-L40` 指定范围。提交时 Everpeace 重新读取每个引用，把带标签的摘录一次性加入模型 context，同时输入历史和标题生成仍使用原问题；行内代码和 fenced code 内的引用保持字面量。每条消息最多八个摘录，默认 200 行，显式范围最多 1,000 行，单个 32 KiB、合计 64 KiB。无效、缺失、二进制或超限引用会保留草稿并显示错误。附件不会授予后续编辑权限。
 

@@ -27,6 +27,7 @@ src/tui/
 - `app/` owns view selection, host I/O for Session changes, and composition of UI areas. Each mount holds one [ApplicationCoordinator](../../src/runtime/application-coordinator.ts) for Session identity, mode, task admission/cancellation, pending approval, and command operation identity; React state projects it for display.
 - `components/` may use application contracts from `app/types.ts`, but does not own persistence or Agent lifecycle.
 - `composer/`, `commands/`, and `rendering/` expose reusable input or presentation behavior and do not create application services.
+- `composer/` owns submission occupancy for its mounted input. It claims input synchronously before calling the host; successful completion may clear only that mount's unchanged draft snapshot. Unmount invalidates late callbacks, while host task admission, cancellation, attachment cleanup, and verified settlement remain outside the composer. See the [submission regressions](../../tests/unit/tui/prompt-submission.test.tsx).
 - `terminal/` contains filesystem operations; the corresponding interactive screen remains under `components/wizards/`.
 - New files should enter the narrowest matching responsibility directory. Do not recreate a flat `components` catch-all.
 

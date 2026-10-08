@@ -38,6 +38,12 @@ stopAll 使用清理计数关闭准入，重叠清理全部返回后才允许新
 
 工作流只读投影通过共享 production IO 注入每个逻辑 step，复用已有状态和持久化；它不包含验证正文、权限、凭据或检查点，并保留未知字段与历史验证债务。工具反馈使用显式类型和状态分类，补充原因及修正方式，不靠错误文案判断，不自动重放可能已产生副作用的命令。默认请求参数、sandbox 与宿主成功判定继续复用；效果证据限定离线机制回归，真实 DS 成功率和成本需另行有界实测。
 
+## Composer 提交与草稿生命周期
+
+第六阶段首轮在现有 [Prompt](../../src/tui/composer/prompt.tsx) 内固定提交占用、挂载身份和草稿快照的归属。输入占用在调用宿主前同步建立，React 的 submitting 状态只控制显示和订阅，不能单独防止连续按键或同步重入。普通 resize／重渲染保持身份，卸载使旧完成回调失效；即使仍挂载，宿主替换了 ComposerState，旧提交也不能清空新草稿或历史导航。
+
+false、抛错和拒绝沿用保留草稿、显式重交的语义，不新增重试。挂载内提交占用不是模型任务准入；应用协调、文件附件取消、Session 身份和 runner 清理仍走现有路径，不把 UI 状态迁入 Session 或核心模块，也不改变公共参数。实际输入流、重挂载和受控 Promise 见 [提交回归](../../tests/unit/tui/prompt-submission.test.tsx)，真实附件解析、任务切换、resize 与命令重放见 [App 回归](../../tests/unit/tui/app.test.tsx)。
+
 ## 文档分层与按任务阅读
 
 开发知识统一放在 `docs/`，`dosc/` 只保留导航入口。根 [AGENTS](../../AGENTS.md) 保存启动流程与全局约束；[知识库索引](../README.md) 路由专题；[PROJECT_MAP](PROJECT_MAP.md) 关联实际源码和回归测试。新 Session 只必读 AGENTS 与 [HANDOFF](../HANDOFF.md)，然后按任务选择必要专题与修改点，不重复全仓调查。
