@@ -47,3 +47,14 @@ test("blocked streak survives rebuilding the runtime", async () => {
   assert.equal(blocked.status, "blocked");
   assert.equal(blocked.blocked_streak, 3);
 });
+
+test("later reliable usage and a rebuilt runtime cannot clear a Goal accounting gap", async () => {
+  const { runtime, get } = fixture();
+  await runtime.create({ objective: "Long task without a numeric budget" });
+  await runtime.recordUsage({ tokensUsed: 3, usageComplete: false, timeUsedSeconds: 1 });
+  const rebuilt = new GoalRuntime({ async getGoal() { return get(); }, async setGoal(next) { Object.assign(get()!, next); } });
+  const settled = await rebuilt.recordUsage({ tokensUsed: 6, usageComplete: true, timeUsedSeconds: 2 });
+  assert.equal(settled?.tokens_used, 6);
+  assert.equal(settled?.usage_complete, false);
+  assert.equal(settled?.status, "active");
+});

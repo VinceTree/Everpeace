@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { AuxiliaryRequestExecutor } from "../../../src/agent/auxiliary-request-executor.js";
 import { test } from "node:test";
 import {
   LearnedMemoryRuntime,
@@ -34,6 +35,88 @@ async function waitFor(predicate: () => Promise<boolean>, attempts = 3_000): Pro
   }
   assert.fail("Timed out waiting for memory background work");
 }
+
+test("an unknown extraction fails its consolidation job without automatic requests and permits a separate verified turn", async () => {
+  const directory = await temporaryDirectory();
+  const store = new LearnedMemoryStore({ directory });
+  const accounting = new AuxiliaryRequestExecutor();
+  let requests = 0;
+  const runtime = new LearnedMemoryRuntime({ store, model: "offline", idleDelayMs: 0, unrefTimers: false,
+    client: { responses: { create: (_params, options) => accounting.execute("memory", async () => {
+      requests++;
+      const entries = requests === 1
+        ? [{ lesson: "First procedure", applyWhen: "First context" }, { lesson: "Second procedure", applyWhen: "Second context" }]
+        : [{ lesson: "Known procedure", applyWhen: "Known context" }];
+      return { id: "extraction", status: "completed", output: [], output_text: JSON.stringify({ entries }),
+        ...(requests === 1 ? {} : { usage: { input_tokens: 2, output_tokens: 1, total_tokens: 3 } }) };
+    }, options?.signal) } },
+  });
+  try {
+    await runtime.finishTurn({ workspacePath: directory, userInput: "Fix the first defect", transcript: "Verified local result", assistantText: "done", toolCallCount: 1 }, "verified");
+    await waitFor(async () => (await store.loadJobs()).some((job) => job.status === "failed"));
+    const failed = (await store.loadJobs())[0]!;
+    assert.equal(failed.attempts, 1);
+    assert.equal(failed.status, "failed");
+    assert.equal(requests, 1);
+    assert.equal((await store.read("project", directory)).length, 0);
+    await runtime.finishTurn({ workspacePath: directory, userInput: "Fix a separate defect", transcript: "Separate verified local result", assistantText: "done", toolCallCount: 1 }, "verified");
+    await waitFor(async () => (await store.read("project", directory)).some((entry) => entry.lesson === "Known procedure"));
+    assert.equal(requests, 2);
+    assert.equal(accounting.getUsage().complete, false);
+    assert.equal(accounting.getUsage().input_tokens, 2);
+    assert.equal((await store.loadJobs())[0]?.status, "failed");
+  } finally { await runtime.dispose(); await removeTemporaryDirectory(directory); }
+});
+
+test("a Memory job cannot reset unknown accounting by requeuing after request or response failure", async (t) => {
+  for (const failure of ["transport", "incomplete", "empty"] as const) await t.test(failure, async () => {
+    const directory = await temporaryDirectory();
+    const store = new LearnedMemoryStore({ directory });
+    const accounting = new AuxiliaryRequestExecutor();
+    let requests = 0;
+    const runtime = new LearnedMemoryRuntime({ store, model: "offline", idleDelayMs: 0, unrefTimers: false,
+      client: { responses: { create: (_params, options) => accounting.execute("memory", async () => {
+        requests++;
+        if (requests === 1 && failure === "transport") throw new Error("Connection interrupted after admission");
+        return { id: "extraction", status: requests === 1 && failure === "incomplete" ? "incomplete" : "completed", output: [],
+          output_text: requests === 1 && failure === "empty" ? "" : JSON.stringify({ entries: [{ lesson: "Separate verified result", applyWhen: "Separate context" }] }),
+          ...(requests === 1 ? {} : { usage: { input_tokens: 2, output_tokens: 1, total_tokens: 3 } }) };
+      }, options?.signal) } },
+    });
+    try {
+      await runtime.finishTurn({ workspacePath: directory, userInput: "Fix the first defect", transcript: "Verified result", assistantText: "done", toolCallCount: 1 }, "verified");
+      await waitFor(async () => requests > 1 || (await store.loadJobs()).some((job) => job.status === "failed"));
+      assert.equal(requests, 1, "The same failed job must not start another model request");
+      const failed = (await store.loadJobs())[0]!;
+      assert.equal(failed.status, "failed");
+      assert.equal(failed.attempts, 1);
+      assert.equal(accounting.getUsage().complete, false);
+      await runtime.finishTurn({ workspacePath: directory, userInput: "Fix an independent defect", transcript: "Independent verified result", assistantText: "done", toolCallCount: 1 }, "verified");
+      await waitFor(async () => (await store.read("project", directory)).some((entry) => entry.lesson === "Separate verified result"));
+      assert.equal(requests, 2);
+      assert.equal((await store.loadJobs())[0]?.status, "failed");
+    } finally { await runtime.dispose(); await accounting.dispose(); await removeTemporaryDirectory(directory); }
+  });
+});
+
+test("a Memory response failure with reliable usage retains ordinary retry behavior", async () => {
+  const directory = await temporaryDirectory();
+  const store = new LearnedMemoryStore({ directory });
+  let requests = 0;
+  const runtime = new LearnedMemoryRuntime({ store, model: "offline", idleDelayMs: 0, unrefTimers: false,
+    client: { responses: { async create() { requests++; return { id: "extraction", status: requests === 1 ? "incomplete" : "completed", output: [],
+      output_text: JSON.stringify({ entries: [{ lesson: "Known retry result", applyWhen: "Known context" }] }),
+      usage: { input_tokens: 2, output_tokens: 1, total_tokens: 3 } }; } } },
+  });
+  try {
+    await runtime.finishTurn({ workspacePath: directory, userInput: "Fix the defect", transcript: "Verified result", assistantText: "done", toolCallCount: 1 }, "verified");
+    await waitFor(async () => (await store.read("project", directory)).some((entry) => entry.lesson === "Known retry result"));
+    await waitFor(async () => (await store.loadJobs()).length === 0);
+    assert.equal(requests, 2);
+    assert.equal((await runtime.status(directory)).capture?.usage?.input_tokens, 4);
+    assert.equal((await store.loadJobs()).length, 0);
+  } finally { await runtime.dispose(); await removeTemporaryDirectory(directory); }
+});
 
 test("learned memory isolates project files and uses platform state paths", () => {
   assert.notEqual(projectMemoryKey("C:\\repo-a"), projectMemoryKey("C:\\repo-b"));

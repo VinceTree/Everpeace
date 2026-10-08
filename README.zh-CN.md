@@ -106,7 +106,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## 使用
 
 ```text
-✦ Everpeace Agent (v0.3.20) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.21) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -149,7 +149,7 @@ TUI 使用原生 inline 模式，普通滚轮可以浏览已完成的 Everpeace 
 
 Everpeace 还会维护独立的 learned 经验记忆。workflow 验证完成并真实空闲五分钟后，当前模型可在后台提取最多三条带证据候选并整理无冲突经验；持久队列可跨 Agent 重建和进程重启恢复，前台工作会暂停后台请求。只有用户明确表达长期偏好时才写入用户级记忆。记忆位于平台应用状态目录（Windows 为 `%APPDATA%\Everpeace\memory`），不会写入仓库。每个逻辑 Agent step 都会根据当前问题和实际读取文件刷新带 revision 的快照，网络重试复用该快照；主 prompt 只注入不可信短索引，只读 `memory_lookup` 可按 ID 查看脱敏证据。输入在裁剪前脱敏，输出在保存前再次脱敏，无法可靠判断的冲突保留待审；当前用户指令和实际仓库证据始终优先。
 
-`/status` 会打开居中的独立命令窗口，显示当前模型、实际 Responses 协议、压缩策略、推理档位、接口地址、工作目录、Session ID、context 占用，以及累计输入、输出、推理、缓存命中和缓存写入 token。主 coding 与辅助模型用量分开显示；辅助请求包括标题、Skill、Memory 与 live doctor。缓存读取与写入独立统计；命中率只使用供应商确实返回缓存数据的样本，数据不完整时标为 partial。DeepSeek 使用自动前缀缓存，不发送 OpenAI 缓存字段；官方 OpenAI 型号可使用 Session 级缓存 key 和原生压缩。主 coding 的 Usage 与请求设置随 Session 持久化。
+`/status` 会打开居中的独立命令窗口，显示当前模型、实际 Responses 协议、压缩策略、推理档位、接口地址、工作目录、Session ID、context 占用，以及累计输入、输出、推理、缓存命中和缓存写入 token。主 coding 与辅助模型用量分开显示；辅助请求包括标题、Skill、Memory 与 live doctor。缺失 usage 后累计总量持续标记不完整，独立的后续操作仍可使用；同一 Memory 任务在用量不完整后不能继续请求合并。缓存读取与写入独立统计；命中率只使用供应商确实返回缓存数据的样本，数据不完整时标为 partial。DeepSeek 使用自动前缀缓存，不发送 OpenAI 缓存字段；官方 OpenAI 型号可使用 Session 级缓存 key 和原生压缩。主 coding 的 Usage 与请求设置随 Session 持久化。
 
 输入快捷键与 Codex composer 保持一致：`Enter` 提交，`Shift+Enter`、`Alt+Enter` 或 `Ctrl+J` 换行，`Home`/`End` 与 `Ctrl+A`/`Ctrl+E` 移动到当前行首/行尾，`Ctrl+U`/`Ctrl+K` 删除到当前行首/行尾，`Ctrl+W` 删除前一个词，`Ctrl+Y` 恢复最近删除的内容。方向键、`Ctrl+B/F/P/N` 和 `Alt+B/F` 也可移动光标。
 
@@ -178,7 +178,7 @@ TUI 命令：
 - `/memory`：查看 learned 经验和独立的 Memory 模型用量、全局启用或关闭读取与自动学习、切换当前聊天是否读取或记录 memory、归档或清理条目、使用 `/memory view` 查看最近一次实际注入快照，或使用 `/memory remember <偏好>` 保存长期用户偏好。聊天策略会随 Session 恢复；开关只控制 learned Memory，与按需 Session 历史检索独立。
 - `/plan` 或 `/plan <需求>`：进入严格只读规划。审阅菜单提供 **Approve plan**（批准）、**Revise plan**（输入修订意见）、**Cancel plan**（取消）。批准后保持 Plan 模式并空闲等待；`/plan show` 查看已批准计划，`/plan execute` 才把完整正文交给正常编码与验证闭环。批准仅保留在当前进程、Session 和 Agent 中；继续讨论、`/plan exit`、成功切换会话或替换 Agent 会清除，重启或恢复不会重建。修订输入中 Esc 返回审阅菜单，菜单中 Esc 取消规划；两处 Ctrl+C 都取消活动任务。未处理的 Plan guidance 返回草稿，等待再次提交。普通 coding 中模型需要澄清时也会使用同一阻塞式问题窗口；在 coding 问题中取消会停止整个活动任务。执行器会拒绝 Plan step 未提供的工具，包括编辑和 Goal 写操作。
 - `/goal <目标> [--tokens N]`：创建、查看、暂停、恢复并自动持续执行当前 Session 目标。收到 usage 后达到预算或无法可靠计量时，会停止后续工具、模型请求和自动验证修复，并显示原因；正在进行的单次请求可能超过剩余额度。
-- `/compact`：压缩模型 context，同时保留完整可见 transcript。官方 OpenAI 使用原生 Responses 压缩；DeepSeek 和保守的兼容端点使用最多 8K token 的摘要，并保留最近两个完整交互单元及未闭合工具链。自动压缩会预留输出预算与安全余量；确认 context 超限后最多恢复一次，且不会重放工具。
+- `/compact`：压缩模型 context，同时保留完整可见 transcript。官方 OpenAI 使用原生 Responses 压缩；DeepSeek 和保守的兼容端点使用最多 8K token 的摘要，并保留最近两个完整交互单元及未闭合工具链。手动压缩计入当前 active Goal；预算耗尽或 usage 不完整时说明原因并停止后续压缩请求。压缩期间保持独占，退出会取消并等待活动模型请求。自动压缩会预留输出预算与安全余量；确认 context 超限后最多恢复一次，且不会重放工具。
 - `/reasoning off|low|high|max`：设置下一项任务捕获的推理档位，默认 `high`；官方 DeepSeek 会原样接收 `max`。
 - `/doctor [--live]`：检查 Node、平台、实际 shell、sandbox 后端/profile、网络模式、Git/随包 ripgrep、可选 TypeScript LSP 配置，并实际执行一次 sandbox 探针。默认只做本地检查；只有 `--live` 会发送一次有界模型请求。
 - `/outputs`：分页浏览保留输出、已高亮的命令及 unified diff。

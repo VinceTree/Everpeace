@@ -38,10 +38,9 @@ import {
 import { resolveCodexCliPath } from "../../codex/cli.js";
 import { modelErrorGuidance } from "../../agent/response-errors.js";
 import { RequestAttemptLedger } from "../../agent/request-attempt-ledger.js";
-import { RequestExecutor } from "../../agent/request-executor.js";
+import { AuxiliaryRequestExecutor } from "../../agent/auxiliary-request-executor.js";
 import { createCodeNavigationFromEnvironment, LanguageServerIsolationError } from "../../tools/code-navigation.js";
 import { resolveBundledRipgrep } from "../../tools/ripgrep.js";
-import { applyUsageSample, createEmptySessionUsage, type TokenUsageSample } from "../../status/model-status.js";
 import {
   assertCompletedModelResponse,
   defaultModelRequestSettings,
@@ -75,12 +74,11 @@ async function requestSkillDraft(
   model: RegisteredModel,
   instructions: string,
   input: string,
-  execute: <T extends { usage?: unknown; status?: unknown }>(run: () => Promise<T>) => Promise<T>,
-  signal?: AbortSignal,
+  execute: <T extends { usage?: unknown; status?: unknown }>(run: (signal: AbortSignal) => Promise<T>) => Promise<T>,
 ): Promise<string> {
   const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
   const request = purposeRequest(model, "skill");
-  const response = await execute(() => runtime.responses.create(
+  const response = await execute((requestSignal) => runtime.responses.create(
     {
       model: model.model_name,
       instructions,
@@ -89,7 +87,7 @@ async function requestSkillDraft(
       max_output_tokens: request.max_output_tokens,
       ...(request.reasoning ? { reasoning: request.reasoning } : {}),
     },
-    { ...(signal ? { signal } : {}), timeout: request.timeoutMs, maxRetries: 0 },
+    { signal: requestSignal, timeout: request.timeoutMs, maxRetries: 0 },
   ));
   assertCompletedModelResponse(response, "skill");
   const draft = normalizeGeneratedSkillMarkdown(response.output_text);
@@ -122,34 +120,15 @@ export function createDefaultTuiDependencies(
   const skillManager = new SkillManager({ workspacePath: process.cwd(), catalog: skills });
   const mcp = new McpRuntime({ workspacePath: process.cwd(), version });
   const learnedMemoryStore = new LearnedMemoryStore();
-  let auxiliaryUsage = createEmptySessionUsage();
-  const auxiliaryLedger = new RequestAttemptLedger();
-  const auxiliaryExecutor = new RequestExecutor(auxiliaryLedger);
-  let recordedAuxiliaryAttempts = 0;
-  let recordedUnknownAuxiliaryUsage = false;
+  const auxiliaryExecutor = new AuxiliaryRequestExecutor();
   let activeLearnedMemory: LearnedMemoryRuntime | undefined;
   const runAuxiliary = async <T extends { usage?: unknown; status?: unknown }>(
     purpose: "title" | "skill" | "memory" | "doctor",
-    run: () => Promise<T>,
+    run: (signal: AbortSignal) => Promise<T>,
+    scopeSignal?: AbortSignal,
+    signal = scopeSignal,
   ): Promise<T> => {
-    try {
-      return await auxiliaryExecutor.execute(purpose, run);
-    } finally {
-      const snapshot = auxiliaryLedger.snapshot();
-      const attempts = snapshot.attempts.slice(recordedAuxiliaryAttempts);
-      recordedAuxiliaryAttempts = snapshot.attempts.length;
-      for (const attempt of attempts) {
-        if (attempt.status === "rejected") continue;
-        if (attempt.usage === null) {
-          if (!recordedUnknownAuxiliaryUsage) {
-            auxiliaryUsage = applyUsageSample(auxiliaryUsage, null);
-            recordedUnknownAuxiliaryUsage = true;
-          }
-        } else {
-          auxiliaryUsage = applyUsageSample(auxiliaryUsage, attempt.usage as TokenUsageSample);
-        }
-      }
-    }
+    return auxiliaryExecutor.execute(purpose, run, scopeSignal, signal);
   };
   return {
     registry,
@@ -157,7 +136,7 @@ export function createDefaultTuiDependencies(
     workspacePath: process.cwd(),
     sessionStore,
     inputHistory: new InputHistory(),
-    getAuxiliaryUsage: () => ({ ...auxiliaryUsage }),
+    getAuxiliaryUsage: () => auxiliaryExecutor.getUsage(),
     skillManager,
     async listModels(baseUrl, apiKey, signal) {
       return listOfficialModelIds(createProviderClient(baseUrl, apiKey), signal);
@@ -182,7 +161,7 @@ export function createDefaultTuiDependencies(
         learnedMemoryStore,
         memoryIdleDelayMs: 5 * 60 * 1000,
         memoryMinTranscriptChars: 200,
-        runMemoryRequest: (run) => runAuxiliary("memory", run),
+        runMemoryRequest: (run, signal) => runAuxiliary("memory", run, signal),
         requestAttemptLedger: new RequestAttemptLedger(),
         ...(codeNavigation ? { codeNavigation } : {}),
         restore: {
@@ -230,7 +209,7 @@ export function createDefaultTuiDependencies(
         client: {
           responses: {
             create(params, options) {
-              return runAuxiliary("memory", () => providerRuntime.responses.create(params, options as never));
+              return runAuxiliary("memory", (signal) => providerRuntime.responses.create(params, { ...options, signal }), options?.signal);
             },
           },
         },
@@ -245,7 +224,7 @@ export function createDefaultTuiDependencies(
     async generateSessionTitle(model, firstQuestion, signal) {
       const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
       const request = purposeRequest(model, "title");
-      const response = await runAuxiliary("title", () => runtime.responses.create(
+      const response = await runAuxiliary("title", (requestSignal) => runtime.responses.create(
         {
           model: model.model_name,
           instructions:
@@ -257,8 +236,8 @@ export function createDefaultTuiDependencies(
           max_output_tokens: request.max_output_tokens,
           ...(request.reasoning ? { reasoning: request.reasoning } : {}),
         },
-        { ...(signal ? { signal } : {}), timeout: request.timeoutMs, maxRetries: 0 },
-      ));
+        { signal: requestSignal, timeout: request.timeoutMs, maxRetries: 0 },
+      ), undefined, signal);
       assertCompletedModelResponse(response, "title");
       const title = sanitizeSessionTitle(response.output_text);
       if (!title) throw new Error("The model returned an empty session title");
@@ -341,13 +320,13 @@ export function createDefaultTuiDependencies(
       const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
       try {
         const request = purposeRequest(model, "doctor");
-        const response = await runAuxiliary("doctor", () => runtime.responses.create({
+        const response = await runAuxiliary("doctor", (requestSignal) => runtime.responses.create({
           model: model.model_name,
           instructions: "This is a bounded connectivity check. Reply with OK only.",
           input: "OK",
           max_output_tokens: request.max_output_tokens,
           ...(request.reasoning ? { reasoning: request.reasoning } : {}),
-        }, { maxRetries: 0, timeout: request.timeoutMs, ...(signal ? { signal } : {}) }));
+        }, { maxRetries: 0, timeout: request.timeoutMs, signal: requestSignal }), undefined, signal);
         assertCompletedModelResponse(response, "doctor");
         lines.push("Model request: completed with text");
       } catch (error) {
@@ -389,8 +368,7 @@ export function createDefaultTuiDependencies(
         model,
         "Create one concise Codex SKILL.md for the requested workflow. Return only the complete SKILL.md, without a Markdown code fence or commentary. It must begin with YAML frontmatter containing a lowercase hyphenated name (maximum 64 characters) and a discriminating description that states what the skill does and when it applies. The body should contain only task-specific workflow, non-obvious constraints, and useful decision criteria. Do not create or refer to extra files, scripts, assets, or placeholders.",
         description,
-        (run) => runAuxiliary("skill", run),
-        signal,
+        (run) => runAuxiliary("skill", run, undefined, signal),
       );
     },
     reviseSkillDraft(model, skillMarkdown, signal) {
@@ -398,8 +376,7 @@ export function createDefaultTuiDependencies(
         model,
         "Validate and improve the supplied Codex SKILL.md. Correct invalid frontmatter, vague routing, generic advice, contradictions, and unnecessary verbosity while preserving the intended workflow. Return only the complete revised SKILL.md, without a Markdown code fence or commentary. Keep it self-contained and do not add references to files, scripts, or assets.",
         skillMarkdown,
-        (run) => runAuxiliary("skill", run),
-        signal,
+        (run) => runAuxiliary("skill", run, undefined, signal),
       );
     },
     runTerminalCommand(command, onOutput, signal, onInputReady) {
@@ -412,6 +389,7 @@ export function createDefaultTuiDependencies(
     },
     async dispose() {
       const results = await Promise.allSettled([
+        auxiliaryExecutor.dispose(),
         activeLearnedMemory?.dispose() ?? Promise.resolve(),
         mcp.close(),
         skillManager.close(),

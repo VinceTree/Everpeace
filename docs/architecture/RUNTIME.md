@@ -55,11 +55,17 @@ ReactAgent 在每个实际 provider attempt 结束后立即结算 coding 的 Ses
 
 压缩每个 attempt 结束后立即更新 Goal，再检查下一请求准入。Session 保留原有 context_compacted 事件的最终 usage 增量和上下文替换；此前失败样本另存 usage，压缩失败则保存全部样本。不得重复计量或改变既有 schema。prepareStep 中的预算停止返回明确 stop reason，不包装成压缩错误。回归见 [request settlement](../../tests/unit/agent/request-settlement.test.ts)。
 
+手动压缩也绑定当前 active Goal，已达到预算或 usage 停止的 Goal 在准入前拒绝，不依赖可选 task ledger 才生效。预取消不读写 Goal 或发出请求；压缩期间拒绝 turn、task reset、设置变更和第二次压缩。Agent 为 turn 和手动压缩分别持有取消控制器及完成 Promise；dispose 先关闭准入，取消并等待请求、持久化和后台清理，再释放内存，重复 dispose 共用完成结果。取消发生在 context 已持久化后仍保持内存与落盘一致，保留已知用量，但不报告成功。回归见 [生产手动压缩](../../tests/unit/runtime/manual-compaction.test.ts)。
+
 模型流关闭失败时，attempt 记为 failed，同时保留终态实际返回的可靠 usage；没有可靠 usage 则仍为 unknown。计量完整与资源关闭是独立事实：即使用量可计量、账本被重置，故障 executor/Agent 也不能再启动请求。ModelStreamCleanupError 和 ProcessCleanupError 共用 ResourceCleanupError 边界，资源故障优先于取消、steering、预算停止和能力降级。
 
 [RequestAttemptLedger](../../src/agent/request-attempt-ledger.ts) 以 input + output 结算预算；reasoning 单列展示，不与已包含它的 output 重复相加。已经发出的请求缺少可靠 usage 后，当前账本的 incomplete 状态不可被后续成功覆盖，禁止继续准入；新宿主任务仅能在没有未结束 attempt 时重置账本。
 
 TUI 分开显示主编码与辅助用量；Session 编码总量不混入标题请求。exec 的可选 task ledger 覆盖主请求、summary、retry 与 repair，并关闭结束后的 Memory capture，避免产生任务外辅助请求。预算耗尽时禁止下一请求，但已发出的请求可能超出剩余额度，超出量必须保留。usage、缓存命中及写入的完整性分别判断，缺字段不补造零成本或实际账单。
+
+[AuxiliaryRequestExecutor](../../src/agent/auxiliary-request-executor.ts) 复用 RequestExecutor，把每项辅助操作的准入与 dependency 实例的累计显示分开。标题、Skill、doctor 和独立 Memory 操作拥有独立账本；同一后台 Memory job 的提取和合并按 job signal 共享账本，用量缺失后不再请求合并，也不自动重试该 job。后续独立操作可以增加已知用量，但不能把累计 unknown 改回完整。资源清理故障则关闭整个辅助所有者的后续准入。dispose 取消并等待所有活动辅助请求及计量；已可靠返回的用量即使结果因取消被丢弃也保留。回归见 [辅助请求所有权](../../tests/unit/agent/auxiliary-request-executor.test.ts)、[实际 SDK fixture](../../tests/fixtures/tui-auxiliary-offline.ts)。
+
+Memory runtime 自身也用同一 job 的 RequestExecutor/ledger 包围提取和合并，错误路径检查该账本是否有缺口；网络、不完整或空白响应不能通过重新排队及新 controller 绕过未知用量限制。可靠响应 usage 在终态与正文校验前保存，已知用量的普通重试保持原行为。此约束不依赖 TUI 包装器，回归见 [Memory jobs](../../tests/unit/memory/learned-memory.test.ts)。
 
 回归入口：[attempt ledger](../../tests/unit/agent/request-attempt-ledger.test.ts)、[provider compatibility](../../tests/unit/providers/openai-compatible.test.ts)、[response errors](../../tests/unit/agent/response-errors.test.ts)。
 

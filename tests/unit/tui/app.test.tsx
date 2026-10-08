@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { render as renderInk } from "ink-testing-library";
-import React from "react";
+import React, { act } from "react";
 import type { AgentIO } from "../../../src/agent/react-agent.js";
+import { LoopStoppedError } from "../../../src/agent/agent-loop.js";
 import type {
   RegisteredModel,
   RegisteredModelStatus,
@@ -948,6 +949,57 @@ test("/compact replaces persisted model context without removing the visible tra
   } finally {
     view.unmount();
   }
+});
+
+test("/compact explains usage and budget stops and returns to the same session", async (t) => {
+  for (const reason of ["usage_limited", "budget_limited"] as const) await t.test(reason, async () => {
+    const model: RegisteredModel = { id: "compact-stop", model_name: "offline", base_url: "https://compatible.invalid/v1", api_key: "fixture" };
+    const compactions: string[] = [];
+    const fixture = createFixture({ initial: [model], createAgent: (_model, io, restore) => ({
+      async runTurn(input) { await restore?.onContextAppend?.([{ role: "user", content: input }]); io.writeAssistant("Original answer"); return {}; },
+      async compact() { compactions.push(reason); throw new LoopStoppedError(reason); },
+    }) });
+    const app = <EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />;
+    const view = render(app);
+    const flushInputEffects = async () => {
+      const environment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+      const previous = environment.IS_REACT_ACT_ENVIRONMENT;
+      environment.IS_REACT_ACT_ENVIRONMENT = true;
+      try { await act(async () => { view.rerender(app); }); }
+      finally {
+        if (previous === undefined) delete environment.IS_REACT_ACT_ENVIRONMENT;
+        else environment.IS_REACT_ACT_ENVIRONMENT = previous;
+      }
+    };
+    const submitDraft = async (text: string) => {
+      await flushInputEffects();
+      await waitFor(() => view.stdin.listenerCount("readable") > 0);
+      view.stdin.write(text);
+      // Observe the accepted draft before Enter; a frame or a timer alone does
+      // not prove that a newly mounted composer received the previous input.
+      await waitFor(() => (view.lastFrame() ?? "").includes(`› ${text}`));
+      view.stdin.write("\r");
+    };
+    try {
+      await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
+      await submitDraft("Original question");
+      await waitFor(() => (view.lastFrame() ?? "").includes("Original answer") && (view.lastFrame() ?? "").includes("Ask Everpeace"));
+      const sessionId = [...fixture.sessionStore.sessions.keys()][0];
+      await submitDraft("/compact");
+      const visibleText = () => (view.lastFrame() ?? "").replace(/[│\s]+/gu, " ");
+      await waitFor(() => visibleText().includes(reason === "usage_limited" ? "model usage is incomplete" : "token budget is exhausted"))
+        .catch((error: unknown) => { throw new Error(`Expected ${reason}; received compact calls ${compactions.join(", ")}\n${view.lastFrame() ?? ""}`, { cause: error }); });
+      assert.match(visibleText(), /No further request was sent/u);
+      assert.deepEqual(compactions, [reason]);
+      // The info frame can precede its passive input subscription. Flush the
+      // committed effects so remount cleanup cannot discard the pending Esc.
+      await flushInputEffects();
+      view.stdin.write("\u001b");
+      await waitFor(() => !(view.lastFrame() ?? "").includes("/compact · Could not compact") && (view.lastFrame() ?? "").includes("Original answer") && (view.lastFrame() ?? "").includes("Ask Everpeace"))
+        .catch((error: unknown) => { throw new Error(`Esc did not restore ${reason}\n${view.lastFrame() ?? ""}`, { cause: error }); });
+      assert.deepEqual([...fixture.sessionStore.sessions.keys()], [sessionId]);
+    } finally { view.unmount(); }
+  });
 });
 
 test("history below the Codex row cap stays visible and remains persisted", async () => {

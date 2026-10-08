@@ -76,7 +76,7 @@ export interface ProductionAgentOptions {
   requestAttemptLedger?: RequestAttemptLedger;
   restore?: ProductionAgentRestore;
   providerRuntime?: ProviderRuntime;
-  runMemoryRequest?<T extends { usage?: unknown; status?: unknown }>(run: () => Promise<T>): Promise<T>;
+  runMemoryRequest?<T extends { usage?: unknown; status?: unknown }>(run: (signal?: AbortSignal) => Promise<T>, scopeSignal?: AbortSignal): Promise<T>;
   codeNavigation?: CodeNavigationRuntimeLike | null;
   parallelReadTools?: boolean;
   maxSteps?: number;
@@ -145,13 +145,13 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
   let learnedMemory = options.learnedMemory;
   if (!learnedMemory && learnedMemoryStore) {
     ownsLearnedMemory = true;
-    const runMemoryRequest = options.runMemoryRequest ?? (async <T extends { usage?: unknown; status?: unknown }>(run: () => Promise<T>) => run());
+    const runMemoryRequest = options.runMemoryRequest ?? (async <T extends { usage?: unknown; status?: unknown }>(run: (signal?: AbortSignal) => Promise<T>) => run());
     learnedMemory = new LearnedMemoryRuntime({
       store: learnedMemoryStore,
       client: {
         responses: {
           create(params, requestOptions) {
-            return runMemoryRequest(() => provider.responses.create(params, requestOptions as never));
+            return runMemoryRequest((signal) => provider.responses.create(params, { ...requestOptions, ...(signal ? { signal } : {}) }), requestOptions?.signal);
           },
         },
       },

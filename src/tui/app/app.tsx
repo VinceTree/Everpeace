@@ -2,7 +2,7 @@ import { Spinner } from "@inkjs/ui";
 import { Box, Text, useApp, useInput, usePaste, useStdout, useWindowSize } from "ink";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentIO } from "../../agent/react-agent.js";
-import type { LoopPhase } from "../../agent/agent-loop.js";
+import { LoopStoppedError, type LoopPhase } from "../../agent/agent-loop.js";
 import { commandPermission, defaultPermissions, permissionPolicyRevision } from "../../permissions/policy.js";
 import { PermissionsPicker } from "../components/navigation/permissions-picker.js";
 import { renderTerminalOutput } from "../../tools/terminal.js";
@@ -1896,7 +1896,11 @@ export function EverpeaceApp({
         if (!isCurrentCommandOperation(operation) || controller.signal.aborted) return;
         replaceCommandView(infoView(
           "/compact · Could not compact",
-          error instanceof Error ? error.message : String(error),
+          error instanceof LoopStoppedError && error.reason === "usage_limited"
+            ? "Context compaction stopped because model usage is incomplete. No further request was sent."
+            : error instanceof LoopStoppedError && error.reason === "budget_limited"
+              ? "Context compaction stopped because the token budget is exhausted. No further request was sent."
+              : error instanceof Error ? error.message : String(error),
           "error",
         ));
       });

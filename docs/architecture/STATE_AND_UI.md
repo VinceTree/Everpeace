@@ -106,8 +106,8 @@
 
 - [model-status](../../src/status/model-status.ts) 分别累计 input、output、reasoning、cache hit 与 cache write；reasoning 不重复加到已经包含它的 output 上。
 - 缺失 usage 或缓存字段保留不完整状态，后来的完整样本不能掩盖缺口。缓存命中率仅用有对应统计的输入作分母；context 占用和累计消费不同，压缩后占用设为未知。
-- 主 coding/压缩 usage 随 Session 保存；标题、Skill、Memory、doctor 的辅助请求通过共享 executor 计量，`/status` 分栏显示。当前辅助总数由 TUI dependency 实例持有，不伪称为恢复后的完整历史辅助账目。
-- Goal 仅按用户明确意图建立，预算仅在明确指定时设置。`paused`、`blocked`、`complete` 与预算/usage 停止各有独立语义；停止条件不得被 UI 的“本轮结束”覆盖。
+- 主 coding/压缩 usage 随 Session 保存；手动压缩也计入 active Goal，预算或 usage 停止时 `/compact` 显示明确原因，Esc 返回同一 Session。标题、Skill、Memory、doctor 的辅助请求通过共享 executor 计量，`/status` 分栏显示。独立操作的准入账本与持续 incomplete 的累计显示分离；同一 Memory job 的提取/合并共享准入，资源故障关闭整个辅助所有者。当前辅助总数由 TUI dependency 实例持有，不伪称为恢复后的完整历史辅助账目。
+- Goal 仅按用户明确意图建立，预算仅在明确指定时设置。`paused`、`blocked`、`complete` 与预算/usage 停止各有独立语义；停止条件不得被 UI 的“本轮结束”覆盖。GoalRuntime 保留已有 usage 缺口，运行时重建或后来的可靠样本不能将其改回完整。
 - 编码完成意图先暂存，由 [CodingTaskRunner](../../src/workflow/task-runner.ts) 在完整、未过期验证通过并再次检查取消后结算。取消、预算停止、无检查和修复耗尽均不提交成功 Memory。
 - 新指令可开启新任务预算，但旧未验证事实仍须保留；Goal 续跑不构成新任务授权。
 - Memory 是不可信背景，低于用户指令和项目规则；全局开关控制 learned Memory 读写，聊天策略随 Session 恢复，均不控制只读 Session 历史检索。成功学习、明确长期偏好、候选审核及后台队列的完整边界见 [MEMORY](MEMORY.md)。
@@ -163,6 +163,7 @@ workflow 提供路径列表时同时返回 `changed_paths_total` 和 `changed_pa
 - Ctrl+C 在任务活动时取消；空闲且有草稿时清空；空闲且无草稿时退出。
 - 活动 coding turn 保留 guidance composer；支持 steering 的 Agent 即时记入可见 transcript，在采样/工具结果安全边界应用。未开始工具补 `steered` 结果；取消时仍保存已提交 guidance。不支持 steering 的替身保留 FIFO。
 - 取消、权限收紧、预算停止和异常都必须收束 task 拥有的后台进程树；清理完成前不能启动下一任务。最终检查期间也可取消，不能在取消后完成 Goal。
+- Agent 和辅助服务 dispose 关闭准入，取消并等待活动 turn、手动压缩、辅助请求及其持久化/计量；请求未结束前不释放所有权。预取消不产生请求或 unknown 样本，迟到的可靠 usage 仍计量，迟到结果不报告成功。
 - 用户直接 `!` 使用交互 PTY，由 Ink 单一 stdin 入口转发并独占输入；禁止同时注册原始 stdin 监听器。它由用户主动执行，不进模型 sandbox，也不进入模型 context，但可进入可恢复输出历史。
 - 原始 PTY 控制序列不能直接写入 Ink stdout；保持清洗、流式显示与终端模式复位。
 - SSE 可用时实时显示正文、审批与工具状态；否则显示 buffered 等待。只有实际 reasoning 事件才显示 Thinking，其耗时与整段请求耗时区分。

@@ -3,6 +3,13 @@ import type { TokenUsageSample } from "../status/model-status.js";
 export type RequestPurpose = "coding" | "summary" | "title" | "skill" | "memory" | "doctor" | "benchmark";
 export type RequestAttemptStatus = "completed" | "failed" | "cancelled" | "rejected";
 
+export class RequestUsageIncompleteError extends Error {
+  constructor() {
+    super("Request usage is incomplete; no further model requests may start");
+    this.name = "RequestUsageIncompleteError";
+  }
+}
+
 export interface RequestAttemptRecord {
   id: number;
   purpose: RequestPurpose;
@@ -51,7 +58,7 @@ export class RequestAttemptLedger {
   }
 
   begin(purpose: RequestPurpose): number {
-    if (!this.#complete) throw new Error("Request usage is incomplete; no further model requests may start");
+    if (!this.#complete) throw new RequestUsageIncompleteError();
     if (this.remainingTokens !== undefined && this.remainingTokens <= 0) {
       throw new Error("The request token budget is exhausted");
     }

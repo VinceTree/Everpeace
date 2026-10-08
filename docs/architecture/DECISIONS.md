@@ -374,5 +374,8 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 - 不创建远程 tag/Release 的版本交付使用 Release workflow 专用 `[skip publish]` 提交标记；Test workflow 不读取该标记，仍在 `main` push 上执行 Windows/Linux 门禁。tag push 始终允许 Release workflow 运行。
 
 - coding/summary 的 Goal 计量绑定每次实际 provider attempt，先结算再判断恢复、重试和能力降级准入。Session coding 用量即时保存，压缩保持最终 context_compacted 增量与失败 usage 样本，不新增 schema、不重复收费；未知用量保持未知，prepareStep 的预算停止保留明确原因。
+- 手动压缩绑定 active/已受限 Goal 的请求准入，和 turn、task reset、设置变更互斥；预取消不发请求。Agent 关闭先拒绝准入，再取消并等待 turn/压缩及持久化，保留 typed 清理/存储故障；Goal 的 usage 缺口不能由后续样本或 runtime 重建清除。
+- 辅助操作复用 RequestExecutor，但独立操作准入与实例累计 usage 分开；同一 Memory job 的提取/合并共享 job signal 账本。unknown 后不自动请求合并或重试该 job，后续独立操作不清除累计缺口。资源故障关闭整个所有者；dispose 取消并等待请求及计量，可靠 usage 不随取消结果丢弃。
+- Memory job 自身复用 RequestExecutor/ledger，失败结算检查 usage 完整性，不借重排队与新 controller 重置未知请求；可靠响应用量先于终态/正文校验记录，普通可计量失败仍可按原策略重试。
 
 - duplex、文件搜索／项目地图及 Skill Git 的子进程也通过共享 process-completion 维持所有权。child error、取消或期限不能在实际 close 及已请求的单次树终止前结算；typed 清理错误优先于普通取消。达到读取保留上限后 drain 到自然退出或既有期限，LSP 先给予 EOF 关闭机会再请求强制终止，期限不代表退出证据。导航故障关闭已排队／后续 server 准入；Skill manager 关闭取消并等待下载／Git，失败 stage 保留且禁止后续安装，TUI dispose 等待所有共享服务。真实 Windows native fixture 只证明受控 detached 后代，不证明任意后代或其他平台。

@@ -61,10 +61,13 @@ test("agent defers goal completion until the host accepts workflow verification"
 
 test("agent rejects overlapping turns and releases the guard after cancellation", async () => {
   const controller = new AbortController();
+  let requests = 0;
   let started!: () => void;
   const ready = new Promise<void>((resolve) => { started = resolve; });
   const agent = new ReactAgent({ model: "test", client: { responses: { async create(_params, options) {
-    if (!options?.signal) return { id: "done", output: [], output_text: "done" };
+    assert.ok(options?.signal);
+    assert.equal(options.signal.aborted, false);
+    if (++requests === 2) return { id: "done", output: [], output_text: "done" };
     started();
     await new Promise((_resolve, reject) => options.signal!.addEventListener("abort", () => reject(options.signal!.reason), { once: true }));
     return { id: "never", output: [], output_text: "" };
@@ -75,6 +78,7 @@ test("agent rejects overlapping turns and releases the guard after cancellation"
   controller.abort();
   await assert.rejects(first, /abort/i);
   await agent.runTurn("next");
+  assert.equal(requests, 2);
 });
 
 test("an explicit step limit is shared by every repair turn in one host task", async () => {
@@ -1828,7 +1832,13 @@ test("agent forwards an AbortSignal to every model request", async () => {
 
   await agent.runTurn("hello", controller.signal);
 
-  assert.deepEqual(signals, [controller.signal]);
+  assert.equal(signals.length, 1);
+  assert.ok(signals[0] instanceof AbortSignal);
+  assert.equal(signals[0].aborted, false);
+  const reason = new Error("Caller cancelled");
+  controller.abort(reason);
+  assert.equal(signals[0].aborted, true);
+  assert.equal(signals[0].reason, reason);
 });
 
 test("agent restores prior context and persists each new context batch", async () => {

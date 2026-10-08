@@ -114,10 +114,11 @@ export class GoalRuntime {
     const goal = await this.#getGoal();
     if (!goal || goal.status !== "active") return goal;
     const tokensUsed = Math.max(goal.tokens_used, usage.tokensUsed);
+    const usageComplete = goal.usage_complete && usage.usageComplete;
     let status: GoalStatus = goal.status;
     if (goal.token_budget !== null && tokensUsed >= goal.token_budget) status = "budget_limited";
-    else if (goal.token_budget !== null && !usage.usageComplete) status = "usage_limited";
-    const updated = { ...goal, tokens_used: tokensUsed, usage_complete: usage.usageComplete, time_used_seconds: Math.max(goal.time_used_seconds, usage.timeUsedSeconds), status, updated_at: this.#now().toISOString() };
+    else if (goal.token_budget !== null && !usageComplete) status = "usage_limited";
+    const updated = { ...goal, tokens_used: tokensUsed, usage_complete: usageComplete, time_used_seconds: Math.max(goal.time_used_seconds, usage.timeUsedSeconds), status, updated_at: this.#now().toISOString() };
     if (JSON.stringify(updated) !== JSON.stringify(goal)) await this.#setGoal(updated);
     return updated;
   }

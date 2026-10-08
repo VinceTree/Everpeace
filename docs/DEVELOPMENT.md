@@ -116,6 +116,8 @@ Plan 专项验收另检查：在审阅选择 `Revise plan` 输入意见，resize
 
 审阅组件回归复用生产 CommandScreen 布局，并等待实际菜单、输入和回调状态后发送下一按键；固定延时不能代替 Ink 的 Esc 缓冲和 React 更新完成。resize 必须确认实际边框宽度已改变，再检查修订正文与提交结果。
 
+命令 loading/info 组件切换时，画面可能先于被替换组件的输入 effect；raw-mode 清理会重置待处理 escape 序列。新增压缩停止回归在一次性输入前用 React act/rerender 完成 committed effects，并观察实际草稿已接收后才 Enter；临时 act 环境标记必须在 finally 恢复。分别检查 usage/budget 文案、单次压缩调用和 Esc 返回原 Session，不以加长固定延时或删掉返回断言规避竞态。
+
 Composer 另检查带有效文件引用的提交：连续按 Enter 只启动一次，进入运行中 guidance 后新草稿能正常编辑，resize 和任务结束不清空它；无效引用保留草稿，纠正后显式重交。再打开命令窗口并按 Esc，确认同一 Session 历史及单 prompt。受控 Promise 与 Ink 输入回归只证明本地生命周期，真实 Windows Terminal 的按键、滚轮与缩放仍须按本节单独记录。
 
 独立 Prompt 回归在等待提交完成／失败后，以测试 stdin 的 readable 订阅恢复确认 Ink 输入 effect 已重新启用，再发送一次性输入；仅看到新画面或经过固定延时不能证明订阅已就绪。待处理阶段先观察订阅停用再结算受控 Promise，重复 Enter／粘贴仍同步连续发送，保留渲染前竞态覆盖。

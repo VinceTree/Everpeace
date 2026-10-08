@@ -569,6 +569,12 @@ export class ReactAgent {
   #history: Array<Record<string, unknown>>;
   #pendingSteering: Array<{ text: string; attachments: readonly FileAttachment[] }> = [];
   #sampleController: AbortController | undefined;
+  #turnController: AbortController | undefined;
+  #turnOperation: Promise<AgentTurnResult> | undefined;
+  #compactionController: AbortController | undefined;
+  #compactionOperation: Promise<ContextCompactionResult> | undefined;
+  #disposed = false;
+  #disposal: Promise<void> | undefined;
   #mcpSnapshot: McpSnapshot = { tools: [], toolInfo: [], instructions: "", servers: [] };
   #stepToolCatalog: StepToolCatalog | undefined;
   #turnInput: string[] = [];
@@ -685,12 +691,27 @@ export class ReactAgent {
   }
 
   async compact(signal?: AbortSignal): Promise<ContextCompactionResult> {
+    this.#assertAvailable();
     if (this.#running) throw new Error("Cannot compact while an agent turn is running");
-    return this.#compactContext(false, signal);
+    if (this.#compacting) throw new Error("Context compaction is already running");
+    signal?.throwIfAborted();
+    const controller = new AbortController();
+    this.#compactionController = controller;
+    const ownedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    const operation = this.#compactContext(false, ownedSignal);
+    this.#compactionOperation = operation;
+    try { return await operation; }
+    finally {
+      this.#compactionOperation = undefined;
+      this.#compactionController = undefined;
+      this.#assertResourceCleanup();
+    }
   }
 
   setRequestSettings(settings: ModelRequestSettings): void {
+    this.#assertAvailable();
     if (this.#running) throw new Error("Request settings can only change between turns");
+    if (this.#compacting) throw new Error("Request settings cannot change during context compaction");
     this.#requestSettings = { ...settings };
   }
 
@@ -704,7 +725,9 @@ export class ReactAgent {
   }
 
   async beginTask(options: AgentTaskOptions): Promise<void> {
-    this.#assertResourceCleanup();
+    this.#assertAvailable();
+    if (this.#running) throw new Error("Cannot start a task while an agent turn is running");
+    if (this.#compacting) throw new Error("Cannot start a task during context compaction");
     this.#requestAttemptLedger?.reset();
     this.#taskStepsRemaining = this.#taskStepLimitEnabled ? this.#maxSteps : undefined;
     this.#taskGeneration += 1;
@@ -732,9 +755,28 @@ export class ReactAgent {
     finally { this.#assertResourceCleanup(); }
   }
 
-  async dispose(): Promise<void> {
+  dispose(): Promise<void> {
+    return this.#disposal ??= this.#dispose();
+  }
+
+  async #dispose(): Promise<void> {
+    this.#disposed = true;
     this.endTask();
-    try { await this.#backgroundJobs.dispose(); }
+    const reason = new Error("The agent has been disposed");
+    this.#turnController?.abort(reason);
+    this.#compactionController?.abort(reason);
+    try {
+      const [turn, compaction, background] = await Promise.allSettled([
+        this.#turnOperation ?? Promise.resolve(),
+        this.#compactionOperation ?? Promise.resolve(),
+        this.#backgroundJobs.dispose(),
+      ]);
+      this.#assertResourceCleanup();
+      if (background?.status === "rejected") throw background.reason;
+      for (const settled of [turn, compaction]) {
+        if (settled?.status === "rejected" && settled.reason instanceof PersistenceError) throw settled.reason;
+      }
+    }
     finally {
       this.#toolOutputs.clear();
       this.#fileSearches.clear();
@@ -744,9 +786,25 @@ export class ReactAgent {
   }
 
   async runTurn(userInput: string, signal?: AbortSignal, options: AgentTurnOptions = {}): Promise<AgentTurnResult> {
+    this.#assertAvailable();
     if (this.#running) throw new Error("An agent turn is already running");
-    this.#assertResourceCleanup();
+    if (this.#compacting) throw new Error("Cannot start an agent turn during context compaction");
     signal?.throwIfAborted();
+    const controller = new AbortController();
+    this.#turnController = controller;
+    const ownedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    const operation = this.#runTurn(userInput, ownedSignal, options);
+    this.#turnOperation = operation;
+    try { return await operation; }
+    finally {
+      this.#turnController = undefined;
+      this.#turnOperation = undefined;
+      this.#running = false;
+      this.#assertResourceCleanup();
+    }
+  }
+
+  async #runTurn(userInput: string, signal: AbortSignal, options: AgentTurnOptions): Promise<AgentTurnResult> {
     this.#running = true;
     this.#pendingLearnedTurn = undefined;
     const turnItems: Array<Record<string, unknown>> = [];
@@ -1689,10 +1747,16 @@ export class ReactAgent {
     if (this.#history.length === 0) throw new Error("There is no conversation context to compact");
     this.#compacting = true;
     const compactionStarted = performance.now();
-    this.#onEvent?.({ type: "compaction_started", automatic });
     const attempts: Array<TokenUsageSample | null> = [];
     let persistedAttempts = 0;
+    const priorGoalId = this.#turnGoalId;
     try {
+      this.#onEvent?.({ type: "compaction_started", automatic });
+      if (!automatic) {
+        const goal = await this.#goalRuntime?.get();
+        this.#turnGoalId = goal && ["active", "budget_limited", "usage_limited"].includes(goal.status) ? goal.goal_id : undefined;
+      }
+      signal?.throwIfAborted();
       // Project rules are persisted as revisioned context events, but the current
       // workspace snapshot is supplied separately on every request. Excluding old
       // snapshots here prevents compaction from making stale rules authoritative.
@@ -1721,6 +1785,7 @@ export class ReactAgent {
       this.#history = items;
       this.#lastCompactedRevision = this.#historyRevision;
       this.#contextTokens = null;
+      signal?.throwIfAborted();
       const result = { items, usage };
       this.#onEvent?.({ type: "compaction_completed", automatic, usage });
       return result;
@@ -1735,8 +1800,11 @@ export class ReactAgent {
         { cause: error },
       );
     } finally {
-      this.#onEvent?.({ type: "timing_recorded", operation: "compaction", durationMs: performance.now() - compactionStarted });
-      this.#compacting = false;
+      try { this.#onEvent?.({ type: "timing_recorded", operation: "compaction", durationMs: performance.now() - compactionStarted }); }
+      finally {
+        if (!automatic) this.#turnGoalId = priorGoalId;
+        this.#compacting = false;
+      }
     }
   }
 
@@ -2348,6 +2416,11 @@ export class ReactAgent {
   #assertResourceCleanup(): void {
     if (this.#cleanupFailure) throw this.#cleanupFailure;
     this.#backgroundJobs.assertCleanupComplete();
+  }
+
+  #assertAvailable(): void {
+    this.#assertResourceCleanup();
+    if (this.#disposed) throw new Error("The agent has been disposed");
   }
 
   async #recordGoalUsage(usage: TokenUsageSample | null): Promise<void> {

@@ -6,6 +6,9 @@ import lockfile from "proper-lockfile";
 import type { ResponsesClientLike } from "../agent/react-agent.js";
 import type { TokenUsageSample } from "../status/model-status.js";
 import { assertCompletedModelResponse } from "../providers/capabilities.js";
+import { RequestAttemptLedger, RequestUsageIncompleteError } from "../agent/request-attempt-ledger.js";
+import { RequestExecutor } from "../agent/request-executor.js";
+import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 import { redactSecretsPreservingLayout } from "../util/redact-secrets.js";
 
 export type LearnedScope = "project" | "user";
@@ -898,30 +901,36 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
       this.#captureState = { state: "running", queued: jobs.filter((job) => job.status === "queued").length, usage: this.#usage };
       const controller = new AbortController();
       this.#captureController = controller;
+      const ledger = new RequestAttemptLedger();
+      const executor = new RequestExecutor(ledger);
       const timeout = AbortSignal.timeout(CAPTURE_TIMEOUT_MS);
       const signal = AbortSignal.any([controller.signal, timeout]);
       try {
-        const entries = claimed.extracted ?? await this.#extract(claimed.turn, false, signal);
+        const entries = claimed.extracted ?? await this.#extract(claimed.turn, false, signal, executor);
         if (!claimed.extracted) {
           claimed.extracted = entries;
           await this.#store.updateJobs((current) => current.map((job) => job.id === claimed!.id ? { ...job, extracted: entries } : job));
         }
         if (generation !== this.#generation || !this.#policy.captureFuture || !(await this.#store.isEnabled())) throw new Error("Memory capture became stale");
-        await this.#stageCandidates(claimed, entries, signal, generation);
+        await this.#stageCandidates(claimed, entries, signal, generation, executor);
         await this.#store.updateJobs((current) => current.filter((job) => job.id !== claimed!.id));
         this.#ownedJobIds.delete(claimed.id);
         this.#captureState = { state: "succeeded", lastAt: new Date().toISOString(), usage: this.#usage };
       } catch (error) {
-        const cancelled = controller.signal.aborted || generation !== this.#generation || !this.#policy.captureFuture;
+        const usageIncomplete = !ledger.snapshot().complete;
+        if (usageIncomplete) this.#usage = null;
+        const nonRetryable = usageIncomplete || error instanceof RequestUsageIncompleteError || error instanceof ResourceCleanupError;
+        const cancelled = !nonRetryable && (controller.signal.aborted || generation !== this.#generation || !this.#policy.captureFuture);
         const message = error instanceof Error ? error.message : String(error);
         await this.#store.updateJobs((current) => current.map((job) => {
           if (job.id !== claimed!.id) return job;
           const attempts = cancelled ? job.attempts : job.attempts + 1;
-          return attempts >= CAPTURE_MAX_ATTEMPTS
+          return nonRetryable || attempts >= CAPTURE_MAX_ATTEMPTS
             ? { ...job, attempts, status: "failed", error: message }
             : { ...job, attempts, status: "queued", notBefore: new Date(Date.now() + this.#idleDelayMs).toISOString(), error: message };
         }));
         this.#captureState = { state: cancelled ? "queued" : "failed", lastAt: new Date().toISOString(), error: message, usage: this.#usage };
+        if (error instanceof ResourceCleanupError) return;
         if (cancelled) break;
       } finally {
         if (this.#captureController === controller) this.#captureController = undefined;
@@ -930,7 +939,7 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
     await this.#armCaptureTimer();
   }
 
-  async #stageCandidates(job: MemoryCaptureJob, entries: ExtractedLesson[], signal: AbortSignal, generation: number): Promise<void> {
+  async #stageCandidates(job: MemoryCaptureJob, entries: ExtractedLesson[], signal: AbortSignal, generation: number, executor: RequestExecutor): Promise<void> {
     const now = new Date().toISOString();
     const candidates: MemoryCandidate[] = entries.flatMap((entry) => {
       if (typeof entry.lesson !== "string" || typeof entry.applyWhen !== "string") return [];
@@ -976,16 +985,17 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
         consolidated.push(...scoped);
         continue;
       }
-      const response = await this.#client.responses.create({
+      signal.throwIfAborted();
+      const response = await executor.execute("memory", () => this.#client.responses.create({
         model: this.#model,
         instructions: `${EXTRACTOR_INSTRUCTIONS} Consolidate duplicate or conflicting candidates. Preserve evidence-based claims only and return at most three entries.`,
         input: JSON.stringify({ scope, candidates: scoped }),
         store: false,
         max_output_tokens: 800,
         reasoning: { effort: "none" },
-      }, { signal, maxRetries: 0, timeout: 60_000 });
-      assertCompletedModelResponse(response, "memory");
+      }, { signal, maxRetries: 0, timeout: 60_000 }));
       this.#recordUsage(response.usage);
+      assertCompletedModelResponse(response, "memory");
       const proposed = parseExtractorOutput(response.output_text);
       if (proposed.length === 0) {
         consolidated.push(...scoped);
@@ -1020,8 +1030,9 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
     await this.#store.updateCandidates((current) => current.map((candidate) => resolvedCandidateIds.has(candidate.id) ? { ...candidate, status: "consolidated" } : candidate));
   }
 
-  async #extract(turn: LearnedTurn, forceUser: boolean, signal?: AbortSignal): Promise<ExtractedLesson[]> {
-    const response = await this.#client.responses.create({
+  async #extract(turn: LearnedTurn, forceUser: boolean, signal?: AbortSignal, executor?: RequestExecutor): Promise<ExtractedLesson[]> {
+    signal?.throwIfAborted();
+    const request = () => this.#client.responses.create({
       model: this.#model,
       instructions: `${EXTRACTOR_INSTRUCTIONS}${forceUser ? " Return every accepted entry with scope user." : ""}`,
       input: JSON.stringify({
@@ -1033,8 +1044,9 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
       max_output_tokens: 800,
       reasoning: { effort: "none" },
     }, { ...(signal ? { signal } : {}), maxRetries: 0, timeout: 60_000 });
-    assertCompletedModelResponse(response, "memory");
+    const response = await (executor ? executor.execute("memory", request) : request());
     this.#recordUsage(response.usage);
+    assertCompletedModelResponse(response, "memory");
     return parseExtractorOutput(response.output_text).map((entry) => ({
       ...entry,
       ...(typeof entry.lesson === "string" ? { lesson: redactSecrets(entry.lesson) } : {}),

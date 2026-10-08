@@ -37,6 +37,8 @@ revision + loadedAt + entryIds + injected text
 
 生产默认等待五分钟真实空闲，后台并发为 1，一次空闲最多处理 5 个任务。每个请求 60 秒超时，失败最多重试 2 次；running 任务持有一小时租约，过期后可重新排队。任务 ID 根据 Session、工作区和脱敏后的轮次材料计算，重复提交保持幂等。连续轮次分别进入队列，不再由单个 timer 覆盖。
 
+上述重试只适用于可重试且可计量的普通失败。Memory runtime 为当前 job 的提取/合并复用 RequestExecutor 和同一账本，生产 TUI 还按 job signal 汇总辅助用量；用量缺失后，合并准入抛出 RequestUsageIncompleteError。任何失败路径若账本已有缺口，该 job 直接保存为 failed，不以重新排队或重建 controller 获得新准入；网络失败、不完整及空白响应同样适用。可靠响应 usage 在正文与终态校验之前保存，普通失败的重试仍保留。ResourceCleanupError 同样使 job 失败，并停止当前批次及故障辅助所有者的后续请求。另一个已验证轮次是独立 job，可以开始新账本，累计辅助 usage 仍保留旧缺口。服务关闭取消并等待正在进行的请求。回归见 [Memory jobs](../../tests/unit/memory/learned-memory.test.ts)、[辅助账本](../../tests/unit/agent/auxiliary-request-executor.test.ts)。
+
 ## 两阶段写入
 
 第一阶段从一个已验证轮次提取最多三条候选，记录 scope、lesson、适用条件、置信度、来源和证据。输入只包含明确用户信息、助手结果摘要与本地可追溯 transcript；网页、MCP 文本和助手自称成功不能单独作为验证依据。
