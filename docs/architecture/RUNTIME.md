@@ -123,6 +123,8 @@ Plan 使用独立于 coding 的行为指令：先针对性读取实现与测试�
 
 Session 恢复使用 `resumeTurn` 重建进程内追踪，不清除任务身份、修复上限或验证债务；结构化 undo 检查点和文件观察版本不恢复。Goal 自动续跑只有在本轮结算允许时发生，不能利用空改动绕过旧债务。
 
+进程清理失败是宿主资源故障，不作为普通命令失败进入自动修复。Agent、runner 与 workflow 保留进程内故障，阻止同一所有者的后续操作；后台记录淘汰及新任务账本重置均不能消除故障。生产 shell bridge 在失败后不再启动工作区快照，所有后台 worker 收束后才拒绝待完成 Goal 并以 failed 结算 Memory。workflow 将固定的 process-ownership 原因、tracking_limited 和 pending_verification 保存为未验证债务，错误正文不进入 workflow 元数据；Session 恢复和空改动不把该债务变为成功。具体闭环见 [cleanup settlement](../../tests/unit/workflow/cleanup-settlement.test.ts)。
+
 模型的编码 Goal 完成请求只暂存意图，由宿主在结算时决定；验证失败、中断或受限不会提交完成。真正无变更且无债务的任务可按 no_changes 结束。成功 learned-memory 仅接收 verified，详见 [MEMORY](MEMORY.md)。
 
 ## 变更与检查

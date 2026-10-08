@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { BashOutputPreview, BashResult } from "./bash.js";
 import { commandFailureFeedback, ToolFeedbackError } from "./tool-feedback.js";
+import { ProcessCleanupError } from "./process-completion.js";
 
 const MAX_RUNNING_JOBS = 2;
 const DEFAULT_JOB_TIMEOUT_MS = 10 * 60_000;
@@ -78,9 +79,14 @@ export class BackgroundJobManager {
   #cleanupDepth = 0;
   #disposed = false;
   #disposal: Promise<BackgroundJobSnapshot[]> | undefined;
+  #cleanupFailure: ProcessCleanupError | undefined;
 
   constructor(run: (command: string, signal: AbortSignal, timeoutMs: number, onOutput: (output: BashOutputPreview) => void) => Promise<BashResult>) {
     this.#run = run;
+  }
+
+  assertCleanupComplete(): void {
+    if (this.#cleanupFailure) throw this.#cleanupFailure;
   }
 
   start(
@@ -95,6 +101,7 @@ export class BackgroundJobManager {
     if (this.#cleanupDepth > 0) {
       throw new ToolFeedbackError("BACKGROUND_CLEANUP", "Background jobs are still cleaning up", "Wait for cleanup to finish before explicitly starting new work. Do not retry the interrupted command automatically.");
     }
+    this.assertCleanupComplete();
     if ([...this.#jobs.values()].filter((job) => job.status === "running").length >= MAX_RUNNING_JOBS) {
       throw new ToolFeedbackError("BACKGROUND_LIMIT", `At most ${MAX_RUNNING_JOBS} background jobs may run at once`, "Poll or wait for the running jobs to finish before starting another command.");
     }
@@ -117,6 +124,7 @@ export class BackgroundJobManager {
       (error: unknown) => this.#settle(job, {
         stdout: "", stderr: "", exitCode: null, signal: null,
         cancelled: controller.signal.aborted,
+        ...(error instanceof ProcessCleanupError ? { cleanupFailed: true } : {}),
         error: error instanceof Error ? error.message : String(error),
       }, onSettled),
     );
@@ -146,6 +154,7 @@ export class BackgroundJobManager {
       job.controller.abort(new Error("Background job stopped"));
     }
     await job.promise;
+    this.assertCleanupComplete();
     return this.#snapshot(job);
   }
 
@@ -156,6 +165,7 @@ export class BackgroundJobManager {
     if (signal?.aborted) abort();
     try { await Promise.all(jobs.map((job) => job.promise)); }
     finally { signal?.removeEventListener("abort", abort); }
+    this.assertCleanupComplete();
     signal?.throwIfAborted();
     return [...this.#jobs.values()].map((job) => this.#snapshot(job));
   }
@@ -166,6 +176,7 @@ export class BackgroundJobManager {
       const jobs = [...this.#jobs.values()];
       for (const job of jobs) if (job.status === "running") job.controller.abort(reason);
       await Promise.allSettled(jobs.map((job) => job.promise));
+      this.assertCleanupComplete();
       return [...this.#jobs.values()].map((job) => this.#snapshot(job));
     } finally { this.#cleanupDepth--; }
   }
@@ -177,7 +188,8 @@ export class BackgroundJobManager {
 
   #settle(job: BackgroundJob, result: BashResult, onSettled?: (completion: BackgroundJobCompletion) => void): void {
     job.result = { ...result, ...commandFailureFeedback(result) };
-    const status = result.timedOut ? "timed_out" : result.cancelled ? "cancelled" : result.error || result.exitCode !== 0 ? "failed" : "completed";
+    if (result.cleanupFailed) this.#cleanupFailure ??= new ProcessCleanupError(result.error ?? "Background process ownership is unresolved");
+    const status = result.cleanupFailed ? "failed" : result.timedOut ? "timed_out" : result.cancelled ? "cancelled" : result.error || result.exitCode !== 0 ? "failed" : "completed";
     job.finished_at = new Date().toISOString();
     job.status = status;
     job.detachParent?.();

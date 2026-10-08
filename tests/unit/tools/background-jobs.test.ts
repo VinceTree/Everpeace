@@ -4,9 +4,44 @@ import { getEventListeners } from "node:events";
 import { BackgroundJobManager } from "../../../src/tools/background-jobs.js";
 import type { BashOutputPreview, BashResult } from "../../../src/tools/bash.js";
 import { ToolFeedbackError } from "../../../src/tools/tool-feedback.js";
+import { ProcessCleanupError } from "../../../src/tools/process-completion.js";
 
 const successfulResult: BashResult = { stdout: "done", stderr: "", exitCode: 0, signal: null };
 const cancelledResult: BashResult = { stdout: "partial", stderr: "", exitCode: null, signal: null, cancelled: true };
+
+test("cleanup failure survives result pruning and permanently closes worker admission", async () => {
+  let starts = 0;
+  const manager = new BackgroundJobManager(async () => {
+    starts++;
+    return { ...cancelledResult, cleanupFailed: true, error: "termination refused", stdout: "x".repeat(5 * 1024 * 1024) };
+  });
+  const job = manager.start("writer");
+  await assert.rejects(manager.waitAll(), ProcessCleanupError);
+  assert.equal(manager.poll(job.job_id), undefined, "output retention must still remain bounded");
+  assert.throws(() => manager.start("new task"), ProcessCleanupError);
+  assert.equal(starts, 1);
+  await assert.rejects(manager.stopAll(), ProcessCleanupError);
+  await assert.rejects(manager.dispose(), ProcessCleanupError);
+});
+
+test("cleanup failure waits for every worker and takes precedence over cancellation", async () => {
+  const first = deferredResult(), second = deferredResult();
+  const controller = new AbortController();
+  let starts = 0, finished = false;
+  const manager = new BackgroundJobManager(() => starts++ === 0 ? first.promise : second.promise);
+  const job = manager.start("failed cleanup");
+  manager.start("still cleaning");
+  const completion = manager.waitAll(controller.signal);
+  const rejected = assert.rejects(completion, ProcessCleanupError).then(() => { finished = true; });
+  first.resolve({ ...cancelledResult, cleanupFailed: true, error: "termination refused" });
+  controller.abort(new Error("cancelled"));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(finished, false);
+  assert.equal(manager.poll(job.job_id)?.status, "failed");
+  second.resolve(cancelledResult);
+  await rejected;
+  await assert.rejects(manager.dispose(), ProcessCleanupError);
+});
 
 function deferredResult() {
   let resolve!: (result: BashResult) => void;

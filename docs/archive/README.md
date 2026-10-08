@@ -13,4 +13,6 @@
 - [Session 搜索快照交接](HANDOFF_SESSION_SEARCH_SNAPSHOTS.md)、[对应计划](PLAN_SESSION_SEARCH_SNAPSHOTS.md)：返回状态隔离、缓存成本、picker／恢复回归，以及第五阶段离线和交付验收记录。
 - [Composer 生命周期交接](HANDOFF_COMPOSER_LIFECYCLE.md)、[对应计划](PLAN_COMPOSER_LIFECYCLE.md)：重复提交、新草稿保护、输入订阅回归与第六阶段交付记录。
 
+- [共享进程清理交接](HANDOFF_PROCESS_LIFECYCLE.md)：launcher、宿主 Bash 与评测 wrappers 的严格清理等待和授权交付证据。
+
 新 Session 默认只读 [当前交接](../HANDOFF.md) 和 [当前计划](../PLAN.md)，仅在追溯历史时查阅这里。归档正文中的旧相对路径以当时 `docs/` 所在位置理解；当前文件定位以 [项目地图](../architecture/PROJECT_MAP.md) 为准。

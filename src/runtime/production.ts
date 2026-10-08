@@ -6,6 +6,7 @@ import {
   type ResponsesClientLike,
 } from "../agent/react-agent.js";
 import type { RequestAttemptLedger } from "../agent/request-attempt-ledger.js";
+import { ProcessCleanupError } from "../tools/process-completion.js";
 import { GoalRuntime } from "../goal/runtime.js";
 import { McpRuntime, type McpRuntimeLike } from "../mcp/runtime.js";
 import {
@@ -236,10 +237,8 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
   });
 
   const disposeAgent = agent.dispose.bind(agent);
-  let disposed = false;
-  const dispose = async () => {
-    if (disposed) return;
-    disposed = true;
+  let disposal: Promise<void> | undefined;
+  const dispose = (): Promise<void> => disposal ??= (async () => {
     try {
       await disposeAgent();
     } finally {
@@ -249,7 +248,7 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
         await ownedMcp?.close();
       }
     }
-  };
+  })();
   // Existing hosts own an AgentSession rather than the richer handle. Keep
   // that interface safe: disposing the agent also releases services created
   // by this factory.
@@ -386,19 +385,51 @@ export function createProductionWorkflowAgentIO(options: ProductionWorkflowAgent
     },
     async runBash(command: string, signal?: AbortSignal) {
       const workflow = workflowFrom(options);
+      workflow.assertCleanupComplete();
       if (workflow.state.phase === "blocked") {
         return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "The coding workflow reached its repair limit" };
       }
-      try { return await options.execute(command, signal); }
-      finally { await workflow.observeShellExecution(); }
+      let cleanupFailed = false;
+      try {
+        const result = await options.execute(command, signal);
+        if (result.cleanupFailed) throw new ProcessCleanupError(result.error ?? "Foreground process ownership is unresolved");
+        return result;
+      } catch (error) {
+        cleanupFailed = error instanceof ProcessCleanupError;
+        if (error instanceof ProcessCleanupError) {
+          try { await workflow.recordCleanupFailure(error); }
+          catch (persistenceError) {
+            throw new ProcessCleanupError(new AggregateError([error, persistenceError], `${error.message}; cleanup debt could not be persisted`));
+          }
+        }
+        throw error;
+      } finally {
+        if (!cleanupFailed) await workflow.observeShellExecution();
+      }
     },
     async runBackgroundBash(command, signal, timeoutMs, onOutput) {
       const workflow = workflowFrom(options);
+      workflow.assertCleanupComplete();
       if (workflow.state.phase === "blocked") {
         return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "The coding workflow reached its repair limit" };
       }
-      try { return await (options.executeBackground ?? options.execute)(command, signal, timeoutMs, onOutput); }
-      finally { await workflow.observeShellExecution(); }
+      let cleanupFailed = false;
+      try {
+        const result = await (options.executeBackground ?? options.execute)(command, signal, timeoutMs, onOutput);
+        if (result.cleanupFailed) throw new ProcessCleanupError(result.error ?? "Background process ownership is unresolved");
+        return result;
+      } catch (error) {
+        cleanupFailed = error instanceof ProcessCleanupError;
+        if (error instanceof ProcessCleanupError) {
+          try { await workflow.recordCleanupFailure(error); }
+          catch (persistenceError) {
+            throw new ProcessCleanupError(new AggregateError([error, persistenceError], `${error.message}; cleanup debt could not be persisted`));
+          }
+        }
+        throw error;
+      } finally {
+        if (!cleanupFailed) await workflow.observeShellExecution();
+      }
     },
     writeAssistant: (text) => output?.assistant?.(text),
     ...(output?.assistantDelta ? { writeAssistantDelta: output.assistantDelta } : {}),

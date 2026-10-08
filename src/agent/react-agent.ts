@@ -35,6 +35,7 @@ import {
 import { FILE_TOOL_DEFINITIONS, FileSearchSession, runFileTool } from "../tools/files.js";
 import { CODE_NAVIGATION_TOOL_DEFINITION, parseCodeNavigationArguments, type CodeNavigationRuntimeLike } from "../tools/code-navigation.js";
 import { BackgroundJobManager, parseBackgroundCommand, parseBackgroundJobId, type BackgroundJobCompletion, type BackgroundJobSnapshot } from "../tools/background-jobs.js";
+import { ProcessCleanupError } from "../tools/process-completion.js";
 import {
   APPLY_PATCH_TOOL_DEFINITION,
   ApplyPatchError,
@@ -610,6 +611,7 @@ export class ReactAgent {
   readonly #streamIdleTimeoutMs: number;
   readonly #contextRecoveryBudget: number;
   readonly #backgroundJobs: BackgroundJobManager;
+  #cleanupFailure: ProcessCleanupError | undefined;
   #taskProgress: TaskProgress;
   #taskGeneration = 0;
   #taskStepsRemaining: number | undefined;
@@ -694,11 +696,13 @@ export class ReactAgent {
     return { ...this.#requestSettings };
   }
 
-  waitForBackgroundJobs(signal?: AbortSignal): Promise<BackgroundJobSnapshot[]> {
-    return this.#backgroundJobs.waitAll(signal);
+  async waitForBackgroundJobs(signal?: AbortSignal): Promise<BackgroundJobSnapshot[]> {
+    try { return await this.#backgroundJobs.waitAll(signal); }
+    finally { this.#assertProcessCleanup(); }
   }
 
   async beginTask(options: AgentTaskOptions): Promise<void> {
+    this.#assertProcessCleanup();
     this.#requestAttemptLedger?.reset();
     this.#taskStepsRemaining = this.#taskStepLimitEnabled ? this.#maxSteps : undefined;
     this.#taskGeneration += 1;
@@ -718,23 +722,28 @@ export class ReactAgent {
     this.#pendingBackgroundNotices.clear();
   }
 
-  cancelBackgroundJobs(reason?: unknown): Promise<BackgroundJobSnapshot[]> {
+  async cancelBackgroundJobs(reason?: unknown): Promise<BackgroundJobSnapshot[]> {
     this.#backgroundNoticeAdmission = false;
     this.#pendingBackgroundNotices.clear();
     this.#backgroundNoticeSlots.clear();
-    return this.#backgroundJobs.stopAll(reason);
+    try { return await this.#backgroundJobs.stopAll(reason); }
+    finally { this.#assertProcessCleanup(); }
   }
 
   async dispose(): Promise<void> {
     this.endTask();
-    await this.#backgroundJobs.dispose();
-    this.#toolOutputs.clear();
-    this.#fileSearches.clear();
-    this.#workspaceReviews.clear();
+    try { await this.#backgroundJobs.dispose(); }
+    finally {
+      this.#toolOutputs.clear();
+      this.#fileSearches.clear();
+      this.#workspaceReviews.clear();
+    }
+    this.#assertProcessCleanup();
   }
 
   async runTurn(userInput: string, signal?: AbortSignal, options: AgentTurnOptions = {}): Promise<AgentTurnResult> {
     if (this.#running) throw new Error("An agent turn is already running");
+    this.#assertProcessCleanup();
     signal?.throwIfAborted();
     this.#running = true;
     this.#pendingLearnedTurn = undefined;
@@ -907,6 +916,7 @@ export class ReactAgent {
       return { ...this.#turnResult };
     } catch (error) {
       persistenceFailed = error instanceof PersistenceError;
+      this.#assertProcessCleanup();
       throw error;
     } finally {
       try {
@@ -930,6 +940,7 @@ export class ReactAgent {
   }
 
   async finalizePendingGoalCompletion(allow: boolean): Promise<void> {
+    if (allow) this.#assertProcessCleanup();
     if (!this.#pendingGoalCompletion) return;
     if (!allow || !this.#goalRuntime) {
       this.#pendingGoalCompletion = false;
@@ -969,6 +980,7 @@ export class ReactAgent {
   }
 
   async finishMemoryTurn(outcome: LearnedTurnOutcome): Promise<void> {
+    if (outcome === "verified") this.#assertProcessCleanup();
     const turn = this.#pendingLearnedTurn;
     this.#pendingLearnedTurn = undefined;
     if (!turn || !this.#learnedMemory) return;
@@ -1030,6 +1042,10 @@ export class ReactAgent {
     let dispatched: string | { output: string; stop?: boolean };
     try { dispatched = await this.#dispatchToolInner(call, signal); }
     catch (error) {
+      if (error instanceof ProcessCleanupError) {
+        this.#cleanupFailure ??= error;
+        return JSON.stringify({ status: "error", cleanup_failed: true, error: error.message });
+      }
       if (signal?.aborted || !(error instanceof ToolFeedbackError)) throw error;
       dispatched = JSON.stringify({ status: "error", error: error.message, ...toolFeedbackFields(error) });
     }
@@ -1044,6 +1060,7 @@ export class ReactAgent {
   }
 
   async #dispatchToolInner(call: ToolCall, signal?: AbortSignal): Promise<string | { output: string; stop?: boolean }> {
+    this.#assertProcessCleanup();
     signal?.throwIfAborted();
     if (!this.#stepToolCatalog?.has(call.name)) {
       return JSON.stringify({ status: "denied", error: `Tool is unavailable in the current step: ${call.name}`, errorCode: "TOOL_UNAVAILABLE", remedy: "Use only tools advertised in the current request. Do not use another tool to bypass a permission or Plan restriction." });
@@ -1183,6 +1200,7 @@ export class ReactAgent {
           } else {
             this.#io.onToolProgress?.({ phase: "started", name: call.name, detail: command });
             const result = await this.#io.runBash(command, signal);
+            if (result.cleanupFailed) throw new ProcessCleanupError(result.error ?? "Foreground process ownership is unresolved");
             output = result.cancelled ? JSON.stringify({ status: "cancelled", stdout: result.stdout, stderr: result.stderr }) : serializeBashResult(result);
             this.#io.onToolProgress?.({ phase: "finished", name: call.name });
           }
@@ -1937,6 +1955,7 @@ export class ReactAgent {
   }
 
   async #runProviderAttempt<T extends { usage?: unknown }>(purpose: RequestPurpose, run: () => Promise<T>): Promise<T> {
+    this.#assertProcessCleanup();
     if (!this.#requestExecutor) return run();
     try {
       return await this.#requestExecutor.execute(purpose, run);
@@ -2287,12 +2306,18 @@ export class ReactAgent {
   }
 
   async #checkStop(): Promise<LoopStopReason | undefined> {
+    this.#assertProcessCleanup();
     if (this.#requestAttemptLedger) {
       const snapshot = this.#requestAttemptLedger.snapshot();
       if (!snapshot.complete) return "usage_limited";
       if (snapshot.remainingTokens !== undefined && snapshot.remainingTokens <= 0) return "budget_limited";
     }
     return this.#checkGoalStop();
+  }
+
+  #assertProcessCleanup(): void {
+    if (this.#cleanupFailure) throw this.#cleanupFailure;
+    this.#backgroundJobs.assertCleanupComplete();
   }
 
   async #recordGoalUsage(usage: TokenUsageSample | null): Promise<void> {

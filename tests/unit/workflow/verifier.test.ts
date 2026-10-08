@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import type { BashResult } from "../../../src/tools/bash.js";
+import { ProcessCleanupError } from "../../../src/tools/process-completion.js";
+
 import {
   discoverVerificationCommands,
   runVerificationCommand,
@@ -13,6 +15,15 @@ import {
   verificationPrompt,
 } from "../../../src/workflow/verifier.js";
 
+test("verification cleanup failure escapes the repair loop even with zero exit code", async () => {
+  const command = { id: "test", label: "Test", command: "pnpm test", tier: "full" as const, timeoutMs: 1000 };
+  let runs = 0;
+  await assert.rejects(runVerificationSuite([command, { ...command, id: "build" }], async () => {
+    runs++;
+    return { stdout: "", stderr: "", exitCode: 0, signal: null, cleanupFailed: true, error: "termination refused" };
+  }), ProcessCleanupError);
+  assert.equal(runs, 1);
+});
 async function withWorkspace(callback: (workspace: string) => Promise<void>): Promise<void> {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-verifier-"));
   try { await callback(workspace); } finally { await fs.rm(workspace, { recursive: true, force: true }); }

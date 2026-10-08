@@ -9,6 +9,8 @@ import type { ProviderRuntime } from "../../../src/providers/openai-compatible.j
 import { createProductionAgent, createProductionWorkflowAgentIO } from "../../../src/runtime/production.js";
 import { SessionStore } from "../../../src/storage/session-store.js";
 import { CodingWorkflowRuntime } from "../../../src/workflow/runtime.js";
+import type { BashResult } from "../../../src/tools/bash.js";
+import { ProcessCleanupError } from "../../../src/tools/process-completion.js";
 
 function fakeProvider(text = "done"): ProviderRuntime {
   const capabilities = resolveProviderCapabilities("https://compatible.invalid/v1", "offline");
@@ -41,6 +43,47 @@ const io: AgentIO = {
   async runBash() { return { stdout: "", stderr: "", exitCode: 0, signal: null }; },
   writeAssistant() {},
 };
+
+test("production handle disposal shares cleanup completion and retains rejection", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-production-disposal-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  let release!: (result: BashResult) => void;
+  const worker = new Promise<BashResult>((resolve) => { release = resolve; });
+  let requests = 0, finished = false;
+  const provider = fakeProvider();
+  provider.responses = {
+    async create() { throw new Error("Unexpected buffered request"); },
+    async stream() {
+      requests++;
+      const response = requests === 1 ? { id: "start", output_text: "", output: [
+        { type: "function_call", name: "start_background", call_id: "job", arguments: '{"command":"fixture"}' },
+      ] } : { id: "done", output_text: "done", output: [] };
+      return (async function* () { yield { type: "response.completed", response: { ...response, status: "completed" } }; })();
+    },
+  };
+  const sessionStore = new SessionStore({ directory: path.join(root, "sessions") });
+  const session = await sessionStore.create({
+    title: "disposal fixture", titlePending: false, workspacePath: root,
+    model: { id: "offline", model_name: "offline", base_url: "https://compatible.invalid/v1" },
+  });
+  const handle = createProductionAgent({
+    model: { id: "offline", model_name: "offline", base_url: "https://compatible.invalid/v1", api_key: "fixture" },
+    workspacePath: root, providerRuntime: provider,
+    sessionStore,
+    sessionId: () => session.id, skills: null, mcp: null, learnedMemoryStore: null, codeNavigation: null,
+    io: { ...io, async confirmBash() { return true; }, runBackgroundBash() { return worker; } },
+  });
+  await handle.agent.runTurn("Start a worker");
+  const first = handle.dispose(), second = handle.agent.dispose();
+  const rejected = assert.rejects(first, ProcessCleanupError).then(() => { finished = true; });
+  assert.equal(first, second);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(finished, false);
+  release({ stdout: "", stderr: "", exitCode: null, signal: null, cancelled: true, cleanupFailed: true, error: "termination refused" });
+  await rejected;
+  await assert.rejects(second, ProcessCleanupError);
+  await assert.rejects(handle.dispose(), ProcessCleanupError);
+});
 
 test("production agent resolves a session lazily and persists the shared context", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-production-runtime-"));

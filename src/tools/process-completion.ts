@@ -2,7 +2,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 
 export class ProcessCleanupError extends Error {
   constructor(cause: unknown) {
-    super(`Process-tree cleanup failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    const message = cause instanceof Error ? cause.message : String(cause);
+    super(message.startsWith("Process-tree cleanup failed:") ? message : `Process-tree cleanup failed: ${message}`, { cause });
     this.name = "ProcessCleanupError";
   }
 }

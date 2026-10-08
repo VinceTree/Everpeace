@@ -136,7 +136,7 @@ README、HANDOFF 等按任务需要读取；规则链并不意味着自动装入
 
 [BackgroundJobManager](../../src/tools/background-jobs.ts) 在调用执行器之前登记占位与完成 promise，重入启动也受同一个限额约束。预先取消不调用执行器；同步启动抛错与异步拒绝都保留一个失败 job，沿用 poll 与完成通知，不自动重试。结果、终态与完成时间在同一次结算中发布，解绑父信号后通知观察者；观察者异常不改变任务结果。运行和取消清理期间的预览继续保留，终态后忽略迟到输出，快照不共享内部结果或预览数组。
 
-stop、waitAll 和 stopAll 等待已登记任务的完成 promise。stopAll 期间的新 start 返回 `BACKGROUND_CLEANUP`；重叠清理全部完成后才恢复准入。dispose 立即永久关闭启动，重复调用共用清理 promise；之后 start 返回 `BACKGROUND_DISPOSED`。等待中的取消也必须先等 worker 结束，空任务列表仍尊重已取消的信号。管理器等待既有执行器的结束边界，进程树停止仍由 Bash／原生后端实现负责。生命周期及 Agent／runner 配对证据见 [管理器回归](../../tests/unit/tools/background-jobs.test.ts)、[Agent 回归](../../tests/unit/agent/react-agent.test.ts) 和 [runner 回归](../../tests/unit/workflow/task-runner.test.ts)。
+stop、waitAll 和 stopAll 等待已登记任务的完成 promise。cleanupFailed 或 typed ProcessCleanupError 永久保留在管理器中，终态优先为 failed；输出淘汰、取消和重复 dispose 不能清掉这个故障。全部 worker 收束后等待／清理方法仍抛出该错误，新 start 关闭准入。stopAll 期间的新 start 返回 `BACKGROUND_CLEANUP`；重叠清理全部完成后才恢复准入。dispose 立即永久关闭启动，重复调用共用清理 promise；之后 start 返回 `BACKGROUND_DISPOSED`。等待中的取消也必须先等 worker 结束，空任务列表仍尊重已取消的信号。管理器等待既有执行器的结束边界，进程树停止仍由 Bash／原生后端实现负责。生命周期及 Agent／runner 配对证据见 [管理器回归](../../tests/unit/tools/background-jobs.test.ts)、[Agent 回归](../../tests/unit/agent/react-agent.test.ts) 和 [runner 回归](../../tests/unit/workflow/task-runner.test.ts)。
 
 前台 timeout JSON 与后台终态 result 都增加 `COMMAND_TIMEOUT` 和修正提示，保留 stdout/stderr 与原超时字段；提示先检查部分输出及已产生的副作用，不盲目重放。后台数量／通知积压上限提供 `BACKGROUND_LIMIT`，旧 job ID 明确 `BACKGROUND_JOB_UNAVAILABLE`；搜索过期 continuation 提供 `SEARCH_CONTINUATION_EXPIRED`。这些提示不增加自动 retry、审批或模型请求，取消、持久失败和预算停止保持原有收束顺序。
 
@@ -144,7 +144,7 @@ stop、waitAll 和 stopAll 等待已登记任务的完成 promise。stopAll 期�
 
 完成任务保留受数量和输出字节约束，最多 20 项、总终态输出 4 MiB；旧任务可被淘汰。job ID 是进程内状态，恢复 Session 不能假装恢复旧进程。
 
-取消先关闭通知准入，再终止并等待进程树；预算停止、异常、权限收紧和退出应用采用相同收束边界。任务结束丢弃未送达通知并忽略迟到 callback。最终验证前 runner 等待所有后台命令收束，清理未结束不能开始新的编码任务。进程树停止实现位于 [process-cancel](../../src/tools/process-cancel.ts)，Windows 和 Unix 路径分别覆盖。
+取消先关闭通知准入，再终止并等待进程树；预算停止、异常、权限收紧和退出应用采用相同收束边界。任务结束丢弃未送达通知并忽略迟到 callback。最终验证前 runner 等待所有后台命令收束，清理未结束不能开始新的编码任务。shell 进程树停止与退出等待位于 [process-completion](../../src/tools/process-completion.ts)。Agent、runner 和 workflow 在资源故障后关闭后续工具、请求、手工验证及 undo；任务结算先等全部后台清理，保留故障优先于取消，拒绝 Goal 和成功 Memory。workflow 仅保存固定的未验证原因及债务，不保存清理错误正文；恢复后空改动不能擦掉债务。生产 handle 的重复 dispose 共用同一 promise，也保留拒绝结果。
 
 等待和取消不是只改 UI 标签：测试必须验证实际任务结束，特别是采样中取消后不能残留写文件进程。原生 Windows Terminal 的端到端证据与 hosted CI 的跳过范围单独记录在 HANDOFF。
 

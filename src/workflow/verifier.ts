@@ -2,6 +2,7 @@ import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 import type { BashResult } from "../tools/bash.js";
 import { retainOutput } from "../tools/command-record.js";
+import { ProcessCleanupError } from "../tools/process-completion.js";
 import type { VerificationCommand, VerificationResult, VerificationSuiteResult, VerificationTier } from "./types.js";
 import { verificationFromBash } from "./types.js";
 
@@ -134,6 +135,7 @@ export async function runVerificationCommand(
   const startedAt = Date.now();
   try {
     const result = await run(command.command, signal, command.timeoutMs);
+    if (result.cleanupFailed) throw new ProcessCleanupError(result.error ?? "Verification process ownership is unresolved");
     signal?.throwIfAborted();
     return verificationFromBash(command, {
       ...result,
@@ -141,7 +143,7 @@ export async function runVerificationCommand(
       stderr: retainOutput(result.stderr, MAX_OUTPUT_BYTES).text,
     }, Date.now() - startedAt);
   } catch (error) {
-    if (signal?.aborted) throw error;
+    if (error instanceof ProcessCleanupError || signal?.aborted) throw error;
     return {
       command,
       passed: false,

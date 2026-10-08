@@ -3,6 +3,7 @@
 // Copyright 2025 OpenAI. Licensed under Apache-2.0; see third_party/codex/LICENSE.
 import { setTimeout as delay } from "node:timers/promises";
 import { PersistenceError } from "../storage/persistence-error.js";
+import { ProcessCleanupError } from "../tools/process-completion.js";
 import { boundModelToolOutput, type PreparedToolOutput } from "./context-limits.js";
 import type { TokenUsageSample } from "../status/model-status.js";
 const MAX_PENDING_PARALLEL_TOOL_BYTES = 4 * 1024 * 1024;
@@ -512,7 +513,9 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   } catch (error) {
     // Public output can fail after the response is durable. Close its outstanding
     // tool chain without attempting further delivery or side effects.
-    if (error instanceof Error && outputFailures.has(error) && !(error instanceof PersistenceError)) {
+    if (error instanceof ProcessCleanupError) {
+      await closeCalls([...pendingCalls.values()], "skipped", "process_cleanup_failed");
+    } else if (error instanceof Error && outputFailures.has(error) && !(error instanceof PersistenceError)) {
       await closeCalls([...pendingCalls.values()], externalSignal?.aborted ? "cancelled" : "skipped", "output_delivery_failed");
     }
     options.onPhase?.(externalSignal?.aborted ? "cancelled" : "failed");

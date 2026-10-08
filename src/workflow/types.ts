@@ -116,7 +116,7 @@ export function verificationFromBash(
 ): VerificationResult {
   return {
     command,
-    passed: !result.cancelled && result.error === undefined && result.exitCode === 0,
+    passed: !result.cancelled && !result.timedOut && !result.cleanupFailed && result.error === undefined && result.exitCode === 0,
     exitCode: result.exitCode,
     stdout: result.stdout,
     stderr: result.stderr,

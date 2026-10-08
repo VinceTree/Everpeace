@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ApplyPatchOperation, ApplyPatchResult } from "../tools/apply-patch.js";
 import { TurnCheckpoint, type UndoResult } from "./checkpoint.js";
 import type { BashResult } from "../tools/bash.js";
+import { ProcessCleanupError } from "../tools/process-completion.js";
 import { discoverVerificationCommands, runVerificationCommand, runVerificationSuite, selectVerificationCommand, selectVerificationCommands, verificationPrompt } from "./verifier.js";
 import { WorkspaceChangeTracker, type WorkspaceChangeObservation } from "./workspace-tracker.js";
 import { createWorkflowState, type VerificationSuiteResult, type WorkflowPatchFollowup, type WorkflowReviewResult, type WorkflowRunResult, type WorkflowState, type VerificationCommand, type WorkflowResultClassification, type WorkflowTaskSource } from "./types.js";
@@ -39,6 +40,7 @@ export class CodingWorkflowRuntime {
   #shellObserved = false;
   #trackingLimited = false;
   #gitTrackingComplete = false;
+  #cleanupFailure: ProcessCleanupError | undefined;
 
   constructor(options: WorkflowRuntimeOptions) {
     this.#workspacePath = options.workspacePath;
@@ -54,7 +56,36 @@ export class CodingWorkflowRuntime {
   get checkpointAvailable(): boolean { return this.#checkpoint.available; }
   get workspacePath(): string { return this.#workspacePath; }
 
+  /** Preserve debt without launching snapshots while process ownership is unknown. */
+  async recordCleanupFailure(failure = new ProcessCleanupError("Process ownership is unresolved")): Promise<void> {
+    this.#cleanupFailure ??= failure;
+    this.#trackingLimited = true;
+    await this.#set({
+      phase: "blocked", result: "unverified", pending_verification: true, tracking_limited: true,
+      result_reason: "Process cleanup failed; process ownership is unresolved",
+    });
+  }
+
+  assertCleanupComplete(): void {
+    if (this.#cleanupFailure) throw this.#cleanupFailure;
+  }
+
+  async #verify<T>(run: () => Promise<T>): Promise<T> {
+    this.assertCleanupComplete();
+    try { return await run(); }
+    catch (error) {
+      if (error instanceof ProcessCleanupError) {
+        try { await this.recordCleanupFailure(error); }
+        catch (persistenceError) {
+          throw new ProcessCleanupError(new AggregateError([error, persistenceError], `${error.message}; cleanup debt could not be persisted`));
+        }
+      }
+      throw error;
+    }
+  }
+
   async beginTurn(options: WorkflowTurnOptions = {}): Promise<WorkflowState> {
+    this.assertCleanupComplete();
     const taskId = randomUUID();
     this.#checkpoint.clear();
     this.#changed = false;
@@ -78,6 +109,7 @@ export class CodingWorkflowRuntime {
 
   /** Rebuild process-local trackers without clearing persisted verification debt. */
   async resumeTurn(): Promise<WorkflowState> {
+    this.assertCleanupComplete();
     this.#checkpoint.clear();
     this.#patchChanged = false;
     this.#shellObserved = false;
@@ -122,7 +154,7 @@ export class CodingWorkflowRuntime {
       await this.#set({ phase: "implement" });
       return { prompt: "The patch was applied. No safe fast verification command was discovered; inspect the changed files and continue with focused checks." };
     }
-    const verification = await runVerificationCommand(command, run, signal);
+    const verification = await this.#verify(() => runVerificationCommand(command, run, signal));
     await this.#set({
       phase: verification.passed ? "implement" : "diagnose",
       last_verification: verification,
@@ -138,6 +170,7 @@ export class CodingWorkflowRuntime {
     run: (command: string, signal?: AbortSignal, timeoutMs?: number) => Promise<BashResult>,
     signal?: AbortSignal,
   ): Promise<WorkflowRunResult> {
+    this.assertCleanupComplete();
     signal?.throwIfAborted();
     let before = await this.#refreshObservedChanges();
     if (this.#state.phase === "blocked") {
@@ -160,7 +193,7 @@ export class CodingWorkflowRuntime {
       if (refreshes > 0) before = await this.#refreshObservedChanges();
       const commands = await discoverVerificationCommands(this.#workspacePath);
       signal?.throwIfAborted();
-      const suite = await runVerificationSuite(selectVerificationCommands(commands, "full"), run, signal);
+      const suite = await this.#verify(() => runVerificationSuite(selectVerificationCommands(commands, "full"), run, signal));
       signal?.throwIfAborted();
       const after = await this.#refreshObservedChanges();
       const verification = suite.results.find((result) => !result.passed) ?? suite.results.at(-1);
@@ -250,6 +283,7 @@ export class CodingWorkflowRuntime {
   }
 
   async observeShellExecution(): Promise<WorkspaceState> {
+    this.assertCleanupComplete();
     if (this.#state.phase === "blocked") throw new Error("The coding workflow is blocked; start a new task before running more tools");
     this.#shellObserved = true;
     await this.#refreshObservedChanges();
@@ -261,10 +295,11 @@ export class CodingWorkflowRuntime {
     run: (command: string, signal?: AbortSignal, timeoutMs?: number) => Promise<BashResult>,
     options: { supplemental: boolean; signal?: AbortSignal },
   ): Promise<VerificationSuiteResult> {
+    this.assertCleanupComplete();
     options.signal?.throwIfAborted();
     await this.#tracker.trackPaths(this.#state.changed_paths);
     const before = await this.#tracker.observe();
-    const suite = await runVerificationSuite(commands, run, options.signal);
+    const suite = await this.#verify(() => runVerificationSuite(commands, run, options.signal));
     options.signal?.throwIfAborted();
     const after = await this.#tracker.observe();
     const gitBound = before.available && before.complete && after.available && after.complete;
@@ -300,6 +335,7 @@ export class CodingWorkflowRuntime {
   }
 
   async undo(): Promise<UndoResult> {
+    this.assertCleanupComplete();
     const result = await this.#checkpoint.undo();
     if (result.status === "undone" || result.status === "conflict") {
       await this.#set({ checkpoint_available: false, changed_paths: this.#state.changed_paths.filter((item) => !result.restored.includes(item)) });
@@ -308,7 +344,9 @@ export class CodingWorkflowRuntime {
   }
 
   async #refreshObservedChanges(): Promise<WorkspaceChangeObservation> {
+    this.assertCleanupComplete();
     const observation = await this.#tracker.observe();
+    this.assertCleanupComplete();
     if (observation.available && observation.complete) {
       this.#gitTrackingComplete = true;
       const retainedDebt = this.#state.pending_verification === true && this.#state.task_source === "session_resume"

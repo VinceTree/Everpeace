@@ -4,6 +4,7 @@ import type { AgentMode } from "../plan/runtime.js";
 import type { FileAttachment } from "../agent/file-attachments.js";
 import type { SessionGoal } from "../storage/session-store.js";
 import type { BashResult } from "../tools/bash.js";
+import { ProcessCleanupError } from "../tools/process-completion.js";
 import { formatWorkflowSummary, type CodingWorkflowRuntime } from "./runtime.js";
 import type { VerificationSuiteResult, WorkflowRunResult, WorkflowTaskSource } from "./types.js";
 import { verificationPrompt } from "./verifier.js";
@@ -60,6 +61,7 @@ export class CodingTaskRunner {
   readonly #workflow: CodingWorkflowRuntime;
   readonly #host: CodingTaskRunnerHost;
   #running = false;
+  #cleanupFailure: ProcessCleanupError | undefined;
 
   constructor(options: { agent: CodingTaskAgent; workflow: CodingWorkflowRuntime; host: CodingTaskRunnerHost }) {
     this.#agent = options.agent;
@@ -69,6 +71,7 @@ export class CodingTaskRunner {
 
   async run(input: CodingTaskRunnerInput): Promise<CodingTaskRunnerResult> {
     if (this.#running) throw new Error("A coding task is already running or cleaning up");
+    if (this.#cleanupFailure) throw this.#cleanupFailure;
     this.#running = true;
     let nextText = input.text;
     let nextMode = input.mode ?? "default";
@@ -188,15 +191,26 @@ export class CodingTaskRunner {
       this.#host.onStatus?.("Continuing active goal");
       }
     } catch (error) {
-      await Promise.allSettled([
-        this.#agent.cancelBackgroundJobs?.(error) ?? Promise.resolve(),
-        this.#agent.finalizePendingGoalCompletion?.(false) ?? Promise.resolve(),
-        this.#agent.finishMemoryTurn?.(input.signal?.aborted ? "stopped" : "failed") ?? Promise.resolve(),
+      const [cleanup] = await Promise.allSettled([
+        Promise.resolve().then(() => this.#agent.cancelBackgroundJobs?.(error)),
       ]);
-      throw error;
+      const failure = error instanceof ProcessCleanupError ? error
+        : cleanup?.status === "rejected" && cleanup.reason instanceof ProcessCleanupError ? cleanup.reason
+          : error;
+      if (failure instanceof ProcessCleanupError) this.#cleanupFailure ??= failure;
+      await Promise.allSettled([
+        ...(failure instanceof ProcessCleanupError
+          ? [Promise.resolve().then(() => this.#workflow.recordCleanupFailure?.(failure))]
+          : []),
+        this.#agent.finalizePendingGoalCompletion?.(false) ?? Promise.resolve(),
+        this.#agent.finishMemoryTurn?.(failure instanceof ProcessCleanupError || !input.signal?.aborted ? "failed" : "stopped") ?? Promise.resolve(),
+      ]);
+      throw failure;
     } finally {
       try {
         await this.#agent.endTask?.();
+      } catch (error) {
+        throw this.#cleanupFailure ?? error;
       } finally {
         this.#running = false;
       }

@@ -106,7 +106,7 @@ $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ## Usage
 
 ```text
-✦ Everpeace Agent (v0.3.17) · 天下长平，以规司矩
+✦ Everpeace Agent (v0.3.18) · 天下长平，以规司矩
 
 ╭──────────────────────────────────────────────────────────╮
 │ model:     deepseek-flash   /model to change             │
@@ -244,7 +244,7 @@ While a model turn is running, the composer stays available with the `Add guidan
 
 Cancellation keeps the task occupied until cleanup finishes. If the conversation is cleared or replaced during cleanup, the old task cannot publish an approved plan or error into the new conversation. Guidance submitted while that old task is still cleaning up returns to your draft for resubmission.
 
-Cancelled or timed-out model shell commands wait for the launcher to close and the process-tree termination request to finish. Elapsed time alone does not end cleanup; termination failures are reported as errors. Benchmark process wrappers use the same cleanup wait; cleanup failure stops subsequent suite/campaign runs.
+Cancelled or timed-out model shell commands wait for the launcher to close and the process-tree termination request to finish. Elapsed time alone does not end cleanup; termination failures are reported as errors. Benchmark process wrappers use the same cleanup wait; cleanup failure stops subsequent suite/campaign runs. It also stops further tools and requests from the affected Agent, denies Goal completion and verified Memory, and keeps unverified workflow debt.
 
 ## Project structure
 
