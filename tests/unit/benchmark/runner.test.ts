@@ -119,13 +119,17 @@ test("verification cancellation is distinct from a timeout", async () => {
 
 test("task cancellation during verification is not reported as a verification timeout", async () => {
   const controller = new AbortController();
-  const cancellation = setTimeout(() => controller.abort(new Error("campaign cancelled")), 1_000);
   const result = await runBenchmarkTask(task({
-    verification: { command: "node", args: ["-e", "setTimeout(() => {}, 1000)"] },
-  }), { name: "fixture-harness", async run() {} }, { signal: controller.signal });
-  clearTimeout(cancellation);
+    verification: { command: "node", args: ["-e", "setInterval(() => {}, 1000)"] },
+  }), { name: "fixture-harness", async run() {} }, {
+    signal: controller.signal,
+    onTaskPhase(phase) {
+      if (phase === "verify") setImmediate(() => controller.abort(new Error("campaign cancelled")));
+    },
+  });
   assert.equal(result.status, "error");
   assert.equal(result.error, "Benchmark task was cancelled");
+  assert.equal(result.verification?.attempted, true);
   assert.equal(result.verification?.cancelled, true);
 });
 

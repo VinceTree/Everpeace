@@ -21,7 +21,11 @@
 
 早期 launcher 四项受控回归在修复前全部失败；宿主 Bash/评测三项新增回归亦在接入前失败。前一开发阶段 Windows/WSL 真实 Node fixture 验证了父子进程退出，WSL 使用独立纯 Node 编译，不能作为真正 native sandbox 或任意脱离进程组后代的隔离证明；后续共享模块的完整 Linux 证据以本次远端 CI 为准。
 
-本次定向测试 78 项、77 通过、0 失败、1 项平台跳过。本次完整门禁串行执行：typecheck 通过 → lint script 缺项 → test 880 项、877 通过、0 失败、3 项平台跳过（57,447.1704 ms）→ build 通过。git diff --check、28 份交付文件空白检查和 361 个本地文档链接路径检查通过。日志保存在宿主临时目录 everpeace-delivery-focused-20261009.log 及 everpeace-delivery-final-{typecheck,test,build}-20261009.log。
+首个实现提交的 Linux CI 在真实进程 fixture 失败：signal 0 成功被断言为仍存活，但 Linux 已退出的僵尸 PID 在被回收前也可被该调用观察。回归现仅在 Linux 读取 /proc/PID/stat：PID 已消失或明确为 Z/X 才通过，任何存活状态仍失败；没有增加延时或跳过测试，也没有改动生产终止逻辑。修正后 WSL Linux 的两文件 13 项、12 通过、0 失败、1 项 Windows-only 跳过；WSL 网络模式回退 None，不能算网络隔离验收。后续 dc54978 的 [Windows/Linux 全套 CI](https://github.com/VinceTree/Everpeace/actions/runs/37808490956) 均已通过，旧断言存在时序敏感性；修正提交仍须以自身 CI 为准。
+
+修正后的首次本地完整测试在既有 benchmark 取消回归失败：固定 1 秒取消与 fixture 自行退出竞争，严格清理报告 taskkill 128。测试现从 verify 阶段调度取消，fixture 保持运行直到被终止，并断言 verification.attempted；不再依赖快照耗时或自行退出时机，生产代码仍保留终止失败。该轮 880 项、876 通过、1 失败、3 跳过，已按首败停止，没有继续构建；日志 everpeace-delivery-linux-fix-test-20261009.log。
+
+本次定向测试 78 项、77 通过、0 失败、1 项平台跳过。最终修正后再次串行执行：typecheck 通过 → lint script 缺项 → test 880 项、877 通过、0 失败、3 项平台跳过（50,865.7895 ms）→ build 通过，日志 everpeace-delivery-race-fix-{typecheck,test,build}-20261009.log。此前首轮完整门禁亦通过。git diff --check、28 份交付文件空白检查和 361 个本地文档链接路径检查通过。日志保存在宿主临时目录 everpeace-delivery-focused-20261009.log 及 everpeace-delivery-final-{typecheck,test,build}-20261009.log。
 
 ## 尚未完成的产品验收
 

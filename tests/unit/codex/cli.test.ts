@@ -145,8 +145,22 @@ test("launcher cancellation returns only after a real child and grandchild stop"
     assert.equal(result.timedOut, undefined);
     assert.equal(result.error, undefined);
     for (const pid of [pids.parent, pids.child]) {
-      assert.throws(() => process.kill(pid, 0), (error: unknown) =>
-        error instanceof Error && "code" in error && error.code === "ESRCH");
+      try { process.kill(pid, 0); }
+      catch (error) {
+        assert.equal((error as NodeJS.ErrnoException).code, "ESRCH");
+        continue;
+      }
+      // An orphan killed with its parent can remain in Linux's process table
+      // until the reaper collects it. Signal 0 also succeeds for these zombies.
+      assert.equal(process.platform, "linux", `PID ${pid} must have exited`);
+      let stat: string;
+      try { stat = await fs.readFile(`/proc/${pid}/stat`, "utf8"); }
+      catch (error) {
+        assert.equal((error as NodeJS.ErrnoException).code, "ENOENT");
+        continue;
+      }
+      const state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0];
+      assert.ok(state === "Z" || state === "X", `PID ${pid} is still live (state ${state})`);
     }
   });
 });
