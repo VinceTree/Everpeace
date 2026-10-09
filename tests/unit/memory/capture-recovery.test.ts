@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { fork } from "node:child_process";
 import { once } from "node:events";
+import { promises as fs } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -34,6 +35,45 @@ function staleJob(directory: string) {
   return { id: "interrupted", turn: { workspacePath: directory, userInput: "Fix the defect", transcript: "Verified evidence", assistantText: "done", toolCallCount: 1 },
     outcome: "verified", createdAt: new Date(0).toISOString(), notBefore: new Date(0).toISOString(), attempts: 0, status: "running" };
 }
+
+test("capture job reads wait for an in-flight atomic replacement", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "everpeace-memory-read-replacement-"));
+  const filePath = join(directory, "capture-jobs.json");
+  const store = new LearnedMemoryStore({ directory });
+  await store.saveJobs([]);
+  const replacing = deferred<void>(), release = deferred<void>();
+  const rename = fs.rename, read = fs.readFile;
+  let replacementActive = false, readDuringReplacement = false;
+  t.mock.method(fs, "rename", async (...args: Parameters<typeof fs.rename>) => {
+    if (String(args[1]) !== filePath) return rename(...args);
+    replacementActive = true;
+    replacing.resolve();
+    await release.promise;
+    try { return await rename(...args); }
+    finally { replacementActive = false; }
+  });
+  t.mock.method(fs, "readFile", (...args: Parameters<typeof fs.readFile>) => {
+    if (String(args[0]) === filePath && replacementActive) readDuringReplacement = true;
+    return read(...args);
+  });
+  const expected: CaptureJobs = [{ ...staleJob(directory), outcome: "verified", status: "queued", requestPending: false, usageComplete: true }];
+  let writing: Promise<CaptureJobs> | undefined, reading: Promise<CaptureJobs> | undefined;
+  try {
+    writing = store.updateJobs(() => expected);
+    await replacing.promise;
+    reading = store.loadJobs();
+    await Promise.resolve();
+    assert.equal(readDuringReplacement, false, "A reader must not compete with atomic replacement on Windows");
+    release.resolve();
+    await writing;
+    assert.deepEqual(await reading, expected);
+    assert.deepEqual(await store.loadJobs(), expected);
+  } finally {
+    release.resolve();
+    await Promise.allSettled([writing, reading].filter((operation) => operation !== undefined));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("interrupted or unknown Memory jobs do not regain admission after runtime reconstruction", async (t) => {
   const cases = [

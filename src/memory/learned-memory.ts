@@ -356,7 +356,7 @@ function retrievalTerms(value: string): string[] {
 export class LearnedMemoryStore {
   readonly #directory: string;
   readonly #now: () => Date;
-  readonly #writeQueues = new Map<string, Promise<void>>();
+  readonly #writeQueues = new Map<string, Promise<unknown>>();
 
   constructor(options: LearnedMemoryStoreOptions = {}) {
     this.#directory = options.directory ?? defaultMemoryDirectory();
@@ -527,8 +527,9 @@ export class LearnedMemoryStore {
   }
 
   async loadJobs(): Promise<MemoryCaptureJob[]> {
-    return parseArrayFile<MemoryCaptureJob>(await readText(path.join(this.#directory, JOBS_FILE)))
-      .filter((job) => job && typeof job.id === "string" && job.turn && (job.status === "queued" || job.status === "running" || job.status === "failed"));
+    const filePath = path.join(this.#directory, JOBS_FILE);
+    return this.#enqueue(filePath, async () => parseArrayFile<MemoryCaptureJob>(await readText(filePath))
+      .filter((job) => job && typeof job.id === "string" && job.turn && (job.status === "queued" || job.status === "running" || job.status === "failed")));
   }
 
   async saveJobs(jobs: readonly MemoryCaptureJob[]): Promise<void> {
@@ -574,11 +575,11 @@ export class LearnedMemoryStore {
     return result;
   }
 
-  async #enqueue(filePath: string, operation: () => Promise<void>): Promise<void> {
+  async #enqueue<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
     const previous = this.#writeQueues.get(filePath) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(operation);
     this.#writeQueues.set(filePath, next);
-    await next.finally(() => {
+    return await next.finally(() => {
       if (this.#writeQueues.get(filePath) === next) this.#writeQueues.delete(filePath);
     });
   }

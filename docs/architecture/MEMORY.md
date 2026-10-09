@@ -7,6 +7,7 @@ Everpeace 的 learned memory 是本地、分层、可审计的经验存储。它
 - `learned.md` 保存用户级长期偏好；`projects/<workspace-hash>/learned.md` 保存项目经验。
 - `capture-jobs.json` 保存待处理、运行中和失败任务；`memory-candidates.json` 保存候选、待审和已合并状态。
 - 项目路径规范化后做 SHA-256 哈希，不把原始路径写入文件名。读改写使用 `proper-lockfile` 跨进程锁并通过临时文件原子替换。
+- 同一 store 的 capture job 读取与写入共用每路径队列；读取等待已开始的原子替换和锁释放，避免 Windows 上高频状态读取与替换竞争。外部进程仍由原子替换、跨进程锁和有界重试保护，持续存储失败保持可见。边界回归见 [capture recovery](../../tests/unit/memory/capture-recovery.test.ts)。
 - 每个 scope 最多保留 100 条 active 条目。superseded、archived、候选与 review 状态不挤占 active 配额；未合并临时候选保留 30 天。
 - 旧 Markdown 条目继续读取为 legacy 来源，不补造验证证据，也不默认回扫旧 Session。
 
