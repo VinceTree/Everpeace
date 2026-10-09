@@ -116,7 +116,7 @@ node tests/fixtures/live-tool-acceptance.mjs live <owned-external-root> <case-id
 
 Question 与 Plan 的回答/审阅由明确标注的宿主 fixture 提供，MCP 使用真实隔离 stdio 服务，Memory 只读种子且关闭未来捕获，Skill 使用专属目录。导航需要已安装且通过原生探针的后端，可用 `EVERPEACE_TEST_LSP_SERVER` 指定路径；准备器不下载服务器。每个工具调用、配对持久化、任务终态、实际修改、宿主验证和清理分别检查。`repair-cycle` 必须观察实际 test pass → 指定 build failure → 模型修复 → 最终全检查；不能用环境失败代替。
 
-HTTP 状态、请求字节数、SSE 类型统计与安全错误类别用于诊断，不保存请求 headers 或 API Key。网页 API 完成与搜索相关性分开报告；工程回归、宿主回答与人工 TUI 使用证据不能互相替代。当前授权、守卫数值、实测结果和证据只在 [HANDOFF](HANDOFF.md) 维护。
+HTTP 状态、请求字节数、SSE 类型统计与安全错误类别用于诊断，不保存请求 headers 或 API Key。网页 API 完成与搜索相关性分开报告；工程回归、宿主回答与人工 TUI 使用证据不能互相替代。按用户要求，本轮实测结果、守卫数值和证据只在本地维护；[HANDOFF](HANDOFF.md) 记录本地入口，未经后续要求不将报告或结果图加入远端仓库。
 
 ## Result and artifact semantics
 
