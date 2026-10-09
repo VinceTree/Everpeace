@@ -24,6 +24,10 @@ pnpm dev
 
 In the terminal, run `/login`, choose DeepSeek, enter your masked API key and select the original model ID returned by the service. OpenAI and custom HTTPS Responses endpoints are also supported; capabilities depend on the endpoint. Keys stay in the system credential store, outside project files and Sessions.
 
+Model connections honor `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` (lowercase names take precedence). Set these before starting the CLI when your endpoint needs a proxy; `ALL_PROXY` alone is insufficient. Proxy settings apply to model traffic, while model shell commands retain their sandbox network policy.
+
+Web page reads retain a bounded list of source links, so the agent can follow an official site's navigation and verify citations when search results are broad.
+
 ```text
 /login
 /plan
@@ -44,11 +48,11 @@ Current source version: **0.4.0**.
 
 ## Real tools, checked changes
 
-![Everpeace live tool acceptance: tool calls and coding repair verified; Plan approval and search relevance remain open](assets/features.webp)
+![Everpeace live tool acceptance: 37 tool entries and 14 scenario groups have verified closure evidence](assets/features.webp)
 
 [Open the full-size chart](assets/features.webp).
 
-These isolated Windows scenarios use the production runner, a native sandbox and `grok-4.6` through a relay. **PASS means at least one verified closure across initial and follow-up candidates.** Plan approval and search relevance remain open; this is not a DeepSeek success-rate or cost comparison.
+These isolated Windows scenarios use the production runner, a native sandbox and `grok-4.6` through a relay. **PASS means at least one verified closure per group on the same tested source and build, across two independent stages.** Plan revision and source-grounded web answers are included. The first stage stopped on unknown usage; its failed and skipped runs remain recorded locally. This is not a campaign success rate, a DeepSeek result or a cost comparison.
 
 Root-to-directory rules, `@` attachments and an on-demand project map help the agent understand your code. Edits use current file observations, permission-bound previews and conflict-aware undo. Sessions, forks and context checkpoints preserve work and verification debt across recovery.
 

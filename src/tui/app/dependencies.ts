@@ -7,6 +7,7 @@ import type { AgentIO } from "../../agent/react-agent.js";
 import {
   createProviderClient,
   createProviderRuntime,
+  disposeProviderClient,
   listOfficialModelIds,
 } from "../../providers/openai-compatible.js";
 import type { RegisteredModel } from "../../storage/model-registry.js";
@@ -77,22 +78,24 @@ async function requestSkillDraft(
   execute: <T extends { usage?: unknown; status?: unknown }>(run: (signal: AbortSignal) => Promise<T>) => Promise<T>,
 ): Promise<string> {
   const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
-  const request = purposeRequest(model, "skill");
-  const response = await execute((requestSignal) => runtime.responses.create(
-    {
-      model: model.model_name,
-      instructions,
-      input,
-      store: false,
-      max_output_tokens: request.max_output_tokens,
-      ...(request.reasoning ? { reasoning: request.reasoning } : {}),
-    },
-    { signal: requestSignal, timeout: request.timeoutMs, maxRetries: 0 },
-  ));
-  assertCompletedModelResponse(response, "skill");
-  const draft = normalizeGeneratedSkillMarkdown(response.output_text);
-  validateManagedSkillMarkdown(draft);
-  return draft;
+  try {
+    const request = purposeRequest(model, "skill");
+    const response = await execute((requestSignal) => runtime.responses.create(
+      {
+        model: model.model_name,
+        instructions,
+        input,
+        store: false,
+        max_output_tokens: request.max_output_tokens,
+        ...(request.reasoning ? { reasoning: request.reasoning } : {}),
+      },
+      { signal: requestSignal, timeout: request.timeoutMs, maxRetries: 0 },
+    ));
+    assertCompletedModelResponse(response, "skill");
+    const draft = normalizeGeneratedSkillMarkdown(response.output_text);
+    validateManagedSkillMarkdown(draft);
+    return draft;
+  } finally { await runtime.dispose?.(); }
 }
 
 export function sanitizeSessionTitle(value: string): string {
@@ -152,7 +155,9 @@ export function createDefaultTuiDependencies(
     getAuxiliaryUsage: () => auxiliaryExecutor.getUsage(),
     skillManager,
     async listModels(baseUrl, apiKey, signal) {
-      return listOfficialModelIds(createProviderClient(baseUrl, apiKey), signal);
+      const client = createProviderClient(baseUrl, apiKey);
+      try { return await listOfficialModelIds(client, signal); }
+      finally { await disposeProviderClient(client); }
     },
     createAgent(model: RegisteredModel, io: AgentIO, restore) {
       if (disposed) throw new Error("TUI services have been disposed");
@@ -245,7 +250,10 @@ export function createDefaultTuiDependencies(
       const operation = (async () => {
         await Promise.resolve();
         try { await memoryRuntime.remember(workspacePath, text, ownedSignal); }
-        finally { await trackMemoryDisposal(memoryRuntime.dispose()); }
+        finally {
+          try { await trackMemoryDisposal(memoryRuntime.dispose()); }
+          finally { await providerRuntime.dispose?.(); }
+        }
       })();
       memoryOperations.add(operation);
       try { await operation; }
@@ -253,25 +261,27 @@ export function createDefaultTuiDependencies(
     },
     async generateSessionTitle(model, firstQuestion, signal) {
       const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
-      const request = purposeRequest(model, "title");
-      const response = await runAuxiliary("title", (requestSignal) => runtime.responses.create(
-        {
-          model: model.model_name,
-          instructions:
-            "Summarize the user's request as one concise session title. " +
-            "Use the same language as the request. Return only the title, " +
-            "without Markdown, quotation marks, or ending punctuation.",
-          input: firstQuestion,
-          store: false,
-          max_output_tokens: request.max_output_tokens,
-          ...(request.reasoning ? { reasoning: request.reasoning } : {}),
-        },
-        { signal: requestSignal, timeout: request.timeoutMs, maxRetries: 0 },
-      ), undefined, signal);
-      assertCompletedModelResponse(response, "title");
-      const title = sanitizeSessionTitle(response.output_text);
-      if (!title) throw new Error("The model returned an empty session title");
-      return title;
+      try {
+        const request = purposeRequest(model, "title");
+        const response = await runAuxiliary("title", (requestSignal) => runtime.responses.create(
+          {
+            model: model.model_name,
+            instructions:
+              "Summarize the user's request as one concise session title. " +
+              "Use the same language as the request. Return only the title, " +
+              "without Markdown, quotation marks, or ending punctuation.",
+            input: firstQuestion,
+            store: false,
+            max_output_tokens: request.max_output_tokens,
+            ...(request.reasoning ? { reasoning: request.reasoning } : {}),
+          },
+          { signal: requestSignal, timeout: request.timeoutMs, maxRetries: 0 },
+        ), undefined, signal);
+        assertCompletedModelResponse(response, "title");
+        const title = sanitizeSessionTitle(response.output_text);
+        if (!title) throw new Error("The model returned an empty session title");
+        return title;
+      } finally { await runtime.dispose?.(); }
     },
     async doctor(model, policy, live, signal) {
       const sandbox = createEffectiveSandboxPolicy(policy, process.cwd(), skills.readableRoots());
@@ -361,7 +371,7 @@ export function createDefaultTuiDependencies(
         lines.push("Model request: completed with text");
       } catch (error) {
         lines.push(`Model request: failed\n${modelErrorGuidance(error)}`);
-      }
+      } finally { await runtime.dispose?.(); }
       return lines.join("\n");
     },
     async changeWorkspace(workspacePath) {

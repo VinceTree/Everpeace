@@ -24,6 +24,10 @@ pnpm dev
 
 启动后输入 `/login`，选择 DeepSeek，输入遮罩显示的 API Key，再选择服务返回的原始模型 ID。也支持 OpenAI 和自定义 HTTPS Responses 端点，能力按实际端点识别。密钥保存在系统凭据库，不写入项目或 Session。
 
+模型连接支持 `HTTP_PROXY`、`HTTPS_PROXY` 与 `NO_PROXY`，同名小写变量优先。端点需要代理时，在启动 CLI 前设置；仅设置 `ALL_PROXY` 不生效。这些设置作用于模型请求，模型 shell 仍遵守 sandbox 网络策略。
+
+网页读取保留有界的来源链接列表，搜索结果宽泛时，Agent 可以沿官方网站的实际导航继续读取并核验引用。
+
 ```text
 /login
 /plan
@@ -44,11 +48,11 @@ everpeace
 
 ## 真实调用，验证改动
 
-![Everpeace 真实工具验收：工具调用与编码修复取得证据，Plan 审批闭环和搜索相关性仍待完成](assets/features.webp)
+![Everpeace 真实工具验收：37 个工具入口、14 组场景均取得闭环证据](assets/features.webp)
 
 [查看完整尺寸图表](assets/features.webp)。
 
-这组隔离 Windows 场景通过中转的 `grok-4.6`，使用生产 runner 与原生 sandbox。**PASS 表示初测或后续候选的独立复测至少取得一次闭环证据。** Plan 审批闭环和搜索相关性仍待完成；这不是 DeepSeek 成功率或成本对比。
+这组隔离 Windows 场景通过中转的 `grok-4.6`，使用生产 runner 与原生 sandbox。**PASS 表示同一实测源码与构建的两个独立阶段中，每组至少取得一次闭环证据。** 包含 Plan 修订审批与基于实际来源的网页问答。首阶段因未知用量停止，失败和跳过项继续保留在本地。这不是整轮成功率、DeepSeek 实测结果或成本对比。
 
 根到目标目录的规则、`@` 文件附件和按需项目地图帮助 Agent 理解代码。编辑基于当前文件观察，提供绑定权限的预览和拒绝并发覆盖的 undo。Session、fork 和上下文检查点在恢复时保留工作与验证债务。
 

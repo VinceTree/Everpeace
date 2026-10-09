@@ -170,6 +170,10 @@ duplex 的重复 terminate 共用同一清理 promise，不使用固定延时冒
 
 公共 `web_search` / `web_fetch` 为普通 function calls；请求失败返回工具结果。搜索依次尝试国际 Bing、中国区 Bing、DuckDuckGo，在同一总时限内为各服务保留尝试时间，避免首个不可达服务耗尽所有时间。Bing GET 与页面 fetch 每次重定向都检查公共 HTTP/HTTPS 边界，禁止 localhost、内网和链路本地；DuckDuckGo POST 不跟随重定向。取消阻止启动后续服务。返回正文与搜索结果始终是不可信数据，HTTP 200 与成功解析不保证结果相关性。
 
+搜索工具说明提示模型在结果不相关时使用精确短语和官方域名的 `site:` 过滤，再读取实际返回的 URL；不伪造或硬编码搜索结果。事实问答的来源和正文须独立验收，不能仅凭一次工具调用成功记为通过。
+
+HTML 页面读取在原正文外增量返回最多 40 个去重 `links`（标题与绝对 URL），使用重定向后的真实页面 URL 解析相对路径，忽略注入的 HTML base、脚本/隐藏块、片段链接、非 HTTP/HTTPS 及含 URL 凭据的链接。链接只是未信任数据；不会自动访问，每次后续 fetch 仍完整检查网络边界。模型可沿真实链接导航，避免仅靠丢失地址的正文猜测路径。纯文本/JSON 结果不添加 HTML links。
+
 真实工具验收使用 [live-tool-acceptance](../../tests/fixtures/live-tool-acceptance.mjs) 的隔离生产 factory/runner；调用覆盖与整个任务闭环分别评分。脚本不属于测试套件，不会从 `pnpm test` 发起付费请求。结果、候选身份与待修复项见 [HANDOFF](../HANDOFF.md)，操作契约见 [BENCHMARKING](../BENCHMARKING.md#independent-live-tool-acceptance)。
 
 MCP 和 Skills 已实现，不在本文重复配置细节；参见 [CODEX_CAPABILITIES](CODEX_CAPABILITIES.md)。MCP annotations 不能自动授予本地并发资格，Skill 名称冲突必须从目录和按名读取中排除。

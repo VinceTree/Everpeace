@@ -234,15 +234,17 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
   const disposeAgent = agent.dispose.bind(agent);
   let disposal: Promise<void> | undefined;
   const dispose = (): Promise<void> => disposal ??= (async () => {
-    try {
-      await disposeAgent();
-    } finally {
-      try {
-        if (ownsLearnedMemory) await learnedMemory?.dispose?.();
-      } finally {
-        await ownedMcp?.close();
-      }
+    const failures: unknown[] = [];
+    for (const cleanup of [
+      () => disposeAgent(),
+      () => ownsLearnedMemory ? learnedMemory?.dispose?.() : undefined,
+      () => ownedMcp?.close(),
+      () => options.providerRuntime === undefined ? provider.dispose?.() : undefined,
+    ]) {
+      try { await cleanup(); } catch (error) { failures.push(error); }
     }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, "Failed to dispose production services");
   })();
   // Existing hosts own an AgentSession rather than the richer handle. Keep
   // that interface safe: disposing the agent also releases services created

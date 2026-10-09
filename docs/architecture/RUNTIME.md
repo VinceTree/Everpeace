@@ -45,6 +45,7 @@ TUI / everpeace exec / everpeace/sdk / 内部 benchmark adapter
 ## 请求与计量
 
 - `createProviderRuntime` 统一 client、能力与请求设置。只使用 Responses；模型 ID 保留服务端原值，不能通过名称推测中转端点支持官方能力。
+- Node 模型连接读取 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`（同名小写优先），使用每个 client 独立的 Undici dispatcher，不修改全局网络设置。`ALL_PROXY` 不单独作为配置入口；配置无效报固定错误，不输出可能含凭据的代理 URL。主 Agent 先等待请求、Memory 与工具清理，再释放其拥有的连接；外部传入 provider 由调用者负责释放。登录、标题、Skill、手动 Memory 与 doctor 在各自请求结束后释放连接，取消后强制关闭残留 CONNECT。该代理不改变网页 SSRF 或模型 shell 原生隔离边界。回归见 [proxy transport](../../tests/unit/providers/proxy-transport.test.ts)。
 - 官方 DeepSeek 使用普通 reasoning/tool item、summary 压缩和供应商自动前缀缓存；不发送 OpenAI encrypted reasoning、prompt-cache 或 native compact 参数。`max` 原样映射到 DeepSeek `max`。
 - 官方 OpenAI 声明 native compact；未知兼容端点使用 summary 和保守能力。SDK 上存在方法不等于服务端支持该能力。
 - 编码默认 `high` / 32,768 输出 tokens；不支持 reasoning 的端点不发送该参数。产品默认输出预算与供应商能力上限分别保存；DeepSeek 当前能力上限为未知。

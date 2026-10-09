@@ -51,13 +51,16 @@ importers:
         version: 1.1.0(patch_hash=3047d8f70b86b81e18bb91f7dca38042822ab14c9ac7530867ff14e33b41554c)
       openai:
         specifier: ^7.15.0
-        version: 7.15.0(ws@8.21.3)(zod@4.6.5)
+        version: 7.15.0(undici@7.30.0)(ws@8.21.3)(zod@4.6.5)
       proper-lockfile:
         specifier: ^4.1.2
         version: 4.1.2
       react:
         specifier: ^19.3.0
         version: 19.3.0
+      undici:
+        specifier: 7.30.0
+        version: 7.30.0
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -1178,6 +1181,10 @@ packages:
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
+  undici@7.30.0:
+    resolution: {integrity: sha512-dkrQXeHSaoamnItlYbmzG0wFYrM0ZwDxCIg0A7aKjTyyhh9svRzCNFEzV+Vm05/yehjCzjDZ31KXfGEjYSztDQ==}
+    engines: {node: '>=20.18.1'}
+
   unpipe@1.0.0:
     resolution: {integrity: sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ==}
     engines: {node: '>= 0.8'}
@@ -1966,8 +1973,9 @@ snapshots:
     dependencies:
       mimic-fn: 2.1.0
 
-  openai@7.15.0(ws@8.21.3)(zod@4.6.5):
+  openai@7.15.0(undici@7.30.0)(ws@8.21.3)(zod@4.6.5):
     optionalDependencies:
+      undici: 7.30.0
       ws: 8.21.3
       zod: 4.6.5
 
@@ -2165,6 +2173,8 @@ snapshots:
       '@typescript/typescript-win32-x64': 7.0.2
 
   undici-types@6.21.0: {}
+
+  undici@7.30.0: {}
 
   unpipe@1.0.0: {}
 

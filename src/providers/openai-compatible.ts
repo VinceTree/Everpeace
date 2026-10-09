@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { EnvHttpProxyAgent } from "undici";
 import type { AgentResponse, ResponseStreamLike } from "../agent/react-agent.js";
 import { ownResponseStream } from "./response-stream.js";
 import {
@@ -49,17 +50,46 @@ export function getProviderDefinition(
   return PROVIDERS[provider];
 }
 
+const clientDisposals = new WeakMap<OpenAI, () => Promise<void>>();
+
+/** Close this client's transport after its requests and response bodies finish. */
+export function disposeProviderClient(client: OpenAI): Promise<void> {
+  return clientDisposals.get(client)?.() ?? Promise.resolve();
+}
+
 export function createProviderClient(
   baseURL: string,
   apiKey: string,
 ): OpenAI {
-  return new OpenAI({ apiKey, baseURL });
+  const httpProxy = process.env.http_proxy ?? process.env.HTTP_PROXY;
+  const httpsProxy = process.env.https_proxy ?? process.env.HTTPS_PROXY;
+  const noProxy = process.env.no_proxy ?? process.env.NO_PROXY ?? "";
+  if ((!httpProxy && !httpsProxy) || noProxy.trim() === "*") {
+    return new OpenAI({ apiKey, baseURL });
+  }
+  let dispatcher: EnvHttpProxyAgent;
+  try {
+    dispatcher = new EnvHttpProxyAgent({ httpProxy: httpProxy ?? "", httpsProxy: httpsProxy ?? httpProxy ?? "", noProxy });
+  } catch {
+    // Proxy URLs can contain credentials. Never echo the URL or parser error.
+    throw new Error("Invalid model HTTP proxy configuration");
+  }
+  const client = new OpenAI({
+    apiKey, baseURL,
+    fetchOptions: { dispatcher },
+  });
+  let disposal: Promise<void> | undefined;
+  // Owners have already joined model requests. Force-close idle sockets and
+  // unfinished proxy CONNECT handshakes, which graceful close can wait on.
+  clientDisposals.set(client, () => disposal ??= dispatcher.destroy());
+  return client;
 }
 
 export interface ProviderRuntime {
   sdk: OpenAI;
   capabilities: ProviderCapabilities;
   settings: ModelRequestSettings;
+  dispose?(): Promise<void>;
   responses: {
     create(params: Record<string, unknown>, options?: Record<string, unknown>): Promise<AgentResponse>;
     stream(params: Record<string, unknown>, options?: Record<string, unknown>): Promise<ResponseStreamLike>;
@@ -120,6 +150,7 @@ export function createProviderRuntime(
     sdk,
     capabilities,
     settings: defaultModelRequestSettings(capabilities, settings),
+    dispose: () => disposeProviderClient(sdk),
     responses,
   };
 }

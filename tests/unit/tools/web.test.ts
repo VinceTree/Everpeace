@@ -179,6 +179,29 @@ test("fetchWebPage validates every redirect target", async () => {
   assert.equal(requests, 1);
 });
 
+test("page navigation retains bounded real links resolved against the final URL without following them", async () => {
+  const fetched: string[] = [];
+  const html = '<base href="https://injected.invalid/">' +
+    '<a href="../help/example-domains">Example &amp; domains</a>' +
+    '<a href="../help/example-domains">Duplicate</a>' +
+    '<a href="javascript:alert(1)">Script</a><a href="https://user:secret@example.org/">Secret</a>' +
+    '<script><a href="https://script.invalid/">Hidden</a></script>' +
+    '<a href="#local">Fragment</a>' +
+    Array.from({ length: 50 }, (_, i) => `<a href='/page-${i}'>Page ${i}</a>`).join('');
+  const result = await fetchWebPage("https://example.org/redirect", {
+    fetch: (async (input) => {
+      fetched.push(String(input));
+      if (fetched.length === 1) return new Response(null, { status: 302, headers: { location: '/domains/index' } });
+      return new Response(html, { headers: { 'content-type': 'text/html' } });
+    }) as typeof fetch,
+    lookup: async () => [{ address: "8.8.8.8", family: 4 }],
+  });
+  assert.deepEqual(fetched, ['https://example.org/redirect', 'https://example.org/domains/index']);
+  assert.deepEqual(result.links?.[0], { title: 'Example & domains', url: 'https://example.org/help/example-domains' });
+  assert.equal(result.links?.length, 40);
+  assert.ok(result.links?.every(link => link.url.startsWith('https://example.org/') && !link.url.includes('secret')));
+});
+
 test("private and local IP addresses are blocked", async () => {
   assert.equal(isPublicIpAddress("8.8.8.8"), true);
   assert.equal(isPublicIpAddress("127.0.0.1"), false);

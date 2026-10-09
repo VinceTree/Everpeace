@@ -1,5 +1,6 @@
 import {
   createProviderClient,
+  disposeProviderClient,
   getProviderDefinition,
   listOfficialModelIds,
   normalizeBaseUrl,
@@ -35,8 +36,8 @@ export async function runLoginCommand({
   let apiKey = (await prompter.askSecret("API Key: ")).trim();
   if (!apiKey) throw new Error("API Key cannot be empty");
 
+  const client = createProviderClient(baseUrl, apiKey);
   try {
-    const client = createProviderClient(baseUrl, apiKey);
     prompter.write("Loading models from /models...\n");
     const modelIds = await listOfficialModelIds(client);
     if (modelIds.length === 0) throw new Error("The endpoint returned no models");
@@ -55,5 +56,6 @@ export async function runLoginCommand({
     return 0;
   } finally {
     apiKey = "";
+    await disposeProviderClient(client);
   }
 }
