@@ -26,9 +26,9 @@ Node.js + TypeScript ESM；React/Ink 提供 inline 终端交互，`everpeace exe
 | 外部信息与扩展 | 公共 Web、可恢复且热更新工具目录的 MCP tools/resources/prompts、主机 Skills 与安装向导 | [集成](architecture/CODEX_CAPABILITIES.md) |
 | 终端体验 | 英文宿主 UI、Markdown、独立命令窗口、输入历史、steering、PTY、取消和重放 | [状态](architecture/STATE_AND_UI.md) |
 | 诊断与评测 | `/doctor` 本地探测、显式 live；内部 campaign、独立评分、固定 fixtures | [评测](BENCHMARKING.md) |
-| 自动化调用 | `everpeace exec` 与 `everpeace/sdk` 的 `runTask`；纯文本 stdout 或版本化脱敏事件、任务级预算/时限/step 与分类结果 | [中文 README](../README.zh-CN.md#非交互执行) |
+| 自动化调用 | `everpeace exec` 与 `everpeace/sdk` 的 `runTask`；纯文本 stdout 或版本化脱敏事件、任务级预算/时限/step 与分类结果 | [使用指南](USAGE.zh-CN.md#非交互执行) |
 
-命令的参数和用户操作以 [中文 README](../README.zh-CN.md#使用) / [English README](../README.md#usage) 为入口，开发定位使用 [PROJECT_MAP](architecture/PROJECT_MAP.md)。
+命令的参数和用户操作以 [中文使用指南](USAGE.zh-CN.md) / [English usage guide](USAGE.md) 为入口，开发定位使用 [PROJECT_MAP](architecture/PROJECT_MAP.md)。
 
 ## 成功的定义
 

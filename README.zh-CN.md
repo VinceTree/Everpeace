@@ -1,15 +1,15 @@
 # Everpeace
 
-**面向个人项目的编码 Agent，从计划走到经过检查的代码改动。**
+**在终端中规划、修改并验证你的 Node.js / TypeScript 项目。**
 
-[English](README.md) · [使用指南](docs/USAGE.zh-CN.md) · [开发文档](docs/README.md)
+[English](README.md) · [使用指南](docs/USAGE.zh-CN.md) · [实测展示](#真实调用验证改动) · [开发文档](docs/README.md)
 
 [![Test](https://github.com/VinceTree/Everpeace/actions/workflows/test.yml/badge.svg)](https://github.com/VinceTree/Everpeace/actions/workflows/test.yml)
 [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 Everpeace 是 DeepSeek 优先、Windows 优先的个人 Node.js / TypeScript 开发 CLI。单个 Agent 读取项目规则、搜索代码、提出计划、修改文件，再运行项目声明的检查。你可以在 inline 终端中交互，通过 `everpeace exec` 自动执行任务，或从 TypeScript 调用同一 runner。
 
-编码任务由宿主判定是否完成：重新发现 `typecheck → lint → test → build`，按顺序执行存在的检查，首败停止，最多进行三轮修复。缺少检查、证据过期、取消和用量不完整都会明确保留。
+先审阅计划和改动，再由宿主检查结果：重新发现 `typecheck → lint → test → build`，按顺序执行存在的检查，首败停止，最多进行三轮修复。缺少检查、证据过期、取消和用量不完整都会明确保留。
 
 ## 开始使用
 
@@ -40,15 +40,17 @@ pnpm link --global
 everpeace
 ```
 
-当前源码版本：**0.4.0**。本次源码更新不创建 GitHub Release。
+当前源码版本：**0.4.0**。
 
-## 它怎样协助开发
+## 真实调用，验证改动
 
-| 工作 | 支持方式 |
-| --- | --- |
-| 理解项目 | 根到目标目录的规则、随包搜索、`@` 文件附件与按需项目地图；可选只读 TypeScript 导航支持定义、引用、实现和 hover。 |
-| 完成可审阅的改动 | Plan 修订与批准、基于当前文件观察的编辑、绑定权限的预览、改动审阅，以及拒绝并发覆盖的 undo。 |
-| 继续长任务 | 持久 Session、独立 fork、上下文检查点、任务所属后台命令，以及恢复时保留的验证债务。 |
+![Everpeace 真实工具验收：工具调用与编码修复取得证据，Plan 审批闭环和搜索相关性仍待完成](assets/features.webp)
+
+[查看完整尺寸图表](assets/features.webp)。
+
+这组隔离 Windows 场景通过中转的 `grok-4.6`，使用生产 runner 与原生 sandbox。**PASS 表示初测或后续候选的独立复测至少取得一次闭环证据。** Plan 审批闭环和搜索相关性仍待完成；这不是 DeepSeek 成功率或成本对比。
+
+根到目标目录的规则、`@` 文件附件和按需项目地图帮助 Agent 理解代码。编辑基于当前文件观察，提供绑定权限的预览和拒绝并发覆盖的 undo。Session、fork 和上下文检查点在恢复时保留工作与验证债务。
 
 配置 MCP 的工具、资源和 prompts，以及本地 Skills，可以扩展 Agent。Learned Memory 保存偏好与经过验证的经验；公共网页访问检查重定向与网络边界。搜索的首选服务不可用时，会依次尝试中国区 Bing 和 DuckDuckGo。配置和完整限制见 [使用指南](docs/USAGE.zh-CN.md)。
 
@@ -78,13 +80,11 @@ SDK 使用已注册凭据，不在任务参数中接收 API Key。[完整选项�
 
 - 模型 shell 在固定原生 sandbox 中执行，Windows 通过 MXC 运行 PowerShell。sandbox 或 LSP 网络探针失败会阻止启动。可选语言服务器需事先安装并显式配置。
 - 文件更新需要当前观察版本；审批和 undo 不覆盖用户后续修改。恢复 Session 保留工作，新的动作仍受当前权限约束。
-- 等待审批时，空草稿输入 `y` 批准，`n` 或 Enter 拒绝；已有草稿时 Enter 只提交 guidance，不同时批准工具。
-- 调整命令窗口大小时，内容与草稿保持可见；较长 Markdown 历史共享窗口尺寸订阅，避免逐块增加监听器。
 - `Ctrl+C` 取消活动任务并等待清理；空闲时先清草稿，再退出。用户直接输入的 `!` 命令在独立宿主 PTY 中运行，独占终端输入，不进入模型上下文。
 - 请求预算包含重试、压缩与修复。未知用量会阻止有界任务继续请求，推理 token 是输出 token 的组成部分。token 预算不是严格账单上限。
-- 请求失败且用量未知时，停止提示保留 HTTP 状态和错误类别，不记录供应商错误正文或请求头。
+  请求失败且用量未知时保留安全 HTTP 状态和错误类别，不记录供应商错误正文或请求头。
 
-离线回归与原生探针提供工程行为证据；真实模型编码质量、稳定性和成本仍须通过实测衡量。Windows Terminal 的人工验收单独记录。[当前证据与待办门禁](docs/HANDOFF.md) · [DeepSeek 实测准备](docs/benchmark/READINESS.md)。
+审批按键、终端操作和集成配置见 [使用指南](docs/USAGE.zh-CN.md)。更广泛的编码质量、稳定性和成本仍须通过实测衡量。[开发状态](docs/HANDOFF.md) · [DeepSeek 实测准备](docs/benchmark/READINESS.md)。
 
 ## 开发与贡献
 

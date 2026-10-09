@@ -1,15 +1,15 @@
 # Everpeace
 
-**A personal coding agent that takes a workspace from a plan to checked changes.**
+**Plan, edit and verify your Node.js / TypeScript project from the terminal.**
 
-[简体中文](README.zh-CN.md) · [Usage guide](docs/USAGE.md) · [Developer docs](docs/README.md)
+[简体中文](README.zh-CN.md) · [Usage guide](docs/USAGE.md) · [Tool acceptance](#real-tools-checked-changes) · [Developer docs](docs/README.md)
 
 [![Test](https://github.com/VinceTree/Everpeace/actions/workflows/test.yml/badge.svg)](https://github.com/VinceTree/Everpeace/actions/workflows/test.yml)
 [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 Everpeace is a DeepSeek-first, Windows-first CLI for personal Node.js and TypeScript projects. One agent reads project rules, searches code, proposes a plan, edits files and runs the checks declared by your project. You can work in an inline terminal conversation, automate a task with `everpeace exec`, or call the same runner from TypeScript.
 
-The host decides whether a coding task is finished: it discovers `typecheck → lint → test → build`, runs available checks in order, stops at the first failure and allows at most three repair rounds. Missing checks, stale evidence, cancellation and incomplete usage remain visible.
+Work through a plan, review the edits and let the host check the result. It discovers `typecheck → lint → test → build`, runs available checks in order, stops at the first failure and allows at most three repair rounds. Missing checks, stale evidence, cancellation and incomplete usage remain visible.
 
 ## Start here
 
@@ -40,15 +40,17 @@ pnpm link --global
 everpeace
 ```
 
-Current source version: **0.4.0**. This source update does not create a GitHub Release.
+Current source version: **0.4.0**.
 
-## What the agent helps you do
+## Real tools, checked changes
 
-| Work | How it supports you |
-| --- | --- |
-| Understand a project | Root-to-directory rules, bundled search, `@` attachments and an on-demand project map. Optional read-only TypeScript navigation supports definition, references, implementation and hover. |
-| Make a reviewed change | Plan revision and approval, observed-file edits, permission-bound previews, change review and conflict-aware undo. |
-| Continue a longer task | Durable Sessions, independent forks, context checkpoints, task-owned background commands and verification debt preserved across recovery. |
+![Everpeace live tool acceptance: tool calls and coding repair verified; Plan approval and search relevance remain open](assets/features.webp)
+
+[Open the full-size chart](assets/features.webp).
+
+These isolated Windows scenarios use the production runner, a native sandbox and `grok-4.6` through a relay. **PASS means at least one verified closure across initial and follow-up candidates.** Plan approval and search relevance remain open; this is not a DeepSeek success-rate or cost comparison.
+
+Root-to-directory rules, `@` attachments and an on-demand project map help the agent understand your code. Edits use current file observations, permission-bound previews and conflict-aware undo. Sessions, forks and context checkpoints preserve work and verification debt across recovery.
 
 Configured MCP tools, resources and prompts and local Skills extend the agent. Learned Memory can retain preferences and verified lessons. Public web tools check redirects and network boundaries. Search falls back to Bing China and DuckDuckGo when the first provider is unavailable. See the [usage guide](docs/USAGE.md) for setup and limits.
 
@@ -78,13 +80,11 @@ The SDK uses registered credentials; it does not accept an API key in task optio
 
 - Model shell commands run in a pinned native sandbox. Windows uses PowerShell through MXC. Sandbox or LSP network-probe failure blocks execution. Optional language servers must already be installed and explicitly configured.
 - File updates require a current observed version. Approval and undo cannot overwrite a later user edit. Session recovery restores work, while current permissions govern new actions.
-- While approval is pending, an empty prompt accepts `y` to approve or `n`/Enter to reject. Once you type a draft, Enter sends guidance and does not approve the tool.
-- Resizing command windows keeps their content and drafts visible. Long Markdown histories share resize observation without adding a listener for every block.
 - `Ctrl+C` cancels active work and waits for cleanup. While idle it clears a draft, then exits. User-written `!` commands run in a separate host PTY, own terminal input and stay outside model context.
 - Request budgets include retries, compaction and repair. Unknown usage prevents another bounded request; reasoning tokens are a subset of output tokens. Token budgets are not strict billing caps.
-- When a failed request has unknown usage, the stop notice retains its HTTP status and error category without logging provider error bodies or headers.
+  Failed requests with unknown usage retain safe HTTP/error categories without logging provider error bodies or headers.
 
-Offline regressions and native probes establish engineering behavior. Real-model coding quality, reliability and cost still require measured testing; Windows Terminal manual acceptance is tracked separately. [Current evidence and pending gates](docs/HANDOFF.md) · [DeepSeek test preparation](docs/benchmark/READINESS.md).
+For approval keys, terminal controls and integration setup, see the [usage guide](docs/USAGE.md). Broader coding quality, reliability and cost still require measured testing. [Development status](docs/HANDOFF.md) · [DeepSeek test preparation](docs/benchmark/READINESS.md).
 
 ## Develop and contribute
 

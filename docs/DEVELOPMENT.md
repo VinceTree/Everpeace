@@ -42,6 +42,8 @@ Windows TUI 手工验收仍需真实 Windows Terminal。通过 WSL 调用 Node �
 
 ## 开发与检查命令
 
+双语 README 的汇总图统一引用 `assets/features.webp`；图片使用无损 WebP，并随 package 的 `files` 清单包含的 assets 目录打包，避免安装产物中的相对引用缺图。原始测试日志与详细结果不属于公开资源，不纳入仓库或 npm 包。替换结果图时需检查 GitHub 显示宽度下的可读性，并同步图旁的验收范围说明。
+
 | 命令 | 用途 |
 | --- | --- |
 | `pnpm dev` | 用 tsx 启动开发 CLI/TUI |
