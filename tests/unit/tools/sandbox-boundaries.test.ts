@@ -33,12 +33,15 @@ test("language-server policy is read-only, network denied, and rejects protected
   assert.equal(policy.networkMode, "deny");
   assert.match(args.join(" "), /everpeace-lsp-readonly/u);
   assert.match(args.join(" "), /:read-only/u);
+  // Launcher paths are host-native; keep the simulated Windows policy above
+  // separate from these host-platform overlap assertions.
+  const hostPolicy = createLspSandboxPolicy(root);
   const launcher = path.resolve("C:/temporary/everpeace-lsp-process-owned");
-  const launcherArgs = nativeLspPermissionProfileArgs(policy, launcher).join(" ");
+  const launcherArgs = nativeLspPermissionProfileArgs(hostPolicy, launcher).join(" ");
   assert.ok(launcherArgs.includes(JSON.stringify(launcher) + '=\"read\"'));
-  assert.throws(() => nativeLspPermissionProfileArgs(policy, root), /separate/u);
-  assert.throws(() => nativeLspPermissionProfileArgs(policy, path.join(root, ".everpeace")), /separate/u);
-  assert.throws(() => nativeLspPermissionProfileArgs(policy, "relative-launcher"), /separate/u);
+  assert.throws(() => nativeLspPermissionProfileArgs(hostPolicy, root), /separate/u);
+  assert.throws(() => nativeLspPermissionProfileArgs(hostPolicy, path.join(root, ".everpeace")), /separate/u);
+  assert.throws(() => nativeLspPermissionProfileArgs(hostPolicy, "relative-launcher"), /separate/u);
   assert.throws(() => createLspSandboxPolicy(root, [path.join(root, ".everpeace")], {
     platform: "win32",
     env: { APPDATA: "C:\\Users\\test\\AppData\\Roaming" },

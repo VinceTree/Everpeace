@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -75,7 +75,21 @@ export async function captureBenchmarkCheckoutIdentity(sourceRoot: string, entry
     }
   }
   const buildHash = createHash("sha256");
-  addHashPart(buildHash, path.relative(root, entry).split(path.sep).join("/"), await readFile(entry));
+  // An unchanged adapter entry can import changed runtime modules. Bind the
+  // complete artifact tree (dist for builds, src for development preflight).
+  const relativeEntry = path.relative(root, entry);
+  const artifactRoot = relativeEntry.includes(path.sep)
+    ? path.join(root, relativeEntry.split(path.sep)[0]!) : entry;
+  const hashArtifact = async (target: string): Promise<void> => {
+    const metadata = await lstat(target);
+    if (metadata.isSymbolicLink()) throw new Error("Benchmark artifact tree must not contain symlinks");
+    if (metadata.isDirectory()) {
+      for (const name of (await readdir(target)).sort()) await hashArtifact(path.join(target, name));
+    } else if (metadata.isFile()) {
+      addHashPart(buildHash, path.relative(root, target).split(path.sep).join("/"), await readFile(target));
+    } else throw new Error("Benchmark artifact tree must contain ordinary files");
+  };
+  await hashArtifact(artifactRoot);
   return {
     revision: revisionOutput.trim(),
     sourceDigest: sourceHash.digest("hex"),

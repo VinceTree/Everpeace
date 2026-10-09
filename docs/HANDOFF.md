@@ -27,6 +27,12 @@ MCP SDK 升级到 1.31.0，同步锁文件，保持 stdio/Streamable HTTP 接口
 
 README 按 Skill 的 clean-doc / 零图片样式重排，保留 Apache 2.0；首屏聚焦定位、安装、显式 Plan 执行、三个场景、CLI/SDK 与边界。详细原说明迁入 [英文使用指南](USAGE.md) 与 [中文使用指南](USAGE.zh-CN.md)。没有修改 GitHub Description/Topics。
 
+最终候选核对发现旧 buildDigest 只哈希 production 入口：入口不变而导入模块变化时，旧构建无法被识别。修正为完整 artifact 顶层目录的确定性路径/字节摘要，拒绝 symlink 和非普通文件。实际回归证明新增、修改、删除入口之外模块均使摘要变化或恢复，源码摘要保持独立；摘要扩展后重新生成三组候选配置与预检。
+
+首次提交 `869181276e5bab987086222a91817238cb28b01c` 的 [Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37882167750) 中 Linux 实际失败两项 fixture：launcher 检查把模拟 win32 canonical 路径用于宿主 Linux 的重叠判断；Memory startup/close 测试任意暂停下一次 store 写入，可能暂停的是无关 startup 写入。修正分别使用宿主 policy 检查 launcher，并在真实 Memory beginTask 持久暂停完成后扣住该方法返回。仍断言关闭后 startup 拒绝、零 progress 写入、零请求，不改变生产生命周期或跳过测试。对应定向 27/27 通过，失败注释与完整 Linux 日志保存在 `ci-first-linux.log` / `ci-first-result.json`，不以重跑掩盖失败。
+
+同次 Windows CI 失败两项已有 fixture：流清理的 200ms deadline 在 Session 启动阶段先到期，根本未进入目标 iterator；Memory 到期后的真实存储未必在固定 settle 次数内完成。分别在实际 iterator 已归属后触发真实 exec deadline callback（墙钟启动超时仍独立验证），以及在到期时保持 Date 不动、等待请求状态可见。保留 cleanup_failed、可靠 usage、零提前请求、队列清空和持久条目断言，不修改生产 deadline/Memory 策略。完整日志 `ci-first-windows.log` 与首次失败收据独立保留。
+
 ## 实测准备与外置收据
 
 独立 owned-root 为 `C:\Users\39850\AppData\Local\Temp\everpeace-readiness-2eb92be531ab475d80b9ac4f141fa66a`，含 ownership marker，不使用用户原有 benchmark 目录写入。
@@ -42,11 +48,11 @@ README 按 Skill 的 clean-doc / 零图片样式重排，保留 Apache 2.0；首
 
 ## 最终工程门禁与交付
 
-审批输入修正后重新发现 manifest 并串行执行：**typecheck 通过 → lint script 缺项 → test 1065 项、1062 通过、0 失败、0 cancelled、3 平台跳过（63,599.5767 ms）→ build 通过**。构建前确认工作区和 dist 无重定向且目标在仓库内。日志为 owned-root 的 `final-typecheck.log`、`final-test.log`、`final-build.log`。定向 App/Prompt 87/87 通过，不借用旧 CI。
+所有修正后重新发现 manifest 并串行执行：**typecheck 通过 → lint script 缺项 → test 1065 项、1062 通过、0 失败、0 cancelled、3 平台跳过（63,700.9325 ms）→ build 通过**，首败停止。日志为 owned-root 的 `final-typecheck.log`、`final-test.log`、`final-build.log`。构建前确认工作区和 dist 无重定向且目标在仓库内。定向 App/Prompt 87/87、构建摘要/实际 checkout 预检 2/2、Windows CI fixture 修正 50/50 通过，不借用旧 CI。
 
 本地 pnpm pack 在新 consumer 目录安装验证，不全局 link、不 publish。实际 CLI --help / exec --help 可用，安装后的 `everpeace/sdk` import 与 runTask 无模型配置的 classification/exitCode 契约通过；实际运行、取消、背压等由共享 runner 回归覆盖。最终源码修正后重新打包与检查。
 
-提交后重新生成 configs 并 preflight。准确最终 HEAD、远端 main、同 SHA 的 Windows/Linux Test CI、Release workflow skipped job、**27 个 Release** 全保护基线及依赖告警只读核对写入 owned-root `final-delivery.json`；实际完成才写通过，路径存在不代表远端通过。基线含 ID/tag/updated_at/draft/prerelease 和资产 ID/更新时间；认证内容不输出或落盘。
+提交后重新生成 configs 并 preflight。准确最终 HEAD、远端 main、同 SHA 的 Windows/Linux Test CI、**27 个 Release** 全保护基线及依赖告警只读核对写入 owned-root `final-delivery.json`；实际完成才写通过，路径存在不代表远端通过。package 变更提交的 [Release workflow](https://github.com/VinceTree/Everpeace/actions/runs/37882167790) 和 Publish version job 实际 skipped；后续只改代码/测试/文档的补充提交不触发该 paths 受限 workflow，均保留 skip publish。基线含 ID/tag/updated_at/draft/prerelease 和资产 ID/更新时间；认证内容不输出或落盘。
 
 ## 仍未验收
 

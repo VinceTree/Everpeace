@@ -9,7 +9,7 @@ import { assertBenchmarkCheckoutIdentity, captureBenchmarkCheckoutIdentity, pref
 
 const exec = promisify(execFile);
 
-test("checkout identity binds revision, runtime source, and built entry", async () => {
+test("checkout identity binds revision, runtime source, and all built modules", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-checkout-identity-"));
   try {
     await exec("git", ["init"], { cwd: root });
@@ -46,6 +46,16 @@ export const createProductionBenchmarkAdapter = ({ model }) => ({
     assert.equal(preflight.requests, 1);
     assert.equal(preflight.reasoning, "high");
     assert.equal(preflight.maxOutputTokens, 32_768);
+    const importedRuntime = path.join(root, "dist", "runtime.mjs");
+    await fs.writeFile(importedRuntime, "export const version = 1;\n");
+    await assert.rejects(assertBenchmarkCheckoutIdentity(expected), /build digest changed/u);
+    const firstBuild = await captureBenchmarkCheckoutIdentity(root, entry);
+    await fs.writeFile(importedRuntime, "export const version = 2;\n");
+    const secondBuild = await captureBenchmarkCheckoutIdentity(root, entry);
+    assert.notEqual(secondBuild.buildDigest, firstBuild.buildDigest);
+    assert.equal(secondBuild.sourceDigest, firstBuild.sourceDigest);
+    await fs.rm(importedRuntime);
+    await assertBenchmarkCheckoutIdentity(expected);
     await fs.writeFile(path.join(root, "src", "runtime.ts"), "export const value = 2;\n", "utf8");
     await assert.rejects(assertBenchmarkCheckoutIdentity(expected), /source digest changed/u);
     const withTrackedChange = await captureBenchmarkCheckoutIdentity(root, entry);

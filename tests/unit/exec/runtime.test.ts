@@ -448,14 +448,30 @@ test("an EPIPE event sink cancels execution and still disposes the production ha
 });
 
 for (const stop of ["completed", "cancelled", "deadline"] as const) {
-  test(`exec reports stream cleanup failure after ${stop} through the production handle`, async () => {
+  test(`exec reports stream cleanup failure after ${stop} through the production handle`, { timeout: 10_000 }, async (t) => {
     const controller = new AbortController();
+    const deadlineMs = 1_234_567;
+    let expireDeadline: (() => void) | undefined;
+    if (stop === "deadline") {
+      // Fire the actual exec deadline only after the iterator is owned;
+      // registry/session disk latency must not turn this into startup timeout.
+      // Other tests cover the real elapsed deadline during startup.
+      const originalSetTimeout = globalThis.setTimeout;
+      t.mock.method(globalThis, "setTimeout", ((callback: (...args: unknown[]) => void, milliseconds?: number, ...args: unknown[]) => {
+        if (milliseconds === deadlineMs) expireDeadline = () => callback(...args);
+        return originalSetTimeout(callback, milliseconds, ...args);
+      }) as typeof globalThis.setTimeout);
+    }
     const provider = fakeProvider(() => assistant("unused", "unused"));
     provider.responses.stream = async (_params, options) => {
       provider.calls++;
       const signal = options?.signal instanceof AbortSignal ? options.signal : undefined;
       return { [Symbol.asyncIterator]() { return {
         async next() {
+          if (stop === "deadline") {
+            assert.ok(expireDeadline, "The real exec deadline must be armed");
+            expireDeadline();
+          }
           if (stop === "deadline") await new Promise<void>((resolve) => {
             if (signal?.aborted) resolve();
             else signal?.addEventListener("abort", () => resolve(), { once: true });
@@ -471,8 +487,8 @@ for (const stop of ["completed", "cancelled", "deadline"] as const) {
     const testFixture = await fixture(provider);
     try {
       const result = await runExec({
-        prompt: "work", workspacePath: testFixture.workspacePath, signal: controller.signal,
-        ...(stop === "deadline" ? { timeoutMs: 200 } : {}),
+        prompt: "work", workspacePath: testFixture.workspacePath, signal: AbortSignal.any([controller.signal, t.signal]),
+        ...(stop === "deadline" ? { timeoutMs: deadlineMs } : {}),
       }, testFixture.dependencies);
       assert.equal(result.exitCode, 1);
       assert.equal(result.classification, "runtime_error");

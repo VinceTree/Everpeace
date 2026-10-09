@@ -326,14 +326,7 @@ test("foreground startup preserves unknown recovery debt without starting Memory
 test("production task startup cannot publish progress after its Memory pause outlives disposal", async () => {
   const root = await mkdtemp(join(tmpdir(), "everpeace-memory-idle-task-close-"));
   const pauseGate = gate();
-  let pauseNext = false, paused = false, progressWrites = 0;
-  class PausingStore extends LearnedMemoryStore {
-    override async updateJobs(...args: Parameters<LearnedMemoryStore["updateJobs"]>) {
-      const jobs = await super.updateJobs(...args);
-      if (pauseNext) { pauseNext = false; paused = true; await pauseGate.promise; }
-      return jobs;
-    }
-  }
+  let paused = false, progressWrites = 0;
   const capabilities = resolveProviderCapabilities("https://compatible.invalid/v1", "offline");
   const provider: ProviderRuntime = { sdk: {} as ProviderRuntime["sdk"], capabilities,
     settings: defaultModelRequestSettings(capabilities), responses: {
@@ -344,14 +337,22 @@ test("production task startup cannot publish progress after its Memory pause out
     model: { id: "offline", model_name: "offline", base_url: "https://compatible.invalid/v1", api_key: "fixture" },
     providerRuntime: provider, sessionStore: new SessionStore({ directory: join(root, "sessions") }), sessionId: () => undefined,
     skills: null, mcp: null, codeNavigation: null,
-    learnedMemoryStore: new PausingStore({ directory: join(root, "memory") }), learnedMemoryPolicy: { captureFuture: false },
+    learnedMemoryStore: new LearnedMemoryStore({ directory: join(root, "memory") }), learnedMemoryPolicy: { captureFuture: false },
     io: { async confirmBash() { return false; }, async runBash() { assert.fail("Unexpected shell"); }, writeAssistant() {},
       async setTaskProgress() { progressWrites++; } },
   });
+  // Gate this exact foreground pause, not an unrelated startup store write.
+  // The real runtime and persistent pause complete before its result is held.
+  const memory = handle.learnedMemory!;
+  const beginMemoryTask = memory.beginTask!.bind(memory);
+  memory.beginTask = async () => {
+    await beginMemoryTask();
+    paused = true;
+    await pauseGate.promise;
+  };
   let starting: Promise<void> | undefined, closing: Promise<void> | undefined;
   try {
     await handle.learnedMemory!.loadPrompt(root);
-    pauseNext = true;
     starting = handle.agent.beginTask({ mode: "default", source: "user" });
     void starting.catch(() => undefined);
     for (let attempt = 0; !paused && attempt < 1_000; attempt++) await delay();
@@ -391,6 +392,7 @@ for (const outcome of ["unverified", "failed", "stopped"] satisfies LearnedTurnO
       await time.advance(idleDelayMs - 1);
       assert.equal(requests, 0);
       await time.advance(1);
+      await time.until(() => requests === 1);
       assert.equal(requests, 1, "The prior verified queue must resume after the skipped turn");
       assert.equal(Date.parse(jobs[0]!.notBefore), resumedAt + idleDelayMs);
       await time.until(async () => (await store.loadJobs()).length === 0);

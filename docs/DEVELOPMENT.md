@@ -134,6 +134,10 @@ Memory 的 [空闲生命周期回归](../tests/unit/runtime/memory-idle-lifecycl
 
 App 回归在每项测试结束后统一清理渲染器和捕获的输出帧，即使断言失败也释放。ink-testing-library 会保留渲染器引用，仅 unmount 不会释放捕获帧；所有历史、resize 和隐私断言仍在清理前执行。不通过增大 CI 堆或跳过断言绕过资源问题。
 
+Memory 的 production startup/close 回归在真实 beginTask 持久暂停完成后，受控地扣住该方法返回，再 dispose、释放和检查 rejection/零 progress 写入；不能任意暂停下一次 store.updateJobs，因为 Linux 上它可能是无关的 startup 写入。模拟 Windows 的 sandbox path 回归与宿主平台 launcher 路径检查分开，不能把 win32 canonical 路径交给 Linux path 重叠判断。
+
+exec 流清理的 deadline 回归在真实 iterator 已归任务所有时触发实际 exec deadline callback，避免 Windows Session 冷启动先消耗短 deadline；真实墙钟的启动超时仍有独立回归。Memory 到期测试在最后一毫秒之前继续断言零请求，到期后保持 Date 不动，等待实际存储/请求状态可见，不假定磁盘写入在固定 settle 轮数内完成。
+
 fixture 中验证命令仍通过生产原生 sandbox；失败保持 unverified，不回退宿主执行。直接 `!` 是工作目录固定在 fixture workspace 的正常用户 PTY。自动测试不替代这里的终端体验验收；执行后记录终端版本、步骤和结果，未执行时明确标记 pending。
 
 ## 离线评测与真实请求

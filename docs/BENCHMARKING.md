@@ -116,6 +116,8 @@ Performance trace 记录 context preparation、request snapshot、sampling、ret
 
 本轮个人四任务与新的最终候选准备流程见 [READINESS](benchmark/READINESS.md)。开发脚本将提示词、允许路径、外置参考解、独立断言、实际请求和取消恢复采集写入新的 owned root。固定任务可声明 `seedFailureContains`；proof 必须同时满足指定失败输出，并拒绝模块缺失、启动失败或超时。旧配置、旧成功和现有 dist 都不能替代最终代码重新构建后的 identity/preflight。
 
+Checkout 的 buildDigest 覆盖入口所在的完整顶层 artifact 目录（构建为 dist，开发预检为 src），包含相对文件名与原始字节，拒绝 symlink 或非普通文件。不能只对 production.js 做摘要：其导入模块变化也必须使旧预检失效。摘要覆盖扩展后重新生成旧配置，不迁移旧摘要为成功。
+
 正式对比顺序固定为：
 
 1. 每项 fixture 先独立证明 pristine pass → seed fail → reference repair pass。
