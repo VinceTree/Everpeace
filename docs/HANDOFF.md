@@ -6,7 +6,9 @@
 
 用户本轮明确选择 **0.4.1**，已同步 package.json 与双语 README；单 Agent、Responses 与现有 TUI/exec/SDK 公共入口不变。沿用提交、推送授权；提交包含 `[skip publish]`，不使用 `[skip ci]`，不创建 tag、Release 或发布 npm。本轮只更新展示元数据并核算官方测试费用，没有取得独立 DeepSeek live 阶段授权，付费请求为零。
 
-当前交付本地根：`C:\Users\39850\Desktop\Everpeace-test-report-0.4.1\metadata-update-ae0b55f9fa774c43a4e611ccc98563fb`。上一实现提交为 `12ea59c29cc3ead6f87cf2c9ad7ec6511521d04a`，其 Windows/Linux CI 已通过。本轮最终提交与重新绑定的候选以新根的 `delivery-receipt.json`、`prepared-final/` 为准；旧 source digest 因 manifest 更新而过期，旧报告保留。
+当前交付本地根：`C:\Users\39850\Desktop\Everpeace-test-report-0.4.1\metadata-update-ae0b55f9fa774c43a4e611ccc98563fb`。上一实现提交为 `12ea59c29cc3ead6f87cf2c9ad7ec6511521d04a`，其 Windows/Linux CI 已通过。本轮最终提交与重新绑定的候选以新根的 `delivery-receipt.json`、`prepared-ci-fix/` 为准；旧 source digest 因 manifest 更新而过期，旧报告保留。
+
+本轮首次元数据提交 `85e08e05cfdba01c8dba87a650e6619ccc64940e` 的 Windows CI 通过，Linux 在真实取消验收中遇到 procfs ESRCH 竞态。测试现同时接受进程读取期间消失的 ENOENT/ESRCH，仍拒绝其他错误和存活状态；未改生产清理或放宽安全边界。原 CI 失败记录在本地保留，后续准确提交 CI 以交付收据为准。package 修改触发的 Release workflow 已实际 skipped，tag/Release 无变化。
 
 原始报告继续本地保存。README 保留既有 Grok 汇总图及明确范围，本轮只同步 profile 设置说明，不增加 DeepSeek 质量或成本宣称。本地报告根：`C:\Users\39850\Desktop\Everpeace-test-report-0.4.0\deepseek-loop-final-2001540786224eafb9e2b881d7008a49`。前次交接保存在该根的 `handoff-before.md`。
 
@@ -25,7 +27,7 @@
 
 ## 当前验证证据
 
-本轮最终串行门禁 `typecheck → lint（不存在）→ test → build` 通过实际存在的检查；**1090 项测试，1087 通过、3 跳过、0 失败**，耗时 74307.9087 ms。lint 缺项，不记为通过。`git diff --check` 通过。完整回归含 TUI、exec/SDK、取消/持久化、混合工具屏障及原生 sandbox；新打包产物的 manifest、双语版本展示和图片已核对，构建后的 SDK 导入通过，不发模型请求。上轮隔离安装的 CLI help 与公共 SDK 导入证据保留在原报告中。
+本轮最终串行门禁 `typecheck → lint（不存在）→ test → build` 通过实际存在的检查；**1090 项测试，1087 通过、3 跳过、0 失败**，耗时 69729.377 ms。lint 缺项，不记为通过。`git diff --check` 通过。完整回归含 TUI、exec/SDK、取消/持久化、混合工具屏障及原生 sandbox；新打包产物的 manifest、双语版本展示和图片已核对，构建后的 SDK 导入通过，不发模型请求。上轮隔离安装的 CLI help 与公共 SDK 导入证据保留在原报告中。
 
 两项生产 runner 离线兼容验收通过；A/B fresh-worker 的实际 SDK 请求边界预检通过，high / 32768 / 原始 ID 与 configured profile 已核对，真实网络调用为零，进程清理已等待。提交后还须在新根重绑定 revision，交付收据记录准确提交的 Windows/Linux CI 与远端状态。
 

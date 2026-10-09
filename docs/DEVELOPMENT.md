@@ -62,6 +62,8 @@ Windows TUI 手工验收仍需真实 Windows Terminal。通过 WSL 调用 Node �
 
 开发期间先运行与变化相关的测试，再执行交付门禁。定向测试直接使用相同的 tsx/Node runner：
 
+Linux 真实进程取消验收需处理进程在探测期间被回收的竞态：signal 0 的 ESRCH，或随后读取 `/proc/<pid>/stat` 的 ENOENT/ESRCH 都表示进程已消失；仍存在的进程只接受已停止的 Z/X 状态。其他错误与存活状态继续失败，不能通过忽略进程错误或跳过清理检查稳定 CI。
+
 ```powershell
 pnpm exec tsx --test tests/unit/workflow/task-runner.test.ts
 pnpm exec tsx --test tests/unit/storage/session-store.test.ts tests/unit/tui/app.test.tsx

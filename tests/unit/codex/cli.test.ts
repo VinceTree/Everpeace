@@ -164,7 +164,9 @@ test("launcher cancellation returns only after a real child and grandchild stop"
       let stat: string;
       try { stat = await fs.readFile(`/proc/${pid}/stat`, "utf8"); }
       catch (error) {
-        assert.equal((error as NodeJS.ErrnoException).code, "ENOENT");
+        // The process can disappear after open but before procfs serves the read.
+        const code = (error as NodeJS.ErrnoException).code;
+        assert.ok(code === "ENOENT" || code === "ESRCH", `Unexpected procfs error for PID ${pid}: ${code}`);
         continue;
       }
       const state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0];
