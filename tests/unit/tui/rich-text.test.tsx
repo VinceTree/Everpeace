@@ -6,6 +6,27 @@ import { MarkdownText, RichOutput } from "../../../src/tui/rendering/rich-text.j
 import { History } from "../../../src/tui/components/conversation/history.js";
 import { translateLegacyUiText } from "../../../src/tui/rendering/legacy-translation.js";
 
+test("many nested Markdown blocks share resize observation and release it on unmount", async () => {
+  const view = render(<></>);
+  const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 30));
+  try {
+    await settle();
+    const baseline = view.stdout.listenerCount("resize");
+    const documents = Array.from({ length: 20 }, (_, index) =>
+      <MarkdownText key={index} text={`> - item ${index}\n\n| Key | Value |\n| --- | --- |\n| a | b |`} />);
+    view.rerender(<>{documents}</>);
+    await settle();
+    assert.equal(view.stdout.listenerCount("resize"), baseline + 1);
+    Object.defineProperty(view.stdout, "columns", { configurable: true, value: 48 });
+    view.stdout.emit("resize");
+    await settle();
+    assert.equal((view.lastFrame() ?? "").match(/Key: a/gu)?.length, 20);
+    view.rerender(<></>);
+    await settle();
+    assert.equal(view.stdout.listenerCount("resize"), baseline);
+  } finally { view.unmount(); }
+});
+
 test("Markdown renders headings, lists, links, tables, and highlighted fences", () => {
   const view = render(<MarkdownText text={"# Heading\n\n- **bold** item\n- [x] complete\n\n[docs](https://example.com)\n\n| Key | Value |\n| --- | --- |\n| a | b |\n\n```ts\nconst value = 1;\n```"} />);
   const frame = view.lastFrame() ?? "";

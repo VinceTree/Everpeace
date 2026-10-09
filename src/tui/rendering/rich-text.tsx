@@ -1,9 +1,39 @@
-import { Box, Text, useWindowSize } from "ink";
+import { Box, Text, useStdout } from "ink";
 import { marked } from "marked";
-import React, { Fragment, type ReactNode } from "react";
+import React, { Fragment, useSyncExternalStore, type ReactNode } from "react";
 import { diffPalette, TUI_COLORS } from "./palette.js";
 import { highlightCode, shellLanguage, type StyledSpan } from "./syntax-highlight.js";
 import { diffLanguage, parseUnifiedDiff, type UnifiedDiff } from "./unified-diff.js";
+
+interface ColumnStore {
+  subscribe(listener: () => void): () => void;
+  getSnapshot(): number;
+}
+const columnStores = new WeakMap<object, ColumnStore>();
+
+function useMarkdownColumns(): number {
+  const { stdout } = useStdout();
+  let store = columnStores.get(stdout);
+  if (!store) {
+    const listeners = new Set<() => void>();
+    const onResize = () => { for (const listener of listeners) listener(); };
+    store = {
+      getSnapshot: () => stdout.columns || 80,
+      subscribe(listener) {
+        // Restored transcripts and nested lists can mount many blocks at once.
+        // Share the stream listener without raising or suppressing its limit.
+        if (listeners.size === 0) stdout.on("resize", onResize);
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+          if (listeners.size === 0) stdout.off("resize", onResize);
+        };
+      },
+    };
+    columnStores.set(stdout, store);
+  }
+  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+}
 
 interface MarkdownToken {
   type: string;
@@ -215,7 +245,7 @@ function tokenText(tokens: readonly MarkdownToken[] | undefined): string {
 }
 
 function MarkdownBlocks({ tokens, depth = 0 }: { tokens: readonly MarkdownToken[]; depth?: number }) {
-  const { columns } = useWindowSize();
+  const columns = useMarkdownColumns();
   return (
     <>
       {tokens.map((token, index): ReactNode => {

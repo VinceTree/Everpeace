@@ -40,7 +40,7 @@ pnpm link --global
 everpeace
 ```
 
-Current source version: **0.3.23**. This source update does not create a GitHub Release.
+Current source version: **0.3.24**. This source update does not create a GitHub Release.
 
 ## What the agent helps you do
 
@@ -79,6 +79,7 @@ The SDK uses registered credentials; it does not accept an API key in task optio
 - Model shell commands run in a pinned native sandbox. Windows uses PowerShell through MXC. Sandbox or LSP network-probe failure blocks execution. Optional language servers must already be installed and explicitly configured.
 - File updates require a current observed version. Approval and undo cannot overwrite a later user edit. Session recovery restores work, while current permissions govern new actions.
 - While approval is pending, an empty prompt accepts `y` to approve or `n`/Enter to reject. Once you type a draft, Enter sends guidance and does not approve the tool.
+- Resizing command windows keeps their content and drafts visible. Long Markdown histories share resize observation without adding a listener for every block.
 - `Ctrl+C` cancels active work and waits for cleanup. While idle it clears a draft, then exits. User-written `!` commands run in a separate host PTY, own terminal input and stay outside model context.
 - Request budgets include retries, compaction and repair. Unknown usage prevents another bounded request; reasoning tokens are a subset of output tokens. Token budgets are not strict billing caps.
 

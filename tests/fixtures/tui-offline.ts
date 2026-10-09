@@ -16,11 +16,13 @@ No user model registry or keyring is loaded. --integrations loads only fixture
 Memory, Skills, stdio MCP and a native sandboxed protocol-fixture LSP.
 
 Prompts: large = 300 Chinese/emoji lines; wait = cancellable 60-second request;
+wait-long = cancellable 5-minute request for desktop focus delays;
 cycle = edit, test passes/build fails, repair, full checks pass;
 integrations = read fixture Skill, call approved MCP ping, sandboxed hover.
 Anything else = immediate fake response with complete synthetic usage.
 Use /resume Offline debt seed, /fork, /plan, /status, Ctrl+C and terminal resize.
 Plan submits a local fixed plan; choose Cancel to preserve pending fork debt.
+/plan wait-long and /plan cycle exercise those scenarios after explicit execution.
 Model/verification commands use the production native sandbox, with no host
 fallback. Direct ! commands are real user PTYs starting in the fixture workspace.
 --help never initializes the fixture or imports the application runtime.
@@ -52,10 +54,10 @@ function latestUser(input: unknown): string {
   return "";
 }
 
-async function waitForCancellation(signal?: AbortSignal): Promise<void> {
+async function waitForCancellation(signal?: AbortSignal, timeoutMs = 60_000): Promise<void> {
   signal?.throwIfAborted();
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => { signal?.removeEventListener("abort", aborted); resolve(); }, 60_000);
+    const timer = setTimeout(() => { signal?.removeEventListener("abort", aborted); resolve(); }, timeoutMs);
     const aborted = () => { clearTimeout(timer); signal?.removeEventListener("abort", aborted); reject(signal?.reason); };
     signal?.addEventListener("abort", aborted, { once: true });
   });
@@ -152,16 +154,23 @@ async function main(): Promise<number> {
       async create() { throw new Error("The offline fixture expects the production streaming path"); },
       async stream(params, options) {
         const id = `offline-response-${++requests}`;
-        const prompt = latestUser(params.input).trim();
+        const userPrompt = latestUser(params.input).trim();
+        const prompt = /^Implement the following plan\b/u.test(userPrompt)
+          ? /Offline fixture scenario: (wait-long|cycle)\b/u.exec(userPrompt)?.[1] ?? userPrompt
+          : userPrompt;
         const signal = options?.signal as AbortSignal | undefined;
-        if (/^wait\b/iu.test(prompt)) await waitForCancellation(signal);
-        signal?.throwIfAborted();
         const planMode = Array.isArray(params.tools) && params.tools.some((tool) => tool && typeof tool === "object" && "name" in tool && tool.name === "submit_plan");
+        if (!planMode && /^wait\b/iu.test(prompt)) await waitForCancellation(signal, /^wait-long\b/iu.test(prompt) ? 300_000 : 60_000);
+        signal?.throwIfAborted();
+        const scenario = /^(wait-long|cycle)\b/u.exec(prompt)?.[1];
+        const plan = scenario
+          ? `Offline fixture scenario: ${scenario}\nInspect the fixture, run this scenario only after explicit execution, and preserve host verification and cancellation.`
+          : "1. Inspect the inherited verification debt.\n2. Cancel this Plan review.\n3. Run wait and cancel with Ctrl+C.\n4. Resume coding and let the production host verify the fixture.";
         const text = /^large\b/iu.test(prompt)
           ? Array.from({ length: 300 }, (_, index) => `Line ${String(index + 1).padStart(3, "0")} · 中文恢复与滚动检查 😀 · indentation:    value`).join("\n")
           : "Offline fixture response. No model connection was used; the production host owns verification and completion.";
         let output: Array<Record<string, unknown> & { type: string }> = planMode
-          ? [{ type: "function_call", call_id: `${id}-plan`, name: "submit_plan", arguments: JSON.stringify({ title: "Offline acceptance plan", plan: "1. Inspect the inherited verification debt.\n2. Cancel this Plan review.\n3. Run wait and cancel with Ctrl+C.\n4. Resume coding and let the production host verify the fixture." }) }]
+          ? [{ type: "function_call", call_id: `${id}-plan`, name: "submit_plan", arguments: JSON.stringify({ title: "Offline acceptance plan", plan }) }]
           : [{ type: "message", role: "assistant", content: [{ type: "output_text", text }] }];
         const call = (name: string, value: unknown) => ({ type: "function_call", call_id: `${id}-${name}`, name, arguments: JSON.stringify(value) });
         if (!planMode && (/^cycle\b/iu.test(prompt) || (cycleStep > 0 && cycleStep < 6))) {

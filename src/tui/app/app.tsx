@@ -2515,6 +2515,10 @@ export function EverpeaceApp({
     const redrawAfterResize = () => {
       setTerminalColumns(Math.max(1, stdout.columns ?? 80));
       if (redrawTimer !== undefined) clearTimeout(redrawTimer);
+      // Command surfaces contain no Static transcript to replay. Ink already
+      // resizes them; clearing again can leave its unchanged frame blank until
+      // the next input. Keep the mounted surface and its draft intact.
+      if (view.kind !== "chat") return;
       redrawTimer = setTimeout(() => {
         // Rebuild the complete source-backed timeline at the final width, like
         // Codex's transcript reflow. The active composer has already followed
@@ -2530,7 +2534,7 @@ export function EverpeaceApp({
       stdout.off("resize", redrawAfterResize);
       if (redrawTimer !== undefined) clearTimeout(redrawTimer);
     };
-  }, [onReplayOutput, stdout]);
+  }, [onReplayOutput, stdout, view.kind]);
 
   const displayedToolStatus = liveToolStatus === "Thinking"
     ? `Thinking · ${formatElapsed(reasoningElapsedSeconds)}`

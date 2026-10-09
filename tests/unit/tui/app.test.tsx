@@ -1726,6 +1726,7 @@ test("repeated terminal resizes preserve history and keep one non-wrapping promp
   await tick();
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("/status · Session status"));
+  const replaysBeforeCommandResize = resizeRedraws;
   Object.defineProperty(view.stdout, "columns", {
     configurable: true,
     value: 64,
@@ -1735,6 +1736,8 @@ test("repeated terminal resizes preserve history and keep one non-wrapping promp
     setTimeout(resolve, RESIZE_REDRAW_DEBOUNCE_MS + 30),
   );
   const commandFrame = lastBorderedSurface(view.lastFrame() ?? "");
+  assert.equal(resizeRedraws, replaysBeforeCommandResize,
+    "command resize must not clear an unchanged dynamic frame via transcript replay");
   assert.match(commandFrame, /\/status · Session status/);
   assert.doesNotMatch(commandFrame, /history-before-resize/);
   assert.doesNotMatch(commandFrame, /Everpeace Agent/);
