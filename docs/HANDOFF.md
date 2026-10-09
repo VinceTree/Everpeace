@@ -4,7 +4,7 @@
 
 ## 当前结论与授权
 
-Windows Terminal 必需场景已通过，最终本地工程门禁通过。本轮安装、提交后预检和远端 CI 收据按下文更新，缺项不能借用旧候选。工程准备不证明真实模型的编码成功率、稳定性或成本。
+Windows Terminal 必需场景、本地工程门禁、公共安装和三组无凭据预检均已通过，修复提交的 Windows/Linux CI 通过。**可以开始有预算的 DeepSeek 实测**，但须先取得对应阶段的数值预算授权。工程准备不证明真实模型的编码成功率、稳定性或成本。
 
 - 本轮起点为 `9d466276fdc5b04158e36a7ae70e8b50125a5364`，个人任务冻结基线仍为 `197c3c48d5f789a7215a1ac6af5ce40cb10ba1ef`。展示版本 **0.3.24**，package.json 与双语 README 一致。
 - 用户已授权更新版本、提交、推送，禁止更新 Release；提交带 `[skip publish]`，不关闭 Test CI，不打 tag、不 publish npm 包。
@@ -41,10 +41,14 @@ helper 修正焦点恢复、NULL 标题查找、DPI/owned HWND 截图、真实 C
 
 公共安装已通过：隔离 consumer 安装本地打包产物，CLI/exec help、SDK import/runTask 的无模型配置结果与退出码契约通过，405 个安装构建文件与本地 dist 字节一致。收据位于终端证据根 `public-install-result.json`。提交后的准确 SHA、同 SHA Test CI、Release 未变化核对记录在 `final-delivery.json`；完成前不借用上一轮通过结论。
 
+修复提交 `33a09e9129ee583a771efb5cff3e5cbee25d34fa` 已推送，[Windows/Linux Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37903249607) 均成功，[Publish version](https://github.com/VinceTree/Everpeace/actions/runs/37903249554) 实际 skipped。27 个 Release 的 ID/tag/更新时间/资产等与保护基线一致，没有创建 tag 或 Release。后续仅交接记录提交仍以最终收据绑定准确 HEAD 和 CI，不把这里的修复提交 SHA 冒充后续 HEAD。
+
 ## 两套付费测试准备
 
 沿用独立根 `C:\Users\39850\AppData\Local\Temp\everpeace-readiness-2eb92be531ab475d80b9ac4f141fa66a`。`personal.json` 与外置参考验收器冻结四项任务；`personal-offline-preflight.json` 验证装配、计量、取消与恢复债务；`fixture-proof.json` 的十项 pristine→指定断言失败→reference 证明保持有效，任务与补丁未改。
 
 `smoke.json` / `comparison.json` 分别准备 9/90 次，基线、当前候选、固定 dsh 三组；统一 deepseek-flash/high/32768、十五分钟、最多三轮修复。提交后重新 configs 和无凭据 preflight，绑定 revision/sourceDigest/buildDigest；本轮之前收据另行保留。源码/锁文件/构建/HEAD 再变化必须重做候选预检。
+
+本轮首次最终预检中 dsh 达到 60 秒超时，基线和候选通过；失败原样保存为终端证据根 `preflight-first-failure.json` / `preflight.log`。未更改代码、超时或权限条件的独立复验三组全部通过，零网络调用、完整 usage、清理已等待；`preflight-result.json` / `preflight-retry-timing.json` 保留复验。超时原因未确定，不把首次失败改写为通过；后续实测遇到类似异常仍立即停止并诊断。
 
 原生 TypeScript 四查询、写入/状态/网络拒绝、取消/权限变化后 PID 退出沿用上一轮有效证据，对应生产实现本轮未改。复现与授权边界见 [READINESS](benchmark/READINESS.md)、[DEVELOPMENT](DEVELOPMENT.md#离线-windows-terminal-手工验收)。后续先分别取得个人与 smoke 的数值预算授权；发现请求、计量、隔离或清理异常立即停止，修复并重新准备候选，再考虑正式比较。
