@@ -1,5 +1,11 @@
 # Architecture Decisions
 
+## Windows 导航与检查启动
+
+固定原生后端同时固定 Windows MXC 配置，原因是旧 token 后端不能证明 LSP 直接网络拒绝。探针仍是启动前必要门禁，具体原生证据见 HANDOFF。LSP 的 Node realpath EPERM 适配只加载到隔离子进程，使用 Node 的实际 symlink 解析，不提升权限；专属临时 adapter 目录只读且退出后清理。设计与能力边界见 [SANDBOX](SANDBOX.md#isolated-lsp-navigation)。
+
+宿主发现的 Windows pnpm/npm/yarn 检查使用 `.cmd`，以避开 PowerShell `.ps1` 的脚本授权拒绝；不改变执行策略、不改检查顺序、不回退宿主。公共 CLI/SDK 入口和 Session schema 不变。离线验收通过显式注入 root 内 Memory/MCP/Skills/navigation 装配，正常 Skill 发现保持默认规则。
+
 ## 全项目分层与验证基线
 
 现有实现按入口适配、应用协调、任务执行、Agent 引擎、能力与资源划分职责；各层映射和状态所有者统一记录于 [PROJECT_MAP](PROJECT_MAP.md#整体分层与状态归属)。生产 factory 保持共享装配入口，核心模块不依赖 React、Ink 或 TUI。入口负责交互，应用协调决定是否启动及会话归属，现有 runner 决定清理、验证和最终完成；后续按状态所有权逐步提取，不按行数拆文件，不建立第二套 runner 或存储。

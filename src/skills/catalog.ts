@@ -264,9 +264,11 @@ export class SkillCatalog {
   #workspacePath: string;
   #generation = 0;
   #snapshot: SkillSnapshot = { skills: [], errors: [], conflictedNames: [], instructions: "" };
+  readonly #roots: readonly SkillRoot[] | undefined;
 
-  constructor(workspacePath: string) {
+  constructor(workspacePath: string, options: { roots?: readonly SkillRoot[] } = {}) {
     this.#workspacePath = workspacePath;
+    this.#roots = options.roots?.map((root) => ({ ...root, path: resolve(root.path) }));
   }
 
   setWorkspace(workspacePath: string): void {
@@ -277,7 +279,7 @@ export class SkillCatalog {
 
   async refresh(): Promise<SkillSnapshot> {
     const generation = this.#generation;
-    const roots = await skillRoots(this.#workspacePath);
+    const roots = this.#roots ?? await skillRoots(this.#workspacePath);
     const loaded = await Promise.all(roots.map(discoverRoot));
     const seenPaths = new Set<string>();
     const skills = loaded.flatMap((item) => item.skills).filter((skill) => {

@@ -3,7 +3,15 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { isSandboxHelperSetupError, runCodexCli, runCodexProcess, startCodexDuplexProcess } from "../../../src/codex/cli.js";
+import { codexCliLaunch, isSandboxHelperSetupError, runCodexCli, runCodexProcess, startCodexDuplexProcess } from "../../../src/codex/cli.js";
+
+test("Windows native launch pins MXC after configuration overrides and before the untouched payload", () => {
+  const payload = ["--", "node", "-e", "windows.sandbox=unelevated"];
+  const launch = codexCliLaunch(["sandbox", "-P", ":read-only", "-c", "windows.sandbox=unelevated", ...payload], { platform: "win32", codexCliPath: "fixture" });
+  assert.deepEqual(launch.args.slice(-payload.length - 2), ["-c", "windows.sandbox=mxc", ...payload]);
+  assert.deepEqual(codexCliLaunch(["mcp", "list"], { platform: "win32", codexCliPath: "fixture" }).args, ["fixture", "mcp", "list"]);
+  assert.deepEqual(codexCliLaunch(["sandbox", ...payload], { platform: "linux", codexCliPath: "fixture" }).args, ["fixture", "sandbox", ...payload]);
+});
 
 async function withFakeCodex(script: string, callback: (scriptPath: string, statePath: string) => Promise<void>): Promise<void> {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-codex-cli-"));

@@ -9,7 +9,7 @@
       "maxRepairAttempts": 3,
       "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 },
       "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-chalk.mjs", "nested-reset", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 },
-      "fixture": { "dependencyLock": "chalk-package-lock.json", "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-chalk.mjs", "nested-reset", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 }, "seedPatch": "chalk-ansi-nested-reset/seed.patch", "referencePatch": "chalk-ansi-nested-reset/reference.patch" }
+      "fixture": { "dependencyLock": "chalk-package-lock.json", "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-chalk.mjs", "nested-reset", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 }, "seedPatch": "chalk-ansi-nested-reset/seed.patch", "referencePatch": "chalk-ansi-nested-reset/reference.patch", "seedFailureContains": ["ERR_ASSERTION"] }
     },
     {
       "id": "chalk-visible-empty-style",
@@ -20,7 +20,7 @@
       "maxRepairAttempts": 3,
       "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 },
       "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-chalk.mjs", "visible", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 },
-      "fixture": { "dependencyLock": "chalk-package-lock.json", "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-chalk.mjs", "visible", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 }, "seedPatch": "chalk-visible-empty-style/seed.patch", "referencePatch": "chalk-visible-empty-style/reference.patch" }
+      "fixture": { "dependencyLock": "chalk-package-lock.json", "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-chalk.mjs", "visible", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 }, "seedPatch": "chalk-visible-empty-style/seed.patch", "referencePatch": "chalk-visible-empty-style/reference.patch", "seedFailureContains": ["ERR_ASSERTION"] }
     },
     {
       "id": "chalk-template-types",
@@ -31,7 +31,7 @@
       "maxRepairAttempts": 3,
       "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 },
       "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-chalk.mjs", "types", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 60000 },
-      "fixture": { "dependencyLock": "chalk-package-lock.json", "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-chalk.mjs", "types", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 60000 }, "seedPatch": "chalk-template-types/seed.patch", "referencePatch": "chalk-template-types/reference.patch" }
+      "fixture": { "dependencyLock": "chalk-package-lock.json", "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-chalk.mjs", "types", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 60000 }, "seedPatch": "chalk-template-types/seed.patch", "referencePatch": "chalk-template-types/reference.patch", "seedFailureContains": ["ERR_ASSERTION"] }
     },
     {
       "id": "commander-negated-default",
@@ -42,7 +42,7 @@
       "maxRepairAttempts": 3,
       "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 },
       "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-commander.mjs", "negated-default", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 },
-      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-commander.mjs", "negated-default", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 }, "seedPatch": "commander-negated-default/seed.patch", "referencePatch": "commander-negated-default/reference.patch" }
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-commander.mjs", "negated-default", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 }, "seedPatch": "commander-negated-default/seed.patch", "referencePatch": "commander-negated-default/reference.patch", "seedFailureContains": ["ERR_ASSERTION"] }
     },
     {
       "id": "commander-async-subcommand-error",
@@ -53,7 +53,7 @@
       "maxRepairAttempts": 3,
       "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 },
       "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-commander.mjs", "async-action", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 },
-      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-commander.mjs", "async-action", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 }, "seedPatch": "commander-async-subcommand-error/seed.patch", "referencePatch": "commander-async-subcommand-error/reference.patch" }
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-commander.mjs", "async-action", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 }, "seedPatch": "commander-async-subcommand-error/seed.patch", "referencePatch": "commander-async-subcommand-error/reference.patch", "seedFailureContains": ["ERR_ASSERTION"] }
     },
     {
       "id": "commander-help-unicode-width",
@@ -64,7 +64,7 @@
       "maxRepairAttempts": 3,
       "verification": { "command": "npm", "args": ["test"], "timeoutMs": 120000 },
       "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-commander.mjs", "styled-width", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 },
-      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-commander.mjs", "styled-width", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 }, "seedPatch": "commander-help-unicode-width/seed.patch", "referencePatch": "commander-help-unicode-width/reference.patch" }
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-commander.mjs", "styled-width", "${WORKSPACE}"], "cwd": "${FIXTURE_ROOT}", "timeoutMs": 30000 }, "seedPatch": "commander-help-unicode-width/seed.patch", "referencePatch": "commander-help-unicode-width/reference.patch", "seedFailureContains": ["ERR_ASSERTION"] }
     },
     {
       "id": "dayjs-timezone-dst-gap",
@@ -75,7 +75,7 @@
       "maxRepairAttempts": 3,
       "verification": { "command": "npm", "args": ["test"], "timeoutMs": 180000 },
       "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "timezone-gap", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 },
-      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "timezone-gap", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 }, "seedPatch": "dayjs-timezone-dst-gap/seed.patch", "referencePatch": "dayjs-timezone-dst-gap/reference.patch" }
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "timezone-gap", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 }, "seedPatch": "dayjs-timezone-dst-gap/seed.patch", "referencePatch": "dayjs-timezone-dst-gap/reference.patch", "seedFailureContains": ["ERR_ASSERTION"] }
     },
     {
       "id": "dayjs-relative-locale-fallback",
@@ -86,7 +86,7 @@
       "maxRepairAttempts": 3,
       "verification": { "command": "npm", "args": ["test"], "timeoutMs": 180000 },
       "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "relative-fallback", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 },
-      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "relative-fallback", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 }, "seedPatch": "dayjs-relative-locale-fallback/seed.patch", "referencePatch": "dayjs-relative-locale-fallback/reference.patch" }
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "relative-fallback", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 }, "seedPatch": "dayjs-relative-locale-fallback/seed.patch", "referencePatch": "dayjs-relative-locale-fallback/reference.patch", "seedFailureContains": ["ERR_ASSERTION"] }
     },
     {
       "id": "dayjs-negative-duration",
@@ -97,7 +97,7 @@
       "maxRepairAttempts": 3,
       "verification": { "command": "npm", "args": ["test"], "timeoutMs": 180000 },
       "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "negative-duration", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 },
-      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "negative-duration", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 }, "seedPatch": "dayjs-negative-duration/seed.patch", "referencePatch": "dayjs-negative-duration/reference.patch" }
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "negative-duration", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 }, "seedPatch": "dayjs-negative-duration/seed.patch", "referencePatch": "dayjs-negative-duration/reference.patch", "seedFailureContains": ["ERR_ASSERTION"] }
     },
     {
       "id": "dayjs-plugin-immutability",
@@ -108,7 +108,7 @@
       "maxRepairAttempts": 3,
       "verification": { "command": "npm", "args": ["test"], "timeoutMs": 180000 },
       "acceptance": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "duration-clone", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 },
-      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "duration-clone", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 }, "seedPatch": "dayjs-plugin-immutability/seed.patch", "referencePatch": "dayjs-plugin-immutability/reference.patch" }
+      "fixture": { "setup": { "command": "npm", "args": ["ci", "--ignore-scripts", "--registry=https://registry.npmjs.org"], "timeoutMs": 300000 }, "pristineVerification": { "command": "node", "args": ["${FIXTURE_ROOT}/verify-dayjs.cjs", "duration-clone", "${WORKSPACE}"], "cwd": "${WORKSPACE}", "env": { "BABEL_ENV": "test" }, "timeoutMs": 120000 }, "seedPatch": "dayjs-plugin-immutability/seed.patch", "referencePatch": "dayjs-plugin-immutability/reference.patch", "seedFailureContains": ["ERR_ASSERTION"] }
     }
   ]
 }

@@ -38,6 +38,7 @@ export interface PromptProps {
   activeModelName: string | undefined;
   placeholder?: string;
   disabled?: boolean;
+  onApprovalChoice?(approved: boolean): void;
   getFileSuggestions?(query: string, signal?: AbortSignal): Promise<string[]>;
   onSubmit(value: string): boolean | void | Promise<boolean | void>;
 }
@@ -162,6 +163,7 @@ function clippedCursorLine(
 export function Prompt({
   activeModelName,
   disabled = false,
+  onApprovalChoice,
   onSubmit,
   history = [],
   onEmptyInterrupt,
@@ -277,6 +279,13 @@ export function Prompt({
   useInput(
     (input, key) => {
       if (key.eventType === "release" || submissionRef.current !== undefined) return;
+      if (onApprovalChoice && !stateRef.current.value && !key.ctrl && !key.meta) {
+        if (input.toLowerCase() === "y") { onApprovalChoice(true); return; }
+        if (input.toLowerCase() === "n" || (key.return && !key.shift)) {
+          onApprovalChoice(false);
+          return;
+        }
+      }
       if (key.ctrl && input === "c") {
         if (stateRef.current.value) updateState(() => createComposerState());
         else onEmptyInterrupt?.();

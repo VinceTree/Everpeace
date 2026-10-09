@@ -123,11 +123,12 @@ test("sandboxed Bash is routed through the pinned Codex CLI and native profile",
     "--sandbox-state-readable-root",
     "C:\\skills",
   ]);
-  assert.deepEqual(launch.args.slice(8, 12), ["--include-managed-config", "-c", "shell_environment_policy.ignore_default_excludes=false", "--"]);
+  const boundary = process.platform === "win32" ? 14 : 12;
+  assert.deepEqual(launch.args.slice(8, boundary), ["--include-managed-config", "-c", "shell_environment_policy.ignore_default_excludes=false", ...(process.platform === "win32" ? ["-c", "windows.sandbox=mxc"] : []), "--"]);
   if (process.platform === "win32") {
-    assert.deepEqual(launch.args.slice(12), ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "echo safe"]);
+    assert.deepEqual(launch.args.slice(boundary), ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "echo safe"]);
   } else {
-    assert.deepEqual(launch.args.slice(12), ["/bin/custom-bash", "-c", "echo safe"]);
+    assert.deepEqual(launch.args.slice(boundary), ["/bin/custom-bash", "-c", "echo safe"]);
   }
 });
 

@@ -122,6 +122,8 @@ CLI → model registry + keyring → TUI dependencies → App
 
 ## 文档与源码的使用规则
 
+原生导航验收从 [native-typescript-navigation](../../tests/fixtures/native-typescript-navigation.ts) 和 [native-navigation-lifecycle](../../tests/fixtures/native-navigation-lifecycle.ts) 进入；真实 SDK 的离线 DeepSeek 流式契约在 [deepseek-contract](../../tests/unit/providers/deepseek-contract.test.ts)。个人与固定任务的装配入口集中在 [实测准备](../benchmark/READINESS.md)，终端集成 fixture 与实际按键的证据范围见 [开发指南](../DEVELOPMENT.md)。这些都是开发验收入口，不新增公共 CLI。
+
 - 回答已知架构问题先用专题；未涉及的模块不需要重新扫描。
 - 开始改代码时仍须读取目标函数、直接调用者和对应测试，不能把文档当作当前文件内容。
 - 文件移动或接口变化时同步修改本表中的源码、测试和专题链接；不要复制大段源码到文档。

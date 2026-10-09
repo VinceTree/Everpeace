@@ -196,6 +196,11 @@ export async function proveBenchmarkFixture(
       throw new Error(`Benchmark ${task.id} seed proof failed because verification infrastructure was unavailable: ${seeded.error ?? "no exit code"}`);
     }
     if (seeded.passed) throw new Error(`Benchmark ${task.id} seed did not fail its acceptance assertion`);
+    const failureOutput = `${seeded.stdout}\n${seeded.stderr}`;
+    if (/ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|spawn .+ ENOENT/u.test(failureOutput)
+      || task.fixture?.seedFailureContains?.some((marker) => !failureOutput.includes(marker))) {
+      throw new Error(`Benchmark ${task.id} seed did not produce its expected acceptance failure`);
+    }
     await applyBenchmarkReferenceRepair(prepared, options.fixtureRoot, controller.signal);
     const repaired = await runBenchmarkVerification(verification, prepared.workspacePath, controller.signal);
     if (repaired.cleanupFailed) throw new ProcessCleanupError(repaired.error);

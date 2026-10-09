@@ -36,6 +36,8 @@ export interface BenchmarkTaskFixture {
   setup?: BenchmarkVerification;
   /** Optional independent assertion proving the pinned source starts healthy. */
   pristineVerification?: BenchmarkVerification;
+  /** Required substrings in a seeded failure, so unrelated process errors are not proof. */
+  seedFailureContains?: readonly string[];
   /** Patch applied to the pinned source to introduce the benchmark defect and its acceptance assertion. */
   seedPatch: string;
   /** Patch applied after the seed to provide the reviewed reference repair. */

@@ -8,6 +8,7 @@ export interface ApprovalConfirmationProps {
   request: string;
   onConfirm(): void;
   onCancel(): void;
+  inputHandledByPrompt?: boolean;
 }
 
 export function ApprovalConfirmation({
@@ -15,6 +16,7 @@ export function ApprovalConfirmation({
   request,
   onConfirm,
   onCancel,
+  inputHandledByPrompt = false,
 }: ApprovalConfirmationProps) {
   const isBash = kind === "bash";
   const isPatch = kind === "patch";
@@ -29,8 +31,9 @@ export function ApprovalConfirmation({
       {isBash ? <HighlightedCommand command={request} shell={shell} /> : isPatch ? <RichOutput text={request} /> : <Text wrap="truncate-end">{request}</Text>}
       <Box>
         <Text>{isBash ? "Run this command? " : isPatch ? "Apply this patch? " : isMcp ? "Allow this MCP tool call? " : isGoal ? "Allow this goal change? " : "Allow this web request? "}</Text>
-        <ConfirmInput defaultChoice="cancel" onConfirm={onConfirm} onCancel={onCancel} />
+        {inputHandledByPrompt ? <Text>y/N</Text> : <ConfirmInput defaultChoice="cancel" onConfirm={onConfirm} onCancel={onCancel} />}
       </Box>
+      {inputHandledByPrompt ? <Text dimColor>Empty prompt: y approves; n or Enter rejects. With a draft, Enter sends guidance.</Text> : null}
     </Box>
   );
 }

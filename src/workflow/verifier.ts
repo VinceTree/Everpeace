@@ -60,7 +60,10 @@ function fileExists(filePath: string): boolean {
 }
 
 function commandForPackageScript(manager: string, script: string): string {
-  return `${manager} run ${script}`;
+  // PowerShell may select an unsigned .ps1 shim. Keep host-discovered checks
+  // on the native batch shim without changing the sandbox or execution policy.
+  const executable = process.platform === "win32" && ["pnpm", "npm", "yarn"].includes(manager) ? `${manager}.cmd` : manager;
+  return `${executable} run ${script}`;
 }
 
 function scriptCommand(

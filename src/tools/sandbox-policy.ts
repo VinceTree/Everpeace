@@ -204,9 +204,15 @@ export function createLspSandboxPolicy(
   });
 }
 
-export function nativeLspPermissionProfileArgs(policy: LspSandboxPolicy): string[] {
+export function nativeLspPermissionProfileArgs(policy: LspSandboxPolicy, launcherRoot?: string): string[] {
+  if (launcherRoot && (!path.isAbsolute(launcherRoot)
+    || overlaps(launcherRoot, policy.workspaceRoot, process.platform)
+    || policy.deniedRoots.some((denied) => overlaps(launcherRoot, denied, process.platform)))) {
+    throw new Error("Language-server launcher root must be separate from workspace and protected state");
+  }
   const filesystem = [
     ...policy.readableRoots.map((root) => `${tomlString(root)}=${tomlString("read")}`),
+    ...(launcherRoot ? [`${tomlString(launcherRoot)}=${tomlString("read")}`] : []),
     ...policy.deniedRoots.map((root) => `${tomlString(root)}=${tomlString("none")}`),
   ].join(",");
   return [

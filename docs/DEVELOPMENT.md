@@ -99,10 +99,10 @@ pnpm exec tsx --test --test-name-pattern="cancel" tests/unit/agent/react-agent.t
 
 ## 离线 Windows Terminal 手工验收
 
-[开发专用 TUI fixture](../tests/fixtures/tui-offline.ts) 使用 fake provider，复用生产 Agent、TaskRunner、Session 恢复和分支。它关闭 Memory、MCP、Skills 与 navigation，不读取用户 keyring/config。先在真实 Windows Terminal 的 PowerShell 中，从仓库运行：
+[开发专用 TUI fixture](../tests/fixtures/tui-offline.ts) 使用 fake provider，复用生产 Agent、TaskRunner、Session 恢复和分支。不读取用户 keyring/config；默认关闭扩展，加 `--integrations` 时只加载 root 内 Memory、显式根 Skill catalog、固定 stdio MCP 与 native sandbox 中的协议 fixture LSP。先在真实 Windows Terminal 的 PowerShell 中，从仓库运行：
 
 ```powershell
-pnpm exec tsx tests/fixtures/tui-offline.ts --root "$env:TEMP\everpeace-tui-offline"
+pnpm exec tsx tests/fixtures/tui-offline.ts --root "$env:TEMP\everpeace-tui-offline-new" --integrations
 ```
 
 `--root` 必须是绝对路径，并指向空目录或本 fixture 已标记的目录；workspace、sessions 和 input-history 都写入该目录。`--help` 不初始化目录。首次启动播种 `Offline debt seed`，按以下顺序保留同一 root 检查：
@@ -111,6 +111,12 @@ pnpm exec tsx tests/fixtures/tui-offline.ts --root "$env:TEMP\everpeace-tui-offl
 2. 退出后以相同 root 重启，`/resume` 选择子会话。使用 `/plan` 检查 Plan 并取消审批，确认分支待继续状态没有被消耗。
 3. coding 输入 `wait`，按 Ctrl+C 取消，再次 coding，检查原有验证债务仍保留。`wait` 会等待最多 60 秒并响应取消，普通输入立即返回离线响应。
 4. 输入 `large` 产生 300 行中文、emoji 和缩进内容，检查 resize、scrollback 和单 prompt；另检查直接 `!` 输出。
+5. 输入 `cycle`：读取和修改 fixture.txt，test 通过但 build 的指定断言失败；修复后重新发现并执行 typecheck、test、build。当前没有 lint。再次启动使用新 root，避免复用旧 fixture manifest。
+6. 输入 `integrations`：读取隔离 Skill、审批 MCP ping、执行 native hover；`/memory` 应显示 root 内种子条目。四者没有加载、返回 error 或只看到了目录不能记为调用通过。协议 fixture 不替代真实 TypeScript server 验收。
+
+Windows 检查发现使用 pnpm/npm/yarn 的 `.cmd` shim，避免 PowerShell 在原生 sandbox 中选择 `.ps1` 并被脚本授权拒绝；bun 保留原生可执行文件。检查顺序、失败停止、审批与 sandbox 不变。
+
+[窗口控制辅助](../tests/fixtures/windows-terminal-control.ps1) 仅允许 ownership marker、WindowsTerminal PID、固定离线窗口标题与实际前台焦点全部匹配后发送输入，并只截取该窗口。若执行环境无法取得焦点，保持真实按键 pending；ConPTY 注入不能冒充 Windows Terminal 的滚轮、缩放或视觉验收。实际终端版本、操作、失败与截图路径在外置收据中记录，不写个人凭据。
 
 Plan 专项验收另检查：在审阅选择 `Revise plan` 输入意见，resize 后意见仍保留；Esc 返回菜单，菜单 Esc／两处 Ctrl+C 恢复聊天且仅一个 prompt。重新规划并批准后应保持空闲，`/plan show` 可查看正文，`/plan execute` 才启动 coding；取消执行后不能再次消费旧批准。重启、fork 或继续讨论后必须重新批准。自动化生产闭环见 [Plan execution](../tests/unit/runtime/plan-execution.test.tsx)，SDK 通过隔离临时用户目录和本地 fake HTTP provider 验证只读计划输出／问题停止；均不调用真实模型，不代替本节手工验收。
 

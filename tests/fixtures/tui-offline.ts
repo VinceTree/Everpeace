@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ProviderRuntime } from "../../src/providers/openai-compatible.js";
 import type { PermissionPolicy } from "../../src/permissions/policy.js";
 import type { TuiDependencies, TuiModelRegistry } from "../../src/tui/app/types.js";
@@ -7,14 +8,17 @@ import type { ProductionAgentHandle } from "../../src/runtime/production.js";
 
 const HELP = `Offline TUI acceptance fixture (development only)
 
-  pnpm exec tsx tests/fixtures/tui-offline.ts --root <absolute-directory>
+  pnpm exec tsx tests/fixtures/tui-offline.ts --root <absolute-directory> [--integrations]
 
 Run inside Windows Terminal. The explicit root must be empty or already owned
 by this fixture. Workspace, Sessions and input history stay inside that root.
-No user model registry, keyring, Memory, MCP, Skills or navigation is loaded.
+No user model registry or keyring is loaded. --integrations loads only fixture
+Memory, Skills, stdio MCP and a native sandboxed protocol-fixture LSP.
 
 Prompts: large = 300 Chinese/emoji lines; wait = cancellable 60-second request;
-anything else = immediate fake response with complete synthetic usage.
+cycle = edit, test passes/build fails, repair, full checks pass;
+integrations = read fixture Skill, call approved MCP ping, sandboxed hover.
+Anything else = immediate fake response with complete synthetic usage.
 Use /resume Offline debt seed, /fork, /plan, /status, Ctrl+C and terminal resize.
 Plan submits a local fixed plan; choose Cancel to preserve pending fork debt.
 Model/verification commands use the production native sandbox, with no host
@@ -63,7 +67,8 @@ async function main(): Promise<number> {
     process.stdout.write(HELP);
     return 0;
   }
-  if (args.length !== 2 || args[0] !== "--root" || !args[1] || !path.isAbsolute(args[1])) {
+  const integrations = args.length === 3 && args[2] === "--integrations";
+  if ((args.length !== 2 && !integrations) || args[0] !== "--root" || !args[1] || !path.isAbsolute(args[1])) {
     throw new Error("Pass --root with an explicit absolute directory. Use --help for instructions.");
   }
   // Reject pipe invocations before creating directories or importing native dependencies.
@@ -86,8 +91,28 @@ async function main(): Promise<number> {
   await createOwnedDirectory(workspacePath);
   await createOwnedDirectory(sessionDirectory);
   await writeNew(path.join(workspacePath, "fixture.txt"), "offline fixture seed\n");
-  await writeNew(path.join(workspacePath, "package.json"), JSON.stringify({ private: true, scripts: { test: "node --test fixture.test.cjs" } }, null, 2));
-  await writeNew(path.join(workspacePath, "fixture.test.cjs"), "const fs = require('node:fs');\nconst assert = require('node:assert/strict');\nconst { test } = require('node:test');\ntest('offline fixture content', () => assert.equal(fs.readFileSync('fixture.txt', 'utf8'), 'offline fixture seed\\n'));\n");
+  await writeNew(path.join(workspacePath, "package.json"), JSON.stringify({ private: true, scripts: { typecheck: "node -e \"process.exit(0)\"", test: "node --test fixture.test.cjs", build: "node fixture.build.cjs" } }, null, 2));
+  await writeNew(path.join(workspacePath, "fixture.test.cjs"), "const fs = require('node:fs');\nconst assert = require('node:assert/strict');\nconst { test } = require('node:test');\ntest('offline fixture content', () => assert.match(fs.readFileSync('fixture.txt', 'utf8'), /^offline fixture (seed|edited|repaired)\\n$/));\n");
+  await writeNew(path.join(workspacePath, "fixture.build.cjs"), "const fs = require('node:fs'); const assert = require('node:assert/strict'); assert.notEqual(fs.readFileSync('fixture.txt', 'utf8'), 'offline fixture edited\\n', 'Expected seeded build failure');\n");
+  await writeNew(path.join(workspacePath, "sample.ts"), "export const fixture = 1;\n");
+  const [{ LearnedMemoryStore }, { SkillCatalog }, { McpRuntime }, { CodeNavigationRuntime }, { createLspSandboxPolicy }] = await Promise.all([
+    import("../../src/memory/learned-memory.js"), import("../../src/skills/catalog.js"), import("../../src/mcp/runtime.js"), import("../../src/tools/code-navigation.js"), import("../../src/tools/sandbox-policy.js"),
+  ]);
+  const memoryStore = integrations ? new LearnedMemoryStore({ directory: path.join(root, "memory") }) : null;
+  const skillRoot = path.join(root, "skills");
+  if (integrations) {
+    await createOwnedDirectory(path.join(skillRoot, "offline-guide"));
+    await writeNew(path.join(skillRoot, "offline-guide", "SKILL.md"), "---\nname: offline-guide\ndescription: Isolated offline acceptance guide\n---\nRead the current fixture file before editing.\n");
+    await memoryStore!.append("project", workspacePath, [{ lesson: "Offline fixture prefers verified changes.", applyWhen: "Working with fixture.txt", kind: "convention", confidence: "high" }]);
+  }
+  const skills = integrations ? new SkillCatalog(workspacePath, { roots: [{ path: skillRoot, scope: "repo" }] }) : null;
+  const mcp = integrations ? new McpRuntime({ workspacePath, async loadConfig() { return [{ name: "offline", enabled: true, transport: { type: "stdio", command: process.execPath, args: ["--import", import.meta.resolve("tsx"), fileURLToPath(new URL("offline-mcp.ts", import.meta.url))] }, startup_timeout_sec: 15 }]; } }) : null;
+  const serverPath = path.join(root, "services", "offline-lsp.mjs");
+  if (integrations) {
+    await createOwnedDirectory(path.dirname(serverPath));
+    await writeNew(serverPath, await fs.readFile(fileURLToPath(new URL("offline-lsp.mjs", import.meta.url)), "utf8"));
+  }
+  const navigation = integrations ? new CodeNavigationRuntime({ workspacePath, command: process.execPath, args: [serverPath], policy: createLspSandboxPolicy(workspacePath, [path.dirname(process.execPath), path.dirname(serverPath)]) }) : null;
   const [
     { runTui }, { SessionStore }, { InputHistory }, { createWorkflowState },
     { createProductionAgent, createProductionCommandExecutor },
@@ -118,6 +143,8 @@ async function main(): Promise<number> {
     await fs.writeFile(markerPath, JSON.stringify(marker), { mode: 0o600 });
   }
   let requests = 0;
+  let cycleStep = 0;
+  let integrationsCalled = false;
   const capabilities = resolveProviderCapabilities(model.base_url, model.model_name);
   const provider: ProviderRuntime = {
     sdk: {} as ProviderRuntime["sdk"], capabilities, settings: defaultModelRequestSettings(capabilities),
@@ -133,9 +160,19 @@ async function main(): Promise<number> {
         const text = /^large\b/iu.test(prompt)
           ? Array.from({ length: 300 }, (_, index) => `Line ${String(index + 1).padStart(3, "0")} · 中文恢复与滚动检查 😀 · indentation:    value`).join("\n")
           : "Offline fixture response. No model connection was used; the production host owns verification and completion.";
-        const output = planMode
+        let output: Array<Record<string, unknown> & { type: string }> = planMode
           ? [{ type: "function_call", call_id: `${id}-plan`, name: "submit_plan", arguments: JSON.stringify({ title: "Offline acceptance plan", plan: "1. Inspect the inherited verification debt.\n2. Cancel this Plan review.\n3. Run wait and cancel with Ctrl+C.\n4. Resume coding and let the production host verify the fixture." }) }]
           : [{ type: "message", role: "assistant", content: [{ type: "output_text", text }] }];
+        const call = (name: string, value: unknown) => ({ type: "function_call", call_id: `${id}-${name}`, name, arguments: JSON.stringify(value) });
+        if (!planMode && (/^cycle\b/iu.test(prompt) || (cycleStep > 0 && cycleStep < 6))) {
+          cycleStep++;
+          if (cycleStep === 1 || cycleStep === 4) output = [call("read_file", { path: "fixture.txt" })];
+          else if (cycleStep === 2 || cycleStep === 5) output = [call("apply_patch", { operations: [{ path: "fixture.txt", action: "update", content: cycleStep === 2 ? "offline fixture edited\n" : "offline fixture repaired\n" }] })];
+        } else if (!planMode && integrations && /^integrations\b/iu.test(prompt) && !integrationsCalled) {
+          integrationsCalled = true;
+          const mcpName = (await mcp!.ensureReady()).tools[0]!.name;
+          output = [call("read_skill", { name: "offline-guide" }), call(mcpName, {}), call("code_navigation", { operation: "hover", path: "sample.ts", line: 1, column: 14 })];
+        }
         return (async function* () {
           yield { type: "response.completed", response: { id, status: "completed", output, output_text: planMode ? "" : text, usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 } } };
         })();
@@ -161,8 +198,8 @@ async function main(): Promise<number> {
     createAgent(selected, io, restore) {
       const handle = createProductionAgent({
         model: selected, io, workspacePath, sessionStore, sessionId: () => io.getSessionId?.(), providerRuntime: provider,
-        skills: null, mcp: null, learnedMemoryStore: null, codeNavigation: null,
-        learnedMemoryPolicy: { readExisting: false, captureFuture: false },
+        skills, mcp, learnedMemoryStore: memoryStore, codeNavigation: navigation,
+        learnedMemoryPolicy: { readExisting: integrations, captureFuture: false },
         restore: {
           ...(restore?.initialContext === undefined ? {} : { initialHistory: restore.initialContext }),
           ...(restore?.initialTaskProgress === undefined ? {} : { initialTaskProgress: restore.initialTaskProgress }),
@@ -185,10 +222,11 @@ async function main(): Promise<number> {
     runTerminalCommand(command, onOutput, signal, onInputReady) {
       return runTerminalCommand(command, { cwd: workspacePath, streamOutput: false, ...(onOutput ? { onOutput } : {}), ...(signal ? { signal } : {}), ...(onInputReady ? { onInputReady } : {}) });
     },
-    async getMcpStatus() { return "MCP disabled in this offline fixture."; },
-    async getSkillsStatus() { return "Skills disabled in this offline fixture."; },
-    async doctor() { return "Offline fixture: provider, Memory, MCP, Skills and navigation are disabled. No live diagnostic request is available."; },
-    async dispose() { await Promise.all([...handles].map((handle) => handle.dispose())); },
+    async getMcpStatus() { return mcp ? JSON.stringify((await mcp.ensureReady()).servers) : "MCP disabled in this offline fixture."; },
+    async getSkillsStatus() { return skills ? JSON.stringify(await skills.refresh()) : "Skills disabled in this offline fixture."; },
+    ...(memoryStore ? { async getMemoryStatus() { const entries = await memoryStore.read("project", workspacePath); return { enabled: true, projectEntries: entries.length, userEntries: 0, recent: entries }; } } : {}),
+    async doctor() { return integrations ? "Offline fixture: isolated Memory, Skills, stdio MCP and native protocol LSP are loaded. No live model diagnostic is available." : "Offline fixture: Memory, MCP, Skills and navigation are disabled. No live model diagnostic is available."; },
+    async dispose() { const results = await Promise.allSettled([...Array.from(handles, (handle) => handle.dispose()), ...(mcp ? [mcp.close()] : [])]); for (const result of results) if (result.status === "rejected") throw result.reason; },
   };
   const previousDirectory = process.cwd();
   process.chdir(workspacePath);

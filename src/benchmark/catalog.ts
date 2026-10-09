@@ -97,6 +97,13 @@ function parseTask(value: unknown, index: number): BenchmarkTaskCatalogEntry {
     fixture = {
       seedPatch,
       referencePatch,
+      ...(fixtureRecord.seedFailureContains === undefined ? {} : {
+        seedFailureContains: (() => {
+          const markers = fixtureRecord.seedFailureContains;
+          if (!Array.isArray(markers) || markers.length === 0) throw new Error(`tasks[${index}].fixture.seedFailureContains must be a nonempty array`);
+          return markers.map((marker, markerIndex) => nonEmpty(marker, `tasks[${index}].fixture.seedFailureContains[${markerIndex}]`));
+        })(),
+      }),
       ...(dependencyLock === undefined ? {} : { dependencyLock }),
       ...(fixtureRecord.setup === undefined ? {} : { setup: parseVerification(fixtureRecord.setup, `tasks[${index}].fixture.setup`) }),
       ...(fixtureRecord.pristineVerification === undefined ? {} : { pristineVerification: parseVerification(fixtureRecord.pristineVerification, `tasks[${index}].fixture.pristineVerification`) }),

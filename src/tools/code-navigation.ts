@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, lstatSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { connect, createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -128,9 +128,44 @@ function contentText(value: unknown): string {
 }
 
 function nativeProcessFactory(options: Parameters<LanguageServerProcessFactory>[0]): CodexDuplexProcess {
-  return startCodexDuplexProcess([
+  // Node's native Windows realpath returns EPERM inside MXC, while Node's
+  // symlink-resolving JS implementation works under the same OS permissions.
+  // Install this compatibility adapter only in the sandboxed LSP child.
+  const temporaryRoot = process.platform === "win32"
+    ? mkdtempSync(path.join(os.tmpdir(), "everpeace-lsp-process-")) : undefined;
+  const verifyTemporaryRoot = () => {
+    if (!temporaryRoot || !inside(path.resolve(os.tmpdir()), temporaryRoot)
+      || !path.basename(temporaryRoot).startsWith("everpeace-lsp-process-")) {
+      throw new Error("Language-server temporary root escaped its owned directory");
+    }
+    const stats = lstatSync(temporaryRoot);
+    if (stats.isSymbolicLink() || !stats.isDirectory()) throw new Error("Language-server temporary root was redirected");
+  };
+  let child: CodexDuplexProcess;
+  try {
+    let command = options.command;
+    let args = [...options.args];
+    if (temporaryRoot) {
+      const launcher = path.join(temporaryRoot, "launch.mjs");
+      const compatibility = path.join(temporaryRoot, "node-compat.mjs");
+      writeFileSync(compatibility, [
+        "import fs from 'node:fs'; import { promisify } from 'node:util';",
+        "const nativeRealpath = fs.promises.realpath; const jsRealpath = promisify(fs.realpath);",
+        "fs.promises.realpath = async (...args) => { try { return await nativeRealpath(...args); } catch (error) { if (error?.code !== 'EPERM') throw error; return jsRealpath(...args); } };",
+      ].join("\n"), { flag: "wx", mode: 0o600 });
+      writeFileSync(launcher, [
+        "import { spawn } from 'node:child_process'; import { pathToFileURL } from 'node:url';",
+        "const [compatibility, command, ...args] = process.argv.slice(2);",
+        "const child = spawn(command, args, { cwd: process.cwd(), env: { ...process.env, NODE_OPTIONS: '--import=' + pathToFileURL(compatibility).href }, shell: false, stdio: 'inherit', windowsHide: true });",
+        "child.once('error', () => { process.stderr.write('Language-server child launch failed\\n'); process.exitCode = 1; });",
+        "child.once('close', (code) => { process.exitCode = code ?? 1; });",
+      ].join("\n"), { flag: "wx", mode: 0o600 });
+      command = process.execPath;
+      args = [launcher, compatibility, options.command, ...options.args];
+    }
+    child = startCodexDuplexProcess([
     "sandbox",
-    ...nativeLspPermissionProfileArgs(options.policy),
+    ...nativeLspPermissionProfileArgs(options.policy, temporaryRoot),
     "-C",
     options.cwd,
     ...options.policy.readableRoots.flatMap((root) => ["--sandbox-state-readable-root", root]),
@@ -139,9 +174,36 @@ function nativeProcessFactory(options: Parameters<LanguageServerProcessFactory>[
     "-c",
     "shell_environment_policy.ignore_default_excludes=false",
     "--",
-    options.command,
-    ...options.args,
-  ], { cwd: options.cwd, env: modelShellEnvironment(process.env), stderrMaxBytes: MAX_STDERR_BYTES });
+    command,
+    ...args,
+    ], { cwd: options.cwd, env: modelShellEnvironment(process.env), stderrMaxBytes: MAX_STDERR_BYTES });
+  } catch (error) {
+    if (temporaryRoot) {
+      try { verifyTemporaryRoot(); rmSync(temporaryRoot, { recursive: true, force: true }); }
+      catch (cleanupError) { throw new ProcessCleanupError(cleanupError); }
+    }
+    throw error;
+  }
+  if (!temporaryRoot) return child;
+  const cleanup = async () => {
+    try {
+      verifyTemporaryRoot();
+      await fs.rm(temporaryRoot, { recursive: true, force: true });
+    } catch (error) { throw new ProcessCleanupError(error); }
+  };
+  const exit = child.exit.then(async (result) => { await cleanup(); return result; }, async (error: unknown) => {
+    await cleanup();
+    throw error;
+  });
+  void exit.catch(() => {});
+  return {
+    stdout: child.stdout, write: (data) => child.write(data), closeInput: () => child.closeInput(), exit,
+    async terminate() {
+      const results = await Promise.allSettled([child.terminate(), exit]);
+      for (const result of results) if (result.status === "rejected") throw result.reason;
+      return (results[1] as PromiseFulfilledResult<CodexDuplexExit>).value;
+    },
+  };
 }
 
 class JsonRpcProcess {

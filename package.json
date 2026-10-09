@@ -1,6 +1,6 @@
 {
   "name": "everpeace",
-  "version": "0.3.22",
+  "version": "0.3.23",
   "description": "A sandboxed terminal ReAct agent with persistent sessions, MCP, skills, and web access.",
   "type": "module",
   "bin": {
@@ -34,9 +34,9 @@
   "packageManager": "pnpm@10.22.0",
   "dependencies": {
     "@inkjs/ui": "^2.0.0",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "@napi-rs/keyring": "^2.1.0",
-    "@openai/codex": "0.155.1",
+    "@openai/codex": "0.162.0",
     "@vscode/ripgrep": "1.18.0",
     "@xterm/headless": "^6.0.0",
     "fflate": "^0.8.2",

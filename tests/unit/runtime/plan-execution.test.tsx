@@ -135,7 +135,7 @@ test("production TUI plans, records revision, waits for explicit execution, and 
     assert.equal(await fs.readFile(target, "utf8"), "const value = 2;\n");
     assert.equal(steps.length, 0);
     assert.deepEqual(starts, [{ mode: "plan", source: "user" }, { mode: "default", source: "session_resume" }]);
-    assert.deepEqual(commands.slice(-4), ["pnpm run typecheck", "pnpm run lint", "pnpm run test", "pnpm run build"]);
+    assert.deepEqual(commands.slice(-4), [`pnpm${process.platform === "win32" ? ".cmd" : ""} run typecheck`, `pnpm${process.platform === "win32" ? ".cmd" : ""} run lint`, `pnpm${process.platform === "win32" ? ".cmd" : ""} run test`, `pnpm${process.platform === "win32" ? ".cmd" : ""} run build`]);
   } catch (error) {
     throw new Error(`${String(error)}\n${view.lastFrame()}`, { cause: error });
   } finally {

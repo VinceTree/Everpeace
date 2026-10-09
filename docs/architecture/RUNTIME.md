@@ -19,6 +19,8 @@
 
 ## 生产调用关系
 
+[DeepSeek 官方契约回归](../../tests/unit/providers/deepseek-contract.test.ts) 通过实际 SDK 与 fake fetch 观察生产请求及 Session 计量。覆盖原始模型 ID、high/输出上限、不发送服务端会话参数、工具调用配对、completed/incomplete/failed、无终止事件、缺失 usage 和取消。请求从未接触真实模型；reasoning 包含在 output 里，不重复扣预算。官方协议出处：[Responses API](https://api-docs.deepseek.com/guides/responses_api/)。
+
 ```text
 TUI / everpeace exec / everpeace/sdk / 内部 benchmark adapter
   → production factory（provider、Agent、历史/附件、Memory、MCP、sandbox command）

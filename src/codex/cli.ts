@@ -47,9 +47,16 @@ export function codexCliLaunch(
   args: readonly string[],
   options: CodexCliOptions = {},
 ): { command: string; args: string[] } {
+  // Pin the Windows enforcement backend as well as its package. Legacy token
+  // sessions do not establish direct-socket denial for the LSP policy.
+  const nativeArgs = [...args];
+  if ((options.platform ?? process.platform) === "win32" && nativeArgs[0] === "sandbox") {
+    const delimiter = nativeArgs.indexOf("--");
+    nativeArgs.splice(delimiter < 0 ? nativeArgs.length : delimiter, 0, "-c", "windows.sandbox=mxc");
+  }
   return {
     command: process.execPath,
-    args: [options.codexCliPath ?? resolveCodexCliPath(), ...args],
+    args: [options.codexCliPath ?? resolveCodexCliPath(), ...nativeArgs],
   };
 }
 

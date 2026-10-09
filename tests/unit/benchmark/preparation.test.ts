@@ -74,6 +74,7 @@ async function fixture(): Promise<{ root: string; fixtureRoot: string; task: Ben
         dependencyLock: "package-lock.json",
         seedPatch: "seed.patch",
         referencePatch: "reference.patch",
+        seedFailureContains: ["ERR_ASSERTION", "'bad'"],
         setup: { command: process.execPath, args: ["-e", "process.exit(0)"] },
         pristineVerification: { command: process.execPath, args: ["-e", "import('./value.mjs').then(({default:value}) => process.exit(value === 'good' ? 0 : 1))"] },
       },
@@ -109,6 +110,14 @@ test("fixture proof rejects verification infrastructure failures as invalid seed
     destination: join(value.root, "invalid-proof"),
     fixtureRoot: value.fixtureRoot,
   }), /verification infrastructure was unavailable/u);
+});
+
+test("fixture proof rejects a launched verifier failing for an unrelated reason", async () => {
+  const value = await fixture();
+  await assert.rejects(proveBenchmarkFixture({
+    ...value.task,
+    acceptance: { command: process.execPath, args: ["-e", "console.error('MODULE_NOT_FOUND'); process.exit(1)"] },
+  }, { destination: join(value.root, "wrong-failure"), fixtureRoot: value.fixtureRoot }), /expected acceptance failure/u);
 });
 
 test("suite runs the task returned by an isolated prepare hook", async () => {

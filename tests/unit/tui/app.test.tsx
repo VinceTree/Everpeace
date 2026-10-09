@@ -2126,6 +2126,7 @@ test("model-requested MCP calls use their own approval surface", async () => {
   view.stdin.write("y");
   await waitFor(() => (view.lastFrame() ?? "").includes("mcp done"));
   assert.equal(called, true);
+  assert.match(view.lastFrame() ?? "", /Ask Everpeace to do anything/);
   view.unmount();
 });
 

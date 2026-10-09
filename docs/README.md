@@ -24,6 +24,8 @@
 | [MEMORY](architecture/MEMORY.md) | 召回、聊天策略、后台学习与存储 | 修改 Memory |
 | [TUI_STRUCTURE](architecture/TUI_STRUCTURE.md) | 终端目录职责与依赖方向 | 增加/移动 UI 模块 |
 | [BENCHMARKING](BENCHMARKING.md) | fixtures、执行器、独立评分和预算 | 跑离线证明或筹备 live 比较 |
+| [实测准备](benchmark/READINESS.md) | 个人四任务、十项固定 proof、候选身份与三阶段预算 | 准备 DeepSeek 实测 |
+| [English usage](USAGE.md) / [中文使用](USAGE.zh-CN.md) | 完整命令、SDK、恢复与交互契约 | README 上手后查阅细节 |
 | [历史归档](archive/README.md) | 旧交接、旧计划、当时的结果 | 追查设计来历时才读 |
 
 ## 最小阅读示例

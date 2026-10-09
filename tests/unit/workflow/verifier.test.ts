@@ -37,7 +37,7 @@ test("verification discovery prefers declared and lockfile package managers", as
     }), "utf8");
     await fs.writeFile(path.join(workspace, "pnpm-lock.yaml"), "lockfileVersion: 9\n", "utf8");
     const commands = await discoverVerificationCommands(workspace);
-    assert.deepEqual(commands.map((command) => command.command), ["npm run typecheck", "npm run test"]);
+    assert.deepEqual(commands.map((command) => command.command), [`npm${process.platform === "win32" ? ".cmd" : ""} run typecheck`, `npm${process.platform === "win32" ? ".cmd" : ""} run test`]);
     assert.equal(selectVerificationCommand(commands, "fast")?.id, "node:typecheck");
     assert.equal(selectVerificationCommand(commands, "full")?.id, "node:test");
   });
@@ -46,7 +46,7 @@ test("verification discovery prefers declared and lockfile package managers", as
     await fs.writeFile(path.join(workspace, "package.json"), JSON.stringify({ scripts: { lint: "eslint .", build: "tsc" } }), "utf8");
     await fs.writeFile(path.join(workspace, "yarn.lock"), "__metadata:\n", "utf8");
     const commands = await discoverVerificationCommands(workspace);
-    assert.deepEqual(commands.map((command) => command.command), ["yarn run lint", "yarn run build"]);
+    assert.deepEqual(commands.map((command) => command.command), [`yarn${process.platform === "win32" ? ".cmd" : ""} run lint`, `yarn${process.platform === "win32" ? ".cmd" : ""} run build`]);
   });
 });
 
@@ -102,8 +102,8 @@ test("full verification runs every Node check in order and stops at the first fa
       return { stdout: "", stderr: "", exitCode: command.endsWith("test") ? 1 : 0, signal: null };
     });
     assert.equal(suite.status, "failed");
-    assert.deepEqual(executed, ["pnpm run typecheck", "pnpm run lint", "pnpm run test"]);
-    assert.deepEqual(suite.skipped.map((command) => command.command), ["pnpm run build"]);
+    assert.deepEqual(executed, [`pnpm${process.platform === "win32" ? ".cmd" : ""} run typecheck`, `pnpm${process.platform === "win32" ? ".cmd" : ""} run lint`, `pnpm${process.platform === "win32" ? ".cmd" : ""} run test`]);
+    assert.deepEqual(suite.skipped.map((command) => command.command), [`pnpm${process.platform === "win32" ? ".cmd" : ""} run build`]);
   });
 });
 

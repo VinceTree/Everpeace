@@ -114,6 +114,8 @@ Performance trace 记录 context preparation、request snapshot、sampling、ret
 
 ## Acceptance sequence
 
+本轮个人四任务与新的最终候选准备流程见 [READINESS](benchmark/READINESS.md)。开发脚本将提示词、允许路径、外置参考解、独立断言、实际请求和取消恢复采集写入新的 owned root。固定任务可声明 `seedFailureContains`；proof 必须同时满足指定失败输出，并拒绝模块缺失、启动失败或超时。旧配置、旧成功和现有 dist 都不能替代最终代码重新构建后的 identity/preflight。
+
 正式对比顺序固定为：
 
 1. 每项 fixture 先独立证明 pristine pass → seed fail → reference repair pass。
@@ -122,4 +124,4 @@ Performance trace 记录 context preparation、request snapshot、sampling、ret
 
 三组固定模型原始 ID、`high` 推理、32K 产品输出预算、十五分钟任务时限和最多三轮诊断。报告独立通过次数、首次通过、人工介入、双方均成功任务的配对耗时、总 token/成功任务、缓存统计完整性，以及协议、sandbox、工具差异。
 
-十项离线 proof、命名 checkout worker、无凭据 preflight 路径和固定 dsh instrumentation 代码已完成；2026-10-02 已在 Windows Node 22 上安装并构建 pinned dsh checkout，Everpeace 与 dsh 的 preflight 均通过，十项 fixture 也全部证明 seed fail → reference pass。真实 API smoke、九十次对比及 Windows Terminal 验收仍未执行。真实调用需要另行显式授权，并同时给出 task 与 campaign token 预算；在此之前不能发布排名、冷缓存结论或相对 dsh 的性能优势声明。
+当前 proof、preflight、候选身份和真实终端的执行状态只在 [HANDOFF](HANDOFF.md) 维护。真实调用需要另行显式授权，并同时给出 task 与 campaign token 预算；在此之前不能发布排名、冷缓存结论或相对 dsh 的性能优势声明。

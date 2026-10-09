@@ -33,6 +33,12 @@ test("language-server policy is read-only, network denied, and rejects protected
   assert.equal(policy.networkMode, "deny");
   assert.match(args.join(" "), /everpeace-lsp-readonly/u);
   assert.match(args.join(" "), /:read-only/u);
+  const launcher = path.resolve("C:/temporary/everpeace-lsp-process-owned");
+  const launcherArgs = nativeLspPermissionProfileArgs(policy, launcher).join(" ");
+  assert.ok(launcherArgs.includes(JSON.stringify(launcher) + '=\"read\"'));
+  assert.throws(() => nativeLspPermissionProfileArgs(policy, root), /separate/u);
+  assert.throws(() => nativeLspPermissionProfileArgs(policy, path.join(root, ".everpeace")), /separate/u);
+  assert.throws(() => nativeLspPermissionProfileArgs(policy, "relative-launcher"), /separate/u);
   assert.throws(() => createLspSandboxPolicy(root, [path.join(root, ".everpeace")], {
     platform: "win32",
     env: { APPDATA: "C:\\Users\\test\\AppData\\Roaming" },
@@ -202,7 +208,7 @@ test("native Windows sandbox cancellation stops a detached payload descendant", 
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
-test("native LSP profile denies writes/state and fails closed when networking remains available", {
+test("native LSP profile denies writes, state reads and direct networking", {
   skip: process.platform !== "win32"
     ? "Windows-only native LSP sandbox integration"
     : process.env.GITHUB_ACTIONS === "true"
@@ -289,16 +295,17 @@ process.stdin.on('data', (chunk) => {
       verifyIsolation: false,
     });
     const result = await runtime.query({ operation: "hover", path: "sample.ts", line: 1, column: 1 });
-    assert.deepEqual(JSON.parse(result.hover ?? "{}"), { writeDenied: true, stateDenied: true, networkDenied: false });
-    assert.equal(connections, 1);
+    assert.deepEqual(JSON.parse(result.hover ?? "{}"), { writeDenied: true, stateDenied: true, networkDenied: true });
+    assert.equal(connections, 0);
     assert.equal(await fs.stat(attemptedWrite).then(() => true, () => false), false);
-    await assert.rejects(runtime.probeIsolation(), /direct networking was permitted/u);
+    await runtime.probeIsolation();
     assert.deepEqual(runtime.getIsolationEvidence(), {
-      outcome: "allowed",
+      outcome: "denied",
       positiveControl: "passed",
       transport: "tcp_ipv4",
       target: "non_loopback",
-      reason: "connection_succeeded",
+      reason: "socket_permission_denied",
+      socketError: "EACCES",
     });
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));

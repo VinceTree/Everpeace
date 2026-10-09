@@ -162,7 +162,7 @@ stop、waitAll 和 stopAll 等待已登记任务的完成 promise。cleanupFaile
 
 每次查询通过 pinned Codex backend 的 duplex 接口直接启动 executable/argv，不经过 shell wrapper，也不回退宿主执行。专用 `:read-only` 子策略拒绝 workspace 写入与应用全局状态，并请求 native network denial；该隔离不受用户选择 full access 影响。配置的 language server 启动前，宿主先用同一监听目标完成宿主连接正对照，再在相同策略中运行直接 socket 探针。只有明确的 `EACCES`/`EPERM` 才记为 denied；连接成功记为 allowed，拒绝连接、超时、无效输出或清理失败记为 inconclusive。只有 denied 可继续，其余均返回 unavailable。证据仅描述本次 TCP/IPv4 及 loopback/non-loopback 目标，不证明其他网络协议或地址都被隔离。传输保持 raw stdout、处理 stdin backpressure、持续 drain 有界 stderr，并等待进程清理后才推进队列或结算成功。任务取消或权限 revision 变化会取消查询。
 
-`:read-only` 的平台 ambient system read 与临时目录能力仍然存在；额外源码根用于明确记录所需依赖，并不表示其余 ambient reads 被移除。Windows 上的固定 `@openai/codex@0.155.1` 已实测拒绝 workspace 写入与 Everpeace 应用状态读取，但仍允许直接网络探针，因此当前 Windows 原生 LSP 导航会失败关闭。原生可用性必须按平台验收，不能从 profile 名称或 CLI 参数推断；通用 language-server registry 和进程池尚未启用。
+`:read-only` 的平台 ambient system read 与临时目录能力仍然存在；额外源码根用于明确记录所需依赖，并不表示其余 ambient reads 被移除。Windows 使用固定后端与 MXC 配置，原生 fixture 同时验证 workspace 写入、应用状态读取和直接 TCP 探针拒绝；真实 TypeScript server 四类查询已有证据，见 [HANDOFF](../HANDOFF.md)。Node promise realpath 的 EPERM 兼容适配仅在 sandbox 内的 LSP 子进程加载，仍真实解析 symlink 并遵守 OS 权限；临时 launcher 根只读、与工作区及保护状态分离，退出及清理结束后才推进队列。原生可用性仍逐平台验收，不能从 profile 名称推断；通用 registry 和进程池尚未启用。
 
 duplex 的重复 terminate 共用同一清理 promise，不使用固定延时冒充进程退出。普通传输错误与成功资源清理分开报告，真正清理失败始终保留为 ProcessCleanupError。RPC 关闭先发送 stdin EOF，短暂等待自然退出后才请求强制终止；这个期限仅触发清理，不能提前结算。查询或隔离探针的清理失败永久关闭当前 navigation runtime 的准入，已排队查询也不能启动替代 server；隔离证据保留 inconclusive/probe_cleanup_failed。回归见 [duplex lifecycle](../../tests/unit/codex/process-lifecycle.test.ts)、[navigation](../../tests/unit/tools/code-navigation.test.ts) 和 [Agent settlement](../../tests/unit/workflow/cleanup-settlement.test.ts)。
 

@@ -2716,6 +2716,7 @@ export function EverpeaceApp({
       {confirmation ? (
         <Box flexDirection="column">
           <ApprovalConfirmation
+            inputHandledByPrompt
             kind={confirmation.kind}
             request={confirmation.request}
             onConfirm={() => finishConfirmation(true)}
@@ -2728,6 +2729,7 @@ export function EverpeaceApp({
             key={`prompt-${inputKey}`}
             activeModelName={activeModel?.model_name}
             placeholder="Add guidance while waiting for approval"
+            onApprovalChoice={finishConfirmation}
             history={resumedInputHistory ?? inputHistory}
             editorRef={editorRef}
             historyNavigationRef={historyNavigationRef}

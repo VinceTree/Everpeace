@@ -9,6 +9,21 @@ import {
   SkillCatalog,
 } from "../../../src/skills/catalog.js";
 
+test("explicit fixture roots exclude normal workspace discovery", async () => {
+  const root = await fs.mkdtemp(join(tmpdir(), "everpeace-isolated-skills-"));
+  try {
+    const workspace = join(root, "workspace");
+    const isolated = join(root, "isolated");
+    for (const [directory, name] of [[join(workspace, ".agents", "skills", "normal"), "normal"], [join(isolated, "fixture"), "fixture"]]) {
+      await fs.mkdir(directory!, { recursive: true });
+      await fs.writeFile(join(directory!, "SKILL.md"), `---\nname: ${name}\ndescription: Isolated discovery test\n---\nInstructions\n`);
+    }
+    const catalog = new SkillCatalog(workspace, { roots: [{ path: isolated, scope: "repo" }] });
+    assert.deepEqual((await catalog.refresh()).skills.map((skill) => skill.name), ["fixture"]);
+    assert.equal(JSON.parse(await catalog.read('{"name":"normal"}')).status, "error");
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
 test("skill metadata requires Codex-style frontmatter", () => {
   const skill = parseSkillMetadata(
     "---\nname: demo\ndescription: Use this skill for focused demos.\nmetadata:\n  short-description: Demo helper\n---\nInstructions",

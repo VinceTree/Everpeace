@@ -8,7 +8,7 @@
 - MCP：`codex-rs/core/src/mcp.rs`、`codex-rs/core/src/session/mcp_runtime.rs`、`codex-rs/core/src/tools/handlers/mcp.rs` 和 `codex-rs/core/src/mcp_tool_call.rs`。
 - Skills：`codex-rs/skills/src/parser.rs`、`codex-rs/ext/skills/src/host_roots.rs`、`catalog_prompt.rs` 和 `tools/read.rs`。
 
-Everpeace 没有复制整套 Rust runtime；它固定依赖 `@openai/codex@0.155.1` 作为 sandbox 执行后端，使用官方 MCP TypeScript SDK，并在现有 Responses/ReAct 循环内实现 Codex 对齐的主机 Skill 发现与渐进读取。
+Everpeace 没有复制整套 Rust runtime；它固定依赖 `@openai/codex@0.162.0` 作为 sandbox 执行后端，Windows 启动时显式选择 MXC，使用官方 MCP TypeScript SDK，并在现有 Responses/ReAct 循环内实现 Codex 对齐的主机 Skill 发现与渐进读取。
 
 ## Sandbox
 
@@ -57,7 +57,11 @@ MCP 文本投影保留文本、URI 和 MIME；只处理协议明确的 tool `con
 
 MCP 的真实 stdio 恢复回归见 [stdio-recovery.test.ts](../../tests/unit/mcp/stdio-recovery.test.ts)。fixture 启动期限覆盖 Node／tsx／SDK 冷启动，首代主动不回应初始化以触发超时；仍严格检查恰好两代、旧进程先退出、binding 失效和不重放。测试时间预算见 [开发指南](../DEVELOPMENT.md#独立测试-ci-与证据范围)，不会修改生产默认期限或恢复策略。
 
+MCP SDK 安全修复按 [官方公告](https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-6qxp-vccf-f47h) 升级并同步 lock。实际 `src/mcp/runtime.ts` 的 StreamableHTTP transport 仅传 requestInit headers，不配置 OAuth authProvider；stdio 也没有 OAuth 调用路径。依赖告警需要处理，但不能据此声称当前应用已经泄漏 OAuth client 凭据。stdio、Streamable HTTP、断连不重放与资源关闭仍由真实协议回归验证，远端告警状态在最终交接记录。
+
 ## Skills
+
+`SkillCatalog` 的开发/嵌入装配可显式提供发现根；传入时仅扫描这些根，不读取默认用户或系统目录。正常生产构造不传 roots，继续使用下面的完整发现规则。离线 TUI 用它加载本轮隔离 Skill，不修改用户环境或个人 Skill 库。
 
 `SkillCatalog` 按 Codex 主机 Skill 规则发现：
 

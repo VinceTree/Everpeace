@@ -21,6 +21,34 @@ afterEach(() => {
 });
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 20));
+test("approval keys have one owner and guidance letters and Enter cannot approve", async () => {
+  const editorRef = { current: createComposerState() };
+  const decisions: boolean[] = [];
+  const guidance: string[] = [];
+  const view = render(<Prompt activeModelName="test" editorRef={editorRef}
+    onApprovalChoice={(approved) => decisions.push(approved)}
+    onSubmit={(value) => { guidance.push(value); return true; }} />);
+  await tick();
+  view.stdin.write("y");
+  await tick();
+  assert.deepEqual(decisions, [true]);
+  assert.equal(editorRef.current.value, "");
+  view.stdin.write("o");
+  await tick();
+  view.stdin.write("n");
+  await tick();
+  view.stdin.write("y");
+  await tick();
+  view.stdin.write("\r");
+  await tick();
+  assert.deepEqual(guidance, ["ony"]);
+  assert.deepEqual(decisions, [true]);
+  assert.equal(editorRef.current.value, "");
+  view.stdin.write("\r");
+  await tick();
+  assert.deepEqual(decisions, [true, false]);
+  assert.deepEqual(guidance, ["ony"]);
+});
 async function waitFor(check: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt++) {
     if (check()) return;

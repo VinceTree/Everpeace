@@ -164,6 +164,7 @@ workflow 提供路径列表时同时返回 `changed_paths_total` 和 `changed_pa
 
 - Ctrl+C 在任务活动时取消；空闲且有草稿时清空；空闲且无草稿时退出。
 - 活动 coding turn 保留 guidance composer；支持 steering 的 Agent 即时记入可见 transcript，在采样/工具结果安全边界应用。未开始工具补 `steered` 结果；取消时仍保存已提交 guidance。不支持 steering 的替身保留 FIFO。
+- 工具审批与 guidance 共用一个 composer 输入所有者：空草稿时 y 批准、n 或 Enter 拒绝，这些按键不进入草稿；有草稿时 y/n 是正文，Enter 只提交 guidance，不同时批准工具。修改权限后仍按当前 revision 拒绝旧审批。App 与 prompt-submission 回归验证按键归属。
 - 取消、权限收紧、预算停止和异常都必须收束 task 拥有的后台进程树；清理完成前不能启动下一任务。最终检查期间也可取消，不能在取消后完成 Goal。
 - Agent 和辅助服务 dispose 关闭准入，取消并等待活动 turn、手动压缩、手动 Memory、辅助请求及其持久化/计量；provider 已返回也不提前结束 Memory 存储的所有权。重复关闭共用完成结果，真实清理或存储故障不被普通取消替代。预取消不产生请求或 unknown 样本，迟到的可靠 usage 仍计量，迟到结果不报告成功。
 - 用户直接 `!` 使用交互 PTY，由 Ink 单一 stdin 入口转发并独占输入；禁止同时注册原始 stdin 监听器。它由用户主动执行，不进模型 sandbox，也不进入模型 context，但可进入可恢复输出历史。

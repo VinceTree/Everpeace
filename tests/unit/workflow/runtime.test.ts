@@ -54,13 +54,13 @@ test("workflow requires the complete Node verification suite before completion",
     const executed: string[] = [];
     const completed = await runtime.finishTurn(async (command) => {
       executed.push(command);
-      return command === "pnpm run build"
+      return command === `pnpm${process.platform === "win32" ? ".cmd" : ""} run build`
         ? { stdout: "", stderr: "build failed", exitCode: 1, signal: null }
         : successfulBash();
     });
     assert.equal(completed.state.result, "failed");
     assert.equal(completed.state.phase, "diagnose");
-    assert.deepEqual(executed, ["pnpm run typecheck", "pnpm run lint", "pnpm run test", "pnpm run build"]);
+    assert.deepEqual(executed, [`pnpm${process.platform === "win32" ? ".cmd" : ""} run typecheck`, `pnpm${process.platform === "win32" ? ".cmd" : ""} run lint`, `pnpm${process.platform === "win32" ? ".cmd" : ""} run test`, `pnpm${process.platform === "win32" ? ".cmd" : ""} run build`]);
     assert.equal(completed.verificationSuite?.status, "failed");
   });
 });
@@ -79,7 +79,7 @@ test("workflow re-discovers checks created during the current turn", async () =>
     await runtime.afterPatch(operations, applied, async () => successfulBash());
     const commands: string[] = [];
     const completed = await runtime.finishTurn(async (command) => { commands.push(command); return successfulBash(); });
-    assert.deepEqual(commands, ["pnpm run test"]);
+    assert.deepEqual(commands, [`pnpm${process.platform === "win32" ? ".cmd" : ""} run test`]);
     assert.equal(completed.state.result, "verified");
   });
 });
