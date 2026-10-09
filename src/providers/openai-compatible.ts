@@ -7,6 +7,7 @@ import {
   resolveProviderCapabilities,
   type ModelRequestSettings,
   type ProviderCapabilities,
+  type ResponsesProfile,
 } from "./capabilities.js";
 
 export type ProviderName = "deepseek" | "openai";
@@ -108,7 +109,7 @@ export function sanitizeProviderRequest(
     delete next.prompt_cache_key;
     delete next.prompt_cache_retention;
   }
-  if (capabilities.provider !== "openai") {
+  if (capabilities.provider !== "openai" || capabilities.responsesProfile === "deepseek" || capabilities.responsesProfile === "generic") {
     delete next.store;
     delete next.parallel_tool_calls;
   }
@@ -124,8 +125,9 @@ export function createProviderRuntime(
   apiKey: string,
   settings?: Partial<ModelRequestSettings>,
   modelName?: string,
+  profile: ResponsesProfile = "auto",
 ): ProviderRuntime {
-  const capabilities = resolveProviderCapabilities(baseURL, modelName);
+  const capabilities = resolveProviderCapabilities(baseURL, modelName, profile);
   const sdk = createProviderClient(baseURL, apiKey);
   const responses: ProviderRuntime["responses"] = {
     create(params, options) {

@@ -24,7 +24,7 @@ import type {
   TokenUsageSample,
 } from "../../status/model-status.js";
 import type { AgentTaskOptions, AgentTurnOptions, AgentTurnResult } from "../../agent/react-agent.js";
-import type { ModelRequestSettings } from "../../providers/capabilities.js";
+import type { ModelRequestSettings, ResponsesProfile } from "../../providers/capabilities.js";
 import type { BackgroundJobSnapshot } from "../../tools/background-jobs.js";
 import type { FileAttachment } from "../../agent/file-attachments.js";
 import type { ContextInspectionSnapshot } from "../../agent/context-inspection.js";
@@ -71,6 +71,7 @@ export interface TuiModelRegistry {
     apiKey: string,
   ): Promise<StoredModelRegistration[]>;
   removeMany(ids: readonly string[]): Promise<StoredModelRegistration[]>;
+  setResponsesProfile?(model: Pick<StoredModelRegistration, "id" | "base_url" | "model_name">, profile: ResponsesProfile): Promise<StoredModelRegistration>;
 }
 
 export interface TuiDependencies {

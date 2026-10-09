@@ -1,4 +1,5 @@
 export { createBenchmarkMetricsCollector, type BenchmarkMetricsCollector } from "./metrics.js";
+export { compareAgentStrategies } from "./strategy-comparison.js";
 export { createBenchmarkCampaignPlan, runBenchmarkCampaign, type BenchmarkCampaignOptions, type BenchmarkCampaignPlanItem, type BenchmarkCampaignResult } from "./campaign.js";
 export { createFileBenchmarkArtifactSink, redactBenchmarkText } from "./artifacts.js";
 export { createProviderCapabilityProfile, type ProviderCapabilityOverrides } from "./capabilities.js";

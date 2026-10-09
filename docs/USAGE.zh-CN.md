@@ -167,8 +167,10 @@ TUI 命令：
 
 - `/login`：登录并立即启用一个模型。
 - `/model`：切换已注册模型，切换后重置对话上下文。
+- `/model profile auto|generic|deepseek`：为当前注册保存 Responses 协议配置。`auto` 按官方地址识别，`generic` 保持保守能力，`deepseek` 显式采用 DeepSeek 契约及 `none/low/high/max` 推理参数。中转标为用户配置，不标为已验证。仅空闲时可修改；保留兼容上下文和用量，清除旧请求设置与 Plan 批准并重建 Agent。存在不兼容 opaque 项时须先创建新 Session。地址或原始模型 ID 变化后重新验收；恢复的旧设置不能覆盖新 profile。
 - `/models`：查看所有模型和凭据状态。
 - `/status`：查看供应商协议、压缩方式、推理档位、context 占用及独立 token/cache 统计。
+- 状态界面同时显示实际 Responses profile、能力来源与发送到接口的推理值；不支持时显示 `Not sent`。`/models` 也显示这些设置，不显示凭据。
 - `/diff`：按 staged、unstaged、untracked 分组查看文件，并在分页高亮详情中明确显示二进制、符号链接、submodule 和截断状态。
 - `/context`：只读查看最近一次已准入 coding 请求的模型、估算、来源、工具、附件、条目计数及脱敏预览，不触发模型请求。
 - `/tasks`：查看当前 model-authored 执行清单和最新宿主 workflow 结果。清单完成仅表示进度，不能替代验证。

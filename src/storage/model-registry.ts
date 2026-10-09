@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { AuthStorage } from "./auth-storage.js";
-import { isModelRequestSettings, type ModelRequestSettings } from "../providers/capabilities.js";
+import { isModelRequestSettings, isResponsesProfile, type ModelRequestSettings, type ResponsesProfile } from "../providers/capabilities.js";
 
 const REGISTRY_VERSION = 1;
 
@@ -15,6 +15,7 @@ export interface StoredModelRegistration {
   created_at: string;
   updated_at: string;
   request_settings?: ModelRequestSettings;
+  responses_profile?: ResponsesProfile;
 }
 
 export interface RegisteredModel {
@@ -23,6 +24,7 @@ export interface RegisteredModel {
   base_url: string;
   api_key: string;
   request_settings?: ModelRequestSettings;
+  responses_profile?: ResponsesProfile;
 }
 
 export interface RegisteredModelStatus extends StoredModelRegistration {
@@ -79,6 +81,7 @@ function isStoredRegistration(value: unknown): value is StoredModelRegistration 
     isString(record.created_at) &&
     isString(record.updated_at)
     && (record.request_settings === undefined || isModelRequestSettings(record.request_settings))
+    && (record.responses_profile === undefined || isResponsesProfile(record.responses_profile))
   );
 }
 
@@ -152,6 +155,7 @@ export class ModelRegistry {
           model_name: model.model_name,
           base_url: model.base_url,
           api_key: apiKey,
+          ...(model.responses_profile === undefined ? {} : { responses_profile: model.responses_profile }),
           ...(model.request_settings ? { request_settings: { ...model.request_settings } } : {}),
         });
       }
@@ -218,6 +222,20 @@ export class ModelRegistry {
       }
       throw error;
     }
+  }
+
+  async setResponsesProfile(model: Pick<StoredModelRegistration, "id" | "base_url" | "model_name">, profile: ResponsesProfile): Promise<StoredModelRegistration> {
+    if (!isResponsesProfile(profile)) throw new Error("Use auto, generic, or deepseek for the Responses profile");
+    const registry = await this.#load();
+    const current = registry.models.find((entry) => entry.id === model.id);
+    if (!current || current.base_url !== model.base_url || current.model_name !== model.model_name) {
+      throw new Error("Model registration changed; select the model again before configuring its profile");
+    }
+    if (current.responses_profile !== profile) delete current.request_settings;
+    current.responses_profile = profile;
+    current.updated_at = this.#now().toISOString();
+    await this.#save(registry);
+    return { ...current };
   }
 
   async removeMany(ids: readonly string[]): Promise<StoredModelRegistration[]> {

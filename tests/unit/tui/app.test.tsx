@@ -1306,6 +1306,44 @@ test("/status keeps cumulative usage persistent while its command screen stays t
   resumedView.unmount();
 });
 
+test("/model profile persists configuration, preserves current context and reports effective reasoning", async () => {
+  const model: RegisteredModel = { id: "relay", model_name: "deepseek-flash", base_url: "https://cc2.caaa.tech/v1", api_key: "fixture-secret" };
+  const created: Array<{ model: RegisteredModel; context: readonly Record<string, unknown>[] }> = [];
+  const fixture = createFixture({ initial: [model], createAgent(selected, io, restore) {
+    created.push({ model: selected, context: restore?.initialContext ?? [] });
+    return { async runTurn(input) { await restore?.onContextAppend?.([{ role: "user", content: input }]); io.writeAssistant("saved context"); return {}; } };
+  } });
+  let saved = 0;
+  fixture.registry.setResponsesProfile = async (selected, profile) => { saved++; return { ...stored({ ...model, ...selected }), responses_profile: profile }; };
+  const view = render(<EverpeaceApp initialModels={await fixture.registry.resolveAll()} dependencies={fixture.dependencies} onReplayOutput={(callback) => callback()} />);
+  await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything"));
+  view.stdin.write("retain this task"); await tick(); view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("saved context"));
+  await tick();
+  view.stdin.write("/model profile deepseek"); await tick(); view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Profile is deepseek"));
+  assert.equal(saved, 1);
+  assert.equal(created.at(-1)!.model.responses_profile, "deepseek");
+  assert.ok(created.at(-1)!.context.some((item) => item.content === "retain this task"));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  view.stdin.write("\u001b");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything")).catch(() => assert.fail(view.lastFrame() ?? "No frame"));
+  view.stdin.write("/status"); await tick(); view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("configured")).catch(() => assert.fail(view.lastFrame() ?? "No frame"));
+  assert.match(view.lastFrame() ?? "", /configured/u);
+  assert.match(view.lastFrame() ?? "", /Reasoning sent:\s+high/u);
+  assert.ok(!(view.lastFrame() ?? "").includes("fixture-secret"));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  view.stdin.write("\u001b");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything"));
+  const before = created.length;
+  fixture.registry.setResponsesProfile = async () => { throw new Error("fixture storage failure"); };
+  view.stdin.write("/model profile generic"); await tick(); view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("fixture storage failure"));
+  assert.equal(created.length, before);
+  view.unmount();
+});
+
 test("/reasoning applies on the next turn and persists with the session model", async () => {
   const model: RegisteredModel = {
     id: "reasoning-model",

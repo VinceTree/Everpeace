@@ -2,6 +2,8 @@ import { pathToFileURL } from "node:url";
 import { RequestAttemptLedger } from "../agent/request-attempt-ledger.js";
 import type { RegisteredModel } from "../storage/model-registry.js";
 import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult, BenchmarkTask } from "./types.js";
+import { projectBenchmarkEvent } from "./event-projection.js";
+import type { LoopStrategy } from "../agent/tool-feedback-policy.js";
 
 interface CheckoutWorkerInput {
   mode?: "run" | "preflight";
@@ -10,6 +12,7 @@ interface CheckoutWorkerInput {
   tokenBudget?: number;
   sessionsRoot: string;
   model?: RegisteredModel;
+  loopStrategy?: LoopStrategy;
 }
 
 interface PreflightBoundaryEvidence {
@@ -102,7 +105,7 @@ export async function main(): Promise<void> {
     ? installPreflightProviderBoundary(request.model.model_name)
     : undefined;
   const module = await import(request.productionModule) as {
-    createProductionBenchmarkAdapter?: (options: { model: RegisteredModel; sessionsRoot: string }) => BenchmarkHarnessAdapter;
+    createProductionBenchmarkAdapter?: (options: { model: RegisteredModel; sessionsRoot: string; loopStrategy?: LoopStrategy }) => BenchmarkHarnessAdapter;
   };
   if (typeof module.createProductionBenchmarkAdapter !== "function") throw new Error("Checkout production module does not export createProductionBenchmarkAdapter");
   if (!request.model || !request.task || !request.sessionsRoot) throw new Error("Checkout worker run input is incomplete");
@@ -110,7 +113,7 @@ export async function main(): Promise<void> {
     throw new Error("Checkout benchmark requires high reasoning and 32768 output tokens");
   }
   const ledger = new RequestAttemptLedger({ ...(request.tokenBudget === undefined ? {} : { tokenBudget: request.tokenBudget }) });
-  const adapter = module.createProductionBenchmarkAdapter({ model: request.model, sessionsRoot: request.sessionsRoot });
+  const adapter = module.createProductionBenchmarkAdapter({ model: request.model, sessionsRoot: request.sessionsRoot, ...(request.loopStrategy === undefined ? {} : { loopStrategy: request.loopStrategy }) });
   const controller = new AbortController();
   const result = await adapter.run(request.task, {
     task: request.task,
@@ -119,8 +122,11 @@ export async function main(): Promise<void> {
     phase: "implement",
     ...(request.tokenBudget === undefined ? {} : { tokenBudgetRemaining: request.tokenBudget }),
     requestAttemptLedger: ledger,
-    onPhase() {},
-    onEvent() {},
+    onPhase(phase) { if (request.mode !== "preflight") process.stdout.write(`EVERPEACE_CHECKOUT_PHASE ${phase}\n`); },
+    onEvent(event) {
+      const projected = projectBenchmarkEvent(event);
+      if (projected && request.mode !== "preflight") process.stdout.write(`EVERPEACE_CHECKOUT_EVENT ${JSON.stringify(projected)}\n`);
+    },
   });
   if (request.mode === "preflight") {
     const evidence = preflightBoundary!.evidence();
@@ -133,7 +139,7 @@ export async function main(): Promise<void> {
     })}\n`);
     return;
   }
-  process.stdout.write(`EVERPEACE_CHECKOUT_RESULT ${JSON.stringify({ ...result, usage: usage(ledger) })}\n`);
+  process.stdout.write(`EVERPEACE_CHECKOUT_RESULT ${JSON.stringify({ ...result, usage: { ...result?.usage, ...usage(ledger) } })}\n`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

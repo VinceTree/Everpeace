@@ -16,6 +16,7 @@ export interface ProductionBenchmarkAdapterOptions {
   model: RegisteredModel;
   sessionsRoot: string;
   permissionPolicy?: PermissionPolicy;
+  loopStrategy?: import("../agent/tool-feedback-policy.js").LoopStrategy;
 }
 
 function safeName(value: string): string {
@@ -49,6 +50,7 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
           model_name: options.model.model_name,
           base_url: options.model.base_url,
           request_settings: { ...comparisonSettings },
+          ...(options.model.responses_profile === undefined ? {} : { responses_profile: options.model.responses_profile }),
         },
       });
       const workflow = new CodingWorkflowRuntime({
@@ -87,6 +89,7 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
       });
       const handle = createProductionAgent({
         model: { ...options.model, request_settings: comparisonSettings },
+        ...(options.loopStrategy === undefined ? {} : { loopStrategy: options.loopStrategy }),
         workspacePath,
         io,
         sessionStore,
@@ -117,7 +120,15 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
           },
         });
         const result = await runner.run({ text: task.prompt, source: "benchmark", signal: context.signal });
+        const snapshot = context.requestAttemptLedger.snapshot();
+        const saved = await sessionStore.load(session.id);
         return {
+          requestAttempts: snapshot.attempts.filter((attempt) => attempt.status !== "rejected").length,
+          usage: {
+            inputTokens: snapshot.inputTokens, outputTokens: snapshot.outputTokens, reasoningTokens: snapshot.reasoningTokens, complete: snapshot.complete,
+            ...(saved.usage.cached_input_tokens === undefined ? {} : { cachedInputTokens: saved.usage.cached_input_tokens }),
+            ...(saved.usage.cache_observed_input_tokens === undefined ? {} : { cacheObservedInputTokens: saved.usage.cache_observed_input_tokens }),
+          },
           terminalOutcome: result.disposition,
           ...(result.agentResult.stopReason ? { stopReason: result.agentResult.stopReason } : {}),
           ...(result.workflowResult?.state.result ? { workflowOutcome: result.workflowResult.state.result } : {}),

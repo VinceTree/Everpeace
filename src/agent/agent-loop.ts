@@ -39,6 +39,8 @@ export type LoopEvent =
   | { type: "model_progress"; milestone: "first_event" | "first_text" }
   | { type: "response_received"; response: LoopResponse }
   | { type: "response_rejected"; reason: "incomplete" | "invalid_tool_call" }
+  | { type: "request_composition"; instructionsBytes: number; toolsBytes: number; toolResultsBytes: number; requestBytes: number }
+  | { type: "tool_failure_repeated" }
   | { type: "tool_started"; call: ToolCall }
   | { type: "tool_finished"; call: ToolCall; output: string }
   | { type: "steering_applied"; count: number }
@@ -113,6 +115,7 @@ export interface AgentLoopOptions {
   toolCapabilities?(call: ToolCall): ToolCapabilities | undefined;
   canRunInParallel?(call: ToolCall): boolean;
   boundToolOutput?(output: string): string;
+  feedbackToolOutput?(call: ToolCall, output: string): string;
   /** Prepare bounded results without publishing retained output references. */
   prepareToolOutput?(output: string, call: ToolCall): PreparedToolOutput;
   /** Commit retained bytes and their reference in model call order. */
@@ -399,6 +402,10 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         const results: ToolRun[] = [];
         const persistToolResult = async (item: ToolRun): Promise<void> => {
           if (item.fatal) throw item.fatal;
+          if (options.feedbackToolOutput) {
+            item.output = options.feedbackToolOutput(item.call, item.output!);
+            if (item.prepared) item.prepared = { ...item.prepared, output: item.output };
+          }
           const record = { type: "function_call_output", call_id: item.call.call_id, output: item.output! };
           if (item.prepared && options.recordToolResult) await options.recordToolResult(record, item.prepared);
           else await options.record([record]);

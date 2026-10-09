@@ -145,7 +145,7 @@ function selectResumeModel(session: LoadedSession, resolved: ResolvedModels, wor
     ...selected,
     model: {
       ...selected.model,
-      ...(saved.request_settings ? { request_settings: { ...saved.request_settings } } : {}),
+      ...(saved.request_settings && saved.responses_profile === selected.model.responses_profile ? { request_settings: { ...saved.request_settings } } : {}),
     },
   };
 }
@@ -465,6 +465,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
           model_name: selected.model.model_name,
           base_url: selected.model.base_url,
           request_settings: { ...handle.provider.settings },
+          ...(selected.model.responses_profile === undefined ? {} : { responses_profile: selected.model.responses_profile }),
         },
       });
       sessionId = session.id;

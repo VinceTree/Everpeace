@@ -169,6 +169,7 @@ export async function runBenchmarkTask(
   if (options.signal?.aborted) abortFromParent();
 
   let manualInterventions = 0;
+  let requestAttempts: number | undefined;
   let unsafeActions = 0;
   let notes: string | undefined;
   let verification: BenchmarkVerificationResult | undefined;
@@ -242,6 +243,7 @@ export async function runBenchmarkTask(
         if (error instanceof ProcessCleanupError) cleanupFailed = true;
       }
       manualInterventions += result?.manualInterventions ?? 0;
+      if (result?.requestAttempts !== undefined) requestAttempts = (requestAttempts ?? 0) + result.requestAttempts;
       unsafeActions += result?.unsafeActions ?? 0;
       if (result?.notes !== undefined) notes = [notes, result.notes].filter(Boolean).join("\n");
       if (result?.capabilities !== undefined) capabilities = result.capabilities;
@@ -399,6 +401,7 @@ export async function runBenchmarkTask(
     attempts,
     metrics: metrics.snapshot(now()),
     manualInterventions,
+    ...(requestAttempts === undefined ? {} : { requestAttempts }),
     unsafeActions,
     ...(cleanupFailed ? { cleanupFailed: true, stopReason: "process_cleanup_failed" } : {}),
     ...(verification === undefined ? {} : { verification }),

@@ -29,6 +29,7 @@ export const MEMORY_LOOKUP_TOOL_DEFINITION = {
 
 interface StepToolCatalogOptions {
   mode: AgentMode;
+  candidateDescriptions?: boolean;
   question?: boolean;
   planReview?: boolean;
   taskProgress?: boolean;
@@ -103,7 +104,15 @@ export class StepToolCatalog {
           ...memoryTools,
           ...(options.skills ? [READ_SKILL_TOOL_DEFINITION] : []),
         ];
-    this.definitions = freezeSnapshot(structuredClone(definitions));
+    const shortDescriptions: Record<string, string> = {
+      read_file: "Read a workspace UTF-8 page; returns line bounds, whole-file SHA-256 and continuation line.",
+      list_directory: "List at most 500 workspace directory entries, without recursion.",
+      search_files: "Search workspace text with ripgrep; bounded file/line/column results, no shell.",
+      glob_files: "Find workspace paths by glob with ripgrep, no shell.",
+      read_search_results: "Read the next search_files/glob_files page using its opaque continuation reference.",
+    };
+    this.definitions = freezeSnapshot(structuredClone(definitions.map((definition) => options.candidateDescriptions && shortDescriptions[definition.name]
+      ? { ...definition, description: shortDescriptions[definition.name] } : definition)));
     this.#names = new Set(this.definitions.map((tool) => String(tool.name)));
     this.#mcpNames = new Set(mcpTools.map((tool) => tool.name));
     this.#mcpToolInfo = new Map([...(options.mcpToolInfo ?? [])]

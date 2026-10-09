@@ -54,6 +54,23 @@ async function createTestRegistry(): Promise<{
   };
 }
 
+test("Responses profile survives restart without copying keys and rejects a changed registration", async () => {
+  const fixture = await createTestRegistry();
+  try {
+    const [model] = await fixture.registry.registerMany("https://cc2.caaa.tech/v1", ["deepseek-flash"], "profile-secret");
+    assert.equal(model!.responses_profile, undefined);
+    await fixture.registry.setResponsesProfile(model!, "deepseek");
+    const restarted = new ModelRegistry({ authStorage: fixture.auth, filePath: fixture.filePath });
+    assert.equal((await restarted.resolveAll()).available[0]!.responses_profile, "deepseek");
+    assert.equal((await restarted.resolveAll()).available[0]!.api_key, "profile-secret");
+    assert.ok(!(await fs.readFile(fixture.filePath, "utf8")).includes("profile-secret"));
+    await assert.rejects(restarted.setResponsesProfile({ ...model!, base_url: "https://other.example/v1" }, "deepseek"), /registration changed/u);
+    await assert.rejects(restarted.setResponsesProfile({ ...model!, model_name: "another" }, "deepseek"), /registration changed/u);
+    await restarted.setResponsesProfile(model!, "auto");
+    assert.equal((await restarted.resolveAll()).available[0]!.responses_profile, "auto");
+  } finally { await fixture.cleanup(); }
+});
+
 test("registerMany stores metadata without writing the API Key to JSON", async () => {
   const fixture = await createTestRegistry();
   try {

@@ -60,3 +60,20 @@ test("opaque provider context is detected before cross-provider restore", () => 
   assert.equal(canReuseOpaqueProviderContext("https://first.example/v1", "https://second.example/v1"), false);
   assert.equal(canReuseOpaqueProviderContext("https://first.example/v1/", "https://first.example/v1"), true);
 });
+
+test("relay profiles are explicit, endpoint-scoped configuration, never official observations", () => {
+  const base = "https://cc2.caaa.tech/v1";
+  const automatic = resolveProviderCapabilities(base, "deepseek-flash");
+  assert.equal(automatic.responsesProfile, "generic");
+  assert.equal(automatic.reasoningEffort, false);
+  const configured = resolveProviderCapabilities(base, "deepseek-flash", "deepseek");
+  assert.equal(configured.provider, "compatible");
+  assert.equal(configured.source, "configured");
+  assert.equal(configured.responsesProfile, "deepseek");
+  for (const [setting, wire] of [["off", "none"], ["low", "low"], ["high", "high"], ["max", "max"]] as const) {
+    assert.equal(requestReasoningEffort(configured, setting), wire);
+  }
+  assert.equal(resolveProviderCapabilities("https://api.deepseek.com", "deepseek-flash", "generic").reasoningEffort, false);
+  assert.equal(resolveProviderCapabilities(base, "different-model").reasoningEffort, false);
+  assert.equal(resolveProviderCapabilities("https://other.example/v1", "deepseek-flash").reasoningEffort, false);
+});

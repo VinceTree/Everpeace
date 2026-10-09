@@ -167,8 +167,10 @@ TUI commands:
 
 - `/login`: Sign in and activate a model immediately.
 - `/model`: Switch to a registered model and reset the conversation context.
+- `/model profile auto|generic|deepseek`: Persist a Responses profile for the selected registration. `auto` detects official endpoints; `generic` keeps conservative capabilities; `deepseek` explicitly configures the DeepSeek contract, including reasoning `none/low/high/max`. Relay configuration is labelled configured, never verified. This idle-only change preserves compatible context and usage, invalidates Plan approval and old request settings, and rebuilds the Agent. Incompatible opaque context requires a new Session first. Address/model changes require a fresh compatibility check; resumed settings cannot override a changed profile.
 - `/models`: List all registered models and credential states.
 - `/status`: Show provider protocol, compaction mode, reasoning level, context usage, and independent token/cache statistics.
+- The status screen also shows the effective Responses profile, capability source and wire reasoning value (`Not sent` for unsupported profiles). `/models` lists these settings without exposing credentials.
 - `/diff`: Review staged, unstaged, and untracked workspace changes in a file list with highlighted, paged detail; binary, symlink, submodule, and truncation states are explicit.
 - `/context`: Inspect the last admitted coding request's model, estimates, sources, tools, attachments, item counts, and redacted previews without making a model request.
 - `/tasks`: Inspect the current model-authored execution checklist and the latest host workflow result. Checklist completion is advisory and never replaces verification.

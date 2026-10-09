@@ -1,5 +1,13 @@
 # 当前开发计划
 
+## DeepSeek Agent Loop 当前实施范围
+
+工程实现已将 provider 指令投影、注册 profile、完整 reasoning 回传与恢复集中到共享生产入口；中转配置和实测能力分开。候选调度提示、精简描述及重复失败反馈显式 opt-in，默认 baseline；四路安全读取、危险操作屏障、持久化和验证结算边界保持。
+
+新增两项离线兼容任务和 A/B 的六次 smoke、六十次正式配置，冻结实际候选及评测材料。本轮只运行无凭据证据，不发付费请求；原始报告保存在本地，首页不新增 DeepSeek 质量或节省宣称。当前工程门禁、fixture proof 和候选身份见 [HANDOFF](HANDOFF.md)，运行方式及待授权的数值预算见 [评测指南](BENCHMARKING.md#deepseek-loop-ab-acceptance)。
+
+结论按三项维护：协议工程兼容、自然编码任务质量、token 效率。后两项在 live A/B 完成前保持 pending；逐任务质量不退、人工介入不增、安全结算无回退且计量完整，才能判断效率；共同成功任务 token 中位数下降至少 10% 才描述为该样本观察到节省。未经证实的候选优化不成为默认行为。
+
 目标是完成 DeepSeek 优先、Windows 优先、单 Agent、Node/TypeScript 单包个人开发 CLI 的工程能力，并取得付费实测条件。真实 Windows Terminal 必需场景已验收，实际发现的 resize 与历史监听器问题已修复并复验；最终候选门禁与交付状态见 [HANDOFF](HANDOFF.md)。工程准备与真实模型能力分开判断；当前版本、候选、检查数和收据只在交接维护。
 
 本轮完善中转请求失败诊断、Web 搜索备用服务时限和重定向边界，并提供独立生产 runner 工具验收 fixture。后续继续完善 Responses 流结束诊断、Plan 修订审批与搜索相关性验收。详细实测结果只在本地保存；用户后续明确授权在双语 README 展示汇总图及范围说明。模型比较和成本优势需独立评测，不能从工具覆盖推断。

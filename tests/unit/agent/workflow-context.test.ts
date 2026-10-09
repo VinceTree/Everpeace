@@ -15,7 +15,7 @@ import { checkpointText } from "../../fixtures/conversation-checkpoint.js";
 function workflowFromRequest(request: Record<string, unknown>): WorkflowContext {
   const text = JSON.stringify(request);
   const decoded = JSON.parse(text) as { input?: Array<{ content?: string }>; instructions?: string };
-  const instructions = decoded.instructions ?? decoded.input?.map((item) => typeof item.content === "string" ? item.content : "").join("\n") ?? "";
+  const instructions = [decoded.instructions ?? "", ...(decoded.input?.map((item) => typeof item.content === "string" ? item.content : "") ?? [])].join("\n");
   const line = instructions.split("\n").find((value) => value.startsWith("Current host workflow facts: "));
   assert.ok(line);
   return JSON.parse(line.slice("Current host workflow facts: ".length)) as WorkflowContext;

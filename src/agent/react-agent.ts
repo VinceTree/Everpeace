@@ -1,5 +1,7 @@
 import { LoopSteeredError, LoopStoppedError, runAgentLoop, classifySamplingError, type LoopEvent, type LoopPhase, type ToolCall, type LoopStopReason, integerBudget } from "./agent-loop.js";
 import path from "node:path";
+import { projectCodingContext } from "../providers/request-projection.js";
+import { CANDIDATE_CODING_INSTRUCTIONS, CANDIDATE_SCHEDULING_INSTRUCTIONS, ToolFeedbackPolicy, type LoopStrategy } from "./tool-feedback-policy.js";
 import { PersistenceError, persistState } from "../storage/persistence-error.js";
 import { repairToolContext } from "./repair-context.js";
 import { CHECKPOINT_INSTRUCTION, checkpointRetentionCut, frameCheckpoint, projectConversationCheckpoints, validateCheckpoint } from "./conversation-checkpoint.js";
@@ -249,6 +251,7 @@ export interface ReactAgentOptions {
   promptCacheOptions?: PromptCacheOptions;
   /** Host scheduling for safe read-only tools; independent from provider request hints. */
   parallelReadTools?: boolean;
+  loopStrategy?: LoopStrategy;
   parallelToolCalls?: boolean;
   samplingRetryBudget?: number;
   maxSteps?: number;
@@ -611,6 +614,9 @@ export class ReactAgent {
   #streamRecoveryRemaining = 0;
   readonly #parallelToolCalls: boolean;
   readonly #parallelReadTools: boolean;
+  readonly #loopStrategy: LoopStrategy;
+  readonly #toolFeedback = new ToolFeedbackPolicy();
+  #taskActive = false;
   readonly #samplingRetryBudget: number;
   readonly #maxSteps: number;
   readonly #taskStepLimitEnabled: boolean;
@@ -652,6 +658,7 @@ export class ReactAgent {
     this.#advancedPromptCacheEnabled = options.promptCacheOptions !== undefined;
     this.#parallelToolCalls = options.parallelToolCalls === true;
     this.#parallelReadTools = options.parallelReadTools === true;
+    this.#loopStrategy = options.loopStrategy ?? "baseline";
     this.#samplingRetryBudget = integerBudget("samplingRetryBudget", options.samplingRetryBudget, 2);
     this.#maxSteps = integerBudget("maxSteps", options.maxSteps, 32, 1);
     this.#taskStepLimitEnabled = options.maxSteps !== undefined;
@@ -733,6 +740,8 @@ export class ReactAgent {
     await this.#learnedMemory?.beginTask?.();
     this.#assertAvailable();
     this.#requestAttemptLedger?.reset();
+    this.#toolFeedback.reset();
+    this.#taskActive = true;
     this.#taskStepsRemaining = this.#taskStepLimitEnabled ? this.#maxSteps : undefined;
     this.#taskGeneration += 1;
     this.#backgroundNoticeAdmission = options.mode === "default";
@@ -749,6 +758,8 @@ export class ReactAgent {
   }
 
   #clearTaskState(): void {
+    this.#taskActive = false;
+    this.#toolFeedback.reset();
     this.#taskStepsRemaining = undefined;
     this.#backgroundNoticeAdmission = false;
     this.#taskGeneration += 1;
@@ -799,6 +810,7 @@ export class ReactAgent {
     if (this.#running) throw new Error("An agent turn is already running");
     if (this.#compacting) throw new Error("Cannot start an agent turn during context compaction");
     signal?.throwIfAborted();
+    if (!this.#taskActive) this.#toolFeedback.reset();
     const controller = new AbortController();
     this.#turnController = controller;
     const ownedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
@@ -897,6 +909,7 @@ export class ReactAgent {
            */
           this.#stepToolCatalog = new StepToolCatalog({
             mode: this.#turnMode,
+            candidateDescriptions: this.#loopStrategy === "candidate",
             question: this.#questionInteraction !== undefined,
             planReview: this.#planInteraction !== undefined,
             taskProgress: this.#io.setTaskProgress !== undefined,
@@ -940,6 +953,12 @@ export class ReactAgent {
         record: (items) => this.#record(items),
         dispatch: (call, loopSignal) => this.#dispatchTool(call, loopSignal),
         boundToolOutput: (output) => this.#toolOutputs.bound(output),
+        feedbackToolOutput: (call, output) => {
+          const feedback = this.#toolFeedback.observe(call, output, this.#loopStrategy === "candidate");
+          if (feedback.repeated) this.#onEvent?.({ type: "tool_failure_repeated" });
+          // Small feedback stays inline. Large retained bodies are unchanged.
+          return Buffer.byteLength(feedback.output, "utf8") <= MODEL_TOOL_OUTPUT_MAX_BYTES ? feedback.output : output;
+        },
         ...(this.#onToolResultAppend ? {
           prepareToolOutput: (output: string, call: ToolCall) => prepareToolOutput(output, call.name),
           recordToolResult: (item: Record<string, unknown>, prepared: PreparedToolOutput) => this.#recordToolResult(item, prepared),
@@ -1877,16 +1896,14 @@ export class ReactAgent {
     const effort = requestReasoningEffort(this.#providerCapabilities, summarySettings.reasoningEffort);
     const stableInstructions = this.#stableInstructions();
     const identityInstructions = [runtimeIdentityInstructions(this.#providerCapabilities.provider, this.#model, this.#workspacePath), workflowInstructions].filter(Boolean).join("\n");
+    const summaryContext = projectCodingContext({ capabilities: this.#providerCapabilities, stableInstructions, dynamicInstructions: identityInstructions, input: prefix, explicitCacheLayout: false });
     const response = await this.#runProviderAttempt(
       "summary",
       () => this.#client.responses.create({
         model: this.#model,
-        input: [
-          { type: "message", role: "developer", content: stableInstructions },
-          ...prefix,
-          { type: "message", role: "developer", content: identityInstructions },
-          { type: "message", role: "user", content: CHECKPOINT_INSTRUCTION },
-        ],
+        ...summaryContext,
+        // Summarization is a user request, after the latest host state.
+        input: [...summaryContext.input, { type: "message", role: "user", content: CHECKPOINT_INSTRUCTION }],
         tools: structuredClone(this.#stepToolCatalog?.definitions ?? []),
         tool_choice: "none",
         max_output_tokens: summarySettings.maxOutputTokens,
@@ -1962,6 +1979,7 @@ export class ReactAgent {
             "coding",
             () => {
               this.#publishContextInspection(snapshot, stableInstructions, dynamicInstructions);
+              this.#reportRequestComposition(params, stableInstructions, dynamicInstructions);
               return consumeStreamAttempt((attemptOptions) => this.#client.responses.stream!(params, attemptOptions));
             },
           );
@@ -1977,6 +1995,7 @@ export class ReactAgent {
             try {
               const result = await this.#runProviderAttempt("coding", async () => {
                 this.#publishContextInspection(snapshot, stableInstructions, dynamicInstructions);
+                this.#reportRequestComposition(params, stableInstructions, dynamicInstructions);
                 const recoveryController = new AbortController();
                 const recoverySignal = signal
                   ? AbortSignal.any([signal, recoveryController.signal])
@@ -2013,6 +2032,7 @@ export class ReactAgent {
           this.#onEvent?.({ type: "sampling_started" });
           return this.#runProviderAttempt("coding", () => {
             this.#publishContextInspection(snapshot, stableInstructions, dynamicInstructions);
+            this.#reportRequestComposition(params, stableInstructions, dynamicInstructions);
             return this.#client.responses.create(params, options);
           });
         }
@@ -2021,6 +2041,7 @@ export class ReactAgent {
     }
     return this.#runProviderAttempt("coding", () => {
       this.#publishContextInspection(snapshot, stableInstructions, dynamicInstructions);
+      this.#reportRequestComposition(params, stableInstructions, dynamicInstructions);
       return this.#client.responses.create(params, options);
     });
   }
@@ -2070,8 +2091,15 @@ export class ReactAgent {
     }
   }
 
+  #reportRequestComposition(request: Record<string, unknown>, stable: string, dynamic: string): void {
+    const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value) ?? "", "utf8");
+    const items = Array.isArray(request.input) ? request.input as Array<Record<string, unknown>> : [];
+    this.#onEvent?.({ type: "request_composition", instructionsBytes: size(stable) + size(dynamic), toolsBytes: size(request.tools ?? []), toolResultsBytes: size(items.filter((item) => item.type === "function_call_output")), requestBytes: size(request) });
+  }
+
   #stableInstructions(): string {
-    return [COMMON_INSTRUCTIONS, this.#turnMode === "plan" ? PLAN_INSTRUCTIONS : CODING_INSTRUCTIONS, PERMISSION_INSTRUCTIONS].join("\n");
+    const coding = this.#loopStrategy === "candidate" ? CANDIDATE_CODING_INSTRUCTIONS : CODING_INSTRUCTIONS;
+    return [COMMON_INSTRUCTIONS, this.#turnMode === "plan" ? PLAN_INSTRUCTIONS : coding, PERMISSION_INSTRUCTIONS, this.#loopStrategy === "candidate" ? CANDIDATE_SCHEDULING_INSTRUCTIONS : ""].filter(Boolean).join("\n");
   }
 
   #buildRequestSnapshot(
@@ -2109,29 +2137,15 @@ export class ReactAgent {
       .join("\n\n");
     const cache = this.#promptCacheRequest(advancedPromptCache);
     const useAdvancedLayout = cache.key !== undefined && advancedPromptCache;
-    const useMessageLayout = useAdvancedLayout || this.#providerCapabilities.provider === "deepseek";
     const effectiveInput = projectConversationCheckpoints(input.filter((item) => !isPersistedProjectRuleSnapshot(item)));
-    const requestInput = useMessageLayout
-      ? [
-          {
-            type: "message",
-            role: "developer",
-            content: useAdvancedLayout
-              ? [{ type: "input_text", text: stableInstructions, prompt_cache_breakpoint: { mode: "explicit" } }]
-              : stableInstructions,
-          },
-          ...effectiveInput,
-          { type: "message", role: "developer", content: dynamicInstructions },
-        ]
-      : effectiveInput;
+    const projected = projectCodingContext({ capabilities: this.#providerCapabilities, stableInstructions, dynamicInstructions, input: effectiveInput, explicitCacheLayout: useAdvancedLayout });
     const reasoningEffort = requestReasoningEffort(
       this.#providerCapabilities,
       this.#requestSettings.reasoningEffort,
     );
     const request = {
         model: this.#model,
-        ...(useMessageLayout ? {} : { instructions: `${stableInstructions}\n${dynamicInstructions}` }),
-        input: requestInput,
+        ...projected,
         tools: structuredClone(this.#stepToolCatalog?.definitions ?? []),
         tool_choice: "auto",
         ...(this.#providerCapabilities.provider === "openai"

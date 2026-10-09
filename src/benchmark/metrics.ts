@@ -35,6 +35,9 @@ export function createBenchmarkMetricsCollector(now: () => number = Date.now): B
   let toolResults = 0;
   let toolFailures = 0;
   let toolBatches = 0;
+  const toolBatchSizes: number[] = [];
+  let repeatedToolFailures = 0;
+  const requestComposition = { count: 0, instructionsBytes: 0, toolsBytes: 0, toolResultsBytes: 0, requestBytes: 0 };
   let firstToolStartDelayMs: number | null = null;
   let firstModelEventDelayMs: number | null = null;
   let firstModelTextDelayMs: number | null = null;
@@ -62,6 +65,7 @@ export function createBenchmarkMetricsCollector(now: () => number = Date.now): B
           break;
         case "response_received":
           responses += 1;
+          toolBatchSizes.push(event.response.output.filter((item) => item.type === "function_call").length);
           break;
         case "response_rejected":
           responseRejections += 1;
@@ -101,6 +105,16 @@ export function createBenchmarkMetricsCollector(now: () => number = Date.now): B
         case "timing_recorded":
           trace.record(event.operation, event.durationMs);
           break;
+        case "request_composition":
+          requestComposition.count += 1;
+          requestComposition.instructionsBytes += event.instructionsBytes;
+          requestComposition.toolsBytes += event.toolsBytes;
+          requestComposition.toolResultsBytes += event.toolResultsBytes;
+          requestComposition.requestBytes += event.requestBytes;
+          break;
+        case "tool_failure_repeated":
+          repeatedToolFailures += 1;
+          break;
         default:
           break;
       }
@@ -119,6 +133,9 @@ export function createBenchmarkMetricsCollector(now: () => number = Date.now): B
         unclosedToolCalls: [...startedTools].filter((callId) => !finishedTools.has(callId)).length,
         toolFailures,
         toolBatches,
+        toolBatchSizes: [...toolBatchSizes],
+        repeatedToolFailures,
+        requestComposition: { ...requestComposition },
         toolResultOrder: [...toolResultOrder],
         firstToolStartDelayMs,
         firstModelEventDelayMs,

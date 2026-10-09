@@ -13,6 +13,10 @@ import { createProductionBenchmarkAdapter } from "./production.js";
 import { createInstrumentedDshAdapter, PINNED_DSH_REVISION } from "./dsh.js";
 import { createCheckoutBenchmarkAdapter, preflightBenchmarkCheckout } from "./checkout.js";
 import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult, BenchmarkTask } from "./types.js";
+import { isResponsesProfile, type ResponsesProfile } from "../providers/capabilities.js";
+import { normalizeBaseUrl } from "../providers/openai-compatible.js";
+import { compareAgentStrategies } from "./strategy-comparison.js";
+import { captureBenchmarkEvaluationDigest } from "./evaluation-identity.js";
 
 interface ExternalHarnessConfig {
   kind: "instrumented-process";
@@ -35,6 +39,7 @@ interface CheckoutHarnessConfig {
   sourceDigest: string;
   buildDigest: string;
   expected: { model: string; reasoning: "high"; maxOutputTokens: 32_768 };
+  loopStrategy?: "baseline" | "candidate";
 }
 
 interface DshHarnessConfig {
@@ -56,6 +61,9 @@ export interface CampaignConfig {
   artifactsRoot: string;
   sessionsRoot: string;
   modelId: string;
+  responsesProfile?: ResponsesProfile;
+  modelBaseUrl?: string;
+  evaluationDigest?: string;
   seed: number;
   repetitions: number;
   taskTokenBudget: number;
@@ -128,9 +136,11 @@ export function parseCampaignConfig(value: unknown, configPath: string): Campaig
       };
     }
     if (harness.kind === "everpeace-checkout") {
+      if (harness.loopStrategy !== undefined && harness.loopStrategy !== "baseline" && harness.loopStrategy !== "candidate") throw new Error("loopStrategy must be baseline or candidate");
       return {
         kind: "everpeace-checkout",
         ...shared,
+        ...(harness.loopStrategy === undefined ? {} : { loopStrategy: harness.loopStrategy as "baseline" | "candidate" }),
         sourceRoot: resolve(root, string(harness.sourceRoot, `harnesses[${index}].sourceRoot`)),
         entryPath: resolve(root, string(harness.entryPath, `harnesses[${index}].entryPath`)),
         sourceDigest: sha256(harness.sourceDigest, `harnesses[${index}].sourceDigest`),
@@ -149,6 +159,7 @@ export function parseCampaignConfig(value: unknown, configPath: string): Campaig
   if (new Set(harnessNames).size !== harnessNames.length) throw new Error("Harness names must be unique");
   const path = (field: string) => resolve(root, string(input[field], field));
   const taskIds = input.taskIds === undefined ? undefined : stringArray(input.taskIds, "taskIds");
+  if (input.responsesProfile !== undefined && !isResponsesProfile(input.responsesProfile)) throw new Error("Invalid responsesProfile");
   if (taskIds?.length === 0) throw new Error("taskIds must contain at least one task when provided");
   if (taskIds && new Set(taskIds).size !== taskIds.length) throw new Error("taskIds must not contain duplicates");
   return {
@@ -159,6 +170,9 @@ export function parseCampaignConfig(value: unknown, configPath: string): Campaig
     artifactsRoot: path("artifactsRoot"),
     sessionsRoot: path("sessionsRoot"),
     modelId: string(input.modelId, "modelId"),
+    ...(input.responsesProfile === undefined ? {} : { responsesProfile: input.responsesProfile as ResponsesProfile }),
+    ...(input.modelBaseUrl === undefined ? {} : { modelBaseUrl: normalizeBaseUrl(string(input.modelBaseUrl, "modelBaseUrl")) }),
+    ...(input.evaluationDigest === undefined ? {} : { evaluationDigest: sha256(input.evaluationDigest, "evaluationDigest") }),
     seed: integer(input.seed, "seed"),
     repetitions: integer(input.repetitions, "repetitions"),
     taskTokenBudget: integer(input.taskTokenBudget, "taskTokenBudget"),
@@ -258,7 +272,7 @@ export async function preflight(config: CampaignConfig): Promise<void> {
         throw new Error("Credential-free preflight requires a named everpeace-checkout with revision and source/build digests");
       }
       if (harness.kind === "everpeace-checkout") {
-        const identity = await preflightBenchmarkCheckout({ ...harness, modelName: harness.expected.model });
+        const identity = await preflightBenchmarkCheckout({ ...harness, modelName: harness.expected.model, ...(config.responsesProfile === undefined ? {} : { responsesProfile: config.responsesProfile }), ...(config.modelBaseUrl === undefined ? {} : { modelBaseUrl: config.modelBaseUrl }) });
         results.push({ name, kind: harness.kind, status: "passed", evidence: { ...identity, loaded: true, reasoning: "high", maxOutputTokens: 32_768 } });
         continue;
       }
@@ -338,7 +352,8 @@ async function live(config: CampaignConfig): Promise<void> {
   const models = await registry.resolveAll();
   const matches = models.available.filter((model) => model.id === config.modelId || model.model_name === config.modelId);
   if (matches.length !== 1) throw new Error(`modelId must resolve to exactly one registered model; found ${matches.length}`);
-  const model = matches[0]!;
+  const model = { ...matches[0]!, ...(config.responsesProfile === undefined ? {} : { responses_profile: config.responsesProfile }) };
+  if (config.modelBaseUrl !== undefined && normalizeBaseUrl(model.base_url) !== config.modelBaseUrl) throw new Error("The registered model endpoint does not match the frozen campaign modelBaseUrl");
   for (const harness of config.harnesses) {
     if (harness.kind !== "everpeace" && harness.expected.model !== model.model_name) {
       throw new Error(`${harness.name} expected model ${harness.expected.model}, but the selected raw model ID is ${model.model_name}`);
@@ -349,6 +364,7 @@ async function live(config: CampaignConfig): Promise<void> {
     if (harness.kind === "everpeace-checkout") {
       return createCheckoutBenchmarkAdapter({
         name: harness.name,
+        ...(harness.loopStrategy === undefined ? {} : { loopStrategy: harness.loopStrategy }),
         sourceRoot: harness.sourceRoot,
         entryPath: harness.entryPath,
         revision: harness.revision,
@@ -403,6 +419,11 @@ async function live(config: CampaignConfig): Promise<void> {
     },
   });
   await writeFile(resolve(config.artifactsRoot, "campaign-result.json"), JSON.stringify(result, null, 2), "utf8");
+  const baseline = config.harnesses.find((harness) => harness.kind === "everpeace-checkout" && harness.loopStrategy === "baseline");
+  const candidate = config.harnesses.find((harness) => harness.kind === "everpeace-checkout" && harness.loopStrategy === "candidate");
+  if (baseline && candidate && baseline.kind === "everpeace-checkout" && candidate.kind === "everpeace-checkout") {
+    await writeFile(resolve(config.artifactsRoot, "strategy-comparison.json"), JSON.stringify(compareAgentStrategies(result, baseline.name, candidate.name), null, 2), "utf8");
+  }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
@@ -415,6 +436,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   if ([liveEnabled, proveEnabled, preflightEnabled].filter(Boolean).length !== 1) throw new Error("Choose exactly one of --preflight, --prove-fixtures, or --live");
   const configPath = resolve(args[configIndex + 1]!);
   const config = parseCampaignConfig(JSON.parse(await readFile(configPath, "utf8")), configPath);
+  if (config.evaluationDigest !== undefined && await captureBenchmarkEvaluationDigest(config.catalogPath, config.fixtureRoot) !== config.evaluationDigest) throw new Error("Evaluation inputs changed; prepare a new frozen campaign before continuing");
   if (preflightEnabled) await preflight(config);
   else if (proveEnabled) await prove(config);
   else await live(config);

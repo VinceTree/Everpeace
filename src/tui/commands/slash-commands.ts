@@ -73,7 +73,7 @@ export function parseTuiInput(input: string): ParsedTuiInput {
 
 export const TUI_HELP = `Slash commands
   /login   Sign in and activate a model
-  /model   Switch between signed-in models
+  /model   Switch models; /model profile auto|generic|deepseek configures the active registration
   /models  View models and credential status
   /status  View session, model, and token usage
   /context Inspect the last coding request submitted in this process

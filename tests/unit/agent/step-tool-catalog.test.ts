@@ -2,6 +2,19 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { StepToolCatalog } from "../../../src/agent/step-tool-catalog.js";
 
+test("candidate descriptions are opt-in and preserve schemas, order and dispatch capabilities", () => {
+  const baseline = new StepToolCatalog({ mode: "default" });
+  const candidate = new StepToolCatalog({ mode: "default", candidateDescriptions: true });
+  assert.deepEqual(candidate.definitions.map((tool) => tool.name), baseline.definitions.map((tool) => tool.name));
+  for (const [index, original] of baseline.definitions.entries()) {
+    const changed = candidate.definitions[index]!;
+    assert.deepEqual(changed.parameters, original.parameters);
+    assert.deepEqual(candidate.capabilities(String(original.name)), baseline.capabilities(String(original.name)));
+  }
+  assert.ok(Buffer.byteLength(JSON.stringify(candidate.definitions)) < Buffer.byteLength(JSON.stringify(baseline.definitions)));
+  assert.deepEqual(new StepToolCatalog({ mode: "default" }).definitions, baseline.definitions);
+});
+
 function mcpFixture(name = "mcp__fixture__read") {
   const definition = {
     type: "function" as const, name, description: "original",

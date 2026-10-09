@@ -4,6 +4,29 @@ Everpeace 的 benchmark 层比较 harness、模型策略和恢复策略在真实
 
 当前 [十项 Node 清单](benchmark/DEEPSEEK_NODE_TASKS.json) 已包含固定 revision、setup、pristine assertion、reviewed seed/reference patch 与 evaluator-owned acceptance；正式 parser 缺少任一项都会在模型请求前拒绝。十项 Chalk、Commander 和 Day.js fixture 已逐项离线证明 pristine pass → seeded assertion failure → reference pass。Commander 与 Day.js 使用上游 lockfile；Chalk 固定 revision 原本用 `.npmrc` 禁用 lockfile，因此评测材料保存 evaluator-owned `chalk-package-lock.json`，准备器在 setup 前排他复制。三组统一用显式 npmjs registry 执行 `npm ci --ignore-scripts`，避免本机 registry 配置改变依赖来源。
 
+## DeepSeek loop A/B acceptance
+
+开发 fixture [deepseek-loop-acceptance](../tests/fixtures/deepseek-loop-acceptance.ts) 显式提供 `prepare|offline|live`，不从常规测试发请求。准备根必须位于仓库外且不存在；Session、结果与凭据目录不共享。prepare/offline 不读取个人凭据、不访问模型服务。以下命令中的 `$root` 应是新的本地报告子目录：
+
+```powershell
+pnpm exec tsx tests/fixtures/deepseek-loop-acceptance.ts prepare $root
+pnpm exec tsx tests/fixtures/deepseek-loop-acceptance.ts offline $root
+pnpm benchmark:campaign -- --config "$root/comparison.json" --prove-fixtures
+pnpm benchmark:campaign -- --config "$root/smoke.json" --preflight
+```
+
+prepare 冻结兼容提示、harness 摘要、候选 revision/source/build digest，以及任务目录和全部 fixture 文件的 evaluationDigest；任务提示、依赖锁、seed/reference 或独立断言变化均阻止运行。代码、构建或提交变化后使用新根重新准备，保留旧证据。原始源码基准单独保存；A 为协议修正后的 baseline，B 仅显式开启 candidate 调度提示和反馈，两组使用同一生产 runner。配置随机交错，同一任务不提示工具名称或操作顺序。
+
+| 待单独授权的阶段 | 固定范围 | task / campaign token 草案 |
+| --- | --- | --- |
+| 兼容 | 文本终态及 usage；携带完整 reasoning 的两轮文件读取 | 10,000 / 20,000 |
+| smoke | 目录前三任务，A/B 各一次，共六次 | 100,000 / 600,000 |
+| 正式 | 十项 Chalk/Commander/Day.js，A/B 各三次，共六十次 | 100,000 / 6,000,000 |
+
+固定中转 `https://cc2.caaa.tech/v1`、原始 ID `deepseek-flash`、显式 deepseek profile 和 high；兼容输出最多 1,024，编码对比最多 32,768。每任务十五分钟，最多三轮实际启动的修复。预算不是预计要用满或严格账单上限，准备配置不构成授权。分别取得明确数值授权后，才可运行 fixture 的 `live $root --token-budget 20000` 或相应 campaign 的 `--live`。unknown usage、隔离或资源清理失败停止阶段，started 标记和旧账本不能清除重跑；失败和跳过留在计划分母。只证明该中转路径，不外推官方直连。
+
+campaign 在本地生成 `strategy-comparison.json`：总体及逐任务通过数不能低于基线，人工介入不能增加，成功必须同时通过宿主验证和独立验收，安全结算无回退。质量通过且完整计量后，比较成功任务总消耗、包括失败消耗的每成功任务成本、共同成功任务 token 中位数、请求次数、耗时、工具批次/等待/重复失败、reasoning/cache 及请求字节比例。reasoning 已包含在 output，不重复相加；缺失缓存为 null，JSON 字节比例不冒充 token。共同成功任务 token 中位数下降至少 10% 才报告该端点和样本中观察到节省；候选默认关闭，无有效 live 证据不改默认行为。
+
 ## Task and fixture contract
 
 每个任务包含唯一 `id`、自然语言 `prompt`、隔离工作区、固定源码和有界命令。`verification` 可向 harness 提供开发反馈，最终评分优先使用模型无法通过改写项目脚本替代的 `acceptance`。

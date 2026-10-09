@@ -26,6 +26,8 @@
 
 ## 存储位置与凭据
 
+模型注册可增量保存 `responses_profile`，旧字段缺失等同 auto。`/model profile` 在空闲命令操作内更新，绑定原注册 ID/地址/原始模型 ID；清除旧请求设置、重建 Agent 并使批准失效，兼容 context 和累计 unknown 仍保留。opaque context 与目标协议不兼容时拒绝修改。Session 保存选择时的 profile；恢复时以当前注册为准，profile 不同时不重用旧 request settings。`/status` 显示实际 profile、official/configured 来源及 wire reasoning，不把用户配置记为实测能力。回归见 [注册](../../tests/unit/storage/model-registry.test.ts) 与 [App](../../tests/unit/tui/app.test.tsx)。
+
 - Windows：配置、Session 等默认位于 `%APPDATA%/Everpeace/`，Session 子目录为 `sessions/`。
 - macOS：默认位于 `~/Library/Application Support/Everpeace/`。
 - Linux：模型配置使用 `$XDG_CONFIG_HOME/everpeace/`（默认 `~/.config/everpeace/`）；Session 使用 `$XDG_STATE_HOME/everpeace/sessions/`（默认 `~/.local/state/everpeace/sessions/`）。

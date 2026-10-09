@@ -1,5 +1,7 @@
 # DeepSeek 实测准备
 
+Agent Loop 的协议基线 A 与显式优化候选 B 使用独立的两组流程，见 [评测指南](../BENCHMARKING.md#deepseek-loop-ab-acceptance)。该流程先验证中转的 reasoning 连续性，再准备六次 smoke 与六十次正式任务；下文已有个人任务及 dsh 三组方案保留为独立准备，不与新预算合并。Windows 的新任务工作区使用显式配置的短临时路径，报告和 Session 保存在本地报告根；工作区不共享日常状态。
+
 本轮面向 Windows、DeepSeek、单 Agent、Node/TypeScript 单包个人项目。离线准备通过以后，真实模型的成功率、稳定性和成本仍须分别授权实测。具体候选、当前证据和未完成项只记录在 [HANDOFF](../HANDOFF.md)。
 
 ## 隔离目录

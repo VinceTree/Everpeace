@@ -38,6 +38,7 @@ Commands inside the agent:
   !<command>                Run a native shell command directly
   /login                    Login and activate one model
   /model                    Switch the active model
+  /model profile <profile>  Set auto, generic, or deepseek Responses settings
   /models                   List registered models
   /status                   Show model, context, and token usage
   /diff                     Show bounded workspace changes

@@ -26,6 +26,8 @@ pnpm dev
 
 模型连接支持 `HTTP_PROXY`、`HTTPS_PROXY` 与 `NO_PROXY`，同名小写变量优先。端点需要代理时，在启动 CLI 前设置；仅设置 `ALL_PROXY` 不生效。这些设置作用于模型请求，模型 shell 仍遵守 sandbox 网络策略。
 
+中转明确支持 DeepSeek Responses 契约时，可设置 `/model profile deepseek`，再设置 `/reasoning high`。`/status` 显示协议配置、能力来源和实际发送的推理值。这属于用户配置，不能证明中转兼容；未知端点默认采用保守设置，`/model profile auto` 恢复按地址识别。完整推理项在工具轮次之间保留。实验性的提示与工具反馈优化默认关闭，须先通过任务质量与实际 token 用量对比。
+
 网页读取保留有界的来源链接列表，搜索结果宽泛时，Agent 可以沿官方网站的实际导航继续读取并核验引用。
 
 ```text

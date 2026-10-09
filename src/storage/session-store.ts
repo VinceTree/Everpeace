@@ -19,7 +19,7 @@ import {
 } from "../status/model-status.js";
 import { createWorkflowState, type VerificationSuiteResult, type WorkflowPhase, type WorkflowState, type VerificationResult } from "../workflow/types.js";
 import type { LearnedMemoryPolicy } from "../memory/learned-memory.js";
-import { isModelRequestSettings, type ModelRequestSettings } from "../providers/capabilities.js";
+import { isModelRequestSettings, isResponsesProfile, type ResponsesProfile, type ModelRequestSettings } from "../providers/capabilities.js";
 import { normalizeWorkspacePath } from "../memory/learned-memory.js";
 import { cloneTaskProgress, isTaskProgress, type TaskProgress } from "../workflow/task-progress.js";
 import { RETAINED_TOOL_OUTPUTS, type PreparedOutputAttachment, type ReadToolOutputArguments, type StoredToolOutputRange } from "../agent/context-limits.js";
@@ -85,6 +85,7 @@ export interface SessionModelRef {
   model_name: string;
   base_url: string;
   request_settings?: ModelRequestSettings;
+  responses_profile?: ResponsesProfile;
 }
 
 export type GoalStatus = "active" | "paused" | "blocked" | "complete" | "budget_limited" | "usage_limited";
@@ -391,6 +392,7 @@ function isModelRef(value: unknown): value is SessionModelRef {
     isNonEmptyString(value.model_name) &&
     isNonEmptyString(value.base_url)
     && (value.request_settings === undefined || isModelRequestSettings(value.request_settings))
+    && (value.responses_profile === undefined || isResponsesProfile(value.responses_profile))
   );
 }
 
@@ -872,6 +874,7 @@ function modelRef(model: SessionModelRef): SessionModelRef {
     model_name: model.model_name,
     base_url: model.base_url,
     ...(model.request_settings ? { request_settings: { ...model.request_settings } } : {}),
+    ...(model.responses_profile === undefined ? {} : { responses_profile: model.responses_profile }),
   };
 }
 

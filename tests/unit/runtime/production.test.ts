@@ -44,6 +44,17 @@ const io: AgentIO = {
   writeAssistant() {},
 };
 
+test("restoring opaque history rejects incompatible profiles before creating provider resources", () => {
+  for (const profile of ["generic", "deepseek"] as const) {
+    assert.throws(() => createProductionAgent({
+      model: { id: "saved", base_url: "https://api.openai.com/v1", model_name: "gpt-5", api_key: "dummy", responses_profile: profile },
+      workspacePath: process.cwd(), io, sessionStore: new SessionStore({ directory: os.tmpdir() }), sessionId: () => undefined,
+      skills: null, mcp: null, learnedMemoryStore: null, codeNavigation: null,
+      restore: { initialHistory: [{ type: "reasoning", encrypted_content: "fixture" }] },
+    }), /opaque provider context is incompatible/u);
+  }
+});
+
 test("production handle disposal shares cleanup completion and retains rejection", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-production-disposal-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

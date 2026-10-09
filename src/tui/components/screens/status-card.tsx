@@ -82,6 +82,9 @@ function statusFields(snapshot: StatusSnapshot): StatusField[] {
     { label: "Protocol", value: snapshot.protocol ?? "responses" },
     { label: "Compaction", value: snapshot.compaction ?? "N/A" },
     { label: "Reasoning", value: snapshot.reasoning_effort ?? "N/A" },
+    { label: "Reasoning sent", value: snapshot.reasoning_sent ?? "Not sent" },
+    { label: "Responses profile", value: snapshot.responses_profile ?? "N/A" },
+    { label: "Capability source", value: snapshot.capability_source ?? "N/A" },
     {
       label: "Base URL",
       value: snapshot.base_url ?? "N/A",

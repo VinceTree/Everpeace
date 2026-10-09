@@ -94,6 +94,9 @@ export interface BenchmarkMetricsSnapshot {
   unclosedToolCalls: number;
   toolFailures: number;
   toolBatches: number;
+  toolBatchSizes?: readonly number[];
+  repeatedToolFailures?: number;
+  requestComposition?: { count: number; instructionsBytes: number; toolsBytes: number; toolResultsBytes: number; requestBytes: number };
   toolResultOrder: readonly string[];
   firstToolStartDelayMs: number | null;
   firstModelEventDelayMs: number | null;
@@ -108,6 +111,7 @@ export interface BenchmarkMetricsSnapshot {
 }
 
 export interface BenchmarkHarnessResult {
+  requestAttempts?: number;
   manualInterventions?: number;
   unsafeActions?: number;
   notes?: string;
@@ -172,6 +176,7 @@ export interface BenchmarkVerificationResult {
 }
 
 export interface BenchmarkRunResult {
+  requestAttempts?: number;
   cleanupFailed?: boolean;
   taskId: string;
   adapter: string;

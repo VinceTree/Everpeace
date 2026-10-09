@@ -46,6 +46,7 @@ export interface CheckoutBenchmarkAdapterOptions {
   sourceDigest: string;
   buildDigest: string;
   model: RegisteredModel;
+  loopStrategy?: import("../agent/tool-feedback-policy.js").LoopStrategy;
   sessionsRoot: string;
 }
 
@@ -121,7 +122,7 @@ function preflightNetworkGuardPath(): string {
 }
 
 export async function preflightBenchmarkCheckout(
-  options: Pick<CheckoutBenchmarkAdapterOptions, "sourceRoot" | "entryPath" | "revision" | "sourceDigest" | "buildDigest"> & { modelName?: string },
+  options: Pick<CheckoutBenchmarkAdapterOptions, "sourceRoot" | "entryPath" | "revision" | "sourceDigest" | "buildDigest" | "loopStrategy"> & { modelName?: string; modelBaseUrl?: string; responsesProfile?: import("../providers/capabilities.js").ResponsesProfile },
 ): Promise<BenchmarkCheckoutPreflight> {
   const identity = await assertBenchmarkCheckoutIdentity(options);
   const stdout = new BoundedOutputBuffer(MAX_OUTPUT_BYTES);
@@ -130,13 +131,15 @@ export async function preflightBenchmarkCheckout(
   try {
     const input = JSON.stringify({
       mode: "preflight",
+      ...(options.loopStrategy === undefined ? {} : { loopStrategy: options.loopStrategy }),
       productionModule: pathToFileURL(identity.entryPath).href,
       task: { id: "checkout-preflight", prompt: "Return a short preflight acknowledgement without using tools.", workspacePath: root },
       tokenBudget: 100,
       sessionsRoot: path.join(root, "sessions"),
       model: {
         id: "checkout-preflight", model_name: options.modelName ?? "preflight-model",
-        base_url: "https://api.deepseek.com", api_key: "preflight-dummy",
+        base_url: options.modelBaseUrl ?? "https://api.deepseek.com", api_key: "preflight-dummy",
+        ...(options.responsesProfile === undefined ? {} : { responses_profile: options.responsesProfile }),
         request_settings: { reasoningEffort: "high", maxOutputTokens: 32_768 },
       },
     });
@@ -192,20 +195,41 @@ export function createCheckoutBenchmarkAdapter(options: CheckoutBenchmarkAdapter
       const input = JSON.stringify({
         productionModule: pathToFileURL(identity.entryPath).href, task,
         tokenBudget: context.tokenBudgetRemaining, sessionsRoot: options.sessionsRoot,
+        ...(options.loopStrategy === undefined ? {} : { loopStrategy: options.loopStrategy }),
         model: { ...options.model, request_settings: { reasoningEffort: "high", maxOutputTokens: 32_768 } },
       });
       const child = spawn(process.execPath, [...process.execArgv, checkoutWorkerPath()], {
         cwd: task.workspacePath, shell: false, windowsHide: true,
         detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"],
       });
-      const owned = observeProcessCompletion(child, { signal: context.signal });
+      const protocolController = new AbortController();
+      let protocolError: Error | undefined;
+      const owned = observeProcessCompletion(child, { signal: AbortSignal.any([context.signal, protocolController.signal]) });
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => { if (!owned.closed) stdout.append(chunk); });
+      let pendingLines = "";
+      child.stdout.on("data", (chunk: string) => {
+        if (owned.closed) return;
+        stdout.append(chunk);
+        pendingLines += chunk;
+        const lines = pendingLines.split("\n");
+        pendingLines = lines.pop()!;
+        try {
+          if (pendingLines.length > MAX_OUTPUT_BYTES) throw new Error("Oversized worker telemetry line");
+          for (const line of lines) {
+            if (line.startsWith("EVERPEACE_CHECKOUT_EVENT ")) context.onEvent(JSON.parse(line.slice(25)) as import("../agent/agent-loop.js").LoopEvent);
+            if (line.startsWith("EVERPEACE_CHECKOUT_PHASE ")) context.onPhase(line.slice(25).trim() as import("../agent/agent-loop.js").LoopPhase);
+          }
+        } catch {
+          protocolError ??= new Error("Checkout worker telemetry failed");
+          protocolController.abort(protocolError);
+        }
+      });
       child.stderr.on("data", (chunk: string) => { if (!owned.closed) stderr.append(chunk); });
       child.stdin.end(input);
       const result = await owned.completion;
       if (result.cleanupError) throw result.cleanupError;
+      if (protocolError) throw protocolError;
       context.signal.throwIfAborted();
       if (result.error) throw result.error;
       await context.writeArtifact?.("checkout-stdout.txt", stdout.text);

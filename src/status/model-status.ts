@@ -50,6 +50,9 @@ export interface StatusSnapshot {
   protocol?: "responses";
   compaction?: "native" | "summary";
   reasoning_effort?: "off" | "low" | "high" | "max";
+  responses_profile?: "generic" | "deepseek" | "openai";
+  capability_source?: "official" | "configured" | "observed";
+  reasoning_sent?: string;
   usage_complete: boolean;
 }
 
@@ -347,6 +350,9 @@ export function isStatusSnapshot(value: unknown): value is StatusSnapshot {
     (record.protocol === undefined || record.protocol === "responses") &&
     (record.compaction === undefined || record.compaction === "native" || record.compaction === "summary") &&
     (record.reasoning_effort === undefined || record.reasoning_effort === "off" || record.reasoning_effort === "low" || record.reasoning_effort === "high" || record.reasoning_effort === "max") &&
+    (record.responses_profile === undefined || ["generic", "deepseek", "openai"].includes(String(record.responses_profile))) &&
+    (record.capability_source === undefined || ["official", "configured", "observed"].includes(String(record.capability_source))) &&
+    (record.reasoning_sent === undefined || ["none", "low", "high", "max", "xhigh", "Not sent"].includes(String(record.reasoning_sent))) &&
     typeof record.usage_complete === "boolean"
   );
 }

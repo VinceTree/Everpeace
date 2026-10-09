@@ -1,8 +1,11 @@
 import type { RegisteredModelStatus } from "../../storage/model-registry.js";
+import { resolveProviderCapabilities, requestReasoningEffort, defaultModelRequestSettings } from "../../providers/capabilities.js";
 import type { CommandContext } from "./types.js";
 
 export function modelStatusLabel(model: RegisteredModelStatus): string {
-  return `${model.model_name} [${model.credential_status}]`;
+  const capabilities = resolveProviderCapabilities(model.base_url, model.model_name, model.responses_profile);
+  const settings = defaultModelRequestSettings(capabilities, model.request_settings);
+  return `${model.model_name} [${model.credential_status}] · ${capabilities.responsesProfile} (${capabilities.source}) · reasoning sent: ${requestReasoningEffort(capabilities, settings.reasoningEffort) ?? "not sent"}`;
 }
 
 export async function runModelsCommand({

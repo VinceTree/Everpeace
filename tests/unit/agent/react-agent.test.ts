@@ -2199,11 +2199,13 @@ test("request attempt ledger stops retries after an emitted request has unknown 
 });
 
 test("DeepSeek request snapshots keep stable instructions before history and dynamic rules at the tail", async () => {
+  const instructions: unknown[] = [];
   const inputs: Array<Array<Record<string, unknown>>> = [];
   const agent = new ReactAgent({
     model: "deepseek-flash",
     providerCapabilities: resolveProviderCapabilities("https://api.deepseek.com", "deepseek-flash"),
     client: { responses: { async create(params) {
+      instructions.push(params.instructions);
       inputs.push(params.input as Array<Record<string, unknown>>);
       return { id: `response-${inputs.length}`, output_text: "done", output: [], usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } };
     } } },
@@ -2211,11 +2213,13 @@ test("DeepSeek request snapshots keep stable instructions before history and dyn
   });
   await agent.runTurn("first");
   await agent.runTurn("second");
-  assert.equal(inputs[0]?.[0]?.role, "developer");
-  assert.equal(inputs[0]?.at(-1)?.role, "developer");
+  assert.equal(inputs[0]?.[0]?.role, "user");
+  assert.equal(inputs[0]?.at(-1)?.role, "system");
+  assert.equal(typeof instructions[0], "string");
+  assert.equal(instructions[0], instructions[1]);
   assert.match(String(inputs[0]?.at(-1)?.content), /Current permissions/u);
-  assert.ok(inputs[1]?.slice(1, -1).some((item) => item.role === "user" && item.content === "first"));
-  assert.equal(inputs[1]?.at(-1)?.role, "developer");
+  assert.ok(inputs[1]?.slice(0, -1).some((item) => item.role === "user" && item.content === "first"));
+  assert.equal(inputs[1]?.at(-1)?.role, "system");
 });
 
 test("agent consumes Responses stream deltas and reconstructs tool calls", async () => {

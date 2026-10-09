@@ -87,6 +87,8 @@ import {
   hasOpaqueProviderContext,
   isReasoningEffort,
   resolveProviderCapabilities,
+  isResponsesProfile,
+  requestReasoningEffort,
   type ModelRequestSettings,
 } from "../../providers/capabilities.js";
 import {
@@ -189,12 +191,13 @@ function toSessionModel(
     model_name: model.model_name,
     base_url: model.base_url,
     ...(requestSettings ? { request_settings: { ...requestSettings } } : {}),
+    ...(model.responses_profile === undefined ? {} : { responses_profile: model.responses_profile }),
   };
 }
 
 function settingsForModel(model: RegisteredModel | undefined): ModelRequestSettings {
   return defaultModelRequestSettings(
-    resolveProviderCapabilities(model?.base_url ?? "", model?.model_name),
+    resolveProviderCapabilities(model?.base_url ?? "", model?.model_name, model?.responses_profile),
     model?.request_settings,
   );
 }
@@ -1248,8 +1251,8 @@ export function EverpeaceApp({
       try {
         const pendingForkResume = loaded.forkPendingResume ?? loaded.summary.fork_pending_resume ?? false;
         if (
-          replacementModel &&
-          !canReuseOpaqueProviderContext(loaded.summary.model.base_url, model.base_url) &&
+          (replacementModel && !canReuseOpaqueProviderContext(loaded.summary.model.base_url, model.base_url) ||
+            !resolveProviderCapabilities(model.base_url, model.model_name, model.responses_profile).encryptedReasoning) &&
           hasOpaqueProviderContext(loaded.context)
         ) {
           throw new Error("This session contains provider-specific opaque context. Select the original provider or start a new session; the saved session was left unchanged.");
@@ -1259,8 +1262,8 @@ export function EverpeaceApp({
         );
         changedWorkspace = restoredWorkspace !== previousWorkspace;
         const restoredSettings = defaultModelRequestSettings(
-          resolveProviderCapabilities(model.base_url, model.model_name),
-          replacementModel
+          resolveProviderCapabilities(model.base_url, model.model_name, model.responses_profile),
+          replacementModel || model.responses_profile !== loaded.summary.model.responses_profile
             ? model.request_settings
             : loaded.summary.model.request_settings ?? model.request_settings,
         );
@@ -1756,7 +1759,7 @@ export function EverpeaceApp({
       ? resolveModelStatusMetadata(activeModel.base_url, activeModel.model_name)
       : undefined;
     const capabilities = activeModel
-      ? resolveProviderCapabilities(activeModel.base_url, activeModel.model_name)
+      ? resolveProviderCapabilities(activeModel.base_url, activeModel.model_name, activeModel.responses_profile)
       : undefined;
     enterCommandView({
       kind: "status",
@@ -1774,6 +1777,7 @@ export function EverpeaceApp({
         protocol: capabilities?.protocol ?? "responses",
         ...(capabilities ? { compaction: capabilities.compaction } : {}),
         reasoning_effort: requestSettings.reasoningEffort,
+        ...(capabilities ? { responses_profile: capabilities.responsesProfile ?? "generic", capability_source: capabilities.source, reasoning_sent: requestReasoningEffort(capabilities, requestSettings.reasoningEffort) ?? "Not sent" } : {}),
         ...(sessionUsage.reasoning_tokens === undefined ? {} : { reasoning_tokens: sessionUsage.reasoning_tokens }),
         ...(auxiliaryUsage === undefined ? {} : {
           auxiliary_input_tokens: auxiliaryUsage.input_tokens,
@@ -1798,6 +1802,50 @@ export function EverpeaceApp({
     workspacePath,
   ]);
 
+  const setResponsesProfile = useCallback(async (args: string) => {
+    const profile = args.trim().toLowerCase();
+    if (!isResponsesProfile(profile)) {
+      openInfo("/model · Invalid profile", "Use /model profile auto|generic|deepseek.", "error");
+      return;
+    }
+    if (coordinator.activeTask || directController.current) {
+      openInfo("/model · Busy", "Wait for the active task to finish before changing the Responses profile.", "error");
+      return;
+    }
+    if (!activeModel || !dependencies.registry.setResponsesProfile) {
+      openInfo("/model · Unavailable", "Select a registered model in a host supporting profile settings.", "error");
+      return;
+    }
+    const operation = startCommandLoad("/model · Responses profile", "Saving model settings");
+    try {
+      const sessionId = coordinator.sessionId;
+      const loaded = sessionId ? await dependencies.sessionStore.load(sessionId) : undefined;
+      const capabilities = resolveProviderCapabilities(activeModel.base_url, activeModel.model_name, profile);
+      if (loaded && hasOpaqueProviderContext(loaded.context) && !capabilities.encryptedReasoning) {
+        throw new Error("This Session contains opaque provider context. Start a new Session before selecting this profile.");
+      }
+      if (!isCurrentCommandOperation(operation) || coordinator.activeTask) return;
+      const saved = await dependencies.registry.setResponsesProfile(activeModel, profile);
+      if (!isCurrentCommandOperation(operation)) return;
+      // A profile changes the request protocol, so the previous Agent is disposed
+      // and rebuilt from the same Session context by the normal model lifecycle.
+      const nextModel = { ...activeModel, responses_profile: saved.responses_profile ?? profile };
+      delete nextModel.request_settings;
+      if (!isCurrentCommandOperation(operation) || coordinator.activeTask) return;
+      if (sessionId) await dependencies.sessionStore.selectModel(sessionId, toSessionModel(nextModel, settingsForModel(nextModel)), true);
+      if (!isCurrentCommandOperation(operation) || coordinator.activeTask) return;
+      coordinator.invalidatePlan();
+      setSessionContext(loaded?.context.map((item) => ({ ...item })) ?? []);
+      setSessionUsage((current) => resetContextUsage(current, true));
+      setActiveModel(nextModel);
+      setRequestSettings(settingsForModel(nextModel));
+      setSessionEpoch((epoch) => epoch + 1);
+      replaceCommandView(infoView("/model · Responses profile", `Profile is ${profile}. Configured capabilities are not proof of endpoint support; run a separately authorized compatibility test before evaluation.`));
+    } catch (error) {
+      if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/model · Could not save", error instanceof Error ? error.message : String(error), "error"));
+    }
+  }, [activeModel, dependencies.registry, dependencies.sessionStore, startCommandLoad, isCurrentCommandOperation, replaceCommandView, openInfo]);
+
   const setReasoning = useCallback((args: string) => {
     const effort = args.trim().toLowerCase();
     if (!isReasoningEffort(effort)) {
@@ -1812,7 +1860,7 @@ export function EverpeaceApp({
       openInfo("/reasoning · No model", "Select a model with /login or /model first.", "error");
       return;
     }
-    if (!resolveProviderCapabilities(activeModel.base_url, activeModel.model_name).reasoningEffort) {
+    if (!resolveProviderCapabilities(activeModel.base_url, activeModel.model_name, activeModel.responses_profile).reasoningEffort) {
       openInfo("/reasoning · Unsupported", "This endpoint and model do not declare a reasoning-effort request capability.", "error");
       return;
     }
@@ -2285,7 +2333,10 @@ export function EverpeaceApp({
         }
 
         if (parsed.command === "/login") enterCommandView({ kind: "login" });
-        if (parsed.command === "/model") void openModelPicker();
+        if (parsed.command === "/model") {
+          if (parsed.args?.toLowerCase().startsWith("profile ")) void setResponsesProfile(parsed.args.slice(8));
+          else void openModelPicker();
+        }
         if (parsed.command === "/models") void showModels();
         if (parsed.command === "/status") showStatus();
         if (parsed.command === "/context") enterCommandView({ kind: "context" });
@@ -2405,6 +2456,7 @@ export function EverpeaceApp({
       showStatus,
       runCompact,
       setReasoning,
+      setResponsesProfile,
       runDoctor,
       workspacePath,
     ],

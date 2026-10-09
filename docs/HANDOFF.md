@@ -4,29 +4,39 @@
 
 ## 当前范围与授权
 
-用户指定版本为 **0.4.0**，package.json 与双语 README 已同步，并授权提交、推送，禁止创建或更新 Release。提交必须包含 `[skip publish]`，保留独立 Test CI；不创建或推送 tag，不发布 npm 包。
+保持版本 **0.4.0**、单 Agent、Responses 与现有 TUI/exec/SDK 公共入口。用户要求实施 DeepSeek Agent Loop 与工具调度计划，并沿用提交、推送授权；提交包含 `[skip publish]`，不使用 `[skip ci]`，不创建 tag、Release 或发布 npm。本轮未取得独立 DeepSeek live 阶段授权，付费请求为零。
 
-用户先要求测试结果不推送远端，随后明确要求将结果图放入 README，并使用 readme-generator skill 修饰中英文首页。授权公开范围为 `assets/features.webp` 汇总图和配套范围说明；详细报告、原始证据、工程门禁和交付收据继续只在本地保存。本地报告入口：`C:\Users\39850\Desktop\Everpeace-test-report-0.4.0`。上一份详细交接也已在该目录保留，不将 private-evidence 加入仓库。
+原始报告继续本地保存。README 保留既有 Grok 汇总图及明确范围，本轮只同步 profile 设置说明，不增加 DeepSeek 质量或成本宣称。本地报告根：`C:\Users\39850\Desktop\Everpeace-test-report-0.4.0\deepseek-loop-final-2001540786224eafb9e2b881d7008a49`。前次交接保存在该根的 `handoff-before.md`。
 
-保留原有未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`；不纳入提交。
+保留原有未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`；不纳入提交。工作起点为 `68ecccb6bc42d4a805e5099024b01327396e6030`，原始源码归档位于本地 `original-0.4.0.zip`。最终提交及 source/build/harness/evaluation digest 以本地 `delivery-receipt.json` 和提交后重新生成的 `prepared-final/` 为准，不复用修改前的候选身份。
 
-## 实际修改
+## 本轮实现
 
-- 请求失败且用量未知时，公开 exec/SDK 与共享 runner 提供安全 HTTP 状态或固定错误类别，停止后续准入，不保存供应商原错误正文或密钥。
-- Web 搜索依次尝试国际 Bing、中国区 Bing、DuckDuckGo，在总时限内分配每个服务的尝试时间；取消阻止后续尝试。Bing GET 手动重定向并逐次检查公共网络边界，DuckDuckGo POST 拒绝重定向。
-- 新增显式开发 fixture `tests/fixtures/live-tool-acceptance.mjs`，复用生产 factory、原生 sandbox 和 coding runner，不新增公共接口，不从 pnpm test 隐式发付费请求。操作约束见 [评测指南](BENCHMARKING.md#independent-live-tool-acceptance)。
-- 双语 README 同步上述用户可见行为与指定版本。
-- 按用户指定的 readme-generator 优化首屏、上手路径与结果展示；首页复用同一张真实汇总图，lossless WebP 保留原始像素，明确组件证据跨候选、至少一次闭环与未完成项，不发布竞品排名或成本优势。package files 保留 assets，保证安装产物中的 README 图片路径存在。
-- 模型 client 增加环境 HTTP/HTTPS 代理与 NO_PROXY 支持；连接由拥有者在请求清理结束后关闭。主 factory、登录、标题、Skill、手动 Memory 与 doctor 使用同一入口；不修改全局 dispatcher、网页 SSRF 或原生 shell 网络边界。新增真实本地 CONNECT、直连排除、取消、关闭后拒绝重连及凭据隐藏回归。
-- 工具验收冻结 harness digest，网页场景要求搜索返回的官方来源、实际读取及独立事实断言。旧阶段 unknown 和未执行项保留，详细续测证据在本地报告入口下的独立目录维护。
-- HTML 网页工具增量返回真实、有界、去重的 links，供模型沿页面导航；验收按事件先后追溯搜索/链接发现链，正文空白归一化。重复搜索、验收器空白误判和候选变化导致的未执行项均保留在本地，不能覆盖原报告。
+- Provider 指令投影集中到 `request-projection`：DeepSeek 的稳定 instructions 与最新 system 宿主状态分开；generic 保守，官方 OpenAI 保持缓存布局，不改写历史。
+- 模型注册与 Session 增量支持 `responses_profile: auto|generic|deepseek`。未知中转不按模型名推断能力；显式 deepseek 标为 configured，保留真实 provider 身份。profile 绑定注册、地址、原始模型 ID；修改清除旧请求设置，恢复不覆盖当前注册。密钥仍由 AuthStorage/keyring 管理。
+- `/model profile` 仅空闲可改，保留兼容 context 和累计 unknown、使 Plan 批准失效并重建 Agent；旧 opaque context 与目标 profile 不兼容时，在请求资源创建前拒绝恢复。`/status`、`/models` 显示 profile、能力来源与实际发送的 reasoning。
+- 完整 reasoning/message/function call 终态按顺序回传，专用 SDK fixture 覆盖多工具、下一用户轮次、Session 恢复、summary 及稳定字节前缀；流式 delta 不重复拼接。未配对调用时不启动 summary，完整保留单元中的 reasoning 和验证债务。
+- 内部候选策略精简提示与读取描述、提供按模型提交顺序的简短失败反馈及第二次连续重复失败提醒。默认仍是 baseline；四路安全读取、危险操作串行、完整响应先落盘、取消/权限/存储/unknown 与宿主验证不变。
+- 评测记录实际请求、tool batch、重复失败、等待、usage/cache 和请求组成字节；worker 只转发安全计数与时间，不复制工具、模型或推理正文。新增质量门槛与 token 对比报告，精确 10% 边界有回归。
+- 显式开发 fixture 准备两项中转兼容及六次 smoke、六十次正式 A/B；冻结源码/构建和全部评测材料。Windows 工作区采用短隔离路径。A 含必要协议修正，B 才启用候选策略，不与旧 dsh 三组预算混用。
+- 双语 README/使用指南、RUNTIME、状态专题、评测指南、PLAN 和 DECISIONS 已同步。此前环境代理、网页来源链接和安全失败诊断保持。
 
-当前本地工程门禁：typecheck、test、build 通过；1075 项测试，1072 通过、3 跳过、0 失败，耗时 65224.1699 ms。当前无 lint script，未记为通过。README 汇总图由本地实测记录重新生成，说明独立阶段、原 unknown 停止及保留的失败/跳过；不公开原始报告。
+## 当前验证证据
 
-## 后续工作与交付约束
+最终串行门禁 `typecheck → lint（不存在）→ test → build` 通过实际存在的检查；**1090 项测试，1087 通过、3 跳过、0 失败**，耗时 70396.8659 ms。lint 缺项，不记为通过。`git diff --check` 通过。完整回归含 TUI、exec/SDK、取消/持久化、混合工具屏障及原生 sandbox；安装包的 CLI help 和 SDK 导入通过，不发模型请求。
 
-Responses 稳定性、真实模型学习质量与成本仍需独立评测；不能从已授权的工具闭环汇总推断。完整响应未落盘不能执行其中的工具调用；用量 unknown 不能清空或被后续成功掩盖。DeepSeek 阶段先验证原始 `deepseek-flash` 在该中转上的文本终态/usage 和工具配对，再进入个人任务与固定对比；此前 DeepSeek 请求失败不因 Grok 通过而消除。
+两项生产 runner 离线兼容验收通过；A/B fresh-worker 的实际 SDK 请求边界预检通过，high / 32768 / 原始 ID 与 configured profile 已核对，真实网络调用为零，进程清理已等待。提交后还须在新根重绑定 revision，交付收据记录准确提交的 Windows/Linux CI 与远端状态。
 
-个人任务、smoke 与正式 DeepSeek 对比仍是独立范围，已有预算草案不构成付费授权。实际运行应冻结候选 revision/source/build digest，代码或构建变化后重新绑定。最终 manifest 门禁按 typecheck → 实际存在的 lint → test → build 串行执行；当前没有 lint script，不能补记为通过。准确提交的 Windows/Linux CI、安装与无凭据 preflight、Release/tag 保护核对保存在本地交付收据。
+十项固定任务已重新取得 pristine pass → 指定 seeded assertion failure → reference pass。证据分布在本地 `fixture-proof-recheck.log`（前五项）、`fixture-proof-retry.log`（接着三项）及 `fixture-proof-final.log`（末两项）。首次路径长度失败、GitHub TLS 错误与不完整 promisor cache 的失败尝试均保留，未充当缺陷证明；最终余项通过真实源码克隆取得。proof 绑定同一 evaluationDigest，agent 代码变化不改变独立 fixture 断言。
 
-本次 README 与图片交付的门禁、链接/锚点检查、缩放预览、打包图片原始字节校验及远端核对收据位于上述本地报告目录的 `readme-update-a11e3cf537d34d08bc3728ba639232b6/`。图片保留原实测快照，不把文档交付误记为新增付费测试。
+首次完整回归两项测试仍假定旧 instructions 布局，已修正测试的宿主事实提取；一次 Windows 原生 LSP 清理失败也保留，定向与后续完整回归通过。早期候选目录及旧安装产物留存，但不替代最后构建的身份与证据。
+
+## 分项结论与后续
+
+| 维度 | 当前结论 | 后续门槛 |
+| --- | --- | --- |
+| 协议兼容 | 工程与离线契约通过；该中转真实 reasoning/usage 仍 pending | 独立中转兼容阶段 |
+| 任务质量 | 自主编码任务 live A/B 未运行 | 总体及逐任务通过数不降、人工介入不增、安全与独立验证无回退 |
+| token 效率 | 无真实消耗对比，不声称节省；候选默认关闭 | 完整计量且质量通过，共同成功任务中位数下降至少 10% 才描述样本观察到节省 |
+
+后续分别授权：兼容每项 10,000/阶段 20,000；smoke 每项 100,000/阶段 600,000；正式每项 100,000/阶段 6,000,000。均为可审阅草案，不是已有授权或严格账单上限。固定 `https://cc2.caaa.tech/v1`、原始 `deepseek-flash`、high；编码输出 32768，十五分钟、最多三轮实际修复。unknown usage、隔离或清理失败停止整个阶段，旧账本和失败不能清空重跑。运行方式见 [评测指南](BENCHMARKING.md#deepseek-loop-ab-acceptance)。

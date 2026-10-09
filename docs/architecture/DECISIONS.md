@@ -1,5 +1,11 @@
 # Architecture Decisions
 
+## DeepSeek 推理连续性与候选调度
+
+协议修正与效率实验分离。provider 投影集中处理 DeepSeek instructions/system 和 OpenAI/generic 布局；注册的可选 responses_profile 向后兼容，显式中转始终显示 configured。完整 Responses reasoning 不按 Chat Completions 字段重建，恢复与压缩保留完整交互和验证债务。
+
+基线 A 已含必要协议修正；候选 B 显式开启精简提示、读取描述及失败反馈。两者复用同一生产 runner、工具目录、并发边界、权限与持久化。候选默认关闭，只有总体与逐任务质量不降低、人工介入不增加、安全结算无回退且用量完整时才评估共同成功任务的 token 中位数；下降至少 10% 才能描述为该样本观察到节省。指标与跨进程报告不额外复制模型或工具正文。详见 [运行时](RUNTIME.md) 与 [评测指南](../BENCHMARKING.md#deepseek-loop-ab-acceptance)。
+
 ## Windows 导航与检查启动
 
 固定原生后端同时固定 Windows MXC 配置，原因是旧 token 后端不能证明 LSP 直接网络拒绝。探针仍是启动前必要门禁，具体原生证据见 HANDOFF。LSP 的 Node realpath EPERM 适配只加载到隔离子进程，使用 Node 的实际 symlink 解析，不提升权限；专属临时 adapter 目录只读且退出后清理。设计与能力边界见 [SANDBOX](SANDBOX.md#isolated-lsp-navigation)。

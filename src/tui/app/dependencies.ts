@@ -64,7 +64,7 @@ function packageVersion(): string {
 }
 
 function purposeRequest(model: RegisteredModel, purpose: ModelRequestPurpose): { max_output_tokens: number; reasoning?: { effort: string }; timeoutMs: number } {
-  const capabilities = resolveProviderCapabilities(model.base_url, model.model_name);
+  const capabilities = resolveProviderCapabilities(model.base_url, model.model_name, model.responses_profile);
   const coding = defaultModelRequestSettings(capabilities, model.request_settings);
   const settings = requestSettingsForPurpose(purpose, coding);
   const effort = requestReasoningEffort(capabilities, settings.reasoningEffort);
@@ -77,7 +77,7 @@ async function requestSkillDraft(
   input: string,
   execute: <T extends { usage?: unknown; status?: unknown }>(run: (signal: AbortSignal) => Promise<T>) => Promise<T>,
 ): Promise<string> {
-  const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
+  const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name, model.responses_profile);
   try {
     const request = purposeRequest(model, "skill");
     const response = await execute((requestSignal) => runtime.responses.create(
@@ -232,7 +232,7 @@ export function createDefaultTuiDependencies(
       signal?.throwIfAborted();
       const controller = new AbortController();
       const ownedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
-      const providerRuntime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
+      const providerRuntime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name, model.responses_profile);
       const memoryRuntime = new LearnedMemoryRuntime({
         store: learnedMemoryStore,
         client: {
@@ -260,7 +260,7 @@ export function createDefaultTuiDependencies(
       finally { manualMemoryControllers.delete(controller); memoryOperations.delete(operation); }
     },
     async generateSessionTitle(model, firstQuestion, signal) {
-      const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
+      const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name, model.responses_profile);
       try {
         const request = purposeRequest(model, "title");
         const response = await runAuxiliary("title", (requestSignal) => runtime.responses.create(
@@ -357,7 +357,7 @@ export function createDefaultTuiDependencies(
         lines.push("Model request: unavailable (select a model first)");
         return lines.join("\n");
       }
-      const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name);
+      const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name, model.responses_profile);
       try {
         const request = purposeRequest(model, "doctor");
         const response = await runAuxiliary("doctor", (requestSignal) => runtime.responses.create({

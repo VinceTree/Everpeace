@@ -83,5 +83,6 @@ export function checkpointRetentionCut(items: readonly Record<string, unknown>[]
     if (item.type === "function_call" && typeof item.call_id === "string") pending.add(item.call_id);
   }
   const unique = [...new Set(starts)].filter((index) => index < items.length);
+  if (pending.size > 0) return 0;
   return unique.length > 2 ? unique.at(-2)! : 0;
 }

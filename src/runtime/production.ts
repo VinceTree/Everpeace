@@ -43,6 +43,7 @@ import type { TaskProgress } from "../workflow/task-progress.js";
 import type { CodingWorkflowRuntime } from "../workflow/runtime.js";
 import { projectWorkflowContext } from "../workflow/model-context.js";
 import { POLICY_DENIED_REMEDY } from "../tools/tool-feedback.js";
+import { hasOpaqueProviderContext, resolveProviderCapabilities } from "../providers/capabilities.js";
 
 export type ProductionAgentRestore = Pick<
   ReactAgentOptions,
@@ -80,6 +81,7 @@ export interface ProductionAgentOptions {
   runMemoryRequest?: MemoryRequestRunner;
   codeNavigation?: CodeNavigationRuntimeLike | null;
   parallelReadTools?: boolean;
+  loopStrategy?: import("../agent/tool-feedback-policy.js").LoopStrategy;
   maxSteps?: number;
   maxTurnDurationMs?: number;
   memoryIdleDelayMs?: number;
@@ -127,11 +129,16 @@ function providerClient(provider: ProviderRuntime): ResponsesClientLike {
  * request-budget behavior here.
  */
 export function createProductionAgent(options: ProductionAgentOptions): ProductionAgentHandle {
+  const capabilities = options.providerRuntime?.capabilities ?? resolveProviderCapabilities(options.model.base_url, options.model.model_name, options.model.responses_profile);
+  if (hasOpaqueProviderContext(options.restore?.initialHistory ?? []) && !capabilities.encryptedReasoning) {
+    throw new Error("Saved opaque provider context is incompatible with this Responses profile. Restore the original profile or start a new Session.");
+  }
   const provider = options.providerRuntime ?? createProviderRuntime(
     options.model.base_url,
     options.model.api_key,
     options.model.request_settings,
     options.model.model_name,
+    options.model.responses_profile,
   );
   const client = providerClient(provider);
   const skills = options.skills === undefined ? new SkillCatalog(options.workspacePath) : options.skills ?? undefined;
@@ -182,6 +189,7 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     workspacePath: options.workspacePath,
     client,
     model: options.model.model_name,
+    ...(options.loopStrategy === undefined ? {} : { loopStrategy: options.loopStrategy }),
     io: options.io,
     parallelReadTools: options.parallelReadTools ?? true,
     providerCapabilities: provider.capabilities,
@@ -207,7 +215,7 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     ...(codeNavigation ? { codeNavigation } : {}),
     ...(options.maxSteps === undefined ? {} : { maxSteps: options.maxSteps }),
     ...(options.maxTurnDurationMs === undefined ? {} : { maxTurnDurationMs: options.maxTurnDurationMs }),
-    ...(isOfficialOpenAiBaseUrl(options.model.base_url)
+    ...(provider.capabilities.promptCacheOptions && isOfficialOpenAiBaseUrl(options.model.base_url)
       ? {
           promptCacheKey: () => {
             const sessionId = options.sessionId();

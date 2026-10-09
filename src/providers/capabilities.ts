@@ -3,6 +3,11 @@ export type CapabilitySource = "official" | "configured" | "observed";
 export type ProviderProtocol = "responses";
 export type CompactionStrategy = "native" | "summary";
 export type ReasoningEffort = "off" | "low" | "high" | "max";
+export type ResponsesProfile = "auto" | "generic" | "deepseek";
+
+export function isResponsesProfile(value: unknown): value is ResponsesProfile {
+  return value === "auto" || value === "generic" || value === "deepseek";
+}
 
 export interface ProviderCapabilities {
   provider: ProviderKind;
@@ -14,6 +19,7 @@ export interface ProviderCapabilities {
   promptCacheOptions: boolean;
   serverSessions: boolean;
   maxOutputTokens: number | null;
+  responsesProfile?: "generic" | "deepseek" | "openai";
 }
 
 export interface ModelRequestSettings {
@@ -62,12 +68,14 @@ export function canReuseOpaqueProviderContext(
   return source !== "compatible" || canonicalBaseUrl(sourceBaseUrl) === canonicalBaseUrl(targetBaseUrl);
 }
 
-export function resolveProviderCapabilities(baseUrl: string, modelName?: string): ProviderCapabilities {
+export function resolveProviderCapabilities(baseUrl: string, modelName?: string, profile: ResponsesProfile = "auto"): ProviderCapabilities {
+  if (!isResponsesProfile(profile)) throw new Error("Invalid Responses profile");
   const provider = providerKind(baseUrl);
-  if (provider === "deepseek") {
+  if (profile === "deepseek" || profile === "auto" && provider === "deepseek") {
     return {
       provider,
-      source: "official",
+      source: provider === "deepseek" && profile === "auto" ? "official" : "configured",
+      responsesProfile: "deepseek",
       protocol: "responses",
       compaction: "summary",
       reasoningEffort: true,
@@ -77,12 +85,13 @@ export function resolveProviderCapabilities(baseUrl: string, modelName?: string)
       maxOutputTokens: null,
     };
   }
-  if (provider === "openai") {
+  if (profile === "auto" && provider === "openai") {
     const reasoningEffort = modelName !== undefined &&
       /^(?:gpt-[56](?:[.-]|$)|o[1-4](?:[.-]|$)|codex-)/u.test(modelName.trim().toLowerCase());
     return {
       provider,
       source: "official",
+      responsesProfile: "openai",
       protocol: "responses",
       compaction: "native",
       reasoningEffort,
@@ -95,6 +104,7 @@ export function resolveProviderCapabilities(baseUrl: string, modelName?: string)
   return {
     provider,
     source: "configured",
+    responsesProfile: "generic",
     protocol: "responses",
     compaction: "summary",
     reasoningEffort: false,
@@ -162,7 +172,7 @@ export function requestReasoningEffort(
 ): string | undefined {
   if (!capabilities.reasoningEffort) return undefined;
   if (effort === "off") return "none";
-  if (effort === "max") return capabilities.provider === "deepseek" ? "max" : "xhigh";
+  if (effort === "max") return capabilities.responsesProfile === "deepseek" || capabilities.provider === "deepseek" ? "max" : "xhigh";
   return effort;
 }
 

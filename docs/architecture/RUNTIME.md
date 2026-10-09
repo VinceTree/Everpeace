@@ -44,6 +44,10 @@ TUI / everpeace exec / everpeace/sdk / 内部 benchmark adapter
 
 ## 请求与计量
 
+请求布局由 [provider 投影](../../src/providers/request-projection.ts) 集中决定。DeepSeek profile 使用稳定 `instructions` 保存基础宿主指令，完整历史之后追加最新 `system` 宿主状态；不把宿主规则放在被解释为 user 的 `developer` 中。官方 OpenAI 保持自身缓存布局，generic 使用保守 instructions。投影不改写持久历史，不使用服务端会话或 Chat Completions 的 `reasoning_content`。
+
+注册可保存可选 `responses_profile: auto|generic|deepseek`；旧注册默认 auto，未知中转不根据模型名启用 reasoning。显式 deepseek 仍保留真实 provider 地址身份，能力来源显示 configured。该配置绑定注册 ID、地址与原始模型 ID；设置入口拒绝过期身份，不读取或写入凭据。修改会清除旧 request settings；TUI、exec、SDK 与辅助请求共用解析，旧 Session 缺字段兼容。配置证据不等于供应商实测证据。
+
 - `createProviderRuntime` 统一 client、能力与请求设置。只使用 Responses；模型 ID 保留服务端原值，不能通过名称推测中转端点支持官方能力。
 - Node 模型连接读取 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`（同名小写优先），使用每个 client 独立的 Undici dispatcher，不修改全局网络设置。`ALL_PROXY` 不单独作为配置入口；配置无效报固定错误，不输出可能含凭据的代理 URL。主 Agent 先等待请求、Memory 与工具清理，再释放其拥有的连接；外部传入 provider 由调用者负责释放。登录、标题、Skill、手动 Memory 与 doctor 在各自请求结束后释放连接，取消后强制关闭残留 CONNECT。该代理不改变网页 SSRF 或模型 shell 原生隔离边界。回归见 [proxy transport](../../tests/unit/providers/proxy-transport.test.ts)。
 - 官方 DeepSeek 使用普通 reasoning/tool item、summary 压缩和供应商自动前缀缓存；不发送 OpenAI encrypted reasoning、prompt-cache 或 native compact 参数。`max` 原样映射到 DeepSeek `max`。
@@ -79,6 +83,10 @@ Memory runtime 默认使用同一 job 的 RequestExecutor/ledger 执行提取和
 回归入口：[attempt ledger](../../tests/unit/agent/request-attempt-ledger.test.ts)、[provider compatibility](../../tests/unit/providers/openai-compatible.test.ts)、[response errors](../../tests/unit/agent/response-errors.test.ts)。
 
 ## ReAct 循环
+
+内部 `loopStrategy` 默认 baseline，只有显式候选评测采用 candidate。候选精简基础提示及五项读取描述，指导独立读取同轮、依赖操作分轮、失败后调整；名称、参数、目录顺序和四路安全读取边界不变。危险操作仍串行，完整终态 output 落盘前不执行工具。反馈在模型顺序提交结果时处理，避免并发完成顺序影响判断：相同工具、规范化参数与错误连续第二次失败追加一次提醒；正常后台轮询、取消和清理失败不触发。签名仅保留摘要，提醒不新增请求、不重放工具、不绕过批准或重新观察。
+
+本地评测采集请求次数、批次大小、重复失败、工具等待、实际 usage/cache，以及 instructions、工具定义、工具结果和整个请求的 UTF-8 JSON 字节数。字节比例不当作 token；跨进程事件只传计数、时间和安全状态，不复制正文或 reasoning。只有质量门槛及完整计量满足后才判断候选效率，未证明有效的优化不进入默认生产行为。
 
 1. 每个逻辑 step 准备项目规则、MCP、Skills、Memory、已落盘历史读取边界与工具快照；独立准备并行执行，全部完成后才发送请求。普通网络重试复用同一步快照。
 2. 消费完整 Responses 响应；仅 completed 响应中的完整工具集合允许进入 dispatch。缺失或重复 `call_id` 在落盘和执行前拒绝。
@@ -168,6 +176,8 @@ Session 恢复使用 `resumeTurn` 重建进程内追踪，不清除任务身份�
 回归入口：[workspace tracking](../../tests/unit/workflow/workspace-tracker.test.ts)、[verification](../../tests/unit/workflow/verifier.test.ts)、[workflow state](../../tests/unit/workflow/runtime.test.ts)、[checkpoint](../../tests/unit/workflow/checkpoint.test.ts)。
 
 ## 上下文与性能证据
+
+完整终态中的 reasoning、message、function call 按供应商顺序持久化和回传；流式 delta 只作显示，不拼接进完整 output。专用 SDK fixture 覆盖多工具、新用户轮次、重启恢复及字节级稳定前缀。摘要仅替换完整旧交互单元，保留单元内 reasoning 不单独删除；有未配对调用时不启动 summary。摘要仍为助手背景，验证债务不因压缩消失。稳定前缀只证明字节布局，缓存收益仅依据供应商实际返回的计量。
 
 `RequestSnapshot` 从实际请求同时生成内容估算、输出预留与指纹，估算标为 UTF-8 bytes / 4，不能伪装为供应商实测。已知窗口自动阈值取 `min(窗口 × 80%, 窗口 − 输出预算 − 安全余量)`，安全余量为窗口 5%、最多 32K。
 

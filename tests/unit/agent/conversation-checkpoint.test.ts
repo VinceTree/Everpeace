@@ -46,6 +46,7 @@ test("checkpoint retention never splits an interleaved parallel tool batch", () 
   ];
   assert.equal(checkpointRetentionCut(items), 6);
   assert.equal(checkpointRetentionCut(items.slice(0, 6)), 0);
+  assert.equal(checkpointRetentionCut([...items, { type: "function_call", call_id: "still-open" }]), 0);
 });
 
 test("structured compaction retains corrections and supplies prior checkpoints and recovery references to the next summary", async () => {
@@ -75,6 +76,25 @@ test("structured compaction retains corrections and supplies prior checkpoints a
   assert.match(JSON.stringify(summaries[1]), /original-evidence/u);
   assert.equal(landed.length, 2);
   assert.match(JSON.stringify(agent.getContextSnapshot()?.previews), /Model-generated checkpoint/u);
+});
+
+test("summary compaction preserves retained Responses reasoning and its entire tool exchange", async () => {
+  const reasoning = { type: "reasoning", id: "keep-reasoning", content: [{ type: "reasoning_text", text: "Retained complete reasoning" }] };
+  const retained = [reasoning, { type: "function_call", call_id: "keep-call", name: "read_file", arguments: '{"path":"src/a.ts"}' }, { type: "function_call_output", call_id: "keep-call", output: '{"status":"ok"}' }];
+  const requests: Record<string, unknown>[] = [];
+  let compacted: Array<Record<string, unknown>> = [];
+  const agent = new ReactAgent({ model: "deepseek-flash", providerCapabilities: capabilities, io,
+    initialHistory: [...history().slice(0, 3), { role: "user", content: "retained task" }, ...retained, { role: "user", content: "latest correction" }],
+    client: { responses: { async create(params) { requests.push(params); return { id: "summary", status: "completed", output: [], output_text: checkpointText("original goal", "Unfinished work; verification is owed") }; } } },
+    async onContextCompacted(items) { compacted = [...items]; },
+  });
+  try { await agent.compact(); } finally { await agent.dispose(); }
+  assert.equal(typeof requests[0]!.instructions, "string");
+  assert.ok((requests[0]!.input as Array<Record<string, unknown>>).some((item) => item.role === "system"));
+  assert.ok(!(requests[0]!.input as Array<Record<string, unknown>>).some((item) => item.role === "developer"));
+  assert.deepEqual(compacted.filter((item) => item.type === "reasoning"), [reasoning]);
+  assert.deepEqual(compacted.filter((item) => item.type === "function_call" || item.type === "function_call_output"), retained.slice(1));
+  assert.match(JSON.stringify(compacted), /verification is owed/u);
 });
 
 test("invalid, nonterminal, oversized, cancelled, or unpersisted summaries leave the original context available", async () => {
