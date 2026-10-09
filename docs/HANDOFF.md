@@ -1,6 +1,6 @@
 # 当前交接
 
-更新日期：2026-10-09。先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 定位。本轮授权交付当前 Memory 修复，展示版本已同步为 0.3.22；功能源码 ea659ef590015299f5150de13e85849ce947053e 已提交、推送。交付中修正 Windows 时钟 fixture 及两处既有测试竞态，最新完整本地门禁通过，继续核对修正提交的远端结果。
+更新日期：2026-10-09。先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 定位。本轮授权交付当前 Memory 修复，展示版本已同步为 0.3.22。源码与测试验证基线为 00369977c84bc50df9923bb5b1494130e0bebe53，已提交、推送，完整本地门禁和 Windows/Linux CI 均通过；本文件最后只补齐交付证据。
 
 ## 本轮范围与授权
 
@@ -29,13 +29,17 @@
 
 修正仅控制五分钟及以上 idle/租约 timer，存储 backoff 和锁心跳继续使用真实 timer；清理仍等待真正持久化，不削弱生产策略、业务断言或 CI。新增真实 Windows store 的一次 EBUSY 注入，断言第二次 rename 成功、条目落盘且 idle Date 未推进。首次扩展定向 15/15 通过；补齐严格的 Node/DOM timer handle 类型与真实 Windows 回归后完整门禁 1051 通过。设计操作说明回填 [DEVELOPMENT](DEVELOPMENT.md)。
 
-时钟修正提交 a9d9168e01ddb823a4ee8261183080b19724e569 的 [第二次 Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37859761531) 中 Linux 通过，Windows 的空闲生命周期回归已通过，但两项既有测试失败：验证命令超时测试的两秒任务 deadline 在 taskkill 清理中到期，使 cancelled 同为 true；Memory 队列保存依赖两次写入在 40ms idle 窗口内完成，消费提前启动后 queued 只剩一项。分别直接测试 verification deadline（任务取消/任务超时仍有独立回归），以及 beginTask 显式暂停保存两轮内容、释放后由新 runtime 消费。队列同时断言持久化的两项 queued、旧 runtime 零请求、新 runtime 恰好两次请求、条目和 jobs 结算，finally 始终清理 runtime。此次完整本地门禁亦为 1051 通过；没有改变产品 timeout、Memory 策略或 CI 门禁，远端最新提交另行复核，两次历史失败均保留为失败证据。
+时钟修正提交 a9d9168e01ddb823a4ee8261183080b19724e569 的 [第二次 Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37859761531) 中 Linux 通过，Windows 的空闲生命周期回归已通过，但两项既有测试失败：验证命令超时测试的两秒任务 deadline 在 taskkill 清理中到期，使 cancelled 同为 true；Memory 队列保存依赖两次写入在 40ms idle 窗口内完成，消费提前启动后 queued 只剩一项。分别直接测试 verification deadline（任务取消/任务超时仍有独立回归），以及 beginTask 显式暂停保存两轮内容、释放后由新 runtime 消费。队列同时断言持久化的两项 queued、旧 runtime 零请求、新 runtime 恰好两次请求、条目和 jobs 结算，finally 始终清理 runtime。没有改变产品 timeout、Memory 策略或 CI 门禁，两次历史失败均保留为失败证据。
+
+最终源码与测试提交 00369977c84bc50df9923bb5b1494130e0bebe53 的 [Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37860517447) 中 Windows/Linux Node 22 两项 job 全部 success；typecheck、test、build、whitespace 步骤实际通过，与本轮最新本地门禁一致。只读远端收据保存在宿主临时目录 everpeace-0.3.22-ci-races-20261009.json。
 
 ## 远端验证与保护状态
 
-Release workflow 的 branch-push job 条件明确排除 head_commit.message 包含 [skip publish] 的提交；Test workflow 独立运行 Windows/Linux Node 22。本轮已通过既有 Git 凭据只读取得 27 个 Release 的 ID/tag/updated_at/draft/prerelease/asset ID 与更新时间基线，目标 Release 不存在；认证内容未输出或落盘。基线为宿主临时目录 everpeace-0.3.22-release-baseline-20261009.json。功能提交的 [Release workflow](https://github.com/VinceTree/Everpeace/actions/runs/37858600246) 和 Publish version job 均实际 skipped；远端 main 精确匹配 ea659ef，27 个 Release 全基线不变，无 v0.3.22 tag。修正提交与最后交接提交随后继续核对准确 HEAD 的 CI 和同一 Release 基线。
+Release workflow 的 branch-push job 条件明确排除 head_commit.message 包含 [skip publish] 的提交；Test workflow 独立运行 Windows/Linux Node 22。本轮通过既有 Git 凭据只读取得 27 个 Release 的 ID/tag/updated_at/draft/prerelease/asset ID 与更新时间基线，目标 Release 不存在；认证内容未输出或落盘。基线为宿主临时目录 everpeace-0.3.22-release-baseline-20261009.json。功能提交的 [Release workflow](https://github.com/VinceTree/Everpeace/actions/runs/37858600246) 和 Publish version job 均实际 skipped；最终源码验收时远端 main 精确匹配 00369977c84bc50df9923bb5b1494130e0bebe53，27 个 Release 的全基线不变，无 v0.3.22 tag。
 
-用户原有未跟踪 .everpeace-benchmark/、.patch-node-pty/、NUL、benchmark/、question/、test-me/、{} 全部保留，不 stage、删除或纳入交付。首次功能提交仅包含 21 份明确 tracked 文件和 12 份本次开发的测试/fixture/交接归档，共 33 份；CI 修正只更新空闲 fixture、开发说明和交接。pnpm-lock.yaml 无依赖变更。
+最后交接证据提交仅变更本文件，不改源码、测试、manifest 或 lockfile，仍使用 [skip publish]。交付时另行核对最终 HEAD 的远端 main、准确 SHA 的两平台 Test CI 与同一 Release 基线；最终收据保存于宿主临时目录 everpeace-0.3.22-final-remote-verification-20261009.json，源码验证基线与交接提交的 HEAD 分开记录。
+
+用户原有未跟踪 .everpeace-benchmark/、.patch-node-pty/、NUL、benchmark/、question/、test-me/、{} 全部保留，不 stage、删除或纳入交付。首次功能提交仅包含 21 份明确 tracked 文件和 12 份本次开发的测试/fixture/交接归档，共 33 份；两次 CI 修正仅涉及三份测试 fixture、开发说明和交接，本轮累计 36 份文件。pnpm-lock.yaml 无依赖变更。
 
 ## 后续范围
 
