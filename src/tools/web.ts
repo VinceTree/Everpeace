@@ -1,7 +1,10 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
-const BING_SEARCH_ENDPOINT = "https://www.bing.com/search";
+const BING_SEARCH_ENDPOINTS = [
+  { name: "Bing", url: "https://www.bing.com/search" },
+  { name: "Bing China", url: "https://cn.bing.com/search" },
+] as const;
 const DUCKDUCKGO_SEARCH_ENDPOINT = "https://html.duckduckgo.com/html/";
 const USER_AGENT =
   "Mozilla/5.0 (compatible; Everpeace/0.1; +https://github.com/)";
@@ -289,7 +292,12 @@ export async function searchWeb(
   options: WebToolOptions & { signal?: AbortSignal } = {},
 ): Promise<WebSearchResult> {
   const fetchImpl = options.fetch ?? globalThis.fetch;
-  const signal = requestSignal(options.signal, options.timeoutMs ?? REQUEST_TIMEOUT_MS);
+  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const signal = requestSignal(options.signal, timeoutMs);
+  const resolveHostname = options.lookup ?? ((hostname: string) => lookup(hostname, { all: true, verbatim: true }));
+  // Reserve time for fallback providers instead of spending the whole deadline
+  // on an unreachable first endpoint.
+  const providerSignal = () => requestSignal(signal, Math.max(1, Math.floor(timeoutMs / 3)));
   const headers = {
     Accept: "text/html,application/xhtml+xml",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
@@ -297,22 +305,25 @@ export async function searchWeb(
   };
   const failures: string[] = [];
 
-  try {
-    const url = new URL(BING_SEARCH_ENDPOINT);
-    url.searchParams.set("q", query);
-    url.searchParams.set("count", String(SEARCH_RESULT_LIMIT));
-    const response = await fetchImpl(url, { headers, signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const { text } = await readLimitedText(response, SEARCH_RESPONSE_LIMIT);
-    const results = parseBingResults(text);
-    if (results.length > 0) return { query, results };
-    throw new Error("no results");
-  } catch (error) {
-    if (options.signal?.aborted) throw error;
-    failures.push(`Bing: ${error instanceof Error ? error.message : String(error)}`);
+  for (const endpoint of BING_SEARCH_ENDPOINTS) {
+    try {
+      const url = new URL(endpoint.url);
+      url.searchParams.set("q", query);
+      url.searchParams.set("count", String(SEARCH_RESULT_LIMIT));
+      const response = await fetchPublicSearch(url, fetchImpl, resolveHostname, headers, providerSignal());
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const { text } = await readLimitedText(response, SEARCH_RESPONSE_LIMIT);
+      const results = parseBingResults(text);
+      if (results.length > 0) return { query, results };
+      throw new Error("no results");
+    } catch (error) {
+      if (signal.aborted) throw error;
+      failures.push(`${endpoint.name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   try {
+    await validatePublicUrl(new URL(DUCKDUCKGO_SEARCH_ENDPOINT), resolveHostname);
     const response = await fetchImpl(DUCKDUCKGO_SEARCH_ENDPOINT, {
       method: "POST",
       headers: {
@@ -321,7 +332,7 @@ export async function searchWeb(
       },
       body: new URLSearchParams({ q: query }),
       redirect: "error",
-      signal,
+      signal: providerSignal(),
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const { text } = await readLimitedText(response, SEARCH_RESPONSE_LIMIT);
@@ -329,13 +340,35 @@ export async function searchWeb(
     if (results.length > 0) return { query, results };
     throw new Error("no results");
   } catch (error) {
-    if (options.signal?.aborted) throw error;
+    if (signal.aborted) throw error;
     failures.push(
       `DuckDuckGo: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 
   throw new Error(`Web search failed (${failures.join("; ")})`);
+}
+
+async function fetchPublicSearch(
+  requestedUrl: URL,
+  fetchImpl: FetchLike,
+  resolveHostname: HostLookup,
+  headers: Record<string, string>,
+  signal: AbortSignal,
+): Promise<Response> {
+  let currentUrl = requestedUrl;
+  for (let redirects = 0; redirects <= REDIRECT_LIMIT; redirects += 1) {
+    signal.throwIfAborted();
+    await validatePublicUrl(currentUrl, resolveHostname);
+    const response = await fetchImpl(currentUrl, { headers, redirect: "manual", signal });
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    const location = response.headers.get("location");
+    await response.body?.cancel();
+    if (!location) throw new Error("Search redirect did not include a location");
+    if (redirects === REDIRECT_LIMIT) throw new Error("Search exceeded the redirect limit");
+    currentUrl = new URL(location, currentUrl);
+  }
+  throw new Error("Search exceeded the redirect limit");
 }
 
 function isPublicIpv4(address: string): boolean {

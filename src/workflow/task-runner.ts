@@ -50,7 +50,7 @@ const continuationPrompt = "Continue working toward the active session goal. Cal
 
 function stoppedMessage(result: AgentTurnResult): string {
   if (result.stopReason === "budget_limited") return "Goal token budget reached. Work stopped before further tools or model requests.";
-  if (result.stopReason === "usage_limited") return "Goal usage could not be measured reliably. Work stopped before further tools or model requests.";
+  if (result.stopReason === "usage_limited") return [result.requestFailure, "Goal usage could not be measured reliably. Work stopped before further tools or model requests."].filter(Boolean).join(" ");
   if (result.stopReason === "step_limit") return "Agent step limit reached. Work stopped without reporting completion.";
   return "Agent turn deadline reached. Work stopped without reporting completion.";
 }

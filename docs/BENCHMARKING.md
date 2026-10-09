@@ -99,6 +99,25 @@ live 入口在任何请求前写入 `campaign-plan.json`，随后随机交错 ha
 
 尚未接入生产 ledger 的外部 adapter 必须返回完整 `BenchmarkTokenUsage`。缺失或 `complete: false` 同样停止后续任务。
 
+中转兼容性先单独检查文本终态/usage 与隔离文件的工具调用，关闭隔离 profile 的 Memory 并限制输出。GET `/models` 只证明认证和模型广告，不证明 Responses、工具调用或计量兼容；GET/OPTIONS 的拒绝也不能替代 POST 的实际状态。unknown 后原 campaign 保持停止；确需独立诊断时另行明确 task/campaign 数值预算，保留原失败和跳过项。最小 provider 诊断不能充当完整 coding runner 的通过证据；错误状态不能解释为零费用。仅查模型列表不构成生成请求或实测授权。
+
+读取兼容任务使用未写入提示词的随机 marker，并检查生产 Session 中真实 function_call/output 配对及最终回答；只有 read_file 子步骤成功、后续请求失败时整项任务仍失败。公开 SDK 工具事件保留实际结果 status（文件工具为 `ok`），验收器不得借用 CLI 展示状态的 `completed` 判定。报告所有已知 input/output，即使该任务最终失败；存在 unknown 的汇总只表示已知部分，不能作为完整成本或剩余授权。兼容端点未声明 reasoning 能力时，保存 off 设置不证明上游禁用了推理。
+
+## Independent live tool acceptance
+
+[live-tool-acceptance](../tests/fixtures/live-tool-acceptance.mjs) 是开发验收 fixture，显式 `prepare` 后才能执行 `live`，不新增公共 CLI/SDK 入口，也不从测试套件隐式请求模型。适用于本轮用户明确授权的中转 Grok 工具检查，不能充当固定十任务 campaign 或成功率排名。
+
+```powershell
+node tests/fixtures/live-tool-acceptance.mjs prepare <owned-external-root> - <isolated-models-json> [comma-separated-case-ids]
+node tests/fixtures/live-tool-acceptance.mjs live <owned-external-root> <case-id>
+```
+
+准备器只复制注册元数据与 keyring auth_ref，冻结提示词、独立工作区和候选 revision/source/build digest。每组构造新的 Session、生产 factory、原生命令 executor 与共享 coding runner；不会读取个人 MCP、Skills、Memory 或会话目录。模型原始 ID 与 URL 需要匹配本轮批准的配置。每组有独立请求账本，unknown 停止该组并保留其失败；独立组的通过不能清除先前 unknown。总览必须同时保存所有初测、复测与未完成项，不能报告为正式 campaign 的连续预算或缩小失败分母。
+
+Question 与 Plan 的回答/审阅由明确标注的宿主 fixture 提供，MCP 使用真实隔离 stdio 服务，Memory 只读种子且关闭未来捕获，Skill 使用专属目录。导航需要已安装且通过原生探针的后端，可用 `EVERPEACE_TEST_LSP_SERVER` 指定路径；准备器不下载服务器。每个工具调用、配对持久化、任务终态、实际修改、宿主验证和清理分别检查。`repair-cycle` 必须观察实际 test pass → 指定 build failure → 模型修复 → 最终全检查；不能用环境失败代替。
+
+HTTP 状态、请求字节数、SSE 类型统计与安全错误类别用于诊断，不保存请求 headers 或 API Key。网页 API 完成与搜索相关性分开报告；工程回归、宿主回答与人工 TUI 使用证据不能互相替代。当前授权、守卫数值、实测结果和证据只在 [HANDOFF](HANDOFF.md) 维护。
+
 ## Result and artifact semantics
 
 - `passed`：harness 完成，独立 acceptance 通过，没有 unsafe action。

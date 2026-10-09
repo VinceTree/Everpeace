@@ -1,4 +1,4 @@
-import { LoopSteeredError, LoopStoppedError, runAgentLoop, type LoopEvent, type LoopPhase, type ToolCall, type LoopStopReason, integerBudget } from "./agent-loop.js";
+import { LoopSteeredError, LoopStoppedError, runAgentLoop, classifySamplingError, type LoopEvent, type LoopPhase, type ToolCall, type LoopStopReason, integerBudget } from "./agent-loop.js";
 import path from "node:path";
 import { PersistenceError, persistState } from "../storage/persistence-error.js";
 import { repairToolContext } from "./repair-context.js";
@@ -301,6 +301,8 @@ export interface AgentTaskOptions {
 
 export interface AgentTurnResult {
   stopReason?: LoopStopReason;
+  /** Host-generated diagnostic; never includes provider bodies, headers, or messages. */
+  requestFailure?: string;
   interactionRequired?: AgentInteractionRequired;
   planDecision?: PlanReviewDecision;
   approvedPlan?: string;
@@ -2053,6 +2055,12 @@ export class ReactAgent {
       }
       if (error instanceof ResourceCleanupError || error instanceof PersistenceError) throw error;
       const snapshot = this.#requestAttemptLedger?.snapshot();
+      if (admitted && !(error instanceof LoopStoppedError) && (snapshot?.complete === false || await this.#checkGoalStop() === "usage_limited")) {
+        const status = error && typeof error === "object" && "status" in error ? error.status : undefined;
+        const http = typeof status === "number" && Number.isInteger(status) && status >= 400 && status <= 599
+          ? `HTTP ${status}; ` : "";
+        this.#turnResult.requestFailure = `Provider request failed (${http}${classifySamplingError(error)}).`;
+      }
       if (snapshot && (!snapshot.complete || snapshot.remainingTokens !== undefined && snapshot.remainingTokens <= 0)) {
         throw new LoopStoppedError(snapshot.complete ? "budget_limited" : "usage_limited");
       }

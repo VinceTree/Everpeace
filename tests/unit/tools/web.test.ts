@@ -79,11 +79,60 @@ test("searchWeb sends the query and returns parsed results", async () => {
     });
   }) as typeof fetch;
 
-  const result = await searchWeb("latest news", { fetch: fetchMock });
+  const result = await searchWeb("latest news", { fetch: fetchMock, lookup: async () => [{ address: "8.8.8.8", family: 4 }] });
 
   assert.match(requestedUrl, /q=latest\+news/u);
   assert.equal(result.query, "latest news");
   assert.equal(result.results.length, 2);
+});
+
+test("search fallback keeps time for Bing China when the first provider times out", async () => {
+  const requested: string[] = [];
+  const fetchMock = (async (input: URL | RequestInfo, init?: RequestInit) => {
+    const url = new URL(String(input));
+    requested.push(url.hostname);
+    assert.equal(init?.redirect, "manual");
+    if (url.hostname === "www.bing.com") {
+      return await new Promise<Response>((_resolve, reject) => {
+        const signal = init!.signal!;
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    }
+    assert.equal(init?.signal?.aborted, false);
+    return new Response(bingFixture, { status: 200 });
+  }) as typeof fetch;
+  // AbortSignal.timeout is unref'ed; keep this controlled timeout test alive.
+  const keepAlive = setTimeout(() => {}, 1_000);
+  try {
+    const result = await searchWeb("latest news", { fetch: fetchMock, timeoutMs: 300, lookup: async () => [{ address: "8.8.8.8", family: 4 }] });
+    assert.deepEqual(requested, ["www.bing.com", "cn.bing.com"]);
+    assert.equal(result.results.length, 2);
+  } finally { clearTimeout(keepAlive); }
+});
+
+test("search validates redirect destinations before following them", async () => {
+  const requested: string[] = [];
+  const fetchMock = (async (input: URL | RequestInfo) => {
+    const url = new URL(String(input));
+    requested.push(url.hostname);
+    if (url.hostname === "html.duckduckgo.com") return new Response(searchFixture);
+    return new Response("redirect body", { status: 302, headers: { location: "http://127.0.0.1/private" } });
+  }) as typeof fetch;
+  const result = await searchWeb("latest news", { fetch: fetchMock, lookup: async () => [{ address: "8.8.8.8", family: 4 }] });
+  assert.deepEqual(requested, ["www.bing.com", "cn.bing.com", "html.duckduckgo.com"]);
+  assert.equal(result.results.length, 2);
+});
+
+test("search cancellation prevents starting fallback providers", async () => {
+  const controller = new AbortController();
+  let requests = 0;
+  const fetchMock = (async () => {
+    requests += 1;
+    controller.abort(new Error("User cancelled search"));
+    throw controller.signal.reason;
+  }) as typeof fetch;
+  await assert.rejects(searchWeb("latest news", { fetch: fetchMock, signal: controller.signal, lookup: async () => [{ address: "8.8.8.8", family: 4 }] }), /User cancelled search/);
+  assert.equal(requests, 1);
 });
 
 test("fetchWebPage extracts readable text from a public HTML page", async () => {

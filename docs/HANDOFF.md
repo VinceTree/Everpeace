@@ -1,54 +1,64 @@
 # 当前交接
 
-更新日期：2026-10-09。先读 [AGENTS](../AGENTS.md)，再按 [索引](README.md) 定位。此前工程准备、原生导航、协议和评测装配的完整证据见 [上一轮交接](archive/HANDOFF_READINESS_BEFORE_TERMINAL.md)。本轮完成真实 Windows Terminal 验收，并修复实际操作发现的两项问题。
+更新日期：2026-10-09。先读 [AGENTS](../AGENTS.md)，按 [索引](README.md) 定位。此前 Windows Terminal、DeepSeek 中转诊断和首轮 Grok 兼容测试见 [上一轮交接](archive/HANDOFF_BEFORE_GROK_TOOLS.md)；本文件只记录本轮真实工具检查和交付。
 
 ## 当前结论与授权
 
-Windows Terminal 必需场景、本地工程门禁、公共安装和三组无凭据预检均已通过，修复提交的 Windows/Linux CI 通过。**可以开始有预算的 DeepSeek 实测**，但须先取得对应阶段的数值预算授权。工程准备不证明真实模型的编码成功率、稳定性或成本。
+用户要求全部工具在真实模型环境中测试，并明确表示额度可以使用；之后明确指定版本为 **0.4.0**，已授权提交、推送，禁止创建或更新 Release。package.json 与双语 README 已同步。提交使用 `[skip publish]`，不关闭 Test CI、不打 tag、不发布 npm 包。
 
-- 本轮起点为 `9d466276fdc5b04158e36a7ae70e8b50125a5364`，个人任务冻结基线仍为 `197c3c48d5f789a7215a1ac6af5ce40cb10ba1ef`。展示版本 **0.3.24**，package.json 与双语 README 一致。
-- 用户已授权更新版本、提交、推送，禁止更新 Release；提交带 `[skip publish]`，不关闭 Test CI，不打 tag、不 publish npm 包。
-- 无付费模型请求。个人 400,000、smoke 900,000、正式 9,000,000 token 仍只是分别授权的草案，不是账单硬上限。
-- 保留原有未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`，不纳入提交。
+本轮原始起点 HEAD 为 `7a366caab3ff6e4e59a26de6559d903df92288bc`。**37/37 工具入口有真实调用成功记录，13 个场景至少取得一次闭环，但不能判为全部 live 验收完成。** Plan 修订/批准仍因中转 SSE 不完整而失败，搜索结果相关性也未完成验收。真实编码修复、Goal、后台命令等闭环通过，不证明 DeepSeek 的成功率、长期稳定性或成本优势。
 
-## 真实终端与修复
+旧 DeepSeek 和 Grok 阶段的 unknown 保持原样。当前检查是用户授权的独立工具场景，不是正式固定任务 campaign；每组新 Session/账本，unknown 停止该组，不续旧账本、不用复测覆盖失败。单组 200,000 token 与汇总已知用量 3,000,000 token 是本轮 harness 守卫设置，不能冒充用户逐字指定的数值，也不是账单硬上限。个人四任务、smoke 和正式 DeepSeek 对比没有因此获得运行授权。
 
-终端为 Windows Terminal **1.24.12741.0**，可执行文件 FileVersion **1.24.2610.01001**。用户将专属窗口置前后，由限定标题/PID/ownership/focus 的 helper 注入实际 GUI 按键、滚轮和 Ctrl+滚轮，使用 PrintWindow 截取该 HWND；这是实际窗口自动操作，不冒充用户亲手按键或 ConPTY 仿真。fake provider 只使用隔离配置，无个人凭据。
+保留原有未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`；不纳入提交。
 
-外置证据根 `C:\Users\39850\AppData\Local\Temp\everpeace-terminal-acceptance-1758ded3a5b548e999de9a7f7452a249`：`terminal-evidence/actions.jsonl` 和截图、`fixture/sessions/`、`acceptance-result.json`、`final-cleanup.json`。主子会话为 `0f84ab27-2a18-4b3d-b459-c2be41b5154e`。
+## 实测入口和证据
 
-| 场景 | 结果与关键证据 |
+端点 `https://cc2.caaa.tech/v1`，模型原始 ID **`grok-4.6`**，正常 ModelRegistry/SystemAuthStorage 读取既有 keyring auth_ref；没有写出 API Key，没有改日常默认模型。工具使用生产 factory、固定原生 sandbox executor、SessionStore 与共享 CodingTaskRunner，不用 fake provider。宿主 Question/Plan 回答明确标为 fixture，MCP 为真实隔离 stdio 服务，Skill/Memory 使用独立种子目录，Memory 后续捕获关闭。
+
+主要 owned 根：
+
+- `C:\Users\39850\AppData\Local\Temp\everpeace-live-tools-b92b3c47bdc747938a068b1b13727e2c`：首轮 13 组、最终工程/安装收据、完整总览 `tool-coverage.json`。
+- `C:\Users\39850\AppData\Local\Temp\everpeace-live-tools-040-99490a7150a54e729dbaadff6ba83474`：当前构建的编辑、历史、Goal、Web 与修复闭环及失败复测。
+- `C:\Users\39850\AppData\Local\Temp\everpeace-live-tools-retry-d54460b0d29d48f997bb9f960f4fef01`：后台闭环通过，Plan 失败保留。
+- `C:\Users\39850\AppData\Local\Temp\everpeace-live-tools-plan-bfe82a3b656d4b44b2186b883f85c12b`：缩小 fixture 和简化 Plan 提示词后仍失败；不计通过。
+
+每根 `plan.json` / `candidate.json` 冻结实际候选；各组 `result.json`、`tools.jsonl`、`requests.json`、Session JSONL 保留实际调用、HTTP/安全错误和 SSE 类型统计。首轮与复测分别绑定其实际 source/build digest；首轮未变化组件的证据不能冒充全部组都重新在最终构建运行。另有两份未请求模型的 recheck/final 准备根，不能算执行结果。
+
+## 工具与闭环结果
+
+| 场景 | 当前证据 |
 | --- | --- |
-| Plan 修订、Esc/Ctrl+C、批准后空闲、显式执行 | 修订草稿 resize 保留（70/71）；批准和查看（73/75）；显式长任务、取消后旧批准拒绝（121–127） |
-| 修改→test pass→build fail→repair→全检查 | /plan cycle 后批准、/plan execute；133 截图与 JSONL 记录 build 指定断言 exit 1，随后 typecheck/test/build 全通过、repair_attempts=1、债务清除 |
-| 重复 Enter、运行中 guidance、Ctrl+C | 122–125；guidance 仍等待，Ctrl+C 取消实际活动请求；不是空闲退出 |
-| 权限在审批期间收紧 | 168–176；切为 read-only 后旧 MCP 批准失效，MCP 与后续 navigation 均 cancelled |
-| 中文/emoji、resize、scrollback、滚轮/缩放、单 prompt | 143–154；300 行保留，Ctrl+End 回到末尾；151/152 实际放大字体、153 恢复 |
-| 直接 ! 输入独占、退出 | 155–160；子进程 10580 接收专属输入并退出，恢复单 prompt；对应文本仅在 timeline，不进入 context_append |
-| 隔离扩展 | 134–141；Skill 内容、MCP pong、native hover 成功，Memory 窗口显示种子条目；不把 Memory UI 当作真实学习质量证据 |
-| 同 root 重启、fork、债务与 unknown | 26/32、89、182–186；子会话及历史恢复，旧 Plan 批准不恢复，最终 status 仍 partial；成功验证没有覆盖未知用量 |
+| 项目地图、目录、文件、文本搜索、glob、搜索续页 | 首轮闭环通过；随机 marker 不在提示词中，模型读取后准确返回 |
+| 修改、新建、删除及四类工作区审阅 | 初测改动及快速检查成功，但后续流失败；当前构建独立复测和完整检查通过 |
+| 前台 PowerShell | 实际 native sandbox 输出 SHELL_OK，模型取得结果并完成 |
+| 后台命令 | 两次后续请求失败均保留；复测观察 BACKGROUND_OK，poll → stop → poll 的 cancelled 状态，清理等待后结算 |
+| 大输出分页 | 实际文件输出保留附件，read_tool_output 分页后模型完成；不把附件历史当作写授权 |
+| Session 四接口 | 首次 fixture 只写 timeline，搜索模型 context 无结果并触发预算停止；修复为同时追加真实 context，离线证明后复测通过，保留原失败与开销 |
+| Question 与进度 | 真实 request_user_input / update_plan，宿主 fixture 回答 blue，模型后续执行与最终回答反映该值 |
+| Plan | submit_plan 曾实际执行并返回修订反馈；后续批准未闭环，多次流缺少 response.completed，仍失败，不恢复或伪造批准 |
+| Goal | create/get/update 实际调用，修改后全 suite 通过，宿主将 pending completion 结算为 complete |
+| Memory 与 Skill | memory_lookup、read_skill 主文件和引用资源实际执行，返回种子 marker；不代表自动学习质量通过 |
+| Web | example.com 页面读取通过；首轮搜索国际 Bing/备用失败，修复后 API 与模型返回闭环。通用 IANA 查询曾返回无关网站，相关性未验收；site:iana.org 限定的宿主直接查询取得官方链接，不冒充模型事实问答通过 |
+| MCP 六类接口 | ping、资源列表、模板列表、读取、提示词列表、获取均实际执行并闭环；不扩展为任意个人服务/OAuth 验收 |
+| Windows 原生导航 | 固定后端的 definition/references/implementation/hover 均实际执行并闭环，不绕过原生探针 |
+| 编码修复 | DRAFT 的实际 typecheck/test pass、build 指定断言失败；模型读取失败后修成 NEW，最终 typecheck/test/build 全通过，真实 repair_attempts=1，检查脚本未改 |
 
-发现并修复：
+总览：工具测试 **98 次模型请求，已知 input + output 647,383 token，9 次请求 usage unknown**；reasoning 已包含在 output，不重复计费。另两个非流式最小诊断各发一请求，均 HTTP 400 / unknown，安全信号指向 streaming 要求；不据此修改生产为非流式或消除先前 unknown。本轮合计 100 次请求，整体计量不完整，已知 token 不是最终账单。初测、所有复测、失败、预算超出和未闭环均保留，不发布成功率排名。
 
-1. 命令窗口 resize 后空白，下一按键才重绘。App 只在聊天视图执行 Static 历史清屏重放；命令窗口由 Ink 原位调整，保留草稿。旧代码回归失败，修复后实际修订和 status resize 均正常。
-2. 恢复较长 Markdown 历史触发 MaxListenersExceededWarning。每个 stdout 共享一个列宽订阅，最后卸载时清理；不提高上限或屏蔽警告。新回归在旧代码复现 60 个订阅，修复为 1 个，resize 更新所有块，卸载归零；实际重启长历史无新警告。
+## 实际修改
 
-helper 修正焦点恢复、NULL 标题查找、DPI/owned HWND 截图、真实 Ctrl+滚轮，并支持失败停止的连续控制。fixture 增加 wait-long、显式 Plan 场景。早期 79/98/111 是空闲退出，149 未产生字体缩放，不能算取消/缩放通过；最终 187 因焦点丢失拒绝发送，不记为成功 Ctrl+C。关闭专属 HWND 后记录后代退出，不关闭其他 Terminal 窗口。早期 05 截图方式不合格，已删除，不作为证据。
+- 保留并交付此前请求失败诊断修复：有界 attempt 失败且 unknown 时，公开 exec/SDK 和共享 runner 返回安全 HTTP 状态/固定类别，仍停止后续准入，不保存供应商原错误正文或密钥。
+- 搜索依次尝试国际 Bing、中国区 Bing、DuckDuckGo，同一总时限内分配每个服务的尝试时间；取消阻止后续服务。Bing GET 手动重定向逐次检查公共网络边界；DuckDuckGo POST 拒绝重定向。回归覆盖首选超时后中国区成功、内网重定向不访问、取消不启动后备服务。
+- 新增显式开发 fixture `tests/fixtures/live-tool-acceptance.mjs`；不新增公共入口、不从 pnpm test 发付费请求。分组只装配相关数据/集成，避免不相关 Skill 与目录探索增加请求。历史 fixture 修复不改生产历史语义。
+- 双语 README 同步搜索行为和用户指定版本；不宣称全部 live 能力通过。
 
-## 工程与候选门禁
+## 最终门禁与交付收据
 
-最终重新发现 manifest 并串行执行：**typecheck pass → lint script 缺项 → test 1066 项、1063 pass、0 fail、0 cancelled、3 平台 skip（68,191.5033 ms）→ build pass**。完整日志保存于终端证据根 `.terminal-acceptance-final-*.log`；sandbox 内一次 App 附件测试超时单独保留，原生同回归通过，不把基础设施失败改写为通过。
+最终 manifest 门禁：**typecheck pass → lint script 缺项 → test 1070 项，1067 pass、0 fail、0 cancelled、3 skip（64,511.8735 ms）→ build pass**。日志为主要证据根 `040-*.log`，`040-checks.json` 保存状态。fixture 的 node --check 通过。
 
-公共安装已通过：隔离 consumer 安装本地打包产物，CLI/exec help、SDK import/runTask 的无模型配置结果与退出码契约通过，405 个安装构建文件与本地 dist 字节一致。收据位于终端证据根 `public-install-result.json`。提交后的准确 SHA、同 SHA Test CI、Release 未变化核对记录在 `final-delivery.json`；完成前不借用上一轮通过结论。
+隔离 public consumer 安装本地 pack 产物后 CLI/exec help、SDK import 与 runTask 的无模型配置/退出码契约通过；405 个安装构建文件与本地 dist 原始字节一致，见 `040-public-install.json`。首次 --offline 安装因未缓存依赖失败，日志保留；使用显式 npmjs registry 的正常安装通过，不把第一次失败抹掉。
 
-修复提交 `33a09e9129ee583a771efb5cff3e5cbee25d34fa` 已推送，[Windows/Linux Test CI](https://github.com/VinceTree/Everpeace/actions/runs/37903249607) 均成功，[Publish version](https://github.com/VinceTree/Everpeace/actions/runs/37903249554) 实际 skipped。27 个 Release 的 ID/tag/更新时间/资产等与保护基线一致，没有创建 tag 或 Release。后续仅交接记录提交仍以最终收据绑定准确 HEAD 和 CI，不把这里的修复提交 SHA 冒充后续 HEAD。
+提交前保护基线为 27 个 Release，见 `releases-before-authenticated.json`；未认证 API 的 404 不算保护基线。最终 commit、push、Windows/Linux CI、候选无凭据 preflight 和 Release/tag 不变核对以主要证据根 `delivery.json` 与其关联收据为准；交付前若未完成，保持 pending，不能借用旧提交的 CI。固定个人/十任务 fixtures 未改，最终候选变更需重新绑定相应 preflight 配置。
 
-## 两套付费测试准备
-
-沿用独立根 `C:\Users\39850\AppData\Local\Temp\everpeace-readiness-2eb92be531ab475d80b9ac4f141fa66a`。`personal.json` 与外置参考验收器冻结四项任务；`personal-offline-preflight.json` 验证装配、计量、取消与恢复债务；`fixture-proof.json` 的十项 pristine→指定断言失败→reference 证明保持有效，任务与补丁未改。
-
-`smoke.json` / `comparison.json` 分别准备 9/90 次，基线、当前候选、固定 dsh 三组；统一 deepseek-flash/high/32768、十五分钟、最多三轮修复。提交后重新 configs 和无凭据 preflight，绑定 revision/sourceDigest/buildDigest；本轮之前收据另行保留。源码/锁文件/构建/HEAD 再变化必须重做候选预检。
-
-本轮首次最终预检中 dsh 达到 60 秒超时，基线和候选通过；失败原样保存为终端证据根 `preflight-first-failure.json` / `preflight.log`。未更改代码、超时或权限条件的独立复验三组全部通过，零网络调用、完整 usage、清理已等待；`preflight-result.json` / `preflight-retry-timing.json` 保留复验。超时原因未确定，不把首次失败改写为通过；后续实测遇到类似异常仍立即停止并诊断。
-
-原生 TypeScript 四查询、写入/状态/网络拒绝、取消/权限变化后 PID 退出沿用上一轮有效证据，对应生产实现本轮未改。复现与授权边界见 [READINESS](benchmark/READINESS.md)、[DEVELOPMENT](DEVELOPMENT.md#离线-windows-terminal-手工验收)。后续先分别取得个人与 smoke 的数值预算授权；发现请求、计量、隔离或清理异常立即停止，修复并重新准备候选，再考虑正式比较。
+后续优先处理：取得中转不完整 SSE 的可靠错误/结束记录并完成 Plan 修订审批；补搜索事实问答的相关性验收。继续保留 unknown，不能执行未完整落盘的流中工具，不能将 Grok 工具覆盖当作 DeepSeek 全定位完成。

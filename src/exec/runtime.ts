@@ -220,6 +220,7 @@ function successfulResult(
     return runtimeResult("limit_reached", 4, result.agentResult.stopReason, ledger, {
       ...common,
       stopReason: result.agentResult.stopReason,
+      ...(result.agentResult.requestFailure ? { error: result.agentResult.requestFailure } : {}),
       ...(result.workflowResult?.state.result ? { workflowResult: result.workflowResult.state.result } : {}),
     });
   }

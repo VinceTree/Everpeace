@@ -55,6 +55,8 @@ TUI / everpeace exec / everpeace/sdk / 内部 benchmark adapter
 
 ReactAgent 在每个实际 provider attempt 结束后立即结算 coding 的 Session/Goal 用量；流恢复、采样重试和能力降级各有独立样本，不能只记录逻辑请求的最终成功。账本触发停止仍须保存已发出请求的 unknown 样本。未准入的请求不产生 usage 样本；用量持久化失败不能被 steering、网络重试或 fallback 吞掉。
 
+已准入的 provider attempt 失败且触发 unknown 停止时，Agent 的当前 turn 保留宿主生成的 HTTP 错误状态（仅 400–599 整数）和固定 sampling category。共享 runner 把它加入停止提示，exec/SDK 使用已有 `error` 字段返回；仍保持 `usage_limited`、退出码 4、不重试和不执行后续工具。供应商 message、body、headers、凭据及任意 error 字段不进入该诊断；没有实际请求失败的缺失 usage 不伪造 HTTP 错误。回归见 [exec runtime](../../tests/unit/exec/runtime.test.ts)。
+
 压缩每个 attempt 结束后立即更新 Goal，再检查下一请求准入。Session 保留原有 context_compacted 事件的最终 usage 增量和上下文替换；此前失败样本另存 usage，压缩失败则保存全部样本。不得重复计量或改变既有 schema。prepareStep 中的预算停止返回明确 stop reason，不包装成压缩错误。回归见 [request settlement](../../tests/unit/agent/request-settlement.test.ts)。
 
 手动压缩也绑定当前 active Goal，已达到预算或 usage 停止的 Goal 在准入前拒绝，不依赖可选 task ledger 才生效。预取消不读写 Goal 或发出请求；压缩期间拒绝 turn、task reset、设置变更和第二次压缩。Agent 为 turn 和手动压缩分别持有取消控制器及完成 Promise；dispose 先关闭准入，取消并等待请求、持久化和后台清理，再释放内存，重复 dispose 共用完成结果。取消发生在 context 已持久化后仍保持内存与落盘一致，保留已知用量，但不报告成功。回归见 [生产手动压缩](../../tests/unit/runtime/manual-compaction.test.ts)。

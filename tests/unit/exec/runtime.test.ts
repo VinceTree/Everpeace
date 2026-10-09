@@ -106,6 +106,32 @@ function verificationResult(passed: boolean): BashResult {
   };
 }
 
+test("bounded exec preserves safe provider failure diagnostics without retrying or exposing error payloads", async () => {
+  const provider = fakeProvider(() => {
+    throw Object.assign(new Error("relay rejected fixture-key private-response-body"), {
+      status: 403,
+      headers: { authorization: "Bearer fixture-key" },
+    });
+  });
+  const f = await fixture(provider);
+  try {
+    const events: ExecEvent[] = [];
+    const result = await runExec({ prompt: "inspect", workspacePath: f.workspacePath, tokenBudget: 100,
+      onEvent(event) { events.push(event); } }, f.dependencies);
+    assert.equal(result.exitCode, 4);
+    assert.equal(result.stopReason, "usage_limited");
+    assert.equal(result.usageComplete, false);
+    assert.equal(result.error, "Provider request failed (HTTP 403; permanent).");
+    assert.equal(provider.calls, 1);
+    const session = await f.sessionStore.load(result.sessionId!);
+    const diagnostic = session.timeline.find((entry) => entry.kind === "system" && entry.text.includes("HTTP 403"));
+    assert.ok(diagnostic);
+    const serialized = JSON.stringify({ result, events, session });
+    assert.ok(!serialized.includes("fixture-key"));
+    assert.ok(!serialized.includes("private-response-body"));
+  } finally { await f.cleanup(); }
+});
+
 test("exec selects registration IDs before unique model names and rejects ambiguous defaults", () => {
   const first = { ...model, id: "same", model_name: "shared" };
   const second = { ...model, id: "other", model_name: "shared" };

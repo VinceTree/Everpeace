@@ -40,7 +40,7 @@ pnpm link --global
 everpeace
 ```
 
-Current source version: **0.3.24**. This source update does not create a GitHub Release.
+Current source version: **0.4.0**. This source update does not create a GitHub Release.
 
 ## What the agent helps you do
 
@@ -50,7 +50,7 @@ Current source version: **0.3.24**. This source update does not create a GitHub 
 | Make a reviewed change | Plan revision and approval, observed-file edits, permission-bound previews, change review and conflict-aware undo. |
 | Continue a longer task | Durable Sessions, independent forks, context checkpoints, task-owned background commands and verification debt preserved across recovery. |
 
-Configured MCP tools, resources and prompts and local Skills extend the agent. Learned Memory can retain preferences and verified lessons. Public web tools check redirects and network boundaries. See the [usage guide](docs/USAGE.md) for setup and limits.
+Configured MCP tools, resources and prompts and local Skills extend the agent. Learned Memory can retain preferences and verified lessons. Public web tools check redirects and network boundaries. Search falls back to Bing China and DuckDuckGo when the first provider is unavailable. See the [usage guide](docs/USAGE.md) for setup and limits.
 
 ## Automate the same workflow
 
@@ -82,6 +82,7 @@ The SDK uses registered credentials; it does not accept an API key in task optio
 - Resizing command windows keeps their content and drafts visible. Long Markdown histories share resize observation without adding a listener for every block.
 - `Ctrl+C` cancels active work and waits for cleanup. While idle it clears a draft, then exits. User-written `!` commands run in a separate host PTY, own terminal input and stay outside model context.
 - Request budgets include retries, compaction and repair. Unknown usage prevents another bounded request; reasoning tokens are a subset of output tokens. Token budgets are not strict billing caps.
+- When a failed request has unknown usage, the stop notice retains its HTTP status and error category without logging provider error bodies or headers.
 
 Offline regressions and native probes establish engineering behavior. Real-model coding quality, reliability and cost still require measured testing; Windows Terminal manual acceptance is tracked separately. [Current evidence and pending gates](docs/HANDOFF.md) · [DeepSeek test preparation](docs/benchmark/READINESS.md).
 
