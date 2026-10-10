@@ -111,6 +111,8 @@ export interface BenchmarkMetricsSnapshot {
 }
 
 export interface BenchmarkHarnessResult {
+  teamMetrics?: { members: number; duplicateReads: number; repeatedFailures: number; conflicts: number };
+  isolationFailed?: boolean;
   requestAttempts?: number;
   manualInterventions?: number;
   unsafeActions?: number;
@@ -176,6 +178,8 @@ export interface BenchmarkVerificationResult {
 }
 
 export interface BenchmarkRunResult {
+  teamMetrics?: BenchmarkHarnessResult["teamMetrics"];
+  isolationFailed?: boolean;
   requestAttempts?: number;
   cleanupFailed?: boolean;
   taskId: string;
@@ -237,5 +241,5 @@ export interface BenchmarkSkippedRun {
   adapter?: string;
   taskId: string;
   repetition: number;
-  reason: "budget_exhausted" | "usage_unknown" | "cancelled" | "cleanup_failed";
+  reason: "budget_exhausted" | "usage_unknown" | "cancelled" | "cleanup_failed" | "isolation_failed";
 }

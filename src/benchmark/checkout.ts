@@ -10,7 +10,8 @@ import type { RegisteredModel } from "../storage/model-registry.js";
 import { BoundedOutputBuffer } from "../tools/command-record.js";
 import { observeProcessCompletion } from "../tools/process-completion.js";
 import { modelShellEnvironment } from "../tools/sandbox-policy.js";
-import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult, BenchmarkTask } from "./types.js";
+import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult } from "./types.js";
+import type { TeamOptions } from "../team/types.js";
 
 const execFileAsync = promisify(execFile);
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -28,7 +29,8 @@ export interface BenchmarkCheckoutIdentity {
 
 export interface BenchmarkCheckoutPreflight extends BenchmarkCheckoutIdentity {
   providerBoundaryObserved: true;
-  requests: 1;
+  requests: number;
+  memberRequests?: number;
   networkCalls: 0;
   processCleanup: "awaited";
   model: string;
@@ -47,6 +49,7 @@ export interface CheckoutBenchmarkAdapterOptions {
   buildDigest: string;
   model: RegisteredModel;
   loopStrategy?: import("../agent/tool-feedback-policy.js").LoopStrategy;
+  team?: TeamOptions;
   sessionsRoot: string;
 }
 
@@ -122,7 +125,7 @@ function preflightNetworkGuardPath(): string {
 }
 
 export async function preflightBenchmarkCheckout(
-  options: Pick<CheckoutBenchmarkAdapterOptions, "sourceRoot" | "entryPath" | "revision" | "sourceDigest" | "buildDigest" | "loopStrategy"> & { modelName?: string; modelBaseUrl?: string; responsesProfile?: import("../providers/capabilities.js").ResponsesProfile },
+  options: Pick<CheckoutBenchmarkAdapterOptions, "sourceRoot" | "entryPath" | "revision" | "sourceDigest" | "buildDigest" | "loopStrategy" | "team"> & { modelName?: string; modelBaseUrl?: string; responsesProfile?: import("../providers/capabilities.js").ResponsesProfile },
 ): Promise<BenchmarkCheckoutPreflight> {
   const identity = await assertBenchmarkCheckoutIdentity(options);
   const stdout = new BoundedOutputBuffer(MAX_OUTPUT_BYTES);
@@ -131,10 +134,11 @@ export async function preflightBenchmarkCheckout(
   try {
     const input = JSON.stringify({
       mode: "preflight",
+      ...(options.team ? { team: options.team } : {}),
       ...(options.loopStrategy === undefined ? {} : { loopStrategy: options.loopStrategy }),
       productionModule: pathToFileURL(identity.entryPath).href,
       task: { id: "checkout-preflight", prompt: "Return a short preflight acknowledgement without using tools.", workspacePath: root },
-      tokenBudget: 100,
+      tokenBudget: options.team?.enabled !== false && options.team ? 200_000 : 100,
       sessionsRoot: path.join(root, "sessions"),
       model: {
         id: "checkout-preflight", model_name: options.modelName ?? "preflight-model",
@@ -166,7 +170,8 @@ export async function preflightBenchmarkCheckout(
       throw new Error(`Checkout preflight failed: ${stderr.text.trim() || `exit ${exitCode ?? "unknown"}`}`);
     }
     const evidence = JSON.parse(line.slice(PREFLIGHT_MARKER.length)) as Omit<BenchmarkCheckoutPreflight, keyof BenchmarkCheckoutIdentity>;
-    if (evidence.providerBoundaryObserved !== true || evidence.requests !== 1 || evidence.reasoning !== "high" || evidence.maxOutputTokens !== 32_768) {
+    const members = options.team?.enabled !== false && options.team ? (options.team.maxAgents ?? 3) - 1 : 0;
+    if (evidence.providerBoundaryObserved !== true || (members ? evidence.requests < members + 3 || evidence.memberRequests !== members : evidence.requests !== 1) || evidence.reasoning !== "high" || evidence.maxOutputTokens !== 32_768 || evidence.usage.complete !== true) {
       throw new Error("Checkout preflight returned invalid request-boundary evidence");
     }
     return { ...evidence, ...identity, networkCalls: 0, processCleanup: "awaited" };
@@ -194,6 +199,7 @@ export function createCheckoutBenchmarkAdapter(options: CheckoutBenchmarkAdapter
       context.signal.throwIfAborted();
       const input = JSON.stringify({
         productionModule: pathToFileURL(identity.entryPath).href, task,
+        ...(options.team ? { team: options.team } : {}),
         tokenBudget: context.tokenBudgetRemaining, sessionsRoot: options.sessionsRoot,
         ...(options.loopStrategy === undefined ? {} : { loopStrategy: options.loopStrategy }),
         model: { ...options.model, request_settings: { reasoningEffort: "high", maxOutputTokens: 32_768 } },

@@ -205,7 +205,7 @@ async function runRipgrep(
   const executable = await resolveRipgrep();
   signal?.throwIfAborted();
   const child = spawn(executable, ["--no-config", ...args], { cwd, windowsHide: true, shell: false, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
-  const owned = observeProcessCompletion(child, { ...(signal ? { signal } : {}) });
+  const owned = observeProcessCompletion(child, (signal ? { signal } : {}));
   const lines: string[] = [];
   let pending = "";
   let retainedBytes = 0;

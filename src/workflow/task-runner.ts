@@ -217,6 +217,7 @@ export class CodingTaskRunner {
       try {
         await this.#agent.endTask?.();
       } catch (error) {
+        // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
         throw this.#cleanupFailure ?? error;
       } finally {
         this.#running = false;

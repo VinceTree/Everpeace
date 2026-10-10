@@ -45,7 +45,7 @@ async function enumerate(cwd: string, resolveRipgrep: RipgrepPathResolver, limit
   const executable = await resolveRipgrep();
   signal?.throwIfAborted();
   const child = spawn(executable, ["--no-config", "--files", "--hidden", "--null", ...[...excluded].flatMap((name) => ["--glob", `!**/${name}/**`]), "--", "."], { cwd, shell: false, windowsHide: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
-  const owned = observeProcessCompletion(child, { ...(signal ? { signal } : {}) });
+  const owned = observeProcessCompletion(child, (signal ? { signal } : {}));
   const files: string[] = [];
   const reasons: string[] = [];
   let pending = Buffer.alloc(0);

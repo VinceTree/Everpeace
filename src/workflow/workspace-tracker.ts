@@ -126,7 +126,8 @@ async function fingerprintPath(root: string, relativePath: string, budget: { byt
 }
 
 async function mapConcurrent<T, R>(values: readonly T[], workers: number, run: (value: T) => Promise<R>): Promise<R[]> {
-  const results = new Array<R>(values.length);
+  const results: R[] = [];
+  results.length = values.length;
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(workers, values.length) }, async () => {
     while (true) {

@@ -175,3 +175,5 @@ Checkout 的 buildDigest 覆盖入口所在的完整顶层 artifact 目录（构
 ## 团队固定离线对照
 
 `pnpm exec tsx tests/fixtures/team-comparison.ts` 顺序运行单 Agent 和团队相同固定任务，真实 Git worktree／原生检查、合成 Responses、不读取注册凭据、不访问真实模型。独立评分检查目标字节与根验证；报告包含耗时、请求／token、重复调用、冲突和人工介入。团队包含两个编码成员；专门回归验证成员通过而根失败不能成功。fixture 的 token 和时间只描述合成流程，不能据此判断实际供应商效率。付费对照另需 task/campaign 数值授权。
+
+当前候选的同模型单 Agent／团队配置、离线 preflight、独立评分证明、冻结摘要和三阶段待授权额度见 [TEAM_READINESS](benchmark/TEAM_READINESS.md)。harness 的可选 team 参数贯穿 adapter/worker，省略时维持单 Agent 行为；团队结果附带重复读取、重复失败和冲突计数，隔离失败停止 campaign。

@@ -42,6 +42,7 @@ export class TeamLedger extends RequestAttemptLedger {
     return { ...current, ...(this.#tokenLimit === undefined ? {} : { tokenBudget: this.#tokenLimit, remainingTokens: this.remainingTokens! }), attempts: [...(old?.attempts ?? []), ...current.attempts.map((entry) => ({ ...entry, ...this.#owners.get(entry.id), id: entry.id + this.offset }))].sort((a, b) => a.id - b.id), inputTokens: current.inputTokens + (old?.inputTokens ?? 0), outputTokens: current.outputTokens + (old?.outputTokens ?? 0), reasoningTokens: current.reasoningTokens + (old?.reasoningTokens ?? 0), complete: this.usageComplete && this.#open === 0 };
   }
   scope(agentId: string, modelId: string): RequestAttemptLedger {
+    // oxlint-disable-next-line typescript/no-this-alias -- The ledger facade has its own this; delegation must retain the owning runtime.
     const owner = this;
     return new class extends RequestAttemptLedger {
       override reset(): void {}
@@ -65,6 +66,7 @@ export class TeamLedger extends RequestAttemptLedger {
     }();
   }
   stop(reason: unknown): void { this.#failure ??= reason; this.settings.onStop(reason); this.wake(); }
+  // oxlint-disable-next-line unicorn/no-useless-spread -- Wake callbacks can mutate the waiter set; iterate its snapshot.
   wake(): void { for (const wake of [...this.#waiters]) wake(); }
   async acquire(agentId: string, _purpose: RequestPurpose, reservation: number, signal?: AbortSignal): Promise<void> {
     while (true) {

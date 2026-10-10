@@ -283,6 +283,7 @@ class JsonRpcProcess {
         await this.#process.exit.catch(() => undefined);
         await (forced ?? this.#process.terminate());
       } catch (error) {
+        // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
         throw error instanceof ProcessCleanupError ? error : new ProcessCleanupError(error);
       } finally { clearTimeout(timer); }
     }
@@ -562,6 +563,7 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
         try { await rpc?.close(); }
         catch (error) {
           if (error instanceof ProcessCleanupError) this.#cleanupFailure ??= error;
+          // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
           throw error;
         }
       }
@@ -668,6 +670,7 @@ export class CodeNavigationRuntime implements CodeNavigationRuntimeLike {
         if (listener.listening) await new Promise<void>((resolve) => listener.close(() => resolve()));
         this.#isolationEvidence = Object.freeze(evidence);
       }
+      // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
       if (this.#cleanupFailure) throw this.#cleanupFailure;
     }
     if (evidence.outcome !== "denied") throw new LanguageServerIsolationError(this.#isolationEvidence!);

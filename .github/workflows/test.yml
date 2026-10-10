@@ -28,7 +28,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm install:verify
       - run: pnpm typecheck
+      - run: pnpm lint
       - name: Inspect Linux namespace availability
         if: runner.os == 'Linux'
         shell: bash
@@ -76,6 +78,7 @@ jobs:
           fi
           exit "$status"
       - run: pnpm build
+      - run: pnpm install:smoke
       - name: Check whitespace
         shell: bash
         run: git diff --check

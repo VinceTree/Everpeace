@@ -16,6 +16,7 @@ import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult, BenchmarkTask } f
 import { isResponsesProfile, type ResponsesProfile } from "../providers/capabilities.js";
 import { normalizeBaseUrl } from "../providers/openai-compatible.js";
 import { compareAgentStrategies } from "./strategy-comparison.js";
+import { normalizeTeamOptions, type TeamOptions } from "../team/types.js";
 import { captureBenchmarkEvaluationDigest } from "./evaluation-identity.js";
 
 interface ExternalHarnessConfig {
@@ -28,7 +29,7 @@ interface ExternalHarnessConfig {
   expected: { model: string; reasoning: "high"; maxOutputTokens: number };
 }
 
-interface ProductionHarnessConfig { kind: "everpeace"; name?: "everpeace" }
+interface ProductionHarnessConfig { kind: "everpeace"; name?: "everpeace"; team?: TeamOptions }
 
 interface CheckoutHarnessConfig {
   kind: "everpeace-checkout";
@@ -40,6 +41,7 @@ interface CheckoutHarnessConfig {
   buildDigest: string;
   expected: { model: string; reasoning: "high"; maxOutputTokens: 32_768 };
   loopStrategy?: "baseline" | "candidate";
+  team?: TeamOptions;
 }
 
 interface DshHarnessConfig {
@@ -109,7 +111,7 @@ export function parseCampaignConfig(value: unknown, configPath: string): Campaig
   if (!Array.isArray(input.harnesses) || input.harnesses.length === 0) throw new Error("harnesses must be a non-empty array");
   const harnesses = input.harnesses.map((item, index): ProductionHarnessConfig | CheckoutHarnessConfig | ExternalHarnessConfig | DshHarnessConfig => {
     const harness = record(item, `harnesses[${index}]`);
-    if (harness.kind === "everpeace") return { kind: "everpeace", name: "everpeace" };
+    if (harness.kind === "everpeace") return { kind: "everpeace", name: "everpeace", ...(harness.team === undefined ? {} : { team: normalizeTeamOptions(record(harness.team, `harnesses[${index}].team`) as TeamOptions) }) };
     if (harness.kind !== "instrumented-process" && harness.kind !== "dsh" && harness.kind !== "everpeace-checkout") throw new Error(`harnesses[${index}].kind is unsupported`);
     const expected = record(harness.expected, `harnesses[${index}].expected`);
     if (expected.reasoning !== "high") throw new Error(`harnesses[${index}].expected.reasoning must be high`);
@@ -140,6 +142,7 @@ export function parseCampaignConfig(value: unknown, configPath: string): Campaig
       return {
         kind: "everpeace-checkout",
         ...shared,
+        ...(harness.team ? { team: normalizeTeamOptions(record(harness.team, `harnesses[${index}].team`) as TeamOptions) } : {}),
         ...(harness.loopStrategy === undefined ? {} : { loopStrategy: harness.loopStrategy as "baseline" | "candidate" }),
         sourceRoot: resolve(root, string(harness.sourceRoot, `harnesses[${index}].sourceRoot`)),
         entryPath: resolve(root, string(harness.entryPath, `harnesses[${index}].entryPath`)),
@@ -360,10 +363,11 @@ async function live(config: CampaignConfig): Promise<void> {
     }
   }
   const harnesses = config.harnesses.map((harness) => {
-    if (harness.kind === "everpeace") return createProductionBenchmarkAdapter({ model, sessionsRoot: config.sessionsRoot });
+    if (harness.kind === "everpeace") return createProductionBenchmarkAdapter({ model, sessionsRoot: config.sessionsRoot, ...(harness.team ? { team: harness.team } : {}) });
     if (harness.kind === "everpeace-checkout") {
       return createCheckoutBenchmarkAdapter({
         name: harness.name,
+        ...(harness.team ? { team: harness.team } : {}),
         ...(harness.loopStrategy === undefined ? {} : { loopStrategy: harness.loopStrategy }),
         sourceRoot: harness.sourceRoot,
         entryPath: harness.entryPath,

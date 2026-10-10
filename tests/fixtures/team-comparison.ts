@@ -1,5 +1,6 @@
 /** Deterministic comparison: synthetic Responses, real Git/editor/native verification. No paid calls. */
 import { promises as fs } from "node:fs";
+import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,12 +11,12 @@ import { TeamStore } from "../../src/team/store.js";
 import { git, loadTeamWorkspace, removeTeamWorkspace } from "../../src/team/workspace.js";
 import type { TeamMember } from "../../src/team/types.js";
 
-export async function runOfflineComparison(team: boolean, failRoot = false) {
+export async function runOfflineComparison(team: boolean, failRoot = false, sameModel = false) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-team-comparison-"));
   const workspace = path.join(directory, "workspace"); await fs.mkdir(workspace);
   const originalFetch = globalThis.fetch;
   const root = { id: "fixture-root", model_name: "fixture-root-raw", base_url: "https://fixture.invalid/v1", api_key: "offline-placeholder", responses_profile: "generic" as const };
-  const worker = { ...root, id: "fixture-worker", model_name: "fixture-worker-raw", responses_profile: "deepseek" as const };
+  const worker = sameModel ? root : { ...root, id: "fixture-worker", model_name: "fixture-worker-raw", responses_profile: "deepseek" as const };
   let rootCalls = 0; let calls = 0; let manualInterventions = 0;
   let retained: Array<{ workspace: string; source: string }> = [];
   const started = performance.now();
@@ -29,13 +30,13 @@ export async function runOfflineComparison(team: boolean, failRoot = false) {
     if (failRoot) await fs.writeFile(path.join(workspace, "block-root"), "Root-only failing check; excluded from worker snapshots.\n");
     globalThis.fetch = async (_url, init) => {
       if (!String(_url).startsWith(root.base_url)) throw new Error("Offline fixture refused a non-fixture request");
-      const request = JSON.parse(String(init?.body)) as { model: string; input: Array<Record<string, unknown>> };
+      const request = JSON.parse(String(init?.body)) as { model: string; input: Array<Record<string, unknown>>; tools?: Array<{ name: string }> };
       calls++;
       const input = Array.isArray(request.input) ? request.input : [];
       const toolResults = input.filter((item) => item.type === "function_call_output");
       const call = (name: string, args: unknown, index = 0) => ({ type: "function_call", call_id: `fixture-${calls}-${index}`, name, arguments: JSON.stringify(args) });
       let output: unknown[]; let text = "";
-      if (request.model === worker.model_name) {
+      if (sameModel ? team && !request.tools?.some((tool) => tool.name === "spawn_agent") : request.model === worker.model_name) {
         const letter = JSON.stringify(input).includes("Edit a.ts") ? "a" : "b";
         if (!toolResults.some((item) => String(item.output).includes('"sha256"'))) output = [call("read_file", { path: `${letter}.ts` })];
         else if (!toolResults.some((item) => String(item.output).includes('"applied"'))) output = [call("apply_patch", { operations: [{ path: `${letter}.ts`, action: "update", content: `export const ${letter} = 2;\n` }] })];
@@ -66,7 +67,7 @@ export async function runOfflineComparison(team: boolean, failRoot = false) {
       return new Response(`event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response })}\n\n`, { headers: { "Content-Type": "text/event-stream" } });
     };
     const result = await runExec({ prompt: "Change a.ts and b.ts values from 1 to 2; preserve other files.", model: root.id, workspacePath: workspace, ...(team ? { team: { models: { worker: worker.id }, maxAttempts: 40 } } : {}), onEvent: (event) => { if (event.type === "interaction_required") manualInterventions++; } }, {
-      registry: { resolveAll: async () => ({ available: [root, worker], missing: [] }) }, sessionStore: new SessionStore({ directory: path.join(directory, "sessions") }),
+      registry: { resolveAll: async () => ({ available: sameModel ? [root] : [root, worker], missing: [] }) }, sessionStore: new SessionStore({ directory: path.join(directory, "sessions") }),
       createAgent: (options) => createProductionAgent({ ...options, skills: null, mcp: null, learnedMemoryStore: null, codeNavigation: null, teamStore: new TeamStore(path.join(directory, "teams")) }),
     });
     retained = (result.team?.members ?? []).filter((member) => member.workspacePath).map((member) => ({ workspace: member.workspacePath!, source: workspace }));
@@ -81,5 +82,8 @@ export async function runOfflineComparison(team: boolean, failRoot = false) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  for (const team of [false, true]) process.stdout.write(`${JSON.stringify(await runOfflineComparison(team))}\n`);
+  for (const team of [false, true]) {
+    const report = await runOfflineComparison(team, false, process.argv.includes("--same-model"));
+    process.stdout.write(`${JSON.stringify(report)}\n`); assert.equal(report.score, 1, "Offline comparison failed; inspect its report");
+  }
 }

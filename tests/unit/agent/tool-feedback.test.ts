@@ -122,7 +122,7 @@ test("foreground and background timeouts preserve partial output with remedies a
     assert.deepEqual(commands, ["foreground", "background"]);
     assert.equal(feedback[0]?.errorCode, "COMMAND_TIMEOUT");
     assert.equal(feedback[0]?.stdout, "partial write completed");
-    const result = (feedback[2]?.job as { result: Record<string, unknown> }).result;
+    const result = (feedback[2]!.job as { result: Record<string, unknown> }).result;
     assert.equal(result.errorCode, "COMMAND_TIMEOUT");
     assert.equal(result.stdout, "partial write completed");
     assert.match(String(result.remedy), /do not blindly replay/u);

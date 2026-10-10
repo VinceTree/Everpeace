@@ -28,3 +28,4 @@
 新 Session 默认只读 [当前交接](../HANDOFF.md) 和 [当前计划](../PLAN.md)，仅在追溯历史时查阅这里。归档正文中的旧相对路径以当时 `docs/` 所在位置理解；当前文件定位以 [项目地图](../architecture/PROJECT_MAP.md) 为准。
 
 - [模型 profile 与请求投影交接](HANDOFF-2026-10-09-profiles.md)：团队实现前的状态、费用授权边界与历史收据。
+- [多 Agent 交付与发布交接](HANDOFF-2026-10-10-teams.md)：公共网络修复前的团队交付、原生与终端验收、历史发布授权和收据。

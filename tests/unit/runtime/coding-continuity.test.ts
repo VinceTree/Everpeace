@@ -114,7 +114,7 @@ test("production failure feedback survives compaction, fork, and restart until t
     assert.equal(result.workflowResult?.state.pending_verification, false);
     assert.deepEqual(result.workflowResult?.verificationSuite?.results.map((item) => item.command.id), ["node:typecheck", "node:lint", "node:test", "node:build"]);
     assert.equal(await fs.readFile(path.join(workspacePath, file), "utf8"), "export const value = 2;\r\n");
-    const dynamic = (requests[0]?.input as Array<{ content: string }>).at(-1)!.content;
+    const dynamic = (requests[0]!.input as Array<{ content: string }>).at(-1)!.content;
     assert.match(dynamic, /"pending_verification":true/u);
     assert.match(JSON.stringify(requests[0]?.input), /session_resume/u);
     const settled = await store.load(child.id);

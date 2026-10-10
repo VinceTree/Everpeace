@@ -13,6 +13,7 @@
 | [PROJECT_MAP](architecture/PROJECT_MAP.md) | 能力 → 源码 → 测试 → 专题 | 定位实现和回归入口 |
 | [TEAMS](architecture/TEAMS.md) | 调度、模型、团队计量、原生隔离、整合与恢复 | 修改多 Agent 协作 |
 | [RUNTIME](architecture/RUNTIME.md) | 请求计量、模型循环、压缩、workflow、Goal | 修改编码行为或性能 |
+| [NETWORK](architecture/NETWORK.md) | 公共 DNS/IP 连接、HTTP/HTTPS 代理、Git Skill 转发器 | 修改网页或远程 Skill 网络 |
 | [TOOLS](architecture/TOOLS.md) | 文件观察、编辑、规则、搜索、后台命令、LSP | 修改编码工具 |
 | [STATE_AND_UI](architecture/STATE_AND_UI.md) | Session/凭据/usage/恢复与终端不变量 | 修改状态或 UI |
 | [DEVELOPMENT](DEVELOPMENT.md) | 工具链、命令、测试、CI、交付 | 开始修改及交付前 |
@@ -26,6 +27,7 @@
 | [TUI_STRUCTURE](architecture/TUI_STRUCTURE.md) | 终端目录职责与依赖方向 | 增加/移动 UI 模块 |
 | [BENCHMARKING](BENCHMARKING.md) | fixtures、执行器、独立评分和预算 | 跑离线证明或筹备 live 比较 |
 | [实测准备](benchmark/READINESS.md) | 个人四任务、十项固定 proof、候选身份与三阶段预算 | 准备 DeepSeek 实测 |
+| [团队实测准备](benchmark/TEAM_READINESS.md) | 当前候选冻结、单 Agent/团队无凭据 preflight 与待授权配置 | 筹备当前团队对照 |
 | [English usage](USAGE.md) / [中文使用](USAGE.zh-CN.md) | 完整命令、SDK、恢复与交互契约 | README 上手后查阅细节 |
 | [历史归档](archive/README.md) | 旧交接、旧计划、当时的结果 | 追查设计来历时才读 |
 

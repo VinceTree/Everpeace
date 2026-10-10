@@ -4,7 +4,6 @@ import { diagnosticCategory } from "../tools/diagnostics.js";
 import { randomUUID, createHash } from "node:crypto";
 import { loadProjectRuleSnapshot } from "../agent/project-context.js";
 import { resolveProviderCapabilities, isModelRequestSettings } from "../providers/capabilities.js";
-import path from "node:path";
 import { RequestUsageIncompleteError, RequestAttemptLedger, type RequestPurpose, type RequestAttemptStatus } from "../agent/request-attempt-ledger.js";
 import type { TokenUsageSample } from "../status/model-status.js";
 import type { AgentMode } from "../plan/runtime.js";
@@ -85,6 +84,7 @@ export class TeamRuntime implements TeamAgentBridge {
       if (model.request_settings && !isModelRequestSettings(model.request_settings)) throw new Error(`Team ${role} request settings are invalid`);
       const frozen = structuredClone(model); Object.freeze(frozen.request_settings); this.#models.set(role, Object.freeze(frozen));
     }
+    // oxlint-disable-next-line typescript/no-this-alias -- The ledger facade has its own this; delegation must retain the owning runtime.
     const owner = this;
     this.accounting = new class extends RequestAttemptLedger {
       override reset(): void {}
@@ -203,6 +203,7 @@ export class TeamRuntime implements TeamAgentBridge {
   }
   async run(owned: OwnedMember): Promise<void> {
     const record = owned.record;
+    delete record.errorCode;
     const signal = this.signal(owned.controller.signal);
     try {
       this.check(signal); await this.event(record);
@@ -225,6 +226,7 @@ export class TeamRuntime implements TeamAgentBridge {
     } catch (error) {
       record.state = signal.aborted ? "cancelled" : "failed";
       record.error = error instanceof ToolFeedbackError ? `${diagnosticCategory(error.code)}: ${sanitizeExecOutput(error.message, 2048)} ${error.remedy}` : "Member stopped; inspect its Session and retained workspace for details.";
+      if (error instanceof ToolFeedbackError && error.code === "SANDBOX_UNAVAILABLE") record.errorCode = error.code;
       if (error instanceof ResourceCleanupError || error instanceof PersistenceError) throw error;
     } finally { delete owned.steering; await this.event(record); this.schedule(); }
   }

@@ -106,3 +106,12 @@ test("checkout preflight invokes the repository production adapter at a syntheti
   assert.equal(result.requests, 1);
   assert.equal(result.usage.complete, true);
 });
+
+test("checkout preflight forwards team configuration and accounts actual independent member requests", { timeout: 45_000 }, async () => {
+  const root = process.cwd(); const entryPath = path.resolve("src/benchmark/production.ts");
+  const identity = await captureBenchmarkCheckoutIdentity(root, entryPath);
+  const result = await preflightBenchmarkCheckout({ sourceRoot: root, ...identity, team: { enabled: true, maxAgents: 3 }, modelName: "deepseek-flash" });
+  assert.equal(result.networkCalls, 0); assert.equal(result.processCleanup, "awaited");
+  assert.equal(result.memberRequests, 2); assert.ok(result.requests >= 5);
+  assert.equal(result.usage.inputTokens, result.requests); assert.equal(result.usage.outputTokens, result.requests); assert.equal(result.usage.complete, true);
+});

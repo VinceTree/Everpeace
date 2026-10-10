@@ -55,6 +55,14 @@ test("campaign stops all harnesses after an unknown request attempt", async () =
   assert.match(result.stopReason ?? "", /unknown usage/u);
 });
 
+test("a native isolation failure stops the stage and leaves later runs in its denominator", async () => {
+  let runs = 0;
+  const adapter: BenchmarkHarnessAdapter = { name: "team", async run() { runs++; return { isolationFailed: true, usage: { inputTokens: 1, outputTokens: 1, complete: true } }; } };
+  const result = await runBenchmarkCampaign(tasks, [adapter], { campaignId: "isolation", seed: 1, repetitions: 1, liveApi: true, taskTokenBudget: 100, campaignTokenBudget: 1000, async prepareRun(task) { return task; } });
+  assert.equal(runs, 1); assert.equal(result.results[0]?.status, "failed"); assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0]?.reason, "isolation_failed"); assert.equal(result.statisticsComplete, false);
+});
+
 
 test("preparation cleanup failure stops the entire campaign before another harness", async () => {
   let preparations = 0;

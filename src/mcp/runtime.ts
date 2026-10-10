@@ -665,7 +665,7 @@ export class McpRuntime {
                 return value === undefined ? [] : [[name, value]];
               }),
             ),
-            ...(config.transport.env ?? {}),
+            ...config.transport.env,
           },
           cwd: config.transport.cwd
             ? resolve(context.workspacePath, config.transport.cwd)
@@ -732,7 +732,7 @@ export class McpRuntime {
     if (isAbsolute(command) || command.includes("/") || command.includes("\\")) {
       return existsSync(isAbsolute(command) ? command : resolve(cwd, command));
     }
-    const environment = { ...getDefaultEnvironment(), ...(transport.env ?? {}) };
+    const environment = { ...getDefaultEnvironment(), ...transport.env };
     const pathValue = Object.entries(environment)
       .find(([name]) => name.toLowerCase() === "path")?.[1] ?? "";
     const pathExtValue = Object.entries(environment)

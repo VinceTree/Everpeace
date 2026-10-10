@@ -200,11 +200,11 @@ export async function inspectWorkspace(
 }
 
 export async function workspaceStatus(workspacePath: string, signal?: AbortSignal): Promise<WorkspaceInspection> {
-  return inspectWorkspace(workspacePath, { ...(signal ? { signal } : {}) });
+  return inspectWorkspace(workspacePath, (signal ? { signal } : {}));
 }
 
 export async function workspaceDiff(workspacePath: string, signal?: AbortSignal): Promise<WorkspaceInspection> {
-  return inspectWorkspace(workspacePath, { ...(signal ? { signal } : {}) });
+  return inspectWorkspace(workspacePath, (signal ? { signal } : {}));
 }
 
 export function formatWorkspaceInspection(value: WorkspaceInspection, diff = false): string {

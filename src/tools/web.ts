@@ -1,5 +1,6 @@
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import { withPublicResponse } from "../network/public-http.js";
+import type { FetchLike, HostLookup } from "../network/public-address.js";
+export { isPublicIpAddress, validatePublicUrl, type FetchLike, type HostLookup } from "../network/public-address.js";
 
 const BING_SEARCH_ENDPOINTS = [
   { name: "Bing", url: "https://www.bing.com/search" },
@@ -15,11 +16,6 @@ const PAGE_TEXT_LIMIT = 30_000;
 const PAGE_LINK_LIMIT = 40;
 const REQUEST_TIMEOUT_MS = 20_000;
 const REDIRECT_LIMIT = 5;
-
-export type FetchLike = typeof globalThis.fetch;
-export type HostLookup = (
-  hostname: string,
-) => Promise<readonly { address: string; family: number }[]>;
 
 export interface WebSearchItem {
   title: string;
@@ -293,10 +289,8 @@ export async function searchWeb(
   query: string,
   options: WebToolOptions & { signal?: AbortSignal } = {},
 ): Promise<WebSearchResult> {
-  const fetchImpl = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
   const signal = requestSignal(options.signal, timeoutMs);
-  const resolveHostname = options.lookup ?? ((hostname: string) => lookup(hostname, { all: true, verbatim: true }));
   // Reserve time for fallback providers instead of spending the whole deadline
   // on an unreachable first endpoint.
   const providerSignal = () => requestSignal(signal, Math.max(1, Math.floor(timeoutMs / 3)));
@@ -312,9 +306,7 @@ export async function searchWeb(
       const url = new URL(endpoint.url);
       url.searchParams.set("q", query);
       url.searchParams.set("count", String(SEARCH_RESULT_LIMIT));
-      const response = await fetchPublicSearch(url, fetchImpl, resolveHostname, headers, providerSignal());
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const { text } = await readLimitedText(response, SEARCH_RESPONSE_LIMIT);
+      const text = await fetchPublicSearch(url, options, headers, providerSignal());
       const results = parseBingResults(text);
       if (results.length > 0) return { query, results };
       throw new Error("no results");
@@ -325,19 +317,18 @@ export async function searchWeb(
   }
 
   try {
-    await validatePublicUrl(new URL(DUCKDUCKGO_SEARCH_ENDPOINT), resolveHostname);
-    const response = await fetchImpl(DUCKDUCKGO_SEARCH_ENDPOINT, {
+    const text = await withPublicResponse(new URL(DUCKDUCKGO_SEARCH_ENDPOINT), {
       method: "POST",
       headers: {
         ...headers,
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({ q: query }),
-      redirect: "error",
       signal: providerSignal(),
+    }, options, async (response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return (await readLimitedText(response, SEARCH_RESPONSE_LIMIT)).text;
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const { text } = await readLimitedText(response, SEARCH_RESPONSE_LIMIT);
     const results = parseDuckDuckGoResults(text);
     if (results.length > 0) return { query, results };
     throw new Error("no results");
@@ -351,92 +342,23 @@ export async function searchWeb(
   throw new Error(`Web search failed (${failures.join("; ")})`);
 }
 
-async function fetchPublicSearch(
-  requestedUrl: URL,
-  fetchImpl: FetchLike,
-  resolveHostname: HostLookup,
-  headers: Record<string, string>,
-  signal: AbortSignal,
-): Promise<Response> {
+async function fetchPublicSearch(requestedUrl: URL, options: WebToolOptions, headers: Record<string, string>, signal: AbortSignal): Promise<string> {
   let currentUrl = requestedUrl;
   for (let redirects = 0; redirects <= REDIRECT_LIMIT; redirects += 1) {
-    signal.throwIfAborted();
-    await validatePublicUrl(currentUrl, resolveHostname);
-    const response = await fetchImpl(currentUrl, { headers, redirect: "manual", signal });
-    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
-    const location = response.headers.get("location");
-    await response.body?.cancel();
-    if (!location) throw new Error("Search redirect did not include a location");
-    if (redirects === REDIRECT_LIMIT) throw new Error("Search exceeded the redirect limit");
-    currentUrl = new URL(location, currentUrl);
+    const result = await withPublicResponse(currentUrl, { headers, signal }, options, async (response) => {
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get("location");
+        if (!location) throw new Error("Search redirect did not include a location");
+        if (redirects === REDIRECT_LIMIT) throw new Error("Search exceeded the redirect limit");
+        return { location };
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return { text: (await readLimitedText(response, SEARCH_RESPONSE_LIMIT)).text };
+    });
+    if ("text" in result) return result.text!;
+    currentUrl = new URL(result.location!, currentUrl);
   }
   throw new Error("Search exceeded the redirect limit");
-}
-
-function isPublicIpv4(address: string): boolean {
-  const octets = address.split(".").map(Number);
-  if (
-    octets.length !== 4 ||
-    octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)
-  ) {
-    return false;
-  }
-  const [first = 0, second = 0] = octets;
-  if (first === 0 || first === 10 || first === 127 || first >= 224) return false;
-  if (first === 100 && second >= 64 && second <= 127) return false;
-  if (first === 169 && second === 254) return false;
-  if (first === 172 && second >= 16 && second <= 31) return false;
-  if (first === 192 && (second === 0 || second === 168)) return false;
-  if (first === 198 && (second === 18 || second === 19)) return false;
-  return true;
-}
-
-function isPublicIpv6(address: string): boolean {
-  const normalized = address.toLowerCase().split("%")[0] ?? "";
-  if (normalized === "::" || normalized === "::1") return false;
-  if (normalized.startsWith("::")) return false;
-  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return false;
-  if (/^fe[89ab]/u.test(normalized) || normalized.startsWith("ff")) return false;
-  const mappedIpv4 = normalized.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/u)?.[1];
-  return mappedIpv4 === undefined || isPublicIpv4(mappedIpv4);
-}
-
-export function isPublicIpAddress(address: string): boolean {
-  const version = isIP(address);
-  if (version === 4) return isPublicIpv4(address);
-  if (version === 6) return isPublicIpv6(address);
-  return false;
-}
-
-export async function validatePublicUrl(url: URL, resolveHostname: HostLookup): Promise<void> {
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Only HTTP and HTTPS URLs can be fetched");
-  }
-  if (url.username || url.password) {
-    throw new Error("URLs containing credentials cannot be fetched");
-  }
-
-  const hostname = url.hostname
-    .toLowerCase()
-    .replace(/^\[|\]$/gu, "");
-  if (
-    hostname === "localhost" ||
-    hostname.endsWith(".localhost") ||
-    hostname.endsWith(".local") ||
-    hostname.endsWith(".internal")
-  ) {
-    throw new Error("Local and private network addresses cannot be fetched");
-  }
-
-  const addresses = isIP(hostname)
-    ? [{ address: hostname, family: isIP(hostname) }]
-    : await resolveHostname(hostname);
-  if (
-    addresses.length === 0 ||
-    addresses.some(({ address }) => !isPublicIpAddress(address))
-  ) {
-    throw new Error("Local and private network addresses cannot be fetched");
-  }
 }
 
 function htmlToPageText(html: string, pageUrl: URL): { title: string | null; content: string; links: Array<{ title: string; url: string }> } {
@@ -482,10 +404,6 @@ export async function fetchWebPage(
   requestedUrl: string,
   options: WebToolOptions & { signal?: AbortSignal } = {},
 ): Promise<WebFetchResult> {
-  const fetchImpl = options.fetch ?? globalThis.fetch;
-  const resolveHostname =
-    options.lookup ??
-    ((hostname: string) => lookup(hostname, { all: true, verbatim: true }));
   const signal = requestSignal(options.signal, options.timeoutMs ?? REQUEST_TIMEOUT_MS);
   let currentUrl: URL;
   try {
@@ -495,8 +413,7 @@ export async function fetchWebPage(
   }
 
   for (let redirectCount = 0; redirectCount <= REDIRECT_LIMIT; redirectCount += 1) {
-    await validatePublicUrl(currentUrl, resolveHostname);
-    const response = await fetchImpl(currentUrl, {
+    const result = await withPublicResponse(currentUrl, {
       method: "GET",
       headers: {
         Accept: "text/html,application/xhtml+xml,text/plain,application/json,application/xml;q=0.9,*/*;q=0.1",
@@ -505,49 +422,50 @@ export async function fetchWebPage(
       },
       redirect: "manual",
       signal,
-    });
-
-    if ([301, 302, 303, 307, 308].includes(response.status)) {
-      const location = response.headers.get("location");
-      if (!location) throw new Error("Web page redirect did not include a location");
-      if (redirectCount === REDIRECT_LIMIT) {
-        throw new Error("Web page exceeded the redirect limit");
+    }, options, async (response): Promise<WebFetchResult | { location: string }> => {
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get("location");
+        if (!location) throw new Error("Web page redirect did not include a location");
+        if (redirectCount === REDIRECT_LIMIT) {
+          throw new Error("Web page exceeded the redirect limit");
+        }
+        return { location };
       }
-      currentUrl = new URL(location, currentUrl);
-      continue;
-    }
-    if (!response.ok) {
-      throw new Error(`Web page returned HTTP ${response.status}`);
-    }
+      if (!response.ok) {
+        throw new Error(`Web page returned HTTP ${response.status}`);
+      }
 
-    const contentType = (response.headers.get("content-type") ?? "text/plain")
-      .split(";", 1)[0]!
-      .trim()
-      .toLowerCase();
-    if (
-      !contentType.startsWith("text/") &&
-      !/^application\/(?:json|xml|xhtml\+xml)$/u.test(contentType)
-    ) {
-      throw new Error(`Unsupported web content type: ${contentType || "unknown"}`);
-    }
+      const contentType = (response.headers.get("content-type") ?? "text/plain")
+        .split(";", 1)[0]!
+        .trim()
+        .toLowerCase();
+      if (
+        !contentType.startsWith("text/") &&
+        !/^application\/(?:json|xml|xhtml\+xml)$/u.test(contentType)
+      ) {
+        throw new Error(`Unsupported web content type: ${contentType || "unknown"}`);
+      }
 
-    const body = await readLimitedText(response, PAGE_RESPONSE_LIMIT);
-    const isHtml = contentType === "text/html" || contentType === "application/xhtml+xml";
-    const parsed = isHtml
-      ? htmlToPageText(body.text, currentUrl)
-      : { title: plainTextTitle(contentType), content: body.text.trim() };
-    const contentTruncated = parsed.content.length > PAGE_TEXT_LIMIT;
-    const content = parsed.content.slice(0, PAGE_TEXT_LIMIT);
-    if (!content) throw new Error("Web page did not contain readable text");
+      const body = await readLimitedText(response, PAGE_RESPONSE_LIMIT);
+      const isHtml = contentType === "text/html" || contentType === "application/xhtml+xml";
+      const parsed = isHtml
+        ? htmlToPageText(body.text, currentUrl)
+        : { title: plainTextTitle(contentType), content: body.text.trim() };
+      const contentTruncated = parsed.content.length > PAGE_TEXT_LIMIT;
+      const content = parsed.content.slice(0, PAGE_TEXT_LIMIT);
+      if (!content) throw new Error("Web page did not contain readable text");
 
-    return {
-      url: currentUrl.toString(),
-      title: parsed.title,
-      content_type: contentType,
-      content,
-      truncated: body.truncated || contentTruncated,
-      ...("links" in parsed ? { links: parsed.links } : {}),
-    };
+      return {
+        url: currentUrl.toString(),
+        title: parsed.title,
+        content_type: contentType,
+        content,
+        truncated: body.truncated || contentTruncated,
+        ...("links" in parsed ? { links: parsed.links } : {}),
+      };
+    });
+    if (!("location" in result)) return result;
+    currentUrl = new URL(result.location, currentUrl);
   }
 
   throw new Error("Web page exceeded the redirect limit");

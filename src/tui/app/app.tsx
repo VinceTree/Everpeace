@@ -2147,6 +2147,7 @@ export function EverpeaceApp({
       } finally {
         const matchesContext = coordinator.matchesTaskContext(task);
         const ownsTask = coordinator.finishTask(task);
+        // oxlint-disable-next-line no-unsafe-finally -- A task that lost ownership must not update the active conversation.
         if (!ownsTask) return;
         setBusyLabel(undefined);
         setAgentPhase(undefined);
@@ -2159,6 +2160,7 @@ export function EverpeaceApp({
         }
         if (!matchesContext || mode === "plan") {
           returnQueuedGuidanceToDraft();
+          // oxlint-disable-next-line no-unsafe-finally -- Guidance from a replaced context or a plan must not start another coding turn.
           return;
         }
         const next = queuedGuidance.current.shift();

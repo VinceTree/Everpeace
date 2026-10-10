@@ -152,6 +152,7 @@ function isErrno(error: unknown, code: string): boolean {
 
 function cleanText(value: string): string {
   return value
+    // oxlint-disable-next-line no-control-regex -- Explicitly reject or remove terminal control bytes at this boundary.
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu, " ")
     .replace(/<\/?(?:system|developer|assistant|user|learned_memory)[^>]*>/giu, "[tag removed]")
     .replace(/\s+/gu, " ")
@@ -1197,7 +1198,9 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
         await this.#updateCaptureJob(job, (current) => ({ ...current, requestPending: false, usageComplete }));
         job.requestPending = false;
       } catch (error) {
+        // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
         if (failure instanceof ResourceCleanupError) throw failure;
+        // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
         throw error;
       }
     }

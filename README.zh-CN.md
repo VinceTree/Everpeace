@@ -46,7 +46,7 @@ pnpm link --global
 everpeace
 ```
 
-当前源码版本：**0.5.0**。
+当前源码版本：**0.5.1**。
 
 ## 真实调用，验证改动
 
@@ -108,10 +108,17 @@ SDK 在 `runTask` 加入 `team: { maxAgents: 3, models: { worker: '<已注册模
 
 ```powershell
 pnpm typecheck
+pnpm lint
 pnpm test
 pnpm build
 ```
 
-当前没有 lint script。开发从 [AGENTS.md](AGENTS.md) 和 [文档地图](docs/README.md) 开始。可复现问题请提交到 [GitHub Issues](https://github.com/VinceTree/Everpeace/issues)。
+按上述顺序执行门禁，首败停止，另跑 `git diff --check`。开发从 [AGENTS.md](AGENTS.md) 和 [文档地图](docs/README.md) 开始。可复现问题请提交到 [GitHub Issues](https://github.com/VinceTree/Everpeace/issues)。
 
 采用 [Apache 2.0](LICENSE) 许可证，由 [VinceTree](https://github.com/VinceTree) 维护。
+
+## 网络与源码安装保障
+
+公共网页和远程 Skill 请求将校验过的 DNS 地址绑定到实际连接，包括 HTTP/HTTPS 代理 CONNECT。代理只读取宿主 HTTP_PROXY、HTTPS_PROXY、NO_PROXY，兼容小写变量。代理基础设施属于受信任边界；暂不支持 SOCKS/PAC，失败不回退直连，HTTPS 证书校验始终开启。[网络边界](docs/architecture/NETWORK.md)。
+
+本轮只支持仓库内 pnpm 源码安装，node-pty 固定为受补丁约束的版本。可运行 `pnpm install:verify`，构建后运行 `pnpm install:smoke`；维护者用 `pnpm install:clean` 核验隔离的干净源码安装。`pnpm pack` 成功不能证明消费者获得补丁，独立安装包/npm 分发仍待解决。开发门禁依次为 `pnpm typecheck`、`pnpm lint`、`pnpm test`、`pnpm build`，首败停止，另跑 `git diff --check`。[当前团队实测准备](docs/benchmark/TEAM_READINESS.md)仅使用离线证据，付费测试另需数值授权。

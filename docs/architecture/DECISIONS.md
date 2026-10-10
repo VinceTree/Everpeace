@@ -401,3 +401,8 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 本轮用户明确授权将原单 Agent 边界扩展为根加最多两个成员；其余外部 runtime 边界保持。共享 production 承载调度，独立 context/模型 scope，根唯一验证结算。当前内容快照保持脏 index 与字节，detached worktree 不 checkout filter、不共享可写依赖。原生探测先于 provider，失败关闭；串行原版本整合、持久 integrationId/目标 hash 与幂等恢复共同保护用户并发修改。
 
 团队总账集中准入、在途预留、sticky unknown 和 request ID 持久化；恢复不重建旧授权或推断成功。独占持久 ownership 拒绝并行宿主认领。模型绑定冻结并在显式恢复时重新核对。默认仍关闭，观察重复调用与离线评分先于任何性能宣称；付费实测另取预算授权。完整约束与入口见 [TEAMS](TEAMS.md)。
+
+- 公共网页与 Skill 传输按请求冻结全部 DNS 答案，把批准 IP 交给自有 Undici connector；HTTP Host、TLS SNI 和证书身份保留域名。HTTP/HTTPS 宿主代理 CONNECT 到批准 IP，Git 通过仅批准目标的临时本地代理使用同一逻辑。模型 API/MCP 不混入公共资源信任边界，失败不得关闭 TLS 或改用直连。
+- 本轮只保障仓库源码安装。固定受补丁约束的 node-pty，冻结安装后检查实际补丁并运行 CLI/SDK/原生 PTY；tarball 成功不证明消费者获得 pnpm 补丁，不新增消费者 postinstall 修改依赖。独立补丁交付及干净消费者安装仍阻塞分发。
+- Oxlint 只提供 correctness 门禁，不引入格式化或额外类型检查引擎。维护的源码、测试、脚本及待纳入管理的新文件均检查，警告使门禁失败；第三方、生成物及用户其他目录不扫描。资源清理优先于成功返回的 finally 例外逐处解释。
+- benchmark 可选 team 配置贯穿配置、fresh worker 和 production adapter。团队总账负责准入；评测仅幂等导入已结算请求证据。当前候选单/团队对照冻结同一模型与请求参数，旧候选/合成证据不提升为本轮真实质量结果；没有新的数值授权不执行付费调用。

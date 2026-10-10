@@ -65,6 +65,7 @@ export function ownResponseStream(response: Response, controller: AbortControlle
         let failed = closed?.status === "rejected";
         let failure: unknown = closed?.status === "rejected" ? closed.reason : undefined;
         try { reader.releaseLock(); } catch (error) { if (!failed) failure = error; failed = true; }
+        // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
         if (failed) throw new ModelStreamCleanupError(failure, usage);
       }
     },

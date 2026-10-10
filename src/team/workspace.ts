@@ -94,21 +94,17 @@ export async function createTeamWorkspace(sourcePath: string, signal?: AbortSign
   for (const directory of [teamWorkspaceRoot(), path.join(teamWorkspaceRoot(), "records")]) if ((await fs.lstat(directory)).isSymbolicLink()) throw new Error("Team workspace storage must not follow links");
   await fs.mkdir(owner);
   await fs.writeFile(workspaceOwnershipFile(owner), ownershipText, { flag: "wx", mode: 0o600 });
-  try {
-    await onOwned?.(record);
-    await git(source, ["worktree", "add", "--detach", "--no-checkout", workspace, head], signal);
-    await git(workspace, ["read-tree", head], signal);
-    for (const [name, content] of contents) {
-      signal?.throwIfAborted();
-      const target = path.join(workspace, name);
-      if (content === null) await fs.rm(target, { force: true });
-      else { await fs.mkdir(path.dirname(target), { recursive: true }); await fs.writeFile(target, content); }
-    }
-    return record;
-  } catch (error) {
-    // Failed creation retains its ownership marker and any partial files for explicit cleanup.
-    throw error;
+  // Failed creation retains its ownership marker and partial files for explicit cleanup.
+  await onOwned?.(record);
+  await git(source, ["worktree", "add", "--detach", "--no-checkout", workspace, head], signal);
+  await git(workspace, ["read-tree", head], signal);
+  for (const [name, content] of contents) {
+    signal?.throwIfAborted();
+    const target = path.join(workspace, name);
+    if (content === null) await fs.rm(target, { force: true });
+    else { await fs.mkdir(path.dirname(target), { recursive: true }); await fs.writeFile(target, content); }
   }
+  return record;
 }
 export async function loadTeamWorkspace(workspace: string, source: string, allowMissing = false): Promise<TeamWorkspaceRecord> {
   const owner = path.dirname(path.resolve(workspace));

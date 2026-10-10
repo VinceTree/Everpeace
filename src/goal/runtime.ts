@@ -37,6 +37,7 @@ export function parseGoalCommand(value: string): GoalCommand {
 const TERMINAL = new Set<GoalStatus>(["complete", "blocked", "budget_limited", "usage_limited"]);
 
 function cleanObjective(value: string): string {
+  // oxlint-disable-next-line no-control-regex -- Explicitly reject or remove terminal control bytes at this boundary.
   return value.replace(/[\u0000-\u001F\u007F]/gu, " ").replace(/\s+/gu, " ").trim().slice(0, 4_000);
 }
 

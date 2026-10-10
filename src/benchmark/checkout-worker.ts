@@ -4,6 +4,7 @@ import type { RegisteredModel } from "../storage/model-registry.js";
 import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult, BenchmarkTask } from "./types.js";
 import { projectBenchmarkEvent } from "./event-projection.js";
 import type { LoopStrategy } from "../agent/tool-feedback-policy.js";
+import type { TeamOptions } from "../team/types.js";
 
 interface CheckoutWorkerInput {
   mode?: "run" | "preflight";
@@ -13,6 +14,7 @@ interface CheckoutWorkerInput {
   sessionsRoot: string;
   model?: RegisteredModel;
   loopStrategy?: LoopStrategy;
+  team?: TeamOptions;
 }
 
 interface PreflightBoundaryEvidence {
@@ -21,6 +23,7 @@ interface PreflightBoundaryEvidence {
   model: string;
   reasoning: string;
   maxOutputTokens: number;
+  memberRequests: number;
 }
 
 async function input(): Promise<CheckoutWorkerInput> {
@@ -39,8 +42,10 @@ function usage(ledger: RequestAttemptLedger): NonNullable<BenchmarkHarnessResult
   };
 }
 
-function installPreflightProviderBoundary(expectedModel: string): { evidence(): PreflightBoundaryEvidence } {
+function installPreflightProviderBoundary(expectedModel: string, team?: TeamOptions): { evidence(): PreflightBoundaryEvidence } {
   let requests = 0;
+  let rootRequests = 0; let memberRequests = 0;
+  const members = team?.enabled !== false && team ? (team.maxAgents ?? 3) - 1 : 0;
   let observed: PreflightBoundaryEvidence | undefined;
   globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     requests += 1;
@@ -51,6 +56,8 @@ function installPreflightProviderBoundary(expectedModel: string): { evidence(): 
         : "";
     if (!bodyText && typeof Request !== "undefined" && _input instanceof Request) bodyText = await _input.clone().text();
     const body = JSON.parse(bodyText) as Record<string, unknown>;
+    const root = Array.isArray(body.tools) && body.tools.some((tool: { name?: string }) => tool.name === "spawn_agent");
+    if (root) rootRequests++; else if (members) memberRequests++;
     const reasoning = body.reasoning && typeof body.reasoning === "object"
       ? (body.reasoning as Record<string, unknown>).effort
       : undefined;
@@ -63,7 +70,13 @@ function installPreflightProviderBoundary(expectedModel: string): { evidence(): 
       model: expectedModel,
       reasoning: "high",
       maxOutputTokens: 32_768,
+      memberRequests,
     };
+    const output = root && members && rootRequests === 1
+      ? Array.from({ length: members }, (_, index) => ({ type: "function_call", id: `fc_preflight_${index}`, call_id: `call_preflight_${index}`, name: "spawn_agent", arguments: JSON.stringify({ role: index ? "reviewer" : "explorer", goal: "Read-only offline preflight acknowledgement", acceptance: "Return an acknowledgement without tools", paths: ["."], dependencies: [] }) }))
+      : root && members && rootRequests === 2
+        ? [{ type: "function_call", id: "fc_wait", call_id: "call_wait", name: "wait_agents", arguments: JSON.stringify({ timeout_ms: 1000 }) }]
+        : [{ id: `msg_preflight_${requests}`, type: "message", status: "completed", role: "assistant", content: [{ type: "output_text", text: "Preflight complete.", annotations: [] }] }];
     const response = {
       id: "resp_preflight",
       object: "response",
@@ -73,13 +86,7 @@ function installPreflightProviderBoundary(expectedModel: string): { evidence(): 
       incomplete_details: null,
       model: expectedModel,
       output_text: "Preflight complete.",
-      output: [{
-        id: "msg_preflight",
-        type: "message",
-        status: "completed",
-        role: "assistant",
-        content: [{ type: "output_text", text: "Preflight complete.", annotations: [] }],
-      }],
+      output,
       usage: {
         input_tokens: 1,
         input_tokens_details: { cached_tokens: 0 },
@@ -93,8 +100,8 @@ function installPreflightProviderBoundary(expectedModel: string): { evidence(): 
   }) as typeof globalThis.fetch;
   return {
     evidence() {
-      if (!observed || requests !== 1) throw new Error(`Checkout preflight expected one provider request, observed ${requests}`);
-      return observed;
+      if (!observed || (members ? memberRequests !== members || requests < members + 3 : requests !== 1)) throw new Error("Checkout preflight did not observe the expected root/member request boundaries");
+      return { ...observed, requests, memberRequests };
     },
   };
 }
@@ -102,18 +109,18 @@ function installPreflightProviderBoundary(expectedModel: string): { evidence(): 
 export async function main(): Promise<void> {
   const request = await input();
   const preflightBoundary = request.mode === "preflight" && request.model
-    ? installPreflightProviderBoundary(request.model.model_name)
+    ? installPreflightProviderBoundary(request.model.model_name, request.team)
     : undefined;
   const module = await import(request.productionModule) as {
-    createProductionBenchmarkAdapter?: (options: { model: RegisteredModel; sessionsRoot: string; loopStrategy?: LoopStrategy }) => BenchmarkHarnessAdapter;
+    createProductionBenchmarkAdapter?: (options: { model: RegisteredModel; sessionsRoot: string; loopStrategy?: LoopStrategy; team?: TeamOptions }) => BenchmarkHarnessAdapter;
   };
   if (typeof module.createProductionBenchmarkAdapter !== "function") throw new Error("Checkout production module does not export createProductionBenchmarkAdapter");
   if (!request.model || !request.task || !request.sessionsRoot) throw new Error("Checkout worker run input is incomplete");
   if (request.model.request_settings?.reasoningEffort !== "high" || request.model.request_settings.maxOutputTokens !== 32_768) {
     throw new Error("Checkout benchmark requires high reasoning and 32768 output tokens");
   }
-  const ledger = new RequestAttemptLedger({ ...(request.tokenBudget === undefined ? {} : { tokenBudget: request.tokenBudget }) });
-  const adapter = module.createProductionBenchmarkAdapter({ model: request.model, sessionsRoot: request.sessionsRoot, ...(request.loopStrategy === undefined ? {} : { loopStrategy: request.loopStrategy }) });
+  const ledger = new RequestAttemptLedger((request.tokenBudget === undefined ? {} : { tokenBudget: request.tokenBudget }));
+  const adapter = module.createProductionBenchmarkAdapter({ model: request.model, sessionsRoot: request.sessionsRoot, ...(request.loopStrategy === undefined ? {} : { loopStrategy: request.loopStrategy }), ...(request.team ? { team: request.team } : {}) });
   const controller = new AbortController();
   const result = await adapter.run(request.task, {
     task: request.task,
@@ -131,7 +138,7 @@ export async function main(): Promise<void> {
   if (request.mode === "preflight") {
     const evidence = preflightBoundary!.evidence();
     const ledgerSnapshot = ledger.snapshot();
-    if (!ledgerSnapshot.complete || ledgerSnapshot.attempts.length !== 1) throw new Error("Checkout preflight request accounting is incomplete");
+    if (!ledgerSnapshot.complete || ledgerSnapshot.attempts.filter((attempt) => attempt.status !== "rejected").length !== evidence.requests || ledgerSnapshot.inputTokens !== evidence.requests || ledgerSnapshot.outputTokens !== evidence.requests) throw new Error("Checkout preflight root/member request accounting is incomplete");
     process.stdout.write(`EVERPEACE_CHECKOUT_PREFLIGHT ${JSON.stringify({
       ...evidence,
       usage: usage(ledger),

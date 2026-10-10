@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile, writeFile, mkdir, lstat } from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { runBenchmarkVerification } from "../../src/benchmark/runner.js";
 
 const root = path.resolve(process.argv[2] ?? "");

@@ -111,6 +111,7 @@ export async function runBenchmarkCampaign(
     }
     if (result.preparationError) continue;
     tokens += (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
+    if (result.isolationFailed) { stopReason = "Campaign stopped because native isolation failed"; break; }
     if (result.usage === undefined || result.usage.complete !== true) {
       stopReason = "Campaign stopped because a model request had unknown usage";
       break;
@@ -124,6 +125,7 @@ export async function runBenchmarkCampaign(
       taskId: item.taskId,
       repetition: item.repetition,
       reason: stopReason?.includes("cleanup") ? "cleanup_failed"
+        : stopReason?.includes("isolation") ? "isolation_failed"
         : stopReason?.includes("unknown") ? "usage_unknown"
         : stopReason?.includes("cancel") ? "cancelled"
           : "budget_exhausted",
@@ -135,7 +137,7 @@ export async function runBenchmarkCampaign(
     results,
     skipped,
     tokenUsage: tokens,
-    statisticsComplete: results.length === plan.length && results.every((result) => result.usage?.complete === true && !result.cleanupFailed),
+    statisticsComplete: results.length === plan.length && results.every((result) => result.usage?.complete === true && !result.cleanupFailed && !result.isolationFailed),
     ...(stopReason ? { stopReason } : {}),
   };
 }

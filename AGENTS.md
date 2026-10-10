@@ -22,6 +22,7 @@
 | Session、配置、usage、TUI、恢复、输入输出 | [状态与终端契约](docs/architecture/STATE_AND_UI.md) |
 | 权限、审批、模型 shell 隔离 | [权限](docs/architecture/PERMISSIONS.md)、[sandbox](docs/architecture/SANDBOX.md) |
 | MCP、Skill 发现与安装 | [集成能力](docs/architecture/CODEX_CAPABILITIES.md) |
+| 网页、公共资源下载、代理及 Skill Git 网络 | [公共网络边界](docs/architecture/NETWORK.md) |
 | Learned Memory | [Memory](docs/architecture/MEMORY.md) |
 | 安装、定向测试、CI、交付 | [开发指南](docs/DEVELOPMENT.md) |
 | benchmark、性能对比、真实模型验收 | [评测指南](docs/BENCHMARKING.md) |
@@ -46,7 +47,7 @@
 
 ## 验证与交付
 
-常用命令：`pnpm dev`、`pnpm test`、`pnpm typecheck`、`pnpm build`、`git diff --check`。定向测试和 Windows/WSL 工具链选择见 [开发指南](docs/DEVELOPMENT.md)。Session/TUI 改动至少跑对应回归；交付前默认执行全部四项检查，无法完成时明确原因和范围。
+常用命令：`pnpm dev`、`pnpm typecheck`、`pnpm lint`、`pnpm test`、`pnpm build`、`git diff --check`。定向测试和 Windows/WSL 工具链选择见 [开发指南](docs/DEVELOPMENT.md)。Session/TUI 改动至少跑对应回归；交付前默认按上述顺序执行四项门禁，首败停止，无法完成时明确原因和范围。
 
 - 用户可见命令、输出或安装方法变化时同时更新中英文 README。文档组织变化也要保持双语入口一致。
 - 当前版本、commit、测试数量和验证证据只在 `HANDOFF` 维护；历史移入 `docs/archive/`，不要把旧结果当新验证。固定上游参考 revision 可以保留在出处和评测材料中。

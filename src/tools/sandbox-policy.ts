@@ -230,7 +230,7 @@ export function nativeLspPermissionProfileArgs(policy: LspSandboxPolicy, launche
     "-c",
     `default_permissions=${tomlString(policy.permissionProfile)}`,
     "-c",
-    `permissions.${policy.permissionProfile}={extends=\":read-only\",filesystem={${filesystem}}}`,
+    `permissions.${policy.permissionProfile}={extends=":read-only",filesystem={${filesystem}}}`,
   ];
 }
 

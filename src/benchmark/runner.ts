@@ -189,11 +189,13 @@ export async function runBenchmarkTask(
   let stopReason: string | undefined;
   let workflowOutcome: BenchmarkHarnessResult["workflowOutcome"];
   let diagnosticRounds: number | undefined;
+  let teamMetrics: BenchmarkHarnessResult["teamMetrics"];
+  let isolationFailed = false;
   let firstVerificationSuiteStatus: BenchmarkHarnessResult["firstVerificationSuiteStatus"];
   let harnessPermitsSuccess = true;
   let cleanupFailed = workspaceBefore.cleanupFailed === true;
   const requestAttemptLedger = options.liveApi === true
-    ? new RequestAttemptLedger({ ...(tokenBudget === undefined ? {} : { tokenBudget }) })
+    ? new RequestAttemptLedger((tokenBudget === undefined ? {} : { tokenBudget }))
     : undefined;
 
   const writeArtifact = options.artifactSink === undefined
@@ -251,6 +253,8 @@ export async function runBenchmarkTask(
       stopReason = result?.stopReason ?? stopReason;
       workflowOutcome = result?.workflowOutcome ?? workflowOutcome;
       diagnosticRounds = result?.diagnosticRounds ?? diagnosticRounds;
+      teamMetrics = result?.teamMetrics ?? teamMetrics;
+      isolationFailed ||= result?.isolationFailed === true;
       firstVerificationSuiteStatus = result?.firstVerificationSuiteStatus ?? firstVerificationSuiteStatus;
       const ledgerAfter = requestAttemptLedger?.snapshot();
       const ledgerRecordedAttempt = ledgerBefore !== undefined
@@ -302,6 +306,7 @@ export async function runBenchmarkTask(
       }
 
       if (attemptError !== undefined) throw attemptError;
+      if (isolationFailed) { status = "failed"; failure = "Native isolation failed; the campaign must stop"; break; }
 
       const terminalStopped = terminalOutcome !== undefined && terminalOutcome !== "completed";
       const workflowFailed = workflowOutcome === "failed" || workflowOutcome === "unverified";
@@ -417,6 +422,8 @@ export async function runBenchmarkTask(
     ...(stopReason === undefined || cleanupFailed ? {} : { stopReason }),
     ...(workflowOutcome === undefined ? {} : { workflowOutcome }),
     ...(diagnosticRounds === undefined ? {} : { diagnosticRounds }),
+    ...(teamMetrics === undefined ? {} : { teamMetrics }),
+    ...(isolationFailed ? { isolationFailed: true } : {}),
     ...(firstVerificationSuiteStatus === undefined ? {} : { firstVerificationSuiteStatus }),
   };
   if (writeArtifact !== undefined) {

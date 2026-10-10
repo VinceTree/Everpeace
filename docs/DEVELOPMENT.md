@@ -32,6 +32,7 @@ pnpm dev
 
 ```bash
 cmd.exe /d /s /c "pnpm typecheck"
+cmd.exe /d /s /c "pnpm lint"
 cmd.exe /d /s /c "pnpm test"
 cmd.exe /d /s /c "pnpm build"
 ```
@@ -49,12 +50,16 @@ Windows TUI 手工验收仍需真实 Windows Terminal。通过 WSL 调用 Node �
 | `pnpm dev` | 用 tsx 启动开发 CLI/TUI |
 | `pnpm dev -- exec <prompt> ...` | 用 tsx 运行公开非交互 CLI 路径 |
 | `pnpm typecheck` | 严格检查全部源码与测试 `.ts` / `.tsx` |
+| `pnpm lint` | Oxlint correctness；维护的 src/tests/scripts，警告也失败 |
+| `pnpm install:verify` | 核对固定 node-pty 与实际 pnpm 补丁 |
+| `pnpm install:smoke` | 构建后 CLI、SDK 与原生 PTY 生命周期 |
+| `pnpm install:clean` | 在独占临时目录复制候选源码并冻结安装，验证补丁及启动 |
 | `pnpm test` | 执行全部测试，文件并发度固定为 4 |
 | `pnpm build` | 清理并重新生成构建产物 |
 | `pnpm start` | 运行已经构建的 CLI |
 | `git diff --check` | 检查 tracked 差异的空白问题 |
 
-本仓库没有独立 `lint` script，不要为完成检查臆造该命令。Agent 对目标项目运行的最终 suite 与本仓库门禁不同：它发现目标当前 manifest 的实际脚本，并按 `typecheck → lint → test → build` 顺序全部执行。
+本仓库门禁依次执行 `pnpm typecheck → pnpm lint → pnpm test → pnpm build`，首败停止。Agent 对目标项目运行的最终 suite 则发现目标当前 manifest 的实际脚本，按同样顺序执行所有存在的检查；不能凭本仓库脚本推断目标项目具有对应检查。
 
 Linux hosted CI 的 Ubuntu AppArmor 默认限制 unprivileged user namespace。Test workflow 先记录内核设置和普通 namespace 探测，再仅为锁定安装的 Codex 原生二进制加载 `userns` 应用 profile；系统限制保持开启，不全局关闭 AppArmor，不给模型宿主执行降级。profile 是一次性 runner 环境准备，不自动修改用户系统；生成时核对 native package revision，升级后必须重新审查。真实团队隔离和双 worker 整合测试仍必须通过，启动不可用不算验收成功。设计依据见 [Ubuntu namespace 说明](https://ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces) 与 [固定 backend](architecture/SANDBOX.md)。
 
@@ -93,7 +98,7 @@ pnpm exec tsx --test --test-name-pattern="cancel" tests/unit/agent/react-agent.t
 
 ## 独立测试 CI 与证据范围
 
-[Test workflow](../.github/workflows/test.yml) 在 pull request 和 main push 上分别运行 Windows/Linux 的 Node 22 门禁：安装 pnpm、通过冻结 lockfile 安装平台 ripgrep optional package、类型检查、完整测试、构建、差异检查。job 最多 20 分钟，测试 step 最多 10 分钟，进程或管道清理回归不能无限挂起 runner。CI 不再显式安装系统 `rg`，应用始终通过包内绝对路径运行平台二进制；缺少匹配 optional package 的行为由 resolver fixture 单独覆盖。它独立于 Release workflow，不能为避免发布而跳过测试 CI。
+[Test workflow](../.github/workflows/test.yml) 在 pull request 和 main push 上分别运行 Windows/Linux 的 Node 22 门禁：安装 pnpm、通过冻结 lockfile 安装平台 ripgrep optional package、补丁验证、类型检查、lint、完整测试、构建、CLI/SDK/PTY 启动及差异检查。job 最多 20 分钟，测试 step 最多 10 分钟，进程或管道清理回归不能无限挂起 runner。CI 不再显式安装系统 `rg`，应用始终通过包内绝对路径运行平台二进制；缺少匹配 optional package 的行为由 resolver fixture 单独覆盖。它独立于 Release workflow，不能为避免发布而跳过测试 CI。
 
 [sandbox-boundaries.test.ts](../tests/unit/tools/sandbox-boundaries.test.ts) 的真实 Windows native sandbox 测试在非 Windows 跳过；在 Windows 且 `GITHUB_ACTIONS=true` 时也明确跳过，因为 hosted runner 无法初始化所需嵌套 sandbox。策略、审批与启动失败关闭仍有单测；跳过结果不能当作真实隔离验收通过。
 
@@ -117,7 +122,7 @@ pnpm exec tsx tests/fixtures/tui-offline.ts --root "$env:TEMP\everpeace-tui-offl
 2. 退出后以相同 root 重启，`/resume` 选择子会话。使用 `/plan` 检查 Plan 并取消审批，确认分支待继续状态没有被消耗。
 3. coding 输入 `wait`，按 Ctrl+C 取消，再次 coding，检查原有验证债务仍保留。`wait` 最多等待 60 秒，`wait-long` 最多五分钟，均响应取消。运行中 guidance 使用 `wait-long preserve verification debt`，让假 provider 的下一请求继续等待；普通 guidance 会立即得到离线响应，此时空闲 Ctrl+C 是退出，不能记为取消通过。
 4. 输入 `large` 产生 300 行中文、emoji 和缩进内容，检查 resize、scrollback 和单 prompt；另检查直接 `!` 输出。
-5. 输入 `cycle`：读取和修改 fixture.txt，test 通过但 build 的指定断言失败；修复后重新发现并执行 typecheck、test、build。当前没有 lint。再次启动使用新 root，避免复用旧 fixture manifest。
+5. 输入 `cycle`：读取和修改 fixture.txt，test 通过但 build 的指定断言失败；修复后重新发现并执行 typecheck、test、build。该 fixture manifest 不包含 lint，与本仓库门禁分开。再次启动使用新 root，避免复用旧 fixture manifest。
 6. 输入 `integrations`：读取隔离 Skill、审批 MCP ping、执行 native hover；`/memory` 应显示 root 内种子条目。四者没有加载、返回 error 或只看到了目录不能记为调用通过。协议 fixture 不替代真实 TypeScript server 验收。
 
 Windows 检查发现使用 pnpm/npm/yarn 的 `.cmd` shim，避免 PowerShell 在原生 sandbox 中选择 `.ps1` 并被脚本授权拒绝；bun 保留原生可执行文件。检查顺序、失败停止、审批与 sandbox 不变。
@@ -174,7 +179,7 @@ pnpm benchmark:campaign -- --config .\campaign.json --prove-fixtures
 1. 开始时执行 `git status --short --branch` 与 `git diff`，记录用户已有 tracked/untracked 差异。
 2. 按任务文档定位最小源码、测试和接口范围；实现依赖的当前代码仍须阅读，文档不能替代真实写入前检查。
 3. 行为、接口或持久化变化同步补相关回归；纯文档变化检查链接、示例和事实即可，不写镜像实现的测试。
-4. 按实际存在的 `typecheck → lint → test → build` 串行执行，首败停止；当前执行 `pnpm typecheck`、记录缺少 lint、`pnpm test`、`pnpm build`，然后运行 `git diff --check`。无法完成的命令注明原因与未验证范围。
+4. 串行执行 `pnpm typecheck → pnpm lint → pnpm test → pnpm build`，首败停止，然后运行 `git diff --check`。无法完成的命令注明原因与未验证范围。
 5. 全仓 diff 因用户原有差异失败时单独报告；再对本次文件做 scoped 检查，不修改用户文件来制造全绿。新建未跟踪文档须另行检查，普通 `git diff --check` 不覆盖它们。
 6. 更新对应专题文档，并检查 [PLAN.md](PLAN.md)、[DECISIONS.md](architecture/DECISIONS.md)、[HANDOFF.md](HANDOFF.md)；命令、输出或安装行为变化时同步两份 README。
 7. HANDOFF 保存最新状态、实测证据、已知限制和下一步；专题保存稳定契约；根 AGENTS 保存通用约束与阅读路径。旧记录不得覆盖当前事实。
@@ -192,3 +197,7 @@ pnpm benchmark:campaign -- --config .\campaign.json --prove-fixtures
 ## 团队定向验收
 
 `pnpm exec tsx --test tests/unit/team/team.test.ts tests/unit/tui/team-surface.test.tsx` 覆盖团队总账、调度／取消、隔离与恢复、两成员编码及根失败、角色 profile 与 Skill 管理。原生探测需真实系统与 Git；CI skip 不替代实机证据。`tests/fixtures/tui-offline.ts --root <新绝对目录> --team` 可在真实 Windows Terminal 用合成 Responses 验收 /team、Esc、resize、滚轮／缩放、Ctrl+C 与单 prompt；只使用 fixture 状态、不读用户注册表或 keyring。前台窗口 capture 在 GPU PrintWindow 返回黑图时仅在 owned HWND 确认前台后截取其矩形，并记录方法；焦点变化拒绝发送按键或记录成功。
+
+Oxlint JSON 配置见 [.oxlintrc.json](../.oxlintrc.json)，[官方配置说明](https://oxc.rs/docs/guide/usage/linter/config.html)。只启用 correctness，不做格式化与类型感知 lint。门禁串行 typecheck → lint → test → build，首败停止；lint 通过 Git 清单检查 src/tests/scripts 的 tracked 及非 ignored 待管理新文件，用户其他未跟踪目录、third_party 与生成 dist 不扫描。局部清理/控制字符例外说明必要性，没有全仓旧代码豁免。
+
+`pnpm install:clean` 不复制现有 node_modules、不改用户 index/HEAD，也不包含用户 benchmark 目录；它检验未提交候选的干净源码安装，不证明独立消费者安装。脱离仓库的补丁交付与干净安装包验收仍是分发阻塞项。

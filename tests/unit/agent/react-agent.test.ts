@@ -658,7 +658,7 @@ test("plan mode exposes only read-only and planning tools", async () => {
     planInteraction: { async requestInput() { return {}; }, async reviewPlan() { return "continue"; } },
   });
   await agent.runTurn("make a plan", undefined, { mode: "plan" });
-  const names = (request?.tools as Array<{ name: string }>).map((tool) => tool.name);
+  const names = (request!.tools as Array<{ name: string }>).map((tool) => tool.name);
   assert.ok(names.includes("read_file"));
   assert.ok(names.includes("request_user_input"));
   assert.ok(names.includes("submit_plan"));
@@ -1598,7 +1598,7 @@ test("agent progressively loads matching skills and injects explicit skill instr
 
   assert.deepEqual(reads, ['{"name":"demo"}']);
   assert.match(String(requests[0]?.instructions), /Full explicit demo instructions/u);
-  assert.ok((requests[0]?.tools as Array<{ name: string }>).some((tool) => tool.name === "read_skill"));
+  assert.ok((requests[0]!.tools as Array<{ name: string }>).some((tool) => tool.name === "read_skill"));
   assert.match(JSON.stringify(requests[1]?.input), /skill body/u);
 });
 
@@ -2035,7 +2035,7 @@ test("agent sends a stable prompt cache key and reports cached usage details", a
   assert.equal(requests[0]?.instructions, undefined);
   const requestInput = requests[0]?.input as Array<Record<string, unknown>>;
   assert.equal(requestInput[0]?.role, "developer");
-  assert.deepEqual((requestInput[0]?.content as Array<Record<string, unknown>>)[0]?.prompt_cache_breakpoint, { mode: "explicit" });
+  assert.deepEqual((requestInput[0]!.content as Array<Record<string, unknown>>)[0]?.prompt_cache_breakpoint, { mode: "explicit" });
   assert.deepEqual(requestOptions[0]?.headers, { "session-id": "everpeace:v2:session:test-key" });
   assert.deepEqual(usage, [{
     input_tokens: 100,

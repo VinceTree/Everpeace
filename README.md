@@ -46,7 +46,7 @@ pnpm link --global
 everpeace
 ```
 
-Current source version: **0.5.0**.
+Current source version: **0.5.1**.
 
 ## Real tools, checked changes
 
@@ -108,10 +108,17 @@ For approval keys, terminal controls and integration setup, see the [usage guide
 
 ```powershell
 pnpm typecheck
+pnpm lint
 pnpm test
 pnpm build
 ```
 
-There is currently no lint script. Start with [AGENTS.md](AGENTS.md) and the [documentation map](docs/README.md). Report reproducible issues through [GitHub Issues](https://github.com/VinceTree/Everpeace/issues).
+Run these gates in order and stop on failure, then run `git diff --check`. Start with [AGENTS.md](AGENTS.md) and the [documentation map](docs/README.md). Report reproducible issues through [GitHub Issues](https://github.com/VinceTree/Everpeace/issues).
 
 Licensed under [Apache 2.0](LICENSE). Maintained by [VinceTree](https://github.com/VinceTree).
+
+## Network and source installation
+
+Public web and remote Skill requests bind validated DNS addresses to the actual connection, including HTTP/HTTPS proxy CONNECT. Configure host HTTP_PROXY, HTTPS_PROXY and NO_PROXY (lowercase variants are supported). Proxy infrastructure is trusted; SOCKS/PAC are unsupported and failures do not fall back to a direct connection. HTTPS certificate verification remains enabled. [Network boundary](docs/architecture/NETWORK.md).
+
+Install from the repository with pnpm; node-pty is pinned to the patched dependency. Run `pnpm install:verify`, build, then `pnpm install:smoke`; maintainers can run `pnpm install:clean` for an isolated clean source installation. `pnpm pack` does not demonstrate patch delivery to consumers. Portable packages/npm distribution remain pending. Development gates are `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` in order, stopping on failure, plus `git diff --check`. [Current team evaluation preparation](docs/benchmark/TEAM_READINESS.md) uses offline evidence and requires separate numerical authorization for paid tests.

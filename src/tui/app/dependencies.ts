@@ -214,7 +214,7 @@ export function createDefaultTuiDependencies(
     async getMemoryStatus(workspacePath) {
       return activeLearnedMemory?.status(workspacePath) ?? learnedMemoryStore.status(workspacePath);
     },
-    async getMemoryPrompt(workspacePath) {
+    async getMemoryPrompt(_workspacePath) {
       const snapshot = activeLearnedMemory?.getSnapshot();
       return snapshot
         ? `Snapshot ${snapshot.revision} loaded ${snapshot.loadedAt}\n\n${snapshot.text || "No learned experience was injected."}`

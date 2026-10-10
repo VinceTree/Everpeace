@@ -71,7 +71,7 @@ test("Plan advertises project_map and retains read-only behavior", async () => {
     const requests: Record<string, unknown>[] = [];
     const agent = new ReactAgent({ model: "offline", workspacePath: root, client: { responses: { async create(params) { requests.push(params); return steps.shift()!; } } }, io: { async confirmBash() { return false; }, async runBash() { throw new Error("No shell"); }, writeAssistant() {} } });
     await agent.runTurn("Explore the project", undefined, { mode: "plan" });
-    const tools = (requests[0]?.tools as Array<{ name: string }>).map((tool) => tool.name);
+    const tools = (requests[0]!.tools as Array<{ name: string }>).map((tool) => tool.name);
     assert.ok(tools.includes("project_map"));
     assert.equal(tools.includes("apply_patch"), false);
     assert.match(JSON.stringify(requests[1]?.input), /Workspace data only/u);

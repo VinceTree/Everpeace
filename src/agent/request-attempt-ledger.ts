@@ -40,6 +40,7 @@ export class RequestAttemptLedger {
   #outputTokens = 0;
   #reasoningTokens = 0;
   #complete = true;
+  readonly #imported = new Set<string>();
 
   constructor(options: { tokenBudget?: number } = {}) {
     if (options.tokenBudget !== undefined && (!Number.isSafeInteger(options.tokenBudget) || options.tokenBudget <= 0)) {
@@ -62,6 +63,24 @@ export class RequestAttemptLedger {
     this.#outputTokens = 0;
     this.#reasoningTokens = 0;
     this.#complete = true;
+    this.#imported.clear();
+  }
+
+  /** Evaluation rollup of an independently owned team ledger, after all its requests have settled. No admission or replay. */
+  importSettledAttempts(namespace: string, attempts: readonly RequestAttemptRecord[]): void {
+    for (const attempt of attempts) {
+      const key = `${namespace}:${attempt.id}`;
+      if (this.#imported.has(key)) continue;
+      this.#imported.add(key);
+      const usage = attempt.usage;
+      if (usage === null) this.#complete = false;
+      else {
+        this.#inputTokens += usage.input_tokens;
+        this.#outputTokens += usage.output_tokens;
+        this.#reasoningTokens += usage.reasoning_tokens ?? 0;
+      }
+      this.#attempts.push({ ...attempt, id: this.#nextId++, usage: usage ? { ...usage } : null });
+    }
   }
 
   begin(purpose: RequestPurpose): number {

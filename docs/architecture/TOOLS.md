@@ -183,3 +183,5 @@ MCP 和 Skills 已实现，不在本文重复配置细节；参见 [CODEX_CAPABI
 ## 项目关系与重复调用观察
 
 project_map 补充 manifest 入口、受限 TypeScript/JavaScript import、源码与测试候选关系，标来源和不完整原因。缓存只复用内容 SHA 匹配的解析，规则与 manifest 仍每次读取，写前仍重新观察文件。团队 telemetry 以有界 hash 记录跨成员重复读取与连续失败，不保存参数正文、不自动切换默认策略。失败增加配置／协议／依赖／sandbox／usage／verification／environment／tool 分类，不泄露 provider 原始错误。
+
+公共网页请求已统一到每次请求绑定 DNS 快照的客户端；响应消费和释放由宿主租约负责。HTTP/HTTPS 代理、特殊地址规则、逐跳验证、固定诊断与真实连接回归见 [NETWORK](NETWORK.md)。模型 API 与 MCP 的传输不经此客户端。

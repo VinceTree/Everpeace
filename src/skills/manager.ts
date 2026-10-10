@@ -4,11 +4,12 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
-import { lookup } from "node:dns/promises";
 import { unzip } from "fflate";
 import { parseSkillMetadata, type SkillMetadata, type SkillSnapshot, SkillCatalog } from "./catalog.js";
 import { observeProcessCompletion, ProcessCleanupError } from "../tools/process-completion.js";
-import { validatePublicUrl, type FetchLike, type HostLookup } from "../tools/web.js";
+import { publicLookup, type FetchLike, type HostLookup } from "../network/public-address.js";
+import { withPublicResponse } from "../network/public-http.js";
+import { createPublicGitRelay, publicGitEnvironment } from "../network/git-relay.js";
 
 const DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024;
 const EXTRACTED_LIMIT_BYTES = 50 * 1024 * 1024;
@@ -341,6 +342,12 @@ function gitSecurityArguments(): string[] {
     "-c", "credential.helper=",
     "-c", "http.extraHeader=",
     "-c", "http.cookieFile=",
+    "-c", "http.sslVerify=true",
+    "-c", "http.proxyAuthMethod=basic",
+    "-c", "init.templateDir=",
+    "-c", "core.hooksPath=",
+    "-c", "protocol.allow=never",
+    "-c", "protocol.https.allow=always",
   ];
 }
 
@@ -415,19 +422,17 @@ export function selectGitSkillCandidates(candidates: readonly GitSkillCandidate[
 }
 
 function conciseGitError(stderr: string, code: number | null): string {
-  const lines = stderr
-    .replace(/\r/gu, "\n")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && !/^Updating files:/u.test(line));
-  const unique = [...new Set(lines)].slice(-12).join("\n");
-  return unique || `Git operation failed with exit code ${code ?? "unknown"}`;
+  const category = /certificate|SSL|TLS/iu.test(stderr) ? "TLS verification failed"
+    : /407|authentication|credential/iu.test(stderr) ? "authentication required"
+    : /proxy|CONNECT/iu.test(stderr) ? "public proxy connection failed"
+    : /timed? ?out/iu.test(stderr) ? "connection timed out" : "repository operation failed";
+  return `Git ${category} (exit ${code ?? "unknown"})`;
 }
 
 export class SkillManager implements SkillManagerLike {
   #workspacePath: string;
   readonly #catalog: SkillCatalog;
-  readonly #fetch: FetchLike;
+  readonly #fetch: FetchLike | undefined;
   readonly #lookup: HostLookup;
   readonly #preparations = new Map<string, PreparationRecord>();
   readonly #preparing = new Set<Promise<PreparedSkillInstall>>();
@@ -442,8 +447,8 @@ export class SkillManager implements SkillManagerLike {
   constructor(options: SkillManagerOptions) {
     this.#workspacePath = options.workspacePath;
     this.#catalog = options.catalog;
-    this.#fetch = options.fetch ?? globalThis.fetch;
-    this.#lookup = options.lookup ?? ((hostname) => lookup(hostname, { all: true, verbatim: true }));
+    this.#fetch = options.fetch;
+    this.#lookup = options.lookup ?? publicLookup;
   }
 
   setWorkspace(workspacePath: string): void {
@@ -611,26 +616,27 @@ export class SkillManager implements SkillManagerLike {
       if (current.protocol !== "https:" || current.username || current.password || current.hash) {
         throw new Error("Skill source redirects must remain public HTTPS URLs without credentials or fragments");
       }
-      await validatePublicUrl(current, this.#lookup);
-      const response = await this.#fetch(current, {
+      const result = await withPublicResponse(current, {
         redirect: "manual",
         signal: requestSignal,
         headers: { "User-Agent": "Everpeace-Skill-Installer/0.1", Accept: "application/octet-stream,text/plain;q=0.9" },
+      }, { ...(this.#fetch ? { fetch: this.#fetch } : {}), lookup: this.#lookup }, async (response): Promise<Uint8Array | { location: string }> => {
+        if ([301, 302, 303, 307, 308].includes(response.status)) {
+          if (redirect === REDIRECT_LIMIT) throw new Error("Skill source exceeded the redirect limit");
+          const location = response.headers.get("location");
+          if (!location) throw new Error("Skill source redirect did not include a location");
+          return { location };
+        }
+        if (!response.ok) throw new Error(`Skill source returned HTTP ${response.status}`);
+        return readLimitedBytes(response);
       });
-      if ([301, 302, 303, 307, 308].includes(response.status)) {
-        if (redirect === REDIRECT_LIMIT) throw new Error("Skill source exceeded the redirect limit");
-        const location = response.headers.get("location");
-        if (!location) throw new Error("Skill source redirect did not include a location");
-        current = new URL(location, current);
-        continue;
-      }
-      if (!response.ok) throw new Error(`Skill source returned HTTP ${response.status}`);
-      return readLimitedBytes(response);
+      if (result instanceof Uint8Array) return result;
+      current = new URL(result.location, current);
     }
     throw new Error("Skill source exceeded the redirect limit");
   }
 
-  async #runGit(args: readonly string[], signal: AbortSignal, stdoutLimit = 0): Promise<Uint8Array> {
+  async #runGit(args: readonly string[], signal: AbortSignal, stdoutLimit = 0, proxyUrl?: string): Promise<Uint8Array> {
     this.#assertAvailable();
     signal.throwIfAborted();
     const child = spawn("git", [...args], {
@@ -638,12 +644,7 @@ export class SkillManager implements SkillManagerLike {
       windowsHide: true,
       detached: process.platform !== "win32",
       stdio: ["ignore", stdoutLimit > 0 ? "pipe" : "ignore", "pipe"],
-      env: {
-        ...process.env,
-        GIT_TERMINAL_PROMPT: "0",
-        GIT_ASKPASS: "",
-        GIT_LFS_SKIP_SMUDGE: "1",
-      },
+      env: publicGitEnvironment(proxyUrl),
     });
     const owned = observeProcessCompletion(child, { signal });
     this.#gitProcesses.add(owned);
@@ -682,12 +683,14 @@ export class SkillManager implements SkillManagerLike {
     signal?: AbortSignal,
     selection: { ref?: string; subpath?: string } = {},
   ): Promise<string> {
-    await validatePublicUrl(url, this.#lookup);
     const timeoutController = new AbortController();
     const timeout = setTimeout(() => timeoutController.abort(new Error("Git Skill preparation timed out")), GIT_TIMEOUT_MS);
     const combined = signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal;
+    let relay: Awaited<ReturnType<typeof createPublicGitRelay>> | undefined;
     try {
-      await this.#runGit(buildGitCloneArguments(url, target, selection.ref), combined);
+      relay = await createPublicGitRelay(url, combined, { lookup: this.#lookup, lifetimeSignal: new AbortController().signal });
+      await this.#runGit(buildGitCloneArguments(url, target, selection.ref), combined, 0, relay.proxyUrl);
+      await relay.close();
       const treeBytes = await this.#runGit(
         buildGitRepositoryArguments(target, "ls-tree", "-r", "-l", "-z", "HEAD"),
         combined,
@@ -755,6 +758,7 @@ export class SkillManager implements SkillManagerLike {
       return discoveryRoot;
     } finally {
       clearTimeout(timeout);
+      await relay?.close();
     }
   }
 

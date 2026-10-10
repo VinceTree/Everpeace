@@ -36,6 +36,7 @@ export interface TeamMember {
   verification?: string;
   integrationId?: string;
   error?: string;
+  errorCode?: "SANDBOX_UNAVAILABLE";
   integrationEligible?: boolean;
   artifactHashes?: Record<string, string | null>;
 }
@@ -87,7 +88,8 @@ export function parseTeamTask(value: unknown): TeamTask {
   const input = value as Record<string, unknown>;
   const bounded = (text: unknown, limit: number) => typeof text === "string" && Boolean(text.trim()) && text.length <= limit;
   if (!["explorer", "worker", "reviewer"].includes(String(input.role)) || !bounded(input.goal, 8192) || !bounded(input.acceptance, 8192) || !Array.isArray(input.paths) || !input.paths.length || input.paths.length > 20 || !Array.isArray(input.dependencies) || input.dependencies.length > 32) throw new Error("Specify a role, goal, acceptance, paths and dependencies");
-  if (input.paths.some((scope) => !bounded(scope, 2048) || typeof scope !== "string" || /^[\/\\]/u.test(scope) || /[:\\\x00-\x1f]/u.test(scope) || scope.split("/").includes(".."))) throw new Error("Team paths must be workspace-relative files or directories");
+  // oxlint-disable-next-line no-control-regex -- Explicitly reject or remove terminal control bytes at this boundary.
+  if (input.paths.some((scope) => !bounded(scope, 2048) || typeof scope !== "string" || /^[/\\]/u.test(scope) || /[:\\\x00-\x1f]/u.test(scope) || scope.split("/").includes(".."))) throw new Error("Team paths must be workspace-relative files or directories");
   if (input.dependencies.some((id) => !bounded(id, 256))) throw new Error("Invalid team dependency");
   if (input.constraints !== undefined && !bounded(input.constraints, 8192)) throw new Error("Invalid member constraints");
   if (input.context !== undefined && (!Array.isArray(input.context) || input.context.length > 16 || input.context.some((entry: unknown) => !entry || typeof entry !== "object" || !bounded((entry as Record<string, unknown>).source, 256) || !bounded((entry as Record<string, unknown>).summary, 4096)) || JSON.stringify(input.context).length > 16 * 1024)) throw new Error("Member context must contain bounded summaries with sources");

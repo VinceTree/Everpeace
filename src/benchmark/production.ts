@@ -11,12 +11,15 @@ import { cloneTaskProgress, type TaskProgress } from "../workflow/task-progress.
 import { createProductionAgent, createProductionCommandExecutor, createProductionWorkflowAgentIO } from "../runtime/production.js";
 import { createProviderCapabilityProfile } from "./capabilities.js";
 import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult } from "./types.js";
+import { TeamStore } from "../team/store.js";
+import type { TeamOptions } from "../team/types.js";
 
 export interface ProductionBenchmarkAdapterOptions {
   model: RegisteredModel;
   sessionsRoot: string;
   permissionPolicy?: PermissionPolicy;
   loopStrategy?: import("../agent/tool-feedback-policy.js").LoopStrategy;
+  team?: TeamOptions;
 }
 
 function safeName(value: string): string {
@@ -89,6 +92,7 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
       });
       const handle = createProductionAgent({
         model: { ...options.model, request_settings: comparisonSettings },
+        ...(options.team ? { team: { ...options.team, ...(context.tokenBudgetRemaining === undefined ? {} : { tokenBudget: Math.min(options.team.tokenBudget ?? context.tokenBudgetRemaining, context.tokenBudgetRemaining) }) }, teamStore: new TeamStore(join(options.sessionsRoot, safeName(task.id), String(context.attempt), "teams")) } : {}),
         ...(options.loopStrategy === undefined ? {} : { loopStrategy: options.loopStrategy }),
         workspacePath,
         io,
@@ -120,9 +124,12 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
           },
         });
         const result = await runner.run({ text: task.prompt, source: "benchmark", signal: context.signal });
-        const snapshot = context.requestAttemptLedger.snapshot();
+        const snapshot = handle.team?.snapshot()?.usage ?? context.requestAttemptLedger.snapshot();
         const saved = await sessionStore.load(session.id);
+        const team = handle.team?.snapshot();
         return {
+          ...(team ? { teamMetrics: { members: team.members.length, duplicateReads: team.diagnostics?.duplicateReads ?? 0, repeatedFailures: team.diagnostics?.repeatedFailures ?? 0, conflicts: team.members.filter((member) => member.state === "conflict").length }, isolationFailed: team.members.some((member) => ["failed", "cancelled"].includes(member.state) && member.errorCode === "SANDBOX_UNAVAILABLE") } : {}),
+          manualInterventions: result.agentResult.interactionRequired ? 1 : 0,
           requestAttempts: snapshot.attempts.filter((attempt) => attempt.status !== "rejected").length,
           usage: {
             inputTokens: snapshot.inputTokens, outputTokens: snapshot.outputTokens, reasoningTokens: snapshot.reasoningTokens, complete: snapshot.complete,
@@ -141,7 +148,11 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
           }),
         };
       } finally {
-        await handle.dispose();
+        try { await handle.dispose(); }
+        finally {
+          const snapshot = handle.team?.snapshot();
+          if (snapshot) context.requestAttemptLedger.importSettledAttempts(snapshot.teamId, snapshot.usage.attempts);
+        }
       }
     },
   };

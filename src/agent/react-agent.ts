@@ -1499,7 +1499,7 @@ export class ReactAgent {
       const mcp = this.#mcp;
       const tool = this.#stepToolCatalog.mcpTool(call.name)!;
       const detail = `${tool.serverName}/${tool.toolName} ${call.arguments}`;
-      if (mcpPermission(policy) === "ask" && !(await this.#confirmTool(call.name, detail, () => this.#confirmMcp(detail)))) {
+      if (mcpPermission(policy) === "ask" && !(await this.#confirmTool(call.name, detail, () => this.#confirmMcp(detail, signal)))) {
         signal?.throwIfAborted();
         output = JSON.stringify({ status: "rejected", message: "The user rejected this MCP tool call. Do not retry it without new guidance." });
       } else {
@@ -1540,7 +1540,7 @@ export class ReactAgent {
         output = JSON.stringify({ error: "Invalid web_search arguments" });
       } else if (webPermission(policy) === "deny") {
         output = JSON.stringify({ status: "denied", error: "Web tools are disabled by the current permission policy." });
-      } else if (this.#turnMode !== "plan" && webPermission(policy) === "ask" && !(await this.#confirmTool("web_search", query, () => this.#confirmWeb(`Search the web for: ${query}`)))) {
+      } else if (this.#turnMode !== "plan" && webPermission(policy) === "ask" && !(await this.#confirmTool("web_search", query, () => this.#confirmWeb(`Search the web for: ${query}`, signal)))) {
         signal?.throwIfAborted();
         output = JSON.stringify({
           status: "rejected",
@@ -1561,7 +1561,7 @@ export class ReactAgent {
         output = JSON.stringify({ error: "Invalid web_fetch arguments" });
       } else if (webPermission(policy) === "deny") {
         output = JSON.stringify({ status: "denied", error: "Web tools are disabled by the current permission policy." });
-      } else if (this.#turnMode !== "plan" && webPermission(policy) === "ask" && !(await this.#confirmTool("web_fetch", url, () => this.#confirmWeb(`Read public web page: ${url}`)))) {
+      } else if (this.#turnMode !== "plan" && webPermission(policy) === "ask" && !(await this.#confirmTool("web_fetch", url, () => this.#confirmWeb(`Read public web page: ${url}`, signal)))) {
         signal?.throwIfAborted();
         output = JSON.stringify({
           status: "rejected",
@@ -1587,11 +1587,11 @@ export class ReactAgent {
   async #confirmWeb(request: string, signal?: AbortSignal): Promise<boolean> {
     // Older integrations may not expose a web approval surface. Treat that as
     // a denial instead of silently bypassing the active policy.
-    return this.#io.confirmWeb?.(request) ?? false;
+    return this.#io.confirmWeb?.(request, signal) ?? false;
   }
 
   async #confirmMcp(request: string, signal?: AbortSignal): Promise<boolean> {
-    return this.#io.confirmMcp?.(request) ?? false;
+    return this.#io.confirmMcp?.(request, signal) ?? false;
   }
 
   async #confirmTool(
@@ -2385,14 +2385,17 @@ export class ReactAgent {
       abortRequest();
       if (!exhausted) {
         try {
+          // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
           if (typeof iterator.return !== "function") throw new Error("The stream iterator exposes no close operation");
           const closed = await iterator.return();
+          // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
           if (closed.done !== true) throw new Error("The stream iterator did not confirm closure");
           // A timeout may leave next() active even after return() reports done.
           await pendingNext?.then(() => {}, () => {});
         } catch (cause) {
           const failure = cause instanceof ModelStreamCleanupError ? cause : new ModelStreamCleanupError(cause, response?.usage);
           this.#cleanupFailure ??= failure;
+          // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
           throw failure;
         }
       }

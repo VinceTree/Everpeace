@@ -123,6 +123,7 @@ test("dsh instrumentation keeps unknown usage sticky and rejects another provide
     model: EXPECTED.model,
     reasoningEffort: EXPECTED.reasoning,
     maxTokens: EXPECTED.maxOutputTokens,
+  // oxlint-disable-next-line require-yield -- This empty generator must never be entered after admission closes.
   }, async function* () {
     downstreamCalls += 1;
   }));
@@ -151,6 +152,7 @@ test("dsh instrumentation rejects invalid usage before it can reopen budget admi
     model: EXPECTED.model,
     reasoningEffort: EXPECTED.reasoning,
     maxTokens: EXPECTED.maxOutputTokens,
+  // oxlint-disable-next-line require-yield -- This empty generator must never be entered after admission closes.
   }, async function* () { downstreamCalls += 1; }));
   const snapshot = instrumentation.snapshot();
   assert.equal(snapshot.complete, false);

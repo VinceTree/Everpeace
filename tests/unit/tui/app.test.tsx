@@ -1734,6 +1734,7 @@ test("repeated terminal resizes preserve history and keep one non-wrapping promp
     assert.match(frame, /Everpeace Agent/);
     assert.match(frame, /history-before-resize/);
     assert.match(frame, /echo: history-before-resize/);
+    // oxlint-disable-next-line no-control-regex -- Explicitly reject or remove terminal control bytes at this boundary.
     assert.doesNotMatch(resizeWrites, /\u001B\[3J/);
 
     const lines = frame.split("\n");
@@ -2932,8 +2933,8 @@ test("/resume restores transcript, workspace, context, and continues the same se
 test("/resume exposes batch session deletion", async () => {
   const model: RegisteredModel = { id: "model-1", model_name: "deepseek-flash", base_url: "https://api.deepseek.com", api_key: "secret" };
   const fixture = createFixture({ initial: [model] });
-  const first = await fixture.sessionStore.create({ title: "First", titlePending: false, workspacePath: "C:\\workspace", model: toSessionModelForTest(model) });
-  const second = await fixture.sessionStore.create({ title: "Second", titlePending: false, workspacePath: "C:\\workspace", model: toSessionModelForTest(model) });
+  await fixture.sessionStore.create({ title: "First", titlePending: false, workspacePath: "C:\\workspace", model: toSessionModelForTest(model) });
+  await fixture.sessionStore.create({ title: "Second", titlePending: false, workspacePath: "C:\\workspace", model: toSessionModelForTest(model) });
   const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
   await tick();
   view.stdin.write("/resume");

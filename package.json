@@ -1,6 +1,6 @@
 {
   "name": "everpeace",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "A sandboxed terminal ReAct agent with persistent sessions, MCP, skills, and web access.",
   "type": "module",
   "bin": {
@@ -27,7 +27,11 @@
     "benchmark:campaign": "tsx src/benchmark/campaign-cli.ts",
     "start": "node dist/cli/index.js",
     "test": "tsx --test --test-concurrency=4 tests/**/*.test.{ts,tsx}",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "node scripts/lint.mjs",
+    "install:verify": "node scripts/verify-source-install.mjs",
+    "install:smoke": "node scripts/source-install-smoke.mjs",
+    "install:clean": "node scripts/verify-clean-install.mjs"
   },
   "engines": {
     "node": ">=22"
@@ -45,7 +49,7 @@
     "jsonc-parser": "^3.3.1",
     "lowlight": "^3.3.0",
     "marked": "^18.0.13",
-    "node-pty": "^1.1.0",
+    "node-pty": "1.1.0",
     "openai": "^7.15.0",
     "proper-lockfile": "^4.1.2",
     "react": "^19.3.0",
@@ -57,6 +61,7 @@
     "@types/proper-lockfile": "^4.1.4",
     "@types/react": "^19.3.0",
     "ink-testing-library": "^4.0.0",
+    "oxlint": "1.87.0",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   }

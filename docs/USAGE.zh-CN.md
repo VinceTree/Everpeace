@@ -326,3 +326,9 @@ pnpm build
 - 在首行/末行使用上下键浏览历史并恢复草稿，斜杠菜单选择优先。终端支持时 Shift+Enter 换行；多行括号粘贴不会自动提交。Windows Terminal 无法区分 Shift+Enter 与 Enter 时，可运行 `/terminal-setup`。
 - 输入历史跨重启共享，最多 1,000 条 / 4 MiB，保存于 sessions 目录旁的 `input-history.json`。登录向导密钥不记录，但手动输入在提问或命令中的机密不会自动脱敏；清空输入历史不会删除 Session 记录。
 - 模型请求的 shell 命令运行时通过有界预览展示最前五行和最后五行及省略数量，终端高度不足时对称缩减；用户直接 `!` 仍优先展示最新五行，完成后的长输出继续折叠。`/outputs` 查看保留内容，每条 UI 记录最多 10,000 行 / 2 MiB，已截断内容不可恢复。模型 shell 分别保留最多 1 MiB 的 stdout/stderr，不提供交互 stdin；用户直接 `!` 命令仍支持交互输入。
+
+## 公共网络配置与源码检查
+
+网页搜索/读取及远程 Skill HTTP/Git 安装共用绑定 DNS 的公共传输。宿主 HTTP_PROXY/HTTPS_PROXY/NO_PROXY 支持小写优先、域名边界及可选端口；只支持 HTTP/HTTPS 代理。代理受信任且必须 CONNECT 到验证过的 IP，代理认证不进入目标请求或诊断。重定向重新验证，TLS 保留原域名身份，取消关闭任务连接及认证 Git 网关。模型 API/MCP 网络保持独立边界，详见 [NETWORK](architecture/NETWORK.md)。
+
+支持路径是仓库内 pnpm 安装，tarball 不保证消费者获得补丁。运行 `pnpm install:verify`，构建后运行 `pnpm install:smoke`。维护者可运行 `pnpm install:clean`，它将当前源码复制到新建临时目录，冻结安装并验证 CLI/SDK/原生 PTY。lint 检查维护的代码，警告也失败，排除用户其他目录。门禁为 typecheck → lint → test → build，首败停止，另跑 diff-check。团队 benchmark 的离线准备见 [专题](benchmark/TEAM_READINESS.md)，不提供付费执行授权。

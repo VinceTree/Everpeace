@@ -38,7 +38,7 @@ test("language-server policy is read-only, network denied, and rejects protected
   const hostPolicy = createLspSandboxPolicy(root);
   const launcher = path.resolve("C:/temporary/everpeace-lsp-process-owned");
   const launcherArgs = nativeLspPermissionProfileArgs(hostPolicy, launcher).join(" ");
-  assert.ok(launcherArgs.includes(JSON.stringify(launcher) + '=\"read\"'));
+  assert.ok(launcherArgs.includes(JSON.stringify(launcher) + '="read"'));
   assert.throws(() => nativeLspPermissionProfileArgs(hostPolicy, root), /separate/u);
   assert.throws(() => nativeLspPermissionProfileArgs(hostPolicy, path.join(root, ".everpeace")), /separate/u);
   assert.throws(() => nativeLspPermissionProfileArgs(hostPolicy, "relative-launcher"), /separate/u);

@@ -11,7 +11,7 @@ import { ToolFeedbackError } from "../tools/tool-feedback.js";
 
 /** PowerShell can initialize at its drive root when ancestors are denied. Use a drive rooted at the owned workspace so provider traversal cannot reset cwd. */
 export function isolatedCommand(command: string, workspace: string): string {
-  if (process.platform !== "win32") return `cd -- '${workspace.replace(/'/gu, "'\''")}' && ${command}`;
+  if (process.platform !== "win32") return `cd -- '${workspace.replace(/'/gu, "'''")}' && ${command}`;
   const quoted = `'${workspace.replace(/'/gu, "''")}'`;
   return `New-PSDrive -Name EPTEAM -PSProvider FileSystem -Root ${quoted} -Scope Global -ErrorAction Stop | Out-Null; Set-Location -LiteralPath 'EPTEAM:\\' -ErrorAction Stop; [System.Environment]::CurrentDirectory=${quoted}; ${command}`;
 }
@@ -29,7 +29,7 @@ export async function verifyTeamIsolation(workspace: TeamWorkspaceRecord, policy
   await fs.mkdir(path.dirname(script), { recursive: true });
   const payload = `const fs=require('node:fs'); const result={cwd:process.cwd().toLowerCase()===${JSON.stringify(workspace.workspace.toLowerCase())}}; try{fs.writeFileSync(${JSON.stringify(ownProbe)},'owned',{flag:'wx'});result.own=true}catch{result.own=false} try{fs.writeFileSync(${JSON.stringify(sourceProbe)},'denied',{flag:'wx'});result.sourceDenied=false}catch{result.sourceDenied=true} try{fs.readFileSync(${JSON.stringify(workspaceOwnershipFile(workspace.owner))});result.stateDenied=false}catch{result.stateDenied=true} try{fs.readFileSync(${JSON.stringify(path.join(workspace.commonGitDir, "config"))});result.gitDenied=false}catch{result.gitDenied=true} try{fs.readFileSync(${JSON.stringify(siblingProbe)});result.siblingReadDenied=false}catch{result.siblingReadDenied=true} try{fs.writeFileSync(${JSON.stringify(siblingProbe)},'changed');result.siblingWriteDenied=false}catch{result.siblingWriteDenied=true} fs.writeFileSync(${JSON.stringify(ownProbe)},JSON.stringify({...result,nonce:${JSON.stringify(id)}})); console.log(JSON.stringify(result)); if(!Object.values(result).every(Boolean))process.exitCode=1;`;
   await fs.writeFile(script, payload, { flag: "wx", mode: 0o600 });
-  const quote = (value: string) => process.platform === "win32" ? `'${value.replace(/'/gu, "''")}'` : `'${value.replace(/'/gu, "'\''")}'`;
+  const quote = (value: string) => process.platform === "win32" ? `'${value.replace(/'/gu, "''")}'` : `'${value.replace(/'/gu, "'''")}'`;
   try {
     const result = await runBash(isolatedCommand(`${process.platform === "win32" ? "& " : ""}${quote(process.execPath)} ${quote(script)}`, workspace.workspace), { cwd: workspace.workspace, streamOutput: false, timeoutMs: 30_000, ...(signal ? { signal } : {}), sandbox: { policy: createEffectiveSandboxPolicy(policy, workspace.workspace, [], { isolation: { deniedRoots: [workspace.source, teamWorkspaceRoot(), ...(within(workspace.source, workspace.commonGitDir) ? [] : [workspace.commonGitDir])], writableRoot: workspace.workspace, traversalRoots: [workspace.owner] } }) } });
     if (result.cleanupFailed) throw new ProcessCleanupError("Team sandbox probe cleanup failed");
@@ -44,6 +44,7 @@ export async function verifyTeamIsolation(workspace: TeamWorkspaceRecord, policy
   } finally {
     // These names are host-generated, exclusive probe artifacts only.
     for (const file of [script, ownProbe, sourceProbe, siblingProbe]) {
+      // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
       try { const stat = await fs.lstat(file); if (stat.isFile() && !stat.isSymbolicLink()) await fs.unlink(file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     }
     await fs.rmdir(siblingDirectory);
