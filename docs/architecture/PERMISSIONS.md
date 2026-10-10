@@ -50,3 +50,7 @@ File tools reject lexical traversal, resolved symlink/junction escapes, and Wind
 Path checks block static escapes, not races caused by a concurrent hostile process replacing path components between validation and use, nor hard-linked sensitive files already exposed inside a workspace. Trusted workspaces and OS access controls remain necessary. No secret-detection or prompt-injection-immunity claim is made.
 
 Everpeace now opts into backend managed requirements for shell launch, but does not implement a unified managed policy for every host tool, automatic reviewer, proxy/domain policy, extra writable-root UI, or complete runtime orchestration. Its persisted command analyzer is narrower than Codex managed policy: user rules live in platform config, while project rules can only restrict and cannot elevate. Do not label it Codex Auto or claim parity with all Codex security layers. Tests cover profile mapping, fail-closed launch construction, file confinement, Bash/web/MCP approvals, context preservation, transient UI and full-access warning cancellation. A real Windows native profile probe has verified ordinary workspace writes and `.everpeace` denial; native network denial and Linux/macOS enforcement, live-model and full TUI acceptance remain pending.
+
+## 团队权限与审批
+
+成员权限不高于根，worker 最高 workspace-write，调查／审查只读。子 Agent 不持有 MCP 外部副作用工具；需要用户回答交给根汇总。根与成员审批共用队列，明确来源、动作、目录，权限 revision 改变收束整个团队。整合依然走现有预览、版本与回滚保护，详见 [TEAMS](TEAMS.md)。

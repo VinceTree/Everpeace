@@ -1,3 +1,4 @@
+export type { TeamOptions, TeamRole, TeamEvent, TeamSnapshot, TeamMember } from "../team/types.js";
 /**
  * Public programmatic API for running Everpeace coding tasks without a TUI.
  * The surface is intentionally narrow: callers pass a prompt and workspace,

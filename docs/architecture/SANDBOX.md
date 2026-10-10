@@ -84,3 +84,7 @@ Windows Node with the installed pinned backend was exercised using disposable di
 The [native Windows ownership fixture](../../tests/unit/tools/sandbox-boundaries.test.ts) cancels a payload that starts a detached child and verifies that both reported PIDs have exited. Buffered and duplex modes run through the pinned backend; a natural self-expiry cannot satisfy the assertions. This verifies the controlled fixture, not all possible descendants. Hosted Windows CI and non-Windows explicitly skip this native integration; those skips are not containment evidence.
 
 Linux/macOS native isolation and live terminal approval flows are not covered by these Windows results. The Windows LSP probe covers one direct TCP/IPv4 socket and is not proof for every protocol or address. Automated counts and the latest full-validation status belong in [HANDOFF](../HANDOFF.md).
+
+## 成员原生隔离
+
+团队 worker 使用 read-only 基础加自己目录 write 的定制策略，从宿主非 Git anchor 启动；主工作区、其他成员目录、ownership 记录、公共 Git 元数据 deny。Windows PSDrive 修正 denied 父目录导致的 cwd 回退。每次 worker provider 前执行 nonce 绑定的真实探测，无宿主直跑降级。实机 Windows/Linux 证据与适用范围以 HANDOFF 为准，机制见 [TEAMS](TEAMS.md)。

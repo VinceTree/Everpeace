@@ -1,3 +1,6 @@
+import { loadTeamWorkspace, removeTeamWorkspace } from "../../team/workspace.js";
+import { TeamConfigStore, TeamStore } from "../../team/store.js";
+import type { TeamRuntime } from "../../team/runtime.js";
 import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
@@ -118,6 +121,10 @@ export function createDefaultTuiDependencies(
   registry: TuiModelRegistry,
 ): TuiDependencies {
   const sessionStore = new SessionStore();
+  const teamConfig = new TeamConfigStore();
+  const teamStore = new TeamStore();
+  let teamModels: RegisteredModel[] = [];
+  let activeTeam: TeamRuntime | undefined;
   const version = packageVersion();
   const skills = new SkillCatalog(process.cwd());
   const skillManager = new SkillManager({ workspacePath: process.cwd(), catalog: skills });
@@ -171,6 +178,7 @@ export function createDefaultTuiDependencies(
       catch { codeNavigation = undefined; }
       const handle = createProductionAgent({
         model,
+        ...(restore?.team ? { team: restore.team, teamModels, teamStore, onTeamEvent: async (event) => { if (event.type === "agent_updated" || event.type === "agent_integrated") io.writeTool?.(`[Team ${event.agentId.slice(0, 8)}] ${event.role ?? "member"} · ${event.state ?? "updated"} · ${event.modelId ?? ""}`); } } : {}),
         workspacePath: process.cwd(),
         io,
         sessionStore,
@@ -193,10 +201,12 @@ export function createDefaultTuiDependencies(
           ...(restore?.onContextCompacted === undefined ? {} : { onContextCompacted: restore.onContextCompacted }),
           ...(restore?.onContextPruned === undefined ? {} : { onContextPruned: restore.onContextPruned }),
           ...(restore?.onUsage === undefined ? {} : { onUsage: restore.onUsage }),
+          ...(restore?.onMemberUsage === undefined ? {} : { onMemberUsage: restore.onMemberUsage }),
           ...(restore?.onPhase === undefined ? {} : { onPhase: restore.onPhase }),
           ...(restore?.onEvent === undefined ? {} : { onEvent: restore.onEvent }),
         },
       });
+      activeTeam = handle.team;
       if (activeLearnedMemory) void trackMemoryDisposal(activeLearnedMemory.dispose()).catch(() => undefined);
       activeLearnedMemory = handle.learnedMemory as LearnedMemoryRuntime | undefined;
       return handle.agent;
@@ -349,6 +359,12 @@ export function createDefaultTuiDependencies(
       } catch (error) {
         lines.push(`Sandbox execution: probe failed (${error instanceof Error ? error.message : String(error)})`);
       }
+      const snapshot = activeTeam?.snapshot();
+      lines.push(`Collaboration: ${(await teamConfig.load()).enabled ? "configured" : "off"}`);
+      if (snapshot) {
+        lines.push(`Team accounting: ${snapshot.usage.complete ? "complete" : snapshot.openRequests ? "in flight" : "usage incomplete"}`);
+        lines.push(`Team verification: ${snapshot.state === "finished" ? "root checks passed" : "not settled"}`);
+      }
       if (!live) {
         lines.push("Model request: not run (use /doctor --live)");
         return lines.join("\n");
@@ -397,6 +413,28 @@ export function createDefaultTuiDependencies(
         readableRoots: () => skills.readableRoots(),
       })(command, signal, timeoutMs, onOutput);
     },
+    async getTeamConfig() { const config = await teamConfig.load(); teamModels = (await registry.resolveAll()).available; return config; },
+    async configureTeam(config) { teamModels = (await registry.resolveAll()).available; for (const id of Object.values(config.models ?? {})) if (!teamModels.some((model) => model.id === id)) throw new Error("Team model registration/credential is unavailable"); await teamConfig.save(config); },
+    getTeamSnapshot: () => activeTeam?.snapshot(),
+    async inspectTeam(sessionId, teamId) { const loaded = await sessionStore.load(sessionId); const id = teamId ?? loaded.summary.team?.teamId; return id ? teamStore.load(id, loaded.summary.workspace_path, sessionId) : undefined; },
+    async manageTeam(action, id, sessionId, teamId) {
+      const live = activeTeam?.snapshot();
+      if (live && live.rootSessionId === sessionId && (!teamId || live.teamId === teamId)) { if (action === "cleanup") await activeTeam!.cleanupMember(id); else await activeTeam!.cancelMember(id); return; }
+      if (!sessionId) throw new Error("No Session owns this team artifact");
+      const loaded = await sessionStore.load(sessionId);
+      const selectedTeam = teamId ?? loaded.summary.team?.teamId;
+      if (!selectedTeam) throw new Error("No team is recorded in this Session");
+      const snapshot = await teamStore.load(selectedTeam, loaded.summary.workspace_path, sessionId);
+      const member = snapshot.members.find((record) => record.agentId === id);
+      if (!member) throw new Error("Unknown team member");
+      const release = await teamStore.claim(snapshot.teamId);
+      try {
+        if (action === "cleanup" && member.workspacePath) { await removeTeamWorkspace(await loadTeamWorkspace(member.workspacePath, snapshot.workspacePath, true)); delete member.workspacePath; }
+        if (action === "cancel" || member.state === "interrupted") member.state = "cancelled";
+        await teamStore.save(snapshot);
+      } finally { await release(); }
+    },
+    async reconnectMcp() { await mcp.refresh(); },
     async getMcpStatus() {
       return formatMcpStatus(await mcp.refresh());
     },

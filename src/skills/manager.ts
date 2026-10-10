@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
@@ -43,6 +44,8 @@ export interface ManagedSkill extends SkillMetadata {
   conflict: boolean;
   usable: boolean;
   skillMarkdown: string;
+  managed?: boolean;
+  sourceUrl?: string;
 }
 
 export interface SkillInstallCandidate {
@@ -65,7 +68,12 @@ export interface SkillInstallResult {
   scope: SkillTargetScope;
 }
 
+export interface SkillLifecyclePreview { id: string; name: string; directory: string; sourceUrl?: string; action: "update" | "uninstall"; diff: string; changedFiles: string[]; }
+interface ManagedSkillRecord { version: 1; name: string; scope: SkillTargetScope; sourceUrl?: string; hashes: Record<string, string>; }
 export interface SkillManagerLike {
+  previewUpdate?(directory: string, signal?: AbortSignal): Promise<SkillLifecyclePreview>;
+  previewUninstall?(directory: string): Promise<SkillLifecyclePreview>;
+  commitLifecycle?(id: string): Promise<void>;
   list(): Promise<readonly ManagedSkill[]>;
   saveCreated(skillMarkdown: string, scope: SkillTargetScope): Promise<SkillInstallResult>;
   prepareInstall(url: string, signal?: AbortSignal): Promise<PreparedSkillInstall>;
@@ -424,6 +432,8 @@ export class SkillManager implements SkillManagerLike {
   readonly #preparations = new Map<string, PreparationRecord>();
   readonly #preparing = new Set<Promise<PreparedSkillInstall>>();
   readonly #gitProcesses = new Set<ReturnType<typeof observeProcessCompletion>>();
+  readonly #lifecycleActive = new Set<Promise<void>>();
+  readonly #lifecycle = new Map<string, { preview: SkillLifecyclePreview; record: ManagedSkillRecord; preparation?: PreparationRecord; candidate?: CandidateRecord }>();
   readonly #lifetime = new AbortController();
   #closed = false;
   #disposal: Promise<void> | undefined;
@@ -447,6 +457,7 @@ export class SkillManager implements SkillManagerLike {
       conflict: snapshot.conflictedNames.includes(skill.name),
       usable: !snapshot.conflictedNames.includes(skill.name),
       skillMarkdown: await fs.readFile(skill.path, "utf8"),
+      ...(await this.#managedInfo(dirname(skill.path))),
     })));
   }
 
@@ -461,7 +472,9 @@ export class SkillManager implements SkillManagerLike {
       const packageDirectory = join(source, metadata.name);
       await fs.mkdir(packageDirectory);
       await fs.writeFile(join(packageDirectory, "SKILL.md"), normalized, { flag: "wx" });
-      return await this.#commitDirectory(packageDirectory, metadata.name, scope, root);
+      const result = await this.#commitDirectory(packageDirectory, metadata.name, scope, root);
+      await this.#markManaged(result);
+      return result;
     } finally {
       await fs.rm(source, { recursive: true, force: true }).catch(() => undefined);
     }
@@ -538,15 +551,19 @@ export class SkillManager implements SkillManagerLike {
     if (!candidate) throw new Error("The selected Skill is unavailable");
     try {
       await validateSkillDirectory(candidate.sourceDirectory);
+      if (await exists(join(candidate.sourceDirectory, ".everpeace-managed.json"))) throw new Error("Skill source cannot supply host management metadata");
       await this.#assertNameAvailable(candidate.name);
       const root = await this.#targetRoot(scope);
-      return await this.#commitDirectory(candidate.sourceDirectory, candidate.name, scope, root);
+      const result = await this.#commitDirectory(candidate.sourceDirectory, candidate.name, scope, root);
+      await this.#markManaged(result, preparation.sourceUrl);
+      return result;
     } finally {
       await this.discardPrepared(preparationId);
     }
   }
 
   async discardPrepared(preparationId: string): Promise<void> {
+    this.#lifecycle.delete(preparationId);
     const preparation = this.#preparations.get(preparationId);
     if (!preparation) return;
     this.#preparations.delete(preparationId);
@@ -562,7 +579,7 @@ export class SkillManager implements SkillManagerLike {
       for (const owned of processes) owned.stop();
       const results = await Promise.all(processes.map((owned) => owned.completion));
       for (const result of results) if (result.cleanupError) this.#cleanupFailure ??= result.cleanupError;
-      await Promise.allSettled([...this.#preparing]);
+      await Promise.allSettled([...this.#preparing, ...this.#lifecycleActive]);
       await Promise.all([...this.#preparations.keys()].map((id) => this.discardPrepared(id)));
       if (this.#cleanupFailure) throw this.#cleanupFailure;
     })();
@@ -741,6 +758,109 @@ export class SkillManager implements SkillManagerLike {
     }
   }
 
+  async #hashes(directory: string): Promise<Record<string, string>> {
+    const validated = await validateSkillDirectory(directory);
+    const hashes: Record<string, string> = Object.create(null) as Record<string, string>;
+    for (const name of validated.files.filter((file) => file !== ".everpeace-managed.json").sort()) hashes[name] = createHash("sha256").update(await fs.readFile(join(directory, name))).digest("hex");
+    return hashes;
+  }
+  async #markManaged(result: SkillInstallResult, sourceUrl?: string): Promise<void> {
+    const record: ManagedSkillRecord = { version: 1, name: result.name, scope: result.scope, hashes: await this.#hashes(result.directory), ...(sourceUrl ? { sourceUrl } : {}) };
+    await fs.writeFile(join(result.directory, ".everpeace-managed.json"), JSON.stringify(record), { flag: "wx", mode: 0o600 });
+  }
+  async #managedInfo(directory: string): Promise<{ managed?: boolean; sourceUrl?: string }> {
+    try { const record = await this.#managed(directory); return { managed: true, ...(record.sourceUrl ? { sourceUrl: record.sourceUrl } : {}) }; }
+    catch { return {}; }
+  }
+  async #managed(directory: string): Promise<ManagedSkillRecord> {
+    const canonical = await fs.realpath(directory);
+    if (canonical !== resolve(directory) || (await fs.lstat(directory)).isSymbolicLink()) throw new Error("Managed Skill directory cannot be redirected");
+    const marker = join(directory, ".everpeace-managed.json");
+    const stat = await fs.lstat(marker);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) throw new Error("Skill management record is invalid");
+    const record = JSON.parse(await fs.readFile(marker, "utf8")) as ManagedSkillRecord;
+    if (record.version !== 1 || !["project", "user"].includes(record.scope) || record.name !== basename(directory) || !record.hashes || typeof record.hashes !== "object") throw new Error("Skill is not a managed installation");
+    const target = resolve(await this.#targetRoot(record.scope), record.name);
+    if (target !== canonical) throw new Error("Skill is outside the managed destination");
+    if (record.sourceUrl) this.#parseSourceUrl(record.sourceUrl);
+    return record;
+  }
+  async #unchanged(directory: string, record: ManagedSkillRecord): Promise<void> {
+    const current = await this.#managed(directory);
+    if (JSON.stringify(current) !== JSON.stringify(record) || JSON.stringify(await this.#hashes(directory)) !== JSON.stringify(record.hashes)) throw new Error("Skill has local modifications; preserve them before updating or uninstalling");
+  }
+  async previewUninstall(directory: string): Promise<SkillLifecyclePreview> {
+    this.#assertAvailable(); const record = await this.#managed(directory); await this.#unchanged(directory, record);
+    const preview: SkillLifecyclePreview = { id: randomUUID(), name: record.name, directory, action: "uninstall", changedFiles: Object.keys(record.hashes), diff: `Remove managed Skill ${record.name} (${Object.keys(record.hashes).length} files) from ${directory}` };
+    this.#lifecycle.set(preview.id, { preview, record }); return preview;
+  }
+  async previewUpdate(directory: string, signal?: AbortSignal): Promise<SkillLifecyclePreview> {
+    this.#assertAvailable(); const record = await this.#managed(directory); await this.#unchanged(directory, record);
+    if (!record.sourceUrl) throw new Error("Locally created Skills have no remote update source");
+    const prepared = await this.prepareInstall(record.sourceUrl, signal);
+    try {
+      const preparation = this.#preparations.get(prepared.id)!;
+      const candidates = preparation.candidates.filter((candidate) => candidate.name === record.name);
+      if (candidates.length !== 1) throw new Error("Update source must contain exactly one matching Skill name");
+      const candidate = candidates[0]!;
+      const hashes = await this.#hashes(candidate.sourceDirectory);
+      const changedFiles = [...new Set([...Object.keys(record.hashes), ...Object.keys(hashes)])].filter((file) => record.hashes[file] !== hashes[file]);
+      let diff = "";
+      for (const file of changedFiles) {
+        const before = record.hashes[file] ? await fs.readFile(join(directory, file), "utf8") : "";
+        const after = hashes[file] ? await fs.readFile(join(candidate.sourceDirectory, file), "utf8") : "";
+        diff += `\n--- ${file}\n+++ ${file}\n${before.split("\n").map((line) => `- ${line}`).join("\n")}\n${after.split("\n").map((line) => `+ ${line}`).join("\n")}`;
+        if (Buffer.byteLength(diff) > 64 * 1024) throw new Error("Skill update preview is too large; inspect the source manually");
+      }
+      await this.#unchanged(directory, record);
+      const preview: SkillLifecyclePreview = { id: prepared.id, name: record.name, directory, sourceUrl: record.sourceUrl, action: "update", diff: diff || "No content changes", changedFiles };
+      this.#lifecycle.set(preview.id, { preview, record, preparation, candidate }); return preview;
+    } catch (error) { await this.discardPrepared(prepared.id); throw error; }
+  }
+  async commitLifecycle(id: string): Promise<void> {
+    this.#assertAvailable();
+    const operation = this.#commitLifecycle(id);
+    this.#lifecycleActive.add(operation);
+    try { await operation; } finally { this.#lifecycleActive.delete(operation); }
+  }
+  async #commitLifecycle(id: string): Promise<void> {
+    this.#assertAvailable();
+    const operation = this.#lifecycle.get(id); if (!operation) throw new Error("Skill lifecycle preview expired");
+    this.#lifecycle.delete(id);
+    const { preview, record, candidate } = operation;
+    const root = await fs.realpath(dirname(preview.directory));
+    const backup = join(root, `.${record.name}.everpeace-backup-${randomUUID()}`);
+    const staging = join(root, `.${record.name}.everpeace-update-${randomUUID()}`);
+    try {
+      await this.#unchanged(preview.directory, record);
+      if (preview.action === "update") {
+        const snapshot = await this.#catalog.refresh();
+        if (snapshot.skills.some((skill) => skill.name === record.name && resolve(dirname(skill.path)) !== resolve(preview.directory))) throw new Error("Skill name is ambiguous; resolve duplicates before updating");
+        if (!candidate) throw new Error("Update candidate is unavailable");
+        await copySkillTree(candidate.sourceDirectory, staging); await validateSkillDirectory(staging);
+        const marker = join(staging, ".everpeace-managed.json"); if (await exists(marker)) throw new Error("Update source must not include host management metadata");
+        await fs.writeFile(marker, JSON.stringify({ ...record, hashes: await this.#hashes(staging) }), { flag: "wx", mode: 0o600 });
+      }
+      this.#assertAvailable();
+      await this.#unchanged(preview.directory, record);
+      await fs.rename(preview.directory, backup);
+      // Recheck the moved bytes before discarding the original directory.
+      if (JSON.stringify(JSON.parse(await fs.readFile(join(backup, ".everpeace-managed.json"), "utf8"))) !== JSON.stringify(record) || JSON.stringify(await this.#hashes(backup)) !== JSON.stringify(record.hashes)) {
+        await fs.rename(backup, preview.directory); throw new Error("Skill changed during confirmation; update refused");
+      }
+      if (preview.action === "update") {
+        try { await fs.rename(staging, preview.directory); }
+        catch (error) { if (!await exists(preview.directory)) await fs.rename(backup, preview.directory); throw error; }
+      }
+      const resolvedBackup = await fs.realpath(backup);
+      if (dirname(resolvedBackup) !== root || !basename(resolvedBackup).startsWith(`.${record.name}.everpeace-backup-`)) throw new Error("Unsafe Skill cleanup target");
+      await fs.rm(resolvedBackup, { recursive: true });
+      await this.#catalog.refresh();
+    } finally {
+      if (await exists(staging)) { const safe = await fs.realpath(staging); if (dirname(safe) === root && basename(safe).startsWith(`.${record.name}.everpeace-update-`)) await fs.rm(safe, { recursive: true }); }
+      if (operation.preparation) await this.discardPrepared(operation.preparation.id);
+    }
+  }
   async #targetRoot(scope: SkillTargetScope): Promise<string> {
     return scope === "user"
       ? join(codexHome(), "skills")

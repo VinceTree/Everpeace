@@ -6,6 +6,7 @@ export const SLASH_COMMANDS = [
   "/status",
   "/context",
   "/tasks",
+  "/team",
   "/diff",
   "/verify",
   "/undo",
@@ -77,12 +78,13 @@ export const TUI_HELP = `Slash commands
   /models  View models and credential status
   /status  View session, model, and token usage
   /context Inspect the last coding request submitted in this process
+  /team    Configure collaboration, role models, limits, and retained members
   /tasks   View the current task checklist and latest task result
   /diff    View bounded workspace changes
   /verify  Run discovered checks, or /verify <command>
   /undo    Undo the latest Agent turn when its files are unchanged
   /permissions  Select read-only, ask, workspace-write, or full-access tools
-  /mcp     Refresh and inspect Codex MCP servers and tools
+  /mcp     Inspect MCP servers; /mcp reconnect reconnects without replay
   /skills  Create, install, inspect, and use local skills
   /memory  View and manage learned experience
   /plan    Plan a request; show, execute an approved plan, or exit

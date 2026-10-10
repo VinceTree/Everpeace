@@ -11,6 +11,8 @@ import { verificationPrompt } from "./verifier.js";
 
 export interface CodingTaskAgent {
   runTurn(userInput: string, signal?: AbortSignal, options?: { mode?: AgentMode; attachments?: readonly FileAttachment[] }): Promise<AgentTurnResult>;
+  finishTeamVerification?: ((verified: boolean) => Promise<void>) | undefined;
+  prepareTeamVerification?: ((signal?: AbortSignal) => Promise<string | undefined>) | undefined;
   beginTask?(options: AgentTaskOptions): void | Promise<void>;
   endTask?(): void | Promise<void>;
   waitForBackgroundJobs?(signal?: AbortSignal): Promise<unknown>;
@@ -145,6 +147,10 @@ export class CodingTaskRunner {
         this.#host.onStatus?.("Waiting for background commands before final verification");
         await this.#agent.waitForBackgroundJobs(input.signal);
       }
+      if (this.#agent.prepareTeamVerification) {
+        const teamPrompt = await this.#agent.prepareTeamVerification(input.signal);
+        if (teamPrompt) { nextText = teamPrompt; nextMode = "default"; this.#host.resetAssistant?.(); continue; }
+      }
       lastWorkflowResult = await this.#workflow.finishTurn(this.#host.executeVerification, input.signal);
       firstVerificationSuite ??= lastWorkflowResult.verificationSuite;
       input.signal?.throwIfAborted();
@@ -167,6 +173,7 @@ export class CodingTaskRunner {
 
       const outcome = lastWorkflowResult.state.result;
       input.signal?.throwIfAborted();
+      if (this.#agent.finishTeamVerification) await this.#agent.finishTeamVerification(outcome === "verified");
       await this.#agent.finalizePendingGoalCompletion?.(outcome === "verified" || outcome === "no_changes");
       input.signal?.throwIfAborted();
       await this.#agent.finishMemoryTurn?.(

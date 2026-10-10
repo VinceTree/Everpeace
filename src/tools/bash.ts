@@ -155,7 +155,7 @@ function resolveSandboxArgs(
     "sandbox",
     ...(sandbox.policy ? nativePermissionProfileArgs(sandbox.policy) : ["-P", permissionProfile]),
     "-C",
-    cwd,
+    sandbox.policy?.launchRoot ?? cwd,
     ...((sandbox.policy?.readableRoots ?? sandbox.readableRoots)?.flatMap((root) => ["--sandbox-state-readable-root", root]) ?? []),
     ...(sandbox.policy?.networkMode === "deny" ? ["--sandbox-state-disable-network"] : []),
     "--include-managed-config",

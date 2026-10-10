@@ -76,6 +76,9 @@ interface StatusField {
 
 function statusFields(snapshot: StatusSnapshot): StatusField[] {
   return [
+    ...(snapshot.configuration_status ? [{ label: "Configuration", value: snapshot.configuration_status }] : []),
+    ...(snapshot.workflow_status ? [{ label: "Verification", value: snapshot.workflow_status }] : []),
+    ...(snapshot.team_state ? [{ label: "Team", value: snapshot.team_state }, { label: "Team tokens", value: totalTokens(snapshot.team_tokens ?? 0, snapshot.team_usage_complete ?? false) }] : []),
     { label: "Version", value: `v${snapshot.version}` },
     { label: "Model", value: snapshot.model_name ?? "not selected" },
     { label: "Provider", value: snapshot.provider },

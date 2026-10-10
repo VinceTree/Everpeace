@@ -1,3 +1,4 @@
+import type { TeamEvent } from "../team/types.js";
 import { stripVTControlCharacters } from "node:util";
 import { redactSecretsPreservingLayout } from "../util/redact-secrets.js";
 import type { WorkflowPhase, WorkflowResultClassification } from "../workflow/types.js";
@@ -62,6 +63,7 @@ export interface ExecInteractionRequiredEvent {
 }
 
 export type ExecProgressEvent =
+  | TeamEvent
   | ExecSessionStartedEvent
   | ExecAssistantMessageEvent
   | ExecToolStartedEvent
@@ -100,6 +102,7 @@ export type ExecJsonlEvent = ExecProgressEvent | ExecRunFinishedEvent;
 export interface ExecJsonlEmitterOptions {
   write(chunk: string, signal?: AbortSignal): void | Promise<void>;
   now?: () => Date;
+  schemaVersion?: 1 | 2;
 }
 
 function truncateUtf8(value: string, maxBytes: number): string {
@@ -170,6 +173,8 @@ function payload(event: ExecJsonlEvent, truncation: PayloadTruncation): Record<s
   };
   const identifier = (value: string) => clipped(value, MAX_IDENTIFIER_BYTES);
   switch (event.type) {
+    case "team_updated": case "agent_updated": case "team_usage": case "agent_integrated":
+      return { team_id: identifier(event.teamId), agent_id: identifier(event.agentId), task_id: identifier(event.taskId), ...(event.state ? { state: identifier(event.state) } : {}), ...(event.role ? { role: identifier(event.role) } : {}), ...(event.modelId ? { model_id: identifier(event.modelId) } : {}), ...(event.summary ? { summary: clipped(event.summary, MAX_TOOL_OUTPUT_BYTES) } : {}), ...(event.changedPaths ? { changed_paths: event.changedPaths.slice(0, MAX_CHANGED_PATHS).map(identifier), changed_paths_total: event.changedPaths.length, changed_paths_returned: Math.min(event.changedPaths.length, MAX_CHANGED_PATHS) } : {}), ...(event.inputTokens !== undefined ? { input_tokens: optionalCount(event.inputTokens) } : {}), ...(event.outputTokens !== undefined ? { output_tokens: optionalCount(event.outputTokens) } : {}), ...(event.usageComplete !== undefined ? { usage_complete: event.usageComplete } : {}) };
     case "session_started":
       return {
         session_id: identifier(event.sessionId),
@@ -237,11 +242,11 @@ function payload(event: ExecJsonlEvent, truncation: PayloadTruncation): Record<s
   }
 }
 
-export function serializeExecJsonlEvent(event: ExecJsonlEvent, timestamp = new Date()): string {
+export function serializeExecJsonlEvent(event: ExecJsonlEvent, timestamp = new Date(), schemaVersion: 1 | 2 = 1): string {
   const truncation: PayloadTruncation = { truncated: false, displayTextBytes: new Map() };
   const fields = payload(event, truncation);
   const record: Record<string, unknown> = {
-    schema_version: EXEC_JSONL_SCHEMA_VERSION,
+    schema_version: schemaVersion,
     type: event.type,
     timestamp: timestamp.toISOString(),
     ...fields,
@@ -281,12 +286,14 @@ export function serializeExecJsonlEvent(event: ExecJsonlEvent, timestamp = new D
 export class ExecJsonlEmitter {
   readonly #write: ExecJsonlEmitterOptions["write"];
   readonly #now: () => Date;
+  readonly #schema: 1 | 2;
   #finished = false;
   #broken = false;
   #active = false;
   readonly #waiters: Array<() => void> = [];
 
   constructor(options: ExecJsonlEmitterOptions) {
+    this.#schema = options.schemaVersion ?? 1;
     this.#write = options.write;
     this.#now = options.now ?? (() => new Date());
   }
@@ -311,7 +318,7 @@ export class ExecJsonlEmitter {
       const timestamp = this.#now();
       if (event.type === "assistant_message") {
         const safe = sanitizeExecOutput(event.text, Number.MAX_SAFE_INTEGER);
-        const prefix = JSON.stringify({ schema_version: EXEC_JSONL_SCHEMA_VERSION, type: event.type, timestamp: timestamp.toISOString() }).slice(0, -1);
+        const prefix = JSON.stringify({ schema_version: this.#schema, type: event.type, timestamp: timestamp.toISOString() }).slice(0, -1);
         started = true;
         await this.#write(`${prefix},"text":"`, signal);
         // JSON string escaping is compositional when chunks never split a surrogate pair.
@@ -321,7 +328,7 @@ export class ExecJsonlEmitter {
         }
         await this.#write('"}\n', signal);
       } else {
-        const line = `${serializeExecJsonlEvent(event, timestamp)}\n`;
+        const line = `${serializeExecJsonlEvent(event, timestamp, this.#schema)}\n`;
         started = true;
         for (const chunk of outputChunks(line)) await this.#write(chunk, signal);
       }

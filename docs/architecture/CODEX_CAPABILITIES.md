@@ -92,3 +92,7 @@ MCP SDK 安全修复按 [官方公告](https://github.com/modelcontextprotocol/t
 ## Session 与兼容性
 
 Session JSONL 现以兼容方式追加 `workflow_updated` 事件，保存当前 workflow phase、变更路径、repair 次数和最后一次有界验证结果；持久化快照清空验证 stdout/stderr/error，旧文件缺少该事件时按无 workflow 元数据读取。工作流不会把文件 before/after 内容或检查点写入 JSONL，检查点只存在当前进程。Skill catalog、MCP 连接和权限授权都不从 session 恢复；function call 与结果仍按既有 context 事件持久化。原有兼容端点如果不能接受动态 function tool schema，会把服务端错误正常返回给当前模型请求，不会改写注册信息或泄露凭据。
+
+## 受管理 Skill 与 MCP 重连
+
+SkillManager 安装来源与文件指纹写入 .everpeace-managed.json；受管理安装支持更新预览、确认提交和卸载。更新展示差异、来源，检测本地修改与重名，提交前重新核对，取消不写源目录。/skills 窗口默认 Cancel。MCP 增加空闲时 /mcp reconnect，关闭旧连接后显式刷新，不重放中断调用。成员不直接获得 MCP。OAuth、私有 Skill 安装与完整插件市场仍不在本轮范围。

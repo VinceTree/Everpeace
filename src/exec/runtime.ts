@@ -1,3 +1,6 @@
+import { TeamLimitError } from "../team/ledger.js";
+import { RequestUsageIncompleteError } from "../agent/request-attempt-ledger.js";
+import { normalizeTeamOptions } from "../team/types.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { LoopEvent } from "../agent/agent-loop.js";
@@ -255,6 +258,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
       && options.permissionMode !== "workspace-write") {
       throw new ExecConfigurationError("--permission-mode must be read-only, ask, or workspace-write; exec cannot request full-access");
     }
+    if (options.team) normalizeTeamOptions(options.team);
     requirePositiveInteger("tokenBudget", options.tokenBudget);
     requirePositiveInteger("timeoutMs", options.timeoutMs);
     requirePositiveInteger("maxSteps", options.maxSteps);
@@ -270,12 +274,13 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
   const controller = new AbortController();
   let deadlineExceeded = false;
   let outputClosed = false;
-  const timeout = options.timeoutMs === undefined ? undefined : setTimeout(() => {
+  const effectiveTimeout = options.team?.enabled !== false && options.team ? Math.min(options.timeoutMs ?? Infinity, options.team.timeoutMs ?? 1_800_000) : options.timeoutMs;
+  const timeout = effectiveTimeout === undefined ? undefined : setTimeout(() => {
     deadlineExceeded = true;
     const error = new Error("Exec task deadline exceeded");
     error.name = "ExecTaskDeadlineError";
     controller.abort(error);
-  }, options.timeoutMs);
+  }, effectiveTimeout);
   const taskSignal = options.signal
     ? AbortSignal.any([options.signal, controller.signal])
     : controller.signal;
@@ -326,7 +331,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
     const policy: PermissionPolicy = options.permissionMode === undefined
       ? basePolicy
       : { ...basePolicy, mode: options.permissionMode };
-    if (options.resume !== undefined) {
+    if (options.resume !== undefined && !options.team?.resumeTeamId) {
       // Fork owns cancellation and must finish its transaction before cleanup.
       // Load the published child, not the earlier source projection: another
       // host may have appended to the source before its locked EOF was frozen.
@@ -336,6 +341,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
       restored = await waitWithSignal(sessionStore.load(sessionId), taskSignal);
       selected = selectResumeModel(restored, resolved, workspacePath);
     }
+    if (options.team?.resumeTeamId) { if (!restored || !options.resume) throw new ExecConfigurationError("Team continuation requires --resume with its root Session"); sessionId = options.resume; }
     ledger = new RequestAttemptLedger(options.tokenBudget === undefined ? {} : { tokenBudget: options.tokenBudget });
     let workflow: CodingWorkflowRuntime | undefined;
     let execute: ProductionCommandExecutor | undefined;
@@ -419,6 +425,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
     };
     handle = createAgent({
       model: selected.model,
+      ...(options.team ? { team: { ...options.team, maxAttempts: Math.min(options.maxSteps ?? Infinity, options.team.maxAttempts ?? 96) }, teamModels: resolved.available, onTeamEvent: async (event: import("../team/types.js").TeamEvent) => { await emit(event); } } : {}),
       workspacePath,
       io,
       sessionStore,
@@ -449,6 +456,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
         onToolEvent: onAgentEvent,
       },
     });
+    if (handle.team) ledger = handle.team.accounting;
     execute = createCommandExecutor({
       workspacePath,
       policy: () => policy,
@@ -524,6 +532,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
     await timeline;
     const assistantText = lastAssistantText;
     result = successfulResult(runnerResult, sessionId, assistantText, ledger);
+    if (handle.team) { const snapshot = handle.team.snapshot(); if (snapshot) result.team = snapshot; }
     taskSignal.throwIfAborted();
     if (restored?.forkPendingResume && result.classification === "success") {
       await sessionStore.setForkPendingResume(sessionId, false);
@@ -535,6 +544,9 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
         ...(sessionId ? { sessionId } : {}),
         error: errorText(error),
       });
+    } else if (error instanceof TeamLimitError || error instanceof RequestUsageIncompleteError) {
+      const reason = error instanceof TeamLimitError ? error.reason : "usage_limited";
+      result = runtimeResult("limit_reached", 4, reason, ledger, { ...(sessionId ? { sessionId } : {}), stopReason: reason });
     } else if (deadlineExceeded) {
       result = runtimeResult("limit_reached", 4, "deadline_exceeded", ledger, {
         ...(sessionId ? { sessionId } : {}),
@@ -571,6 +583,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
     }
   }
 
+  if (result && handle?.team) { const snapshot = handle.team.snapshot(); if (snapshot) result.team = snapshot; }
   return result ?? runtimeResult("runtime_error", 1, "runtime_error", ledger, {
     ...(sessionId ? { sessionId } : {}),
     error: "Exec ended without a terminal result",

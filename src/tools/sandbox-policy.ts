@@ -5,7 +5,7 @@ import type { PermissionPolicy } from "../permissions/policy.js";
 import { codexSandboxProfile } from "../permissions/policy.js";
 
 export type NativePermissionProfile = ":read-only" | ":workspace" | ":danger-full-access";
-export type SandboxPathAccess = "read" | "none";
+export type SandboxPathAccess = "read" | "none" | "write";
 
 export interface SandboxPathRule {
   path: string;
@@ -14,6 +14,7 @@ export interface SandboxPathRule {
 
 /** Immutable policy captured immediately before one model command starts. */
 export interface EffectiveSandboxPolicy {
+  launchRoot?: string;
   backend: "codex-cli";
   permissionProfile: NativePermissionProfile;
   workspaceRoots: readonly string[];
@@ -91,6 +92,7 @@ export function createEffectiveSandboxPolicy(
     platform?: NodeJS.Platform;
     env?: NodeJS.ProcessEnv;
     homeDirectory?: string;
+    isolation?: { deniedRoots: readonly string[]; writableRoot: string; traversalRoots?: readonly string[] };
   } = {},
 ): EffectiveSandboxPolicy {
   const platform = options.platform ?? process.platform;
@@ -102,12 +104,16 @@ export function createEffectiveSandboxPolicy(
   const globalState = applicationStateRoots(platform, options.env ?? process.env, options.homeDirectory ?? os.homedir())
     .map((root) => canonicalExistingPath(root, platform))
     .filter((root) => !isWithin(workspace, root, platform));
-  const pathRules = permissionProfile === ":danger-full-access"
+  const pathRules: SandboxPathRule[] = permissionProfile === ":danger-full-access"
     ? []
     : [
         ...controlPaths.map((rulePath): SandboxPathRule => ({ path: rulePath, access: "read" })),
         ...globalState.map((rulePath): SandboxPathRule => ({ path: rulePath, access: "none" })),
       ];
+  if (options.isolation) {
+    if (permissionProfile === ":danger-full-access") throw new Error("Team members cannot use full access");
+    pathRules.unshift(...options.isolation.deniedRoots.map((root): SandboxPathRule => ({ path: canonicalExistingPath(root, platform), access: "none" })), ...(options.isolation.traversalRoots ?? []).map((root): SandboxPathRule => ({ path: canonicalExistingPath(root, platform), access: "read" })), { path: canonicalExistingPath(options.isolation.writableRoot, platform), access: "write" });
+  }
   const materializedControlPaths = permissionProfile === ":workspace"
     ? [api.join(workspace, ".everpeace")]
     : [];
@@ -122,12 +128,14 @@ export function createEffectiveSandboxPolicy(
     workspace,
     readableRoots: normalizedReadableRoots,
     pathRules,
+    ...(options.isolation?.traversalRoots?.[0] ? { launchRoot: canonicalExistingPath(options.isolation.traversalRoots[0], platform) } : {}),
     networkMode: permissionPolicy.shellNetwork ?? "profile-default",
   });
   return Object.freeze({
     backend: "codex-cli" as const,
     permissionProfile,
     workspaceRoots: Object.freeze([workspace]),
+    ...(options.isolation?.traversalRoots?.[0] ? { launchRoot: canonicalExistingPath(options.isolation.traversalRoots[0], platform) } : {}),
     readableRoots: Object.freeze(normalizedReadableRoots),
     pathRules: Object.freeze(pathRules.map((rule) => Object.freeze({ ...rule }))),
     materializedControlPaths: Object.freeze(materializedControlPaths),
@@ -156,6 +164,7 @@ function tomlString(value: string): string {
 /** Build a complete named profile override so user config cannot add permissions to it. */
 export function nativePermissionProfileArgs(policy: EffectiveSandboxPolicy): string[] {
   if (policy.permissionProfile !== ":workspace") return ["-P", policy.permissionProfile];
+  const baseProfile = policy.pathRules.some((rule) => rule.access === "write") ? ":read-only" : ":workspace";
   const filesystem = policy.pathRules
     .map((rule) => `${tomlString(rule.path)}=${tomlString(rule.access)}`)
     .join(",");
@@ -165,7 +174,7 @@ export function nativePermissionProfileArgs(policy: EffectiveSandboxPolicy): str
     "-c",
     `default_permissions=${tomlString(MODEL_WORKSPACE_PROFILE)}`,
     "-c",
-    `permissions.${MODEL_WORKSPACE_PROFILE}={extends=\":workspace\",filesystem={${filesystem}}}`,
+    `permissions.${MODEL_WORKSPACE_PROFILE}={extends=${tomlString(baseProfile)},filesystem={${filesystem}}}`,
   ];
 }
 

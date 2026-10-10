@@ -7,7 +7,7 @@
 [![Test](https://github.com/VinceTree/Everpeace/actions/workflows/test.yml/badge.svg)](https://github.com/VinceTree/Everpeace/actions/workflows/test.yml)
 [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-Everpeace is a DeepSeek-first, Windows-first CLI for personal Node.js and TypeScript projects. One agent reads project rules, searches code, proposes a plan, edits files and runs the checks declared by your project. You can work in an inline terminal conversation, automate a task with `everpeace exec`, or call the same runner from TypeScript.
+Everpeace is a DeepSeek-first, Windows-first CLI for personal Node.js and TypeScript projects. By default, one agent reads project rules, searches code, proposes a plan, edits files and runs the checks declared by your project. You can work in an inline terminal conversation, automate a task with `everpeace exec`, or call the same runner from TypeScript.
 
 Work through a plan, review the edits and let the host check the result. It discovers `typecheck → lint → test → build`, runs available checks in order, stops at the first failure and allows at most three repair rounds. Missing checks, stale evidence, cancellation and incomplete usage remain visible.
 
@@ -46,7 +46,7 @@ pnpm link --global
 everpeace
 ```
 
-Current source version: **0.4.1**.
+Current source version: **0.5.0**.
 
 ## Real tools, checked changes
 
@@ -81,6 +81,18 @@ console.log(result.classification);
 ```
 
 The SDK uses registered credentials; it does not accept an API key in task options. [Full options, events and exit codes](docs/USAGE.md#non-interactive-execution).
+
+## Optional Agent teams
+
+Open `/team on` to enable collaboration, then `/team` to configure role models and limits or inspect members. The root Agent can delegate investigation, coding and review to at most two children; the default total is three Agents. Settings apply while idle. `Ctrl+C` cancels the team and waits for cleanup.
+
+```powershell
+everpeace exec "Implement two independent changes and verify the project" --team --max-agents 3 --worker-model <registered-id> --json
+```
+
+SDK: add `team: { maxAgents: 3, models: { worker: '<registered-id>' } }` to `runTask`. Role selectors use registered model IDs and inherit the root model when omitted. Coding members use isolated Git worktrees seeded from current workspace bytes, including uncommitted changes. Integration protects concurrent edits; only the root's final checks establish success. Plan permits read-only members. Default shared limits are 96 provider attempts and 30 minutes; root limits can be stricter.
+
+Team JSONL uses schema v2; ordinary execution retains v1. Interrupted or conflicting artifacts remain available for explicit continuation or cleanup in `/team`. [Configuration, recovery and limits](docs/USAGE.md#agent-teams). Engineering fixtures cover collaboration; no real-model speed, token savings or success-rate claim is made.
 
 ## Control and boundaries
 

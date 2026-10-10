@@ -127,6 +127,7 @@ export function createProcessExecCommandHost(options: { outputStallMs?: number }
 
 function progressEvent(event: ExecEvent): ExecProgressEvent {
   switch (event.type) {
+    case "team_updated": case "agent_updated": case "team_usage": case "agent_integrated":
     case "session_started":
       return { ...event };
     case "assistant_message":
@@ -161,6 +162,8 @@ function humanProgress(event: ExecEvent): string | undefined {
   switch (event.type) {
     case "session_started":
       return `Session ${event.sessionId} · ${event.modelName}${event.parentSessionId ? ` · continued from ${event.parentSessionId}` : ""}\n`;
+    case "agent_updated": case "agent_integrated":
+      return `Team ${event.agentId}: ${event.state} · ${event.role ?? "member"}\n`;
     case "tool_started":
       return `Tool: ${event.name}\n`;
     case "workflow_updated":
@@ -208,7 +211,7 @@ export async function runExecCommand(
   let emitter: ExecJsonlEmitter | undefined;
   try {
     if (options.json) {
-      emitter = new ExecJsonlEmitter({ write: (chunk, signal) => host.writeStdout(chunk, signal) });
+      emitter = new ExecJsonlEmitter({ schemaVersion: options.team ? 2 : 1, write: (chunk, signal) => host.writeStdout(chunk, signal) });
     }
     const stdinText = host.stdinIsTTY ? undefined : await host.readStdin(controller.signal);
     const prompt = resolveExecPrompt(options, { stdinIsTTY: host.stdinIsTTY, ...(stdinText === undefined ? {} : { stdinText }) });
@@ -225,6 +228,7 @@ export async function runExecCommand(
     controller.signal.throwIfAborted();
     runtimeOptions = {
       prompt,
+      ...(options.team ? { team: options.team } : {}),
       workspacePath: options.directory ?? host.cwd(),
       ...(options.model === undefined ? {} : { model: options.model }),
       ...(options.resume === undefined ? {} : { resume: options.resume }),

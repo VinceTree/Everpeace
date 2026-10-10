@@ -3164,3 +3164,26 @@ test("budget stop bypasses workflow completion and automatic continuation", asyn
     } finally { view.unmount(); }
   }
 });
+
+
+test("/team opens older owned artifacts and routes cleanup to that team after a later task", async () => {
+  const model: RegisteredModel = { id: "team-ui", model_name: "fixture", base_url: "https://example.test/v1", api_key: "fixture" };
+  const oldId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+  const currentId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+  const memberId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+  const saved: import("../../../src/team/types.js").TeamSnapshot = { version: 1, teamId: oldId, rootSessionId: "session-1", workspacePath: "C:\\workspace", mode: "default", state: "stopped", options: {}, startedAt: 0, elapsedMs: 0, openRequests: 0, usage: { attempts: [], inputTokens: 0, outputTokens: 0, reasoningTokens: 0, complete: true }, members: [{ agentId: memberId, taskId: memberId, modelId: model.id, state: "failed", task: { role: "worker", goal: "Retained previous work", acceptance: "check", paths: ["."], dependencies: [] } }] };
+  const fixture = createFixture({ initial: [model], createAgent: (_selected, io) => ({ async runTurn(input) { io.writeAssistant(`echo: ${input}`); return {}; }, getTeamSnapshot: () => ({ ...saved, teamId: currentId, members: [] }) }) });
+  let cleaned = false;
+  fixture.dependencies.getTeamSnapshot = () => ({ ...saved, teamId: currentId, members: [] });
+  fixture.dependencies.inspectTeam = async (sessionId, teamId) => { assert.equal(sessionId, "session-1"); assert.equal(teamId, oldId); return saved; };
+  fixture.dependencies.manageTeam = async (action, id, sessionId, teamId) => { assert.equal(action, "cleanup"); assert.equal(id, memberId); assert.equal(sessionId, "session-1"); assert.equal(teamId, oldId); cleaned = true; };
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await tick(); view.stdin.write("create root"); await tick(); view.stdin.write("\r"); await waitFor(() => (view.lastFrame() ?? "").includes("echo: create root"));
+    view.stdin.write(`/team ${oldId}`); await tick(); view.stdin.write("\r"); await waitFor(() => (view.lastFrame() ?? "").includes(oldId)); assert.doesNotMatch(view.lastFrame() ?? "", new RegExp(currentId));
+    for (let index = 0; index < 12 && !(view.lastFrame() ?? "").includes("› worker · failed"); index++) { view.stdin.write("\u001b[B"); await new Promise((resolve) => setTimeout(resolve, 30)); }
+    assert.match(view.lastFrame() ?? "", /Retained previous work/);
+    view.stdin.write("d"); try { await waitFor(() => cleaned); } catch { assert.fail(view.lastFrame() ?? "No frame"); }
+    view.stdin.write("\u001b"); await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace")); assert.equal(fixture.sessionStore.sessions.size, 1);
+  } finally { view.unmount(); }
+});

@@ -119,7 +119,10 @@ export type StoredTimelineEntry =
   | StoredTextTimelineEntry
   | StoredStatusTimelineEntry;
 
+export interface SessionTeamReference { teamId: string; state: string; members: Array<{ agentId: string; taskId: string; sessionId?: string; state: string }>; }
+
 export interface SessionSummary {
+  team?: SessionTeamReference;
   id: string;
   title: string;
   title_pending: boolean;
@@ -223,6 +226,7 @@ export interface SessionStoreLike {
   appendUsage(
     sessionId: string,
     usage: TokenUsageSample | null,
+    options?: { preserveContext?: boolean },
   ): Promise<void>;
   selectModel(
     sessionId: string,
@@ -235,6 +239,7 @@ export interface SessionStoreLike {
   load(sessionId: string): Promise<LoadedSession>;
   setGoal(sessionId: string, goal: SessionGoal): Promise<void>;
   updateGoal(sessionId: string, patch: Partial<Pick<SessionGoal, "status" | "tokens_used" | "usage_complete" | "time_used_seconds" | "blocked_streak" | "updated_at">>): Promise<void>;
+  setTeam?(sessionId: string, team: SessionTeamReference): Promise<void>;
   setWorkflow?(sessionId: string, workflow: WorkflowState): Promise<void>;
   setTaskProgress?(sessionId: string, progress: TaskProgress): Promise<void>;
   setMemoryPolicy?(sessionId: string, policy: LearnedMemoryPolicy): Promise<void>;
@@ -300,6 +305,7 @@ interface ModelSelectedEvent extends EventBase {
 
 interface UsageRecordedEvent extends EventBase {
   type: "usage_recorded";
+  preserve_context?: boolean;
   usage: TokenUsageSample | null;
 }
 
@@ -336,7 +342,10 @@ interface ForkResumeUpdatedEvent extends EventBase {
   pending: boolean;
 }
 
+interface TeamUpdatedEvent extends EventBase { type: "team_updated"; team: SessionTeamReference; }
+
 type SessionEvent =
+  | TeamUpdatedEvent
   | SessionCreatedEvent
   | TitleUpdatedEvent
   | TimelineEntryEvent
@@ -555,7 +564,8 @@ function parseEvent(value: unknown): SessionEvent {
     if (value.usage !== null && !isTokenUsageSample(value.usage)) {
       throw new Error("Session usage event is invalid");
     }
-    return { ...base, type: "usage_recorded", usage: value.usage };
+    if (value.preserve_context !== undefined && typeof value.preserve_context !== "boolean") throw new Error("Invalid usage context scope");
+    return { ...base, type: "usage_recorded", usage: value.usage, ...(value.preserve_context === true ? { preserve_context: true } : {}) };
   }
 
   if (value.type === "goal_updated") {
@@ -563,6 +573,10 @@ function parseEvent(value: unknown): SessionEvent {
     return { ...base, type: "goal_updated", goal: value.goal };
   }
 
+  if (value.type === "team_updated") {
+    if (!isRecord(value.team) || typeof value.team.teamId !== "string" || typeof value.team.state !== "string" || !Array.isArray(value.team.members) || value.team.members.length > 32 || value.team.members.some((member) => !isRecord(member) || typeof member.agentId !== "string" || typeof member.taskId !== "string" || typeof member.state !== "string" || member.sessionId !== undefined && typeof member.sessionId !== "string")) throw new Error("Invalid team reference");
+    return { ...base, type: "team_updated", team: value.team as unknown as SessionTeamReference };
+  }
   if (value.type === "workflow_updated") {
     if (!isWorkflow(value.workflow)) throw new Error("Session workflow is invalid");
     return {
@@ -774,6 +788,7 @@ async function readSession(filePath: string, trace: PerformanceTrace, summaryOnl
   let memoryPolicy: LearnedMemoryPolicy | undefined;
   let lineage: SessionLineage | undefined;
   let forkPendingResume = false;
+  let team: SessionTeamReference | undefined;
   for await (const record of sessionRecords(filePath, trace)) {
     if (!record.line.trim()) continue;
     let event: SessionEvent;
@@ -818,9 +833,12 @@ async function readSession(filePath: string, trace: PerformanceTrace, summaryOnl
       usage = resetContextUsage(usage, event.preserve_context);
     }
     if (event.type === "usage_recorded") {
+      const context = usage.context_tokens;
       usage = applyUsageSample(usage, event.usage);
+      if (event.preserve_context && event.usage !== null) usage.context_tokens = context;
     }
     if (event.type === "goal_updated") goal = { ...event.goal };
+    if (event.type === "team_updated") team = structuredClone(event.team);
     if (event.type === "workflow_updated") workflow = { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
     if (event.type === "task_progress_updated") taskProgress = cloneTaskProgress(event.progress);
     if (event.type === "memory_policy_updated") memoryPolicy = { ...event.policy };
@@ -850,6 +868,7 @@ async function readSession(filePath: string, trace: PerformanceTrace, summaryOnl
       updated_at: updatedAt,
       workspace_path: header.workspace_path,
       model,
+      ...(team ? { team } : {}),
       ...(goal ? { goal } : {}),
       ...(workflow ? { workflow } : {}),
       ...(taskProgress ? { task_progress: cloneTaskProgress(taskProgress) } : {}),
@@ -961,6 +980,7 @@ async function readSearchProjection(filePath: string, trace: PerformanceTrace, s
   let memoryPolicy: LearnedMemoryPolicy | undefined;
   let lineage: SessionLineage | undefined;
   let forkPendingResume = false;
+  let team: SessionTeamReference | undefined;
   let timelineIndex = 0;
   const messages: SessionSearchProjection["messages"] = [];
 
@@ -998,6 +1018,7 @@ async function readSearchProjection(filePath: string, trace: PerformanceTrace, s
     }
     if (event.type === "model_selected") model = event.model;
     if (event.type === "goal_updated") goal = { ...event.goal };
+    if (event.type === "team_updated") team = structuredClone(event.team);
     if (event.type === "workflow_updated") workflow = { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
     if (event.type === "task_progress_updated") taskProgress = cloneTaskProgress(event.progress);
     if (event.type === "memory_policy_updated") memoryPolicy = { ...event.policy };
@@ -1028,6 +1049,7 @@ async function readSearchProjection(filePath: string, trace: PerformanceTrace, s
       updated_at: updatedAt,
       workspace_path: header.workspace_path,
       model,
+      ...(team ? { team } : {}),
       ...(goal ? { goal } : {}),
       ...(workflow ? { workflow } : {}),
       ...(taskProgress ? { task_progress: cloneTaskProgress(taskProgress) } : {}),
@@ -1353,12 +1375,14 @@ export class SessionStore implements SessionStoreLike {
   appendUsage(
     sessionId: string,
     usage: TokenUsageSample | null,
+    options?: { preserveContext?: boolean },
   ): Promise<void> {
     return this.#append(sessionId, {
       version: SESSION_FORMAT_VERSION,
       type: "usage_recorded",
       at: this.#now().toISOString(),
       usage: usage === null ? null : { ...usage },
+      ...(options?.preserveContext ? { preserve_context: true } : {}),
     });
   }
 
@@ -1386,6 +1410,9 @@ export class SessionStore implements SessionStoreLike {
     await this.setGoal(sessionId, { ...current, ...patch, updated_at: patch.updated_at ?? this.#now().toISOString() });
   }
 
+  setTeam(sessionId: string, team: SessionTeamReference): Promise<void> {
+    return this.#append(sessionId, { version: SESSION_FORMAT_VERSION, type: "team_updated", at: this.#now().toISOString(), team: structuredClone(team) });
+  }
   setWorkflow(sessionId: string, workflow: WorkflowState): Promise<void> {
     return this.#append(sessionId, {
       version: SESSION_FORMAT_VERSION,

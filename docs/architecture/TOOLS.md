@@ -179,3 +179,7 @@ HTML 页面读取在原正文外增量返回最多 40 个去重 `links`（标题
 MCP 和 Skills 已实现，不在本文重复配置细节；参见 [CODEX_CAPABILITIES](CODEX_CAPABILITIES.md)。MCP annotations 不能自动授予本地并发资格，Skill 名称冲突必须从目录和按名读取中排除。
 
 完成工具改动前，检查四个方向：参数/路径边界、取消和审批后的权限复查、结果配对与持久化失败、最终变更追踪与验证。对应单测通过后按根 guide 执行交付门禁，并在 HANDOFF 区分自动化已验证与真实模型/终端尚未验收的范围。
+
+## 项目关系与重复调用观察
+
+project_map 补充 manifest 入口、受限 TypeScript/JavaScript import、源码与测试候选关系，标来源和不完整原因。缓存只复用内容 SHA 匹配的解析，规则与 manifest 仍每次读取，写前仍重新观察文件。团队 telemetry 以有界 hash 记录跨成员重复读取与连续失败，不保存参数正文、不自动切换默认策略。失败增加配置／协议／依赖／sandbox／usage／verification／environment／tool 分类，不泄露 provider 原始错误。

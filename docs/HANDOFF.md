@@ -1,46 +1,73 @@
 # 当前交接
 
-更新日期：2026-10-09。先读 [AGENTS](../AGENTS.md)，按 [索引](README.md) 定位。
+更新日期：2026-10-10。先读 [AGENTS](../AGENTS.md)，按 [索引](README.md) 定位；本轮详细契约见 [TEAMS](architecture/TEAMS.md)。前轮交接已移至 [profile 交付归档](archive/HANDOFF-2026-10-09-profiles.md)，旧授权与证据不适用于本轮。
 
 ## 当前范围与授权
 
-用户本轮明确选择 **0.4.1**，已同步 package.json 与双语 README；单 Agent、Responses 与现有 TUI/exec/SDK 公共入口不变。沿用提交、推送授权；提交包含 `[skip publish]`，不使用 `[skip ci]`，不创建 tag、Release 或发布 npm。本轮只更新展示元数据并核算官方测试费用，没有取得独立 DeepSeek live 阶段授权，付费请求为零。
+用户授权实施并继续完成 P0–P4 多 Agent、编码可靠性与开发体验计划，并在实现验收后明确授权更新版本、提交、推送与 GitHub Release。默认单 Agent，协作显式开启；主方向仍是 Windows、DeepSeek 和 Node/TypeScript 单包。当前源码版本更新为 **0.5.0**，同步 package.json 与双语 README；工作起点为 `7ce6ca3e659b4b5b55a4727dc49a77bbc5b6f210`。授权不包含付费模型调用或 npm publish，实际均为零。
 
-当前交付本地根：`C:\Users\39850\Desktop\Everpeace-test-report-0.4.1\metadata-update-ae0b55f9fa774c43a4e611ccc98563fb`。上一实现提交为 `12ea59c29cc3ead6f87cf2c9ad7ec6511521d04a`，其 Windows/Linux CI 已通过。本轮最终提交与重新绑定的候选以新根的 `delivery-receipt.json`、`prepared-ci-fix/` 为准；旧 source digest 因 manifest 更新而过期，旧报告保留。
+保留工作起点的未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`，不纳入提交；不能把用户原有目录当成待清理产物。测试用 Git fixture 的提交只发生在宿主所有的临时目录，不创建用户提交或改用户 index。
 
-本轮首次元数据提交 `85e08e05cfdba01c8dba87a650e6619ccc64940e` 的 Windows CI 通过，Linux 在真实取消验收中遇到 procfs ESRCH 竞态。测试现同时接受进程读取期间消失的 ENOENT/ESRCH，仍拒绝其他错误和存活状态；未改生产清理或放宽安全边界。原 CI 失败记录在本地保留，后续准确提交 CI 以交付收据为准。package 修改触发的 Release workflow 已实际 skipped，tag/Release 无变化。
+发布交付根为 `C:\Users\39850\AppData\Local\Temp\everpeace-publish-20261010`，保留实现验收原收据、发布前源码核对、最终 source/build digest、准确 commit、Windows/Linux CI、tag 和 Release 的远端核验。当前发布准备阶段，真实远端结果以该根 `delivery-receipt.json` 为准，不把计划步骤写成已完成结果。
 
-原始报告继续本地保存。README 保留既有 Grok 汇总图及明确范围，本轮只同步 profile 设置说明，不增加 DeepSeek 质量或成本宣称。本地报告根：`C:\Users\39850\Desktop\Everpeace-test-report-0.4.0\deepseek-loop-final-2001540786224eafb9e2b881d7008a49`。前次交接保存在该根的 `handoff-before.md`。
+发布顺序：提交含 `[skip publish]`，先推 main 执行 Windows/Linux Test；两平台通过后显式创建并推送匹配 manifest 的 tag，触发 Release workflow，再核对 tag、Release、正文和最新标记。此标记仅延后分支的自动发布，不跳过 CI，也不阻止已授权的 tag 发布。现有工作流不执行 npm publish。
 
-保留原有未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`；不纳入提交。工作起点为 `68ecccb6bc42d4a805e5099024b01327396e6030`，原始源码归档位于本地 `original-0.4.0.zip`。最终提交及 source/build/harness/evaluation digest 以本地 `delivery-receipt.json` 和提交后重新生成的 `prepared-final/` 为准，不复用修改前的候选身份。
+## 已实现的阶段
 
-## 本轮实现
+| 阶段 | 当前交付 |
+| --- | --- |
+| P0 | 团队唯一总账、不可 reset 的 scope、集中请求预留、计量落盘、sticky unknown、稳定请求 ID、计量连续恢复、诊断分类；关闭协作的 v1 与单 Agent 回归通过 |
+| P1 | 默认根加两成员，角色独立模型/profile/context，只读 explorer/reviewer、依赖调度、成员取消、权限收紧与迟到结果屏障、独立 Session |
+| P2 | 当前字节快照、detached worktree、原生隔离准入探测、范围/版本/产物 hash 核验、串行幂等整合与保留冲突、根完整验证和成功回收 |
+| P3 | 英文 `/team` 窗口、角色/额度配置、成员详情、显式继续/清理、旧团队 ID 入口、CLI/SDK 共享运行时、协作 JSONL v2、根唯一终态；真实 Windows Terminal 验收 |
+| P4 | 有来源的项目入口/import/测试候选与内容指纹缓存、跨成员重复调用观察、Skill 来源/更新预览/受管理卸载、MCP 显式重连、固定离线单 Agent/团队对照 |
 
-- Provider 指令投影集中到 `request-projection`：DeepSeek 的稳定 instructions 与最新 system 宿主状态分开；generic 保守，官方 OpenAI 保持缓存布局，不改写历史。
-- 模型注册与 Session 增量支持 `responses_profile: auto|generic|deepseek`。未知中转不按模型名推断能力；显式 deepseek 标为 configured，保留真实 provider 身份。profile 绑定注册、地址、原始模型 ID；修改清除旧请求设置，恢复不覆盖当前注册。密钥仍由 AuthStorage/keyring 管理。
-- `/model profile` 仅空闲可改，保留兼容 context 和累计 unknown、使 Plan 批准失效并重建 Agent；旧 opaque context 与目标 profile 不兼容时，在请求资源创建前拒绝恢复。`/status`、`/models` 显示 profile、能力来源与实际发送的 reasoning。
-- 完整 reasoning/message/function call 终态按顺序回传，专用 SDK fixture 覆盖多工具、下一用户轮次、Session 恢复、summary 及稳定字节前缀；流式 delta 不重复拼接。未配对调用时不启动 summary，完整保留单元中的 reasoning 和验证债务。
-- 内部候选策略精简提示与读取描述、提供按模型提交顺序的简短失败反馈及第二次连续重复失败提醒。默认仍是 baseline；四路安全读取、危险操作串行、完整响应先落盘、取消/权限/存储/unknown 与宿主验证不变。
-- 评测记录实际请求、tool batch、重复失败、等待、usage/cache 和请求组成字节；worker 只转发安全计数与时间，不复制工具、模型或推理正文。新增质量门槛与 token 对比报告，精确 10% 边界有回归。
-- 显式开发 fixture 准备两项中转兼容及六次 smoke、六十次正式 A/B；冻结源码/构建和全部评测材料。Windows 工作区采用短隔离路径。A 含必要协议修正，B 才启用候选策略，不与旧 dsh 三组预算混用。
-- 双语 README/使用指南、RUNTIME、状态专题、评测指南、PLAN 和 DECISIONS 已同步。此前环境代理、网页来源链接和安全失败诊断保持。
+根拥有 spawn/list/wait/message/cancel/integrate 工具；Plan 只允许只读成员，成员不能递归委派、提升权限、完成根 Goal、写成功 Memory 或直接操作 MCP。角色模型未设置时继承根模型，错误注册/凭据/profile 明确拒绝。模型与请求设置在任务内冻结；不复制父会话或 opaque reasoning。
 
-## 当前验证证据
+Git 快照包含 tracked 当前内容/删除及普通非 ignored untracked，拒绝链接、子模块、非根工作区和不完整快照。HEAD 解析为不可变 commit，并在快照复核后检查变化；worktree 和成员 index 都使用捕获的 commit。Git 命令临时启用 core.longpaths，不改用户配置。源文件不硬链接，node_modules 不共享可写目录。只有通过真实原生隔离探测的 worker 才启动 provider；没有宿主执行降级。
 
-本轮最终串行门禁 `typecheck → lint（不存在）→ test → build` 通过实际存在的检查；**1090 项测试，1087 通过、3 跳过、0 失败**，耗时 69729.377 ms。lint 缺项，不记为通过。`git diff --check` 通过。完整回归含 TUI、exec/SDK、取消/持久化、混合工具屏障及原生 sandbox；新打包产物的 manifest、双语版本展示和图片已核对，构建后的 SDK 导入通过，不发模型请求。上轮隔离安装的 CLI help 与公共 SDK 导入证据保留在原报告中。
+整合复用既有原始字节版本、审批 revision、checkpoint 与回滚；超范围、并发修改、二进制/编码不兼容或冻结产物被改变时保留并拒绝自动应用。稳定 integration ID 在写入前落盘，重启检查 baseline/已应用目标/冲突，不能盲目重放。子项目通过不能替代根验证。根验证成功才收回已整合工作区；冲突/失败/中断保留，清理只作用于所有权核验的团队目录。
 
-两项生产 runner 离线兼容验收通过；A/B fresh-worker 的实际 SDK 请求边界预检通过，high / 32768 / 原始 ID 与 configured profile 已核对，真实网络调用为零，进程清理已等待。提交后还须在新根重绑定 revision，交付收据记录准确提交的 Windows/Linux CI 与远端状态。
+默认团队共享 96 provider attempts/30 分钟，与根更严格限制取最小值；可选 token 预算按输入估算加固定输出上限集中准入，不宣称账单硬上限。unknown 关闭新请求、传播停止并永久保留，显式继续不能清空它。审批不恢复；模型、权限、Session、工作区和文件重新检查。非交互入口需要批准或回答时先收束，再报告 interaction_required。
 
-十项固定任务已重新取得 pristine pass → 指定 seeded assertion failure → reference pass。证据分布在本地 `fixture-proof-recheck.log`（前五项）、`fixture-proof-retry.log`（接着三项）及 `fixture-proof-final.log`（末两项）。首次路径长度失败、GitHub TLS 错误与不完整 promisor cache 的失败尝试均保留，未充当缺陷证明；最终余项通过真实源码克隆取得。proof 绑定同一 evaluationDigest，agent 代码变化不改变独立 fixture 断言。
+## 最终验证
 
-首次完整回归两项测试仍假定旧 instructions 布局，已修正测试的宿主事实提取；一次 Windows 原生 LSP 清理失败也保留，定向与后续完整回归通过。早期候选目录及旧安装产物留存，但不替代最后构建的身份与证据。
+最后代码改动后串行执行 `pnpm typecheck → lint（脚本不存在）→ pnpm test → pnpm build`，实际存在的检查全部通过：**1117 项测试，1114 通过、3 跳过、0 失败，88882.5833 ms**。lint 是缺项，不记为通过；`git diff --check` 另行通过。构建后的 CLI help 和公共 SDK runTask 导入通过，不发模型请求。
 
-## 分项结论与后续
+更新 manifest 与双语展示后，发布前再次串行执行 typecheck → lint 缺项 → test → build，**1117 项、1114 通过、3 跳过、0 失败，109494.8563 ms**；diff 检查、当前构建的 CLI help/SDK 导入和 pnpm pack 通过。日志与 `everpeace-0.5.0.tgz` 保存在发布交付根，源码与打包产物重新绑定摘要，不沿用实现阶段的 source digest。
 
-| 维度 | 当前结论 | 后续门槛 |
-| --- | --- | --- |
-| 协议兼容 | 工程与离线契约通过；该中转真实 reasoning/usage 仍 pending | 独立中转兼容阶段 |
-| 任务质量 | 自主编码任务 live A/B 未运行 | 总体及逐任务通过数不降、人工介入不增、安全与独立验证无回退 |
-| token 效率 | 无真实消耗对比，不声称节省；候选默认关闭 | 完整计量且质量通过，共同成功任务中位数下降至少 10% 才描述样本观察到节省 |
+最终日志位于 `C:\Users\39850\AppData\Local\Temp\`：
 
-后续分别授权：兼容每项 10,000/阶段 20,000；smoke 每项 100,000/阶段 600,000；正式每项 100,000/阶段 6,000,000。均为可审阅草案，不是已有授权或严格账单上限。固定 `https://cc2.caaa.tech/v1`、原始 `deepseek-flash`、high；编码输出 32768，十五分钟、最多三轮实际修复。unknown usage、隔离或清理失败停止整个阶段，旧账本和失败不能清空重跑。运行方式见 [评测指南](BENCHMARKING.md#deepseek-loop-ab-acceptance)。
+- `everpeace-team-final-typecheck-passed.log`、`everpeace-team-final-test-passed.log`、`everpeace-team-final-build-passed.log`：最终串行门禁；typecheck/build 正常退出但没有日志正文，退出结果和产物摘要见验收收据。
+- `everpeace-team-layout-fix.log`：团队与 App 并行定向回归，102 项通过。
+- `everpeace-team-pinned-head.log`：真实 Git HEAD 移动后仍使用捕获 commit 的定向回归通过。
+- `everpeace-team-comparison.log`：离线固定单 Agent/团队对照，独立源码断言与真实根检查通过；还覆盖成员验证通过而根检查失败。
+- `everpeace-team-final-linux-native.log`：最终代码的 Linux 原生隔离探测通过。
+
+三项跳过分别是当前 Windows 文件系统不允许的文件 symlink、Windows 临时目录 alias 的既有 CI 专项、Unix 子进程用例。它们不能替代原生隔离证据；本轮 Windows/Linux 实机隔离有另外的真实执行。
+
+完整回归覆盖共享额度/unknown/持久化失败/重启计量、模型/profile/context 隔离、单成员与根取消、依赖/范围串行、staged/unstaged/untracked、长中文路径/CRLF/BOM、并发修改与幂等整合、根失败/修复耗尽、Session/TUI/exec 背压和资源清理。新团队专项有 24 项测试，窗口专项 2 项，App 增加旧团队 ID 与清理路由回归；既有 runner/Session/权限/sandbox/Goal/Memory 测试同时通过。
+
+收尾发现并修复 Ink 的 Static 生命周期问题：聊天切换到命令窗口时释放祖先会留下已释放的 Yoga 引用，后续读出异常尺寸，默认并行测试出现 OOM。现共享稳定最外层 Box、直接卸载 Static。诊断时的 heap/尺寸 guard 都位于外部临时目录，未加入产品；最终门禁使用原来的 test-concurrency=4，没有增大 heap、串行绕过或跳过失败测试。之前失败日志保留，不算通过证据。
+
+## 原生与终端实机证据
+
+**Windows：**最终完整回归实际执行 pinned Codex 原生后端，验证两 worker 独立编码/整合及根成功和根失败。探测证明成员 cwd、本目录写入以及主目录写入/其他成员读写/ownership 记录/Git 公共 metadata 的边界；没有用 mock 替代。
+
+**Linux：**WSL Ubuntu、Node v22.22.1 的真实 kernel sandbox 执行最终源码快照，两成员均证明 owned cwd 与 source/sibling/metadata denial。临时根为 `C:\Users\39850\AppData\Local\Temp\everpeace-team-linux-20261010`；原生二进制来自已锁定 codex 依赖并核对完整性，未改仓库依赖。WSL 的 NAT/代理环境提示保留，不影响探测；此证据是 Linux 原生隔离专项，不声称完整 Linux TUI/SDK 验收。
+
+**Windows Terminal：**使用真实 WindowsTerminal 1.24、宿主所有的 offline fixture、合成 Responses；不读取用户注册表/keyring，不发真实模型请求。证据根为 `C:\Users\39850\AppData\Local\Temp\everpeace-team-terminal-d7ca9eae-bdae-4522-85d3-a21bd6e4aa1c`，截图和带 HWND/PID/终端版本的 action 记录在 `terminal-evidence/`。
+
+该根 `delivery-receipt.json` 绑定最终 source/build digest、检查结果、原生探测和明确采用的终端截图；临时资料没有加入仓库。
+
+最终代码复核 `final-team-panel.png`、`final-team-esc.png`、`final-chat-resize.png`、`final-team-cancel-settled.png`，并在恢复的同一聊天上实际执行 wheel/zoom，截图为 `final-chat-native-scrollback.png`、`final-chat-native-zoom.png`；前一轮成员消费/独立 Session 详情截图另行保留。根 Session `29fcd1d6-3506-477a-b68d-ed15981c4e2e` 的团队 `4d47893e-09e0-4d13-af9a-a9929f7fbd9d` 两只读成员完成，共 65 synthetic tokens/5 attempts/openRequests=0。随后团队 `54f4bff0-31b9-47a1-abc5-6134b1b62e6b` 两成员在途时 Ctrl+C：最终成员 interrupted、openRequests=0/inFlight=[]，unknown 保留为 usage.complete=false，没有迟到成功正文。
+
+重启 fixture、恢复上述根 Session、打开旧 ID 的截图为 `final-historical-owned-team.png`，显示旧团队 4d47893e 与完整用量，未被新团队状态覆盖；Esc 返回同一 Session。已退出 fixture，所属 Node 和团队后台进程没有继续运行。焦点变化拒绝输入/截图、初次 GPU 黑图及旧 fixture 忽略历史 ID 的失败尝试都保留，不算通过；fixture 已对齐生产历史路由，成功截图单独标识。
+
+## 使用与限制
+
+入口和双语示例见 [英文使用指南](USAGE.md#agent-teams)、[中文使用指南](USAGE.zh-CN.md#多-agent-协作)。TUI `/team on` 后 Esc 返回聊天；CLI `everpeace exec "任务" --team`；SDK 可传 `team: {}`。角色注册 ID 与最多 1–3 Agent 可在任务前配置；`/team <team-id>` 要先恢复所属根 Session。
+
+首版并行编码仅支持 Git 根和文件编辑工具支持的文本变更。Windows/Linux 每次启动 worker 都先证明隔离；实际环境不能满足时明确拒绝，仍可用单 Agent/只读成员。权限、恢复和清理失败必须保留产物并阻止后续任务绕过。团队总账保留未知缺口时不能继续 provider，需开始新任务并独立处理保留产物。
+
+离线对照的评分、耗时、tokens、重复调用、冲突和人工介入只说明固定合成请求的工程行为。没有付费模型实测，不宣称团队更快、更省或成功率更高；后续实测必须重新取得 task/campaign 数值预算授权。递归团队、成员互调、远程执行、Web/Desktop、OAuth、私有 Skill 和完整插件市场仍不在本轮范围。提交、推送与 GitHub Release 本轮已授权，须核对实际结果；付费模型实测没有授权。

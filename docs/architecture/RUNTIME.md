@@ -198,3 +198,7 @@ incomplete、空白、缺少／重复／乱序章节、空章节、没有缩短�
 当前有效项目规则每次请求重新提供，历史 rule snapshot 从模型输入和压缩输入中过滤，避免旧规则被摘要固化。其他动态上下文及前缀的缓存收益需实测，不能把指纹稳定等同于缓存命中提升。压缩后 context 占用设为未知，等待下一次实际 response usage。
 
 性能 trace 只保存单调耗时、数量、字节、指纹和状态，不新增请求正文、文件内容或凭据。Session trace 可观察重放实际读取字节/记录数/最大输入缓冲、历史扫描字节、输出定位命中/失效和附件范围读取字节；这些量用于证明宿主 I/O 路径，不代表模型成功率或 token 改善。协议与离线回归不能代替真实模型成功率、Windows Terminal 交互或 dsh 实测；当前验收边界查 [HANDOFF](../HANDOFF.md)。
+
+## 团队编码闭环
+
+默认单 Agent 不变，可选 TeamRuntime 由 production 建立，成员沿用 ReactAgent/CodingTaskRunner，根负责唯一最终验证、Goal 与 Memory。共享 ledger scope 禁止成员 reset，真实请求先持久化准入。完整调度、预算和恢复契约见 [TEAMS](TEAMS.md)。

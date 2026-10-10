@@ -1,0 +1,11 @@
+const target = { agent_id: { type: "string" } };
+function tool(name: string, description: string, properties: Record<string, unknown>, required: string[]) { return { type: "function", name, description, parameters: { type: "object", properties, required, additionalProperties: false } }; }
+export const TEAM_TOOL_DEFINITIONS = [
+  tool("spawn_agent", "Delegate one independent task. Worker edits are isolated and must be explicitly integrated. Child agents cannot delegate. Prefer non-overlapping file scopes; avoid delegation for small tasks.", { role: { type: "string", enum: ["explorer", "worker", "reviewer"] }, goal: { type: "string" }, acceptance: { type: "string" }, paths: { type: "array", items: { type: "string" } }, dependencies: { type: "array", items: { type: "string" } }, constraints: { type: "string", description: "Necessary user constraints for this task" }, context: { type: "array", items: { type: "object", properties: { source: { type: "string" }, summary: { type: "string" } }, required: ["source", "summary"], additionalProperties: false } } }, ["role", "goal", "acceptance", "paths", "dependencies"]),
+  tool("list_agents", "Inspect team member states and bounded results. Child evidence does not verify the root workspace. Select one member with include_evidence to read bounded verification excerpts.", { ...target, include_evidence: { type: "boolean" } }, []),
+  tool("wait_agents", "Wait up to 30 seconds for a member; returns when a member changes or finishes. Continue other independent work while members run.", { ...target, timeout_ms: { type: "integer", minimum: 0, maximum: 30000 } }, []),
+  tool("send_agent_message", "Send bounded guidance to a running or queued member. Completed tasks require a new delegation.", { ...target, message: { type: "string" } }, ["agent_id", "message"]),
+  tool("cancel_agent", "Cancel one team member and wait for owned resources to close.", target, ["agent_id"]),
+  tool("integrate_agent", "Integrate a completed worker through current byte/version and permission checks. Conflicts require re-reading current files; never overwrite concurrent user edits.", target, ["agent_id"]),
+];
+export const TEAM_TOOL_NAMES = new Set(TEAM_TOOL_DEFINITIONS.map((definition) => definition.name));

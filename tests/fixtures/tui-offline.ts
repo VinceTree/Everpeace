@@ -8,7 +8,7 @@ import type { ProductionAgentHandle } from "../../src/runtime/production.js";
 
 const HELP = `Offline TUI acceptance fixture (development only)
 
-  pnpm exec tsx tests/fixtures/tui-offline.ts --root <absolute-directory> [--integrations]
+  pnpm exec tsx tests/fixtures/tui-offline.ts --root <absolute-directory> [--integrations] [--team]
 
 Run inside Windows Terminal. The explicit root must be empty or already owned
 by this fixture. Workspace, Sessions and input history stay inside that root.
@@ -69,8 +69,9 @@ async function main(): Promise<number> {
     process.stdout.write(HELP);
     return 0;
   }
-  const integrations = args.length === 3 && args[2] === "--integrations";
-  if ((args.length !== 2 && !integrations) || args[0] !== "--root" || !args[1] || !path.isAbsolute(args[1])) {
+  const integrations = args.slice(2).includes("--integrations");
+  const collaboration = args.slice(2).includes("--team");
+  if (args.slice(2).some((flag) => flag !== "--integrations" && flag !== "--team") || new Set(args.slice(2)).size !== args.slice(2).length || (args.length < 2 || args.length > 4) || args[0] !== "--root" || !args[1] || !path.isAbsolute(args[1])) {
     throw new Error("Pass --root with an explicit absolute directory. Use --help for instructions.");
   }
   // Reject pipe invocations before creating directories or importing native dependencies.
@@ -144,6 +145,20 @@ async function main(): Promise<number> {
     marker.seedSessionId = seed.id;
     await fs.writeFile(markerPath, JSON.stringify(marker), { mode: 0o600 });
   }
+  const { TeamStore } = await import("../../src/team/store.js");
+  const teamStore = new TeamStore(path.join(root, "teams"));
+  let teamConfig: import("../../src/team/types.js").TeamOptions = { enabled: collaboration };
+  let activeHandle: ProductionAgentHandle | undefined;
+  let teamStep = 0;
+  let longTeam = false;
+  const previousFetch = globalThis.fetch;
+  if (collaboration) globalThis.fetch = async (url, init) => {
+    if (!String(url).startsWith(model.base_url)) throw new Error("Offline fixture refused a non-fixture request");
+    if (longTeam) await waitForCancellation(init?.signal ?? undefined, 300_000);
+    init?.signal?.throwIfAborted();
+    const response = { id: `offline-member-${Date.now()}`, status: "completed", output: [], output_text: "Read-only member report from synthetic Responses. No paid model was used.", usage: { input_tokens: 7, output_tokens: 3, total_tokens: 10 } };
+    return new Response(`event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response })}\n\n`, { headers: { "Content-Type": "text/event-stream" } });
+  };
   let requests = 0;
   let cycleStep = 0;
   let integrationsCalled = false;
@@ -173,7 +188,12 @@ async function main(): Promise<number> {
           ? [{ type: "function_call", call_id: `${id}-plan`, name: "submit_plan", arguments: JSON.stringify({ title: "Offline acceptance plan", plan }) }]
           : [{ type: "message", role: "assistant", content: [{ type: "output_text", text }] }];
         const call = (name: string, value: unknown) => ({ type: "function_call", call_id: `${id}-${name}`, name, arguments: JSON.stringify(value) });
-        if (!planMode && (/^cycle\b/iu.test(prompt) || (cycleStep > 0 && cycleStep < 6))) {
+        if (!planMode && collaboration && /^team\b/iu.test(prompt)) {
+          teamStep++;
+          if (teamStep === 1) { longTeam = prompt.includes("wait-long"); output = [call("spawn_agent", { role: "explorer", goal: "Inspect fixture.txt", acceptance: "Report relevant fixture evidence", paths: ["fixture.txt"], dependencies: [] }), { ...call("spawn_agent", { role: "reviewer", goal: "Review sample.ts", acceptance: "Report relevant fixture evidence", paths: ["sample.ts"], dependencies: [] }), call_id: `${id}-reviewer` }]; }
+          else if (teamStep === 2 || longTeam) output = [call("wait_agents", {})];
+          else { teamStep = 0; output = [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "Offline team investigation complete; root host owns task settlement." }] }]; }
+        } else if (!planMode && (/^cycle\b/iu.test(prompt) || (cycleStep > 0 && cycleStep < 6))) {
           cycleStep++;
           if (cycleStep === 1 || cycleStep === 4) output = [call("read_file", { path: "fixture.txt" })];
           else if (cycleStep === 2 || cycleStep === 5) output = [call("apply_patch", { operations: [{ path: "fixture.txt", action: "update", content: cycleStep === 2 ? "offline fixture edited\n" : "offline fixture repaired\n" }] })];
@@ -206,7 +226,7 @@ async function main(): Promise<number> {
     },
     createAgent(selected, io, restore) {
       const handle = createProductionAgent({
-        model: selected, io, workspacePath, sessionStore, sessionId: () => io.getSessionId?.(), providerRuntime: provider,
+        model: selected, io, ...(restore?.team ? { team: restore.team, teamModels: [model], teamStore, onTeamEvent: async (event) => { if (event.type === "agent_updated" || event.type === "agent_integrated") io.writeTool?.(`[Team ${event.agentId.slice(0, 8)}] ${event.role} · ${event.state}`); } } : {}), workspacePath, sessionStore, sessionId: () => io.getSessionId?.(), providerRuntime: provider,
         skills, mcp, learnedMemoryStore: memoryStore, codeNavigation: navigation,
         learnedMemoryPolicy: { readExisting: integrations, captureFuture: false },
         restore: {
@@ -218,11 +238,12 @@ async function main(): Promise<number> {
           ...(restore?.onContextCompacted === undefined ? {} : { onContextCompacted: restore.onContextCompacted }),
           ...(restore?.onContextPruned === undefined ? {} : { onContextPruned: restore.onContextPruned }),
           ...(restore?.onUsage === undefined ? {} : { onUsage: restore.onUsage }),
+          ...(restore?.onMemberUsage === undefined ? {} : { onMemberUsage: restore.onMemberUsage }),
           ...(restore?.onPhase === undefined ? {} : { onPhase: restore.onPhase }),
           ...(restore?.onEvent === undefined ? {} : { onEvent: restore.onEvent }),
         },
       });
-      handles.add(handle);
+      activeHandle = handle; handles.add(handle);
       return handle.agent;
     },
     runBash(command, activePolicy, signal, onOutput, timeoutMs) {
@@ -230,6 +251,39 @@ async function main(): Promise<number> {
     },
     runTerminalCommand(command, onOutput, signal, onInputReady) {
       return runTerminalCommand(command, { cwd: workspacePath, streamOutput: false, ...(onOutput ? { onOutput } : {}), ...(signal ? { signal } : {}), ...(onInputReady ? { onInputReady } : {}) });
+    },
+    async getTeamConfig() { return teamConfig; },
+    async configureTeam(config) { teamConfig = config; },
+    getTeamSnapshot: () => activeHandle?.team?.snapshot(),
+    async inspectTeam(id, requestedTeam) {
+      const saved = await sessionStore.load(id);
+      const teamId = requestedTeam ?? saved.summary.team?.teamId;
+      return teamId ? teamStore.load(teamId, workspacePath, id) : undefined;
+    },
+    async manageTeam(action, id, sessionId, requestedTeam) {
+      const live = activeHandle?.team?.snapshot();
+      if (live && live.rootSessionId === sessionId && (!requestedTeam || requestedTeam === live.teamId)) {
+        if (action === "cancel") await activeHandle!.team!.cancelMember(id);
+        else await activeHandle!.team!.cleanupMember(id);
+        return;
+      }
+      if (!sessionId) throw new Error("No fixture Session owns the member");
+      const saved = await sessionStore.load(sessionId);
+      const teamId = requestedTeam ?? saved.summary.team?.teamId;
+      if (!teamId) throw new Error("No fixture team owns the member");
+      const snapshot = await teamStore.load(teamId, workspacePath, sessionId);
+      const member = snapshot.members.find((record) => record.agentId === id);
+      if (!member) throw new Error("Unknown fixture member");
+      const release = await teamStore.claim(teamId);
+      try {
+        if (action === "cleanup" && member.workspacePath) {
+          const { loadTeamWorkspace, removeTeamWorkspace } = await import("../../src/team/workspace.js");
+          await removeTeamWorkspace(await loadTeamWorkspace(member.workspacePath, workspacePath, true));
+          delete member.workspacePath;
+        }
+        if (action === "cancel" || member.state === "interrupted") member.state = "cancelled";
+        await teamStore.save(snapshot);
+      } finally { await release(); }
     },
     async getMcpStatus() { return mcp ? JSON.stringify((await mcp.ensureReady()).servers) : "MCP disabled in this offline fixture."; },
     async getSkillsStatus() { return skills ? JSON.stringify(await skills.refresh()) : "Skills disabled in this offline fixture."; },
@@ -240,7 +294,7 @@ async function main(): Promise<number> {
   const previousDirectory = process.cwd();
   process.chdir(workspacePath);
   try { return await runTui({ registry, dependencies }); }
-  finally { process.chdir(previousDirectory); }
+  finally { process.chdir(previousDirectory); globalThis.fetch = previousFetch; }
 }
 
 void main().then((code) => { process.exitCode = code; }, (error: unknown) => {

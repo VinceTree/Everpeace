@@ -103,6 +103,31 @@ macOS/Linux 上如果 `bash` 不在 `PATH` 中，可以显式配置：
 $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ```
 
+## 多 Agent 协作
+
+默认关闭。空闲时 `/team on`、`/team off` 修改后续任务，`/team` 打开英文配置／成员窗口。方向键与 Enter 操作，Esc 返回同一 Session，选成员后 c 取消、d 清理。可配置 explorer／worker／reviewer 注册模型、总名额 1–3（默认 3）、可选 token budget、请求次数（96）和分钟（30）。详情分页显示任务、消耗、文件和检查证据；主聊天仅显示里程碑，成员保存独立 Session。
+
+CLI 新增 `--team`、`--explorer-model <id>`、`--worker-model <id>`、`--reviewer-model <id>`、`--max-agents <1..3>`、`--team-max-attempts <n>`；角色／名额参数隐含开启团队。既有 `--token-budget`、`--timeout-ms`、`--max-steps` 是覆盖重试、压缩与修复的团队共享限制，与团队配置取更严格值。准入按输入估算加配置输出上限预留，不静默减小模型设置，因此过小预算可能首请求前就停止；不是账单硬上限。unknown 永久关闭新准入。
+
+```typescript
+const result = await runTask({
+  prompt: '完成独立修改，整合并执行项目全部检查',
+  workspacePath: 'C:/projects/app',
+  model: 'root-registration',
+  team: { maxAgents: 3, models: { explorer: 'explorer-registration', worker: 'worker-registration' }, maxAttempts: 96, timeoutMs: 1_800_000 },
+  tokenBudget: 200_000,
+});
+console.log(result.team?.members, result.usage);
+```
+
+角色使用已有注册模型 ID，未设置继承主模型；凭据、profile 错误明确失败。编码要求 Git 根目录、完整当前字节快照及真实原生隔离探测通过；保留 staged／unstaged／非 ignored untracked 内容，不复制 ignored 配置、依赖或构建产物。成员按命令权限独立安装依赖。子模块、外部链接、不完整／超限快照及不支持的文本整合明确拒绝。非 Git 和 Plan 仍支持只读成员。成员不直接使用 MCP 外部副作用，不支持递归或远程团队。
+
+失败、中断或冲突产物保留。恢复所属根 Session 后，`/team <团队ID>` 可打开后续任务之前的旧团队并清理产物。TUI 选 Continue interrupted team 后提交 guidance 才继续。CLI 使用 `--resume <根SessionID> --resume-team <团队ID> --team`；SDK 使用 `resume: rootSessionId, team: { resumeTeamId: teamId, ...原角色配置 }`。这种显式团队继续持有原根 Session；普通 resume 仍 fork。重新检查当前模型／profile、权限和文件，不复用审批或重放未知请求；模型绑定变化拒绝继续。在 `/team` 选停止成员按 d 清理，只删除宿主拥有的工作区；活动成员先取消。整合后根完整验证成功自动回收已整合目录。
+
+团队事件 team_updated、agent_updated、team_usage、agent_integrated 带 teamId／agentId／taskId。协作 CLI JSONL 全程 schema_version 2，普通 CLI 保持 v1。最终终态只由根发布一次。exec／SDK 需要审批或回答时先收束团队，再返回 interaction_required。Ctrl+C、输出关闭、期限、存储／清理故障也等待资源收束。成员检查不等于根成功，冲突不覆盖用户文件。
+
+project_map 增加有界 import、源码／测试候选、内容指纹及不完整说明。/status 和普通 /doctor 区分配置、usage 与验证状态。/skills 展示受管理安装来源，更新先差异预览并确认，本地修改阻止覆盖，卸载也需确认。/mcp reconnect 仅空闲显式重连，不重放中断调用。普通诊断不发付费请求。
+
 ## 使用
 
 ```text

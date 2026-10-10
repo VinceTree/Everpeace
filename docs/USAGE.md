@@ -103,6 +103,31 @@ On macOS/Linux, if `bash` is not in `PATH`, configure it explicitly:
 $env:EVERPEACE_BASH_PATH="/custom/path/to/bash"
 ```
 
+## Agent teams
+
+Collaboration is off by default. `/team on` and `/team off` change subsequent tasks while idle; `/team` opens an English configuration/member window. Use arrows and Enter, Esc to return, and c/d to cancel/clean a selected member. Configure explorer/worker/reviewer registrations, 1–3 total Agents (default 3), optional token budget, attempts (96) and minutes (30). Member details page long reports and show scoped tokens, paths and check evidence. Root chat shows milestones; member Sessions retain their own context and output.
+
+CLI accepts `--team`, `--explorer-model <id>`, `--worker-model <id>`, `--reviewer-model <id>`, `--max-agents <1..3>` and `--team-max-attempts <n>`. Role/max flags imply team mode. Existing `--token-budget`, `--timeout-ms` and `--max-steps` are shared limits, covering retries, compaction and repair; the stricter task/team limit wins. Budgets reserve estimated input plus the configured output maximum without silently reducing settings, so a small budget can stop before the first call. They are not billing caps. Unknown usage closes new admission permanently.
+
+```typescript
+const result = await runTask({
+  prompt: 'Implement independent changes, integrate and run every project check',
+  workspacePath: 'C:/projects/app',
+  model: 'root-registration',
+  team: { maxAgents: 3, models: { explorer: 'explorer-registration', worker: 'worker-registration' }, maxAttempts: 96, timeoutMs: 1_800_000 },
+  tokenBudget: 200_000,
+});
+console.log(result.team?.members, result.usage);
+```
+
+Models and credentials must already be registered. Each role inherits the root unless configured; invalid credentials/profile fail explicitly. Workers require the Git repository root, a complete current-byte snapshot and a passing native isolation probe. Dependencies are installed independently under existing command permissions; ignored local config/dependencies/build output are excluded. Submodules, external links, oversized/incomplete snapshots and unsupported text changes reject delegation/integration. Non-Git projects and Plan retain read-only members. Child MCP external effects, recursive and remote teams are unavailable.
+
+Stopped artifacts are retained. After resuming their owning root Session, `/team <team-id>` opens older retained teams, even after a later task. In `/team`, choose Continue interrupted team then submit guidance. CLI explicitly uses `--resume <root-session-id> --resume-team <team-id> --team`; SDK uses `resume: rootSessionId, team: { resumeTeamId: teamId, ...originalRoleConfig }`. This special continuation owns the existing root Session; ordinary resume still forks. Current model/profile, permissions and files are rechecked; no approval or unknown request is replayed. Changed model bindings reject continuation. Select a stopped member and d to discard only its owned workspace; cancel before cleaning active work. Successful integration plus root verification automatically collects integrated workspaces.
+
+Team events are team_updated, agent_updated, team_usage and agent_integrated, with teamId/agentId/taskId. Collaborative CLI JSONL uses schema_version 2 throughout, ordinary CLI retains v1. Only the root publishes the terminal result. Approval/questions in exec/SDK stop and collect the team before interaction_required. Ctrl+C, output closure, deadline and storage/cleanup failure also wait for owned resources. Member checks do not establish root success; integration conflicts preserve user edits.
+
+Project maps now include bounded import and source/test candidates with content fingerprints and incomplete coverage. `/status` and local `/doctor` distinguish configuration, usage and verification state. Managed Skills expose provenance, update diffs with confirmation and guarded uninstall in `/skills`; local modifications block replacement. `/mcp reconnect` explicitly reconnects while idle without replaying interrupted calls. No paid request is issued by ordinary diagnostics.
+
 ## Usage
 
 ```text

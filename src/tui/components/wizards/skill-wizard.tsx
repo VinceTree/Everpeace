@@ -1,3 +1,5 @@
+import path from "node:path";
+import type { SkillLifecyclePreview } from "../../../skills/manager.js";
 import { ConfirmInput, Select, Spinner, TextInput } from "@inkjs/ui";
 import { Box, Text, useInput, usePaste, useWindowSize } from "ink";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -41,6 +43,7 @@ type State =
   | { kind: "install-confirm"; prepared: PreparedSkillInstall; candidate: SkillInstallCandidate; scope: SkillTargetScope }
   | { kind: "skills-list"; skills: readonly ManagedSkill[] }
   | { kind: "skill-detail"; skill: ManagedSkill }
+  | { kind: "lifecycle-confirm"; preview: SkillLifecyclePreview }
   | { kind: "success"; title: string; text: string };
 
 export interface SkillWizardProps {
@@ -199,6 +202,7 @@ function SkillIdentity({ skill }: { skill: ManagedSkill }) {
       </Box>
       <Text>{skill.description || "No description provided."}</Text>
       <Text dimColor>{skillStatus(skill)}</Text>
+      {skill.managed ? <Text dimColor wrap="truncate-end">{`Managed source: ${skill.sourceUrl ?? "local creation"}`}</Text> : null}
     </Box>
   );
 }
@@ -462,12 +466,26 @@ export function SkillWizard({ manager, activeModel, generateDraft, reviseDraft, 
         }} />
       </> : null}
 
+      {state.kind === "lifecycle-confirm" ? <PagedSkill markdown={state.preview.diff} footer={<>
+        <Text>{state.preview.sourceUrl ?? state.preview.directory}</Text>
+        <Text>{`Confirm ${state.preview.action} of ${state.preview.name}?`}</Text>
+        <ConfirmInput defaultChoice="cancel" onCancel={loadSkills} onConfirm={() => run({ kind: "loading", title: "/skills · Apply", label: "Applying confirmed change", returnState: state }, async () => { if (!manager?.commitLifecycle) throw new Error("Skill management is unavailable"); await manager.commitLifecycle(state.preview.id); }, () => { preparedId.current = undefined; setState({ kind: "success", title: "/skills · Updated", text: `${state.preview.action} complete` }); }, (error) => ({ kind: "success", title: "/skills · Could not apply", text: error }))} />
+      </>} /> : null}
       {state.kind === "skills-list" ? <InstalledSkillList skills={state.skills} onSelect={(skill) => setState({ kind: "skill-detail", skill })} /> : null}
 
       {state.kind === "skill-detail" ? <>
         <SkillIdentity skill={state.skill} />
         <PagedSkill markdown={state.skill.skillMarkdown} footer={<>
-          {state.skill.conflict ? <Text color="yellow">This name is ambiguous. Resolve duplicate installations before using it.</Text> : <Select options={[{ label: "Use in next prompt", value: "use" }, { label: "Back to list", value: "back" }]} onChange={(value) => value === "use" ? onUse(state.skill.name) : loadSkills()} />}
+          {state.skill.conflict ? <Text color="yellow">This name is ambiguous. Resolve duplicate installations before using it.</Text> : <Select options={[{ label: "Use in next prompt", value: "use" }, ...(state.skill.managed ? [{ label: "Preview update from source", value: "update" }, { label: "Preview uninstall", value: "uninstall" }] : []), { label: "Back to list", value: "back" }]} onChange={(value) => {
+            if (value === "use") { onUse(state.skill.name); return; }
+            if (value === "back") { loadSkills(); return; }
+            const directory = path.dirname(state.skill.path);
+            run({ kind: "loading", title: "/skills · Preview", label: "Checking managed installation", returnState: state }, async (signal) => {
+              const preview = value === "update" ? await manager?.previewUpdate?.(directory, signal) : await manager?.previewUninstall?.(directory);
+              if (!preview) throw new Error("Skill lifecycle management is unavailable");
+              return preview;
+            }, (preview) => { preparedId.current = preview.id; setState({ kind: "lifecycle-confirm", preview }); }, (error) => ({ kind: "success", title: "/skills · Preview failed", text: error }));
+          }} />}
         </>} />
       </> : null}
 

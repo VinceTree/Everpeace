@@ -186,3 +186,7 @@ pnpm benchmark:campaign -- --config .\campaign.json --prove-fixtures
 用户要求提交推送但禁止 Release 时，使用 `[skip publish]` 提交标记，并核对 [Release workflow](../.github/workflows/release.yml) 的实际结果；不要使用会跳过测试的 `[skip ci]`。该标记只阻止分支 push 的发布 job，tag push 仍可触发发布，所以禁止 Release 的交付也不能推送 tag。
 
 展示版本调整若被授权，应同步 package.json 与中英文 README。正常发布另需确认 tag 和 GitHub Release 实际成功；只看到 Git push 成功不足以证明发布完成。以上操作规则不构成本次开发任务的提交或付费授权。
+
+## 团队定向验收
+
+`pnpm exec tsx --test tests/unit/team/team.test.ts tests/unit/tui/team-surface.test.tsx` 覆盖团队总账、调度／取消、隔离与恢复、两成员编码及根失败、角色 profile 与 Skill 管理。原生探测需真实系统与 Git；CI skip 不替代实机证据。`tests/fixtures/tui-offline.ts --root <新绝对目录> --team` 可在真实 Windows Terminal 用合成 Responses 验收 /team、Esc、resize、滚轮／缩放、Ctrl+C 与单 prompt；只使用 fixture 状态、不读用户注册表或 keyring。前台窗口 capture 在 GPU PrintWindow 返回黑图时仅在 owned HWND 确认前台后截取其矩形，并记录方法；焦点变化拒绝发送按键或记录成功。

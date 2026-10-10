@@ -38,7 +38,7 @@ Node.js + TypeScript ESM；React/Ink 提供 inline 终端交互，`everpeace exe
 
 ## 明确的边界
 
-- 主产品仍是单 Agent 终端工具；公开非交互 CLI 与 TypeScript SDK 共用任务运行时，SDK 不挂载 Ink，也不自动批准交互请求。没有 ACP、通用 app-server、多 Agent 调度、Web/Desktop 或完整插件架构。
+- 主产品是默认单 Agent、可选[团队协作](architecture/TEAMS.md)的终端工具；公开非交互 CLI 与 TypeScript SDK 共用任务运行时，SDK 不挂载 Ink，也不自动批准交互请求。没有 ACP、通用 app-server、递归或远程团队、Web/Desktop 或完整插件架构。
 - MCP 已覆盖瞬时断连恢复与工具列表热更新；OAuth/elicitation/tasks 等协议能力、私有认证 Skill 安装及 Skill 更新/删除仍不属于完整支持范围，具体见集成文档。
 - 读取和编辑有宿主路径/版本保护；不要把所有本地工具都描述成 OS sandbox 隔离。显式配置的 LSP 通过固定原生 read-only sandbox 启动并先验证网络隔离；后端不满足探针时失败关闭，当前固定 Windows 后端因此尚不可用。
 - Session 历史与 Learned Memory 分开；历史及父子关系读取限定完全相同工作区，不能恢复写权限、审批或验证成功。分支复制的是固定 EOF 和最多 16 份已保留附件；父子之后独立。大工具输出只保留每会话最近 16 项的前 2 MiB，旧进程内正文和超出保留范围的内容不可恢复。

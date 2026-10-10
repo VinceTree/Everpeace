@@ -15,6 +15,8 @@ export interface RequestAttemptRecord {
   purpose: RequestPurpose;
   status: RequestAttemptStatus;
   usage: TokenUsageSample | null;
+  agentId?: string;
+  modelId?: string;
 }
 
 export interface RequestAttemptLedgerSnapshot {
@@ -45,6 +47,11 @@ export class RequestAttemptLedger {
     }
     this.#tokenBudget = options.tokenBudget;
   }
+
+  /** Team scopes override these boundaries; ordinary tasks retain their contract. */
+  async admit(_purpose: RequestPurpose, _reservation: number, signal?: AbortSignal): Promise<void> { signal?.throwIfAborted(); }
+  async flush(): Promise<void> {}
+  get usageComplete(): boolean { return this.#complete; }
 
   /** Start a new host task while retaining the configured budget contract. */
   reset(): void {

@@ -1,3 +1,4 @@
+import { TEAM_TOOL_DEFINITIONS } from "../team/tools.js";
 import type { ToolCapabilities } from "./agent-loop.js";
 import type { AgentMode } from "../plan/runtime.js";
 import { REQUEST_USER_INPUT_TOOL_DEFINITION, SUBMIT_PLAN_TOOL_DEFINITION } from "../plan/runtime.js";
@@ -29,6 +30,7 @@ export const MEMORY_LOOKUP_TOOL_DEFINITION = {
 
 interface StepToolCatalogOptions {
   mode: AgentMode;
+  team?: boolean;
   candidateDescriptions?: boolean;
   question?: boolean;
   planReview?: boolean;
@@ -111,7 +113,7 @@ export class StepToolCatalog {
       glob_files: "Find workspace paths by glob with ripgrep, no shell.",
       read_search_results: "Read the next search_files/glob_files page using its opaque continuation reference.",
     };
-    this.definitions = freezeSnapshot(structuredClone(definitions.map((definition) => options.candidateDescriptions && shortDescriptions[definition.name]
+    this.definitions = freezeSnapshot(structuredClone([...definitions, ...(options.team ? TEAM_TOOL_DEFINITIONS.filter((tool) => options.mode !== "plan" || tool.name !== "integrate_agent") : [])].map((definition) => options.candidateDescriptions && shortDescriptions[definition.name]
       ? { ...definition, description: shortDescriptions[definition.name] } : definition)));
     this.#names = new Set(this.definitions.map((tool) => String(tool.name)));
     this.#mcpNames = new Set(mcpTools.map((tool) => tool.name));

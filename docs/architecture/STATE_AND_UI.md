@@ -189,3 +189,9 @@ workflow 提供路径列表时同时返回 `changed_paths_total` 和 `changed_pa
 | 权限与审批 | [PERMISSIONS](PERMISSIONS.md)、[SANDBOX](SANDBOX.md)；运行时权限 revision、取消、原生启动失败关闭 |
 
 新增状态前先决定它属于持久化事实、临时视图还是进程内资源；不要把三者共用一个布尔“成功”字段。增加持久字段必须同时补解析、序列化、缺字段默认与恢复测试，并更新本页和 [DECISIONS](DECISIONS.md)。
+
+## 团队状态与窗口
+
+Session 增量 team_updated 仅保存关系引用，成员使用独立 Session；fork 不复制团队所有权。成员 usage_recorded 可选 preserve_context 只累计总量，不污染根 context estimate。/team 独立窗口、单一审批队列、英文里程碑、显式继续与产物清理见 [TEAMS](TEAMS.md)。/status 和本地 /doctor 增加配置、团队完整性及验证状态；不自动发付费诊断。
+
+聊天与命令窗口共享稳定的最外层 Ink Box。切换时直接卸载 Static，而不是释放包含 Static 的祖先；否则 Ink 保留的 Yoga 布局引用可能已经失效，在后续提交中形成异常尺寸及内存耗尽。原生 scrollback 重放和 resize 仍使用现有 timeline epoch。

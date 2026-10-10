@@ -7,7 +7,7 @@
 [![Test](https://github.com/VinceTree/Everpeace/actions/workflows/test.yml/badge.svg)](https://github.com/VinceTree/Everpeace/actions/workflows/test.yml)
 [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-Everpeace 是 DeepSeek 优先、Windows 优先的个人 Node.js / TypeScript 开发 CLI。单个 Agent 读取项目规则、搜索代码、提出计划、修改文件，再运行项目声明的检查。你可以在 inline 终端中交互，通过 `everpeace exec` 自动执行任务，或从 TypeScript 调用同一 runner。
+Everpeace 是 DeepSeek 优先、Windows 优先的个人 Node.js / TypeScript 开发 CLI。默认由单个 Agent 读取项目规则、搜索代码、提出计划、修改文件，再运行项目声明的检查。你可以在 inline 终端中交互，通过 `everpeace exec` 自动执行任务，或从 TypeScript 调用同一 runner。
 
 先审阅计划和改动，再由宿主检查结果：重新发现 `typecheck → lint → test → build`，按顺序执行存在的检查，首败停止，最多进行三轮修复。缺少检查、证据过期、取消和用量不完整都会明确保留。
 
@@ -46,7 +46,7 @@ pnpm link --global
 everpeace
 ```
 
-当前源码版本：**0.4.1**。
+当前源码版本：**0.5.0**。
 
 ## 真实调用，验证改动
 
@@ -81,6 +81,18 @@ console.log(result.classification);
 ```
 
 SDK 使用已注册凭据，不在任务参数中接收 API Key。[完整选项、事件与退出码](docs/USAGE.zh-CN.md#非交互执行)。
+
+## 可选多 Agent 协作
+
+用 `/team on` 启用协作，再打开 `/team` 配置角色模型、限制或查看成员。主 Agent 可委派调查、编码和审查；默认共三个 Agent，即主 Agent 加两个成员。配置仅空闲时修改。`Ctrl+C` 取消团队并等待清理。
+
+```powershell
+everpeace exec "完成两个独立修改并验证项目" --team --max-agents 3 --worker-model <已注册模型ID> --json
+```
+
+SDK 在 `runTask` 加入 `team: { maxAgents: 3, models: { worker: '<已注册模型ID>' } }`。角色未配置时继承主模型。编码成员使用以当前工作区字节为起点的隔离 Git worktree，支持未提交修改；整合保护用户并发编辑，最终成功只由根项目完整检查决定。Plan 仅允许只读成员。默认共享限制为 96 次 provider attempts、30 分钟，根任务更严格限制优先。
+
+协作 JSONL 使用 schema v2，普通执行保留 v1。中断、失败或冲突的产物留待 `/team` 显式继续或清理。[完整配置、恢复与限制](docs/USAGE.zh-CN.md#多-agent-协作)。当前工程 fixture 不代表真实模型更快、更省或成功率更高。
 
 ## 控制与边界
 

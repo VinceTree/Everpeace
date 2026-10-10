@@ -16,6 +16,7 @@
 | --- | --- |
 | 了解产品、能力与边界 | [产品概览](docs/OVERVIEW.md) |
 | 不知道代码或测试在哪 | [项目地图](docs/architecture/PROJECT_MAP.md) |
+| 多 Agent、团队预算、隔离整合、成员恢复 | [团队协作](docs/architecture/TEAMS.md) |
 | Agent、DeepSeek、请求、压缩、预算、验证、Goal | [运行时与编码闭环](docs/architecture/RUNTIME.md) |
 | 文件编辑、规则、搜索、后台命令、LSP | [工具与项目理解](docs/architecture/TOOLS.md) |
 | Session、配置、usage、TUI、恢复、输入输出 | [状态与终端契约](docs/architecture/STATE_AND_UI.md) |
@@ -30,7 +31,7 @@
 
 ## 项目基础与不可破坏的边界
 
-- Node.js 22+、TypeScript、ESM、`pnpm@10.22.0`；单 Agent、Responses API、React + Ink inline TUI。主方向是 DeepSeek 优先、Windows 优先、Node/TypeScript 单包个人开发。
+- Node.js 22+、TypeScript、ESM、`pnpm@10.22.0`；默认单 Agent、可选根 Agent 管理的团队协作、Responses API、React + Ink inline TUI。主方向是 DeepSeek 优先、Windows 优先、Node/TypeScript 单包个人开发。
 - 保留已有 tracked/untracked 改动。不要 reset、checkout、删除、覆盖或顺手整理无关文件；先做最小、聚焦修改。
 - 模型名保留供应商原始 ID。官方能力与未知兼容端点分开；不根据模型名或 SDK 方法存在就推断能力。API Key 只由 `AuthStorage`/系统 keyring 管理，不写入模型注册 JSON、Session、日志、测试快照或 UI。
 - 模型 shell 必须走固定原生 sandbox，启动失败不得回退宿主直跑；项目策略只能收紧权限，审批绑定权限 revision。`read-only`/`ask`、默认 `workspace-write`、二次确认的 `full-access` 语义见权限专题。用户直接 `!` 是独立宿主 PTY，不进入模型 context。

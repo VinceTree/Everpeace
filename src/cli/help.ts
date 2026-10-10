@@ -1,4 +1,7 @@
 export const EXEC_HELP = `Non-interactive execution:
+  Collaboration: --team [--explorer-model <id>] [--worker-model <id>]
+                 [--reviewer-model <id>] [--max-agents <1..3>]
+                 [--team-max-attempts <n>] [--resume-team <id>]
   everpeace exec [prompt] [-C <directory>] [--model <id-or-name>]
                [--resume <session-id>]
                [--plan] [--json] [--token-budget <n>]
@@ -6,6 +9,7 @@ export const EXEC_HELP = `Non-interactive execution:
 
   Supply the prompt as one positional argument or through piped stdin.
   --resume continues a same-workspace Session in a new child using its saved model.
+  --resume-team with --resume explicitly continues its retained root team.
   A new prompt is required; --resume and --model cannot be combined.
   --plan inspects the workspace and prints a submitted implementation plan
   without editing files; it never auto-approves execution.
@@ -40,6 +44,7 @@ Commands inside the agent:
   /model                    Switch the active model
   /model profile <profile>  Set auto, generic, or deepseek Responses settings
   /models                   List registered models
+  /team [on|off|team-id]     Configure collaboration or inspect retained members
   /status                   Show model, context, and token usage
   /diff                     Show bounded workspace changes
   /verify                   Run discovered checks, or /verify <command>

@@ -1,3 +1,4 @@
+import type { TeamOptions, TeamEvent, TeamSnapshot } from "../team/types.js";
 import type { LoopStopReason } from "../agent/agent-loop.js";
 import type { AgentInteractionRequired } from "../agent/react-agent.js";
 import type { RequestAttemptLedgerSnapshot } from "../agent/request-attempt-ledger.js";
@@ -24,6 +25,7 @@ export type ExecClassification =
 export type ExecStopReason = LoopStopReason | "aborted" | "output_closed";
 
 export type ExecEvent =
+  | TeamEvent
   | {
       type: "session_started";
       sessionId: string;
@@ -50,6 +52,7 @@ export type ExecEvent =
 
 export interface ExecOptions {
   prompt: string;
+  team?: TeamOptions;
   workspacePath: string;
   model?: string;
   /** Continue a same-workspace Session in an independent child; requires a new prompt. */
@@ -69,6 +72,7 @@ export interface ExecOptions {
 }
 
 export interface ExecResult {
+  team?: TeamSnapshot;
   exitCode: number;
   classification: ExecClassification;
   status: string;

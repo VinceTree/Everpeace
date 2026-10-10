@@ -1,3 +1,4 @@
+import { projectInsights } from "./project-insights.js";
 import { spawn } from "node:child_process";
 import { constants, promises as fs } from "node:fs";
 import path from "node:path";
@@ -192,10 +193,12 @@ export async function runProjectMap(args: Record<string, unknown>, workspace: st
       diagnostics.push({ path: file, reason: "manifest_invalid_or_unreadable" });
     }
   }
-  const result = { path: scope.split(path.sep).join("/") || ".", depth, observedFiles: files.length, structure: [...structure.values()], fileTypes, packages, locations, diagnostics,
+  const insights = await projectInsights(root, files, signal);
+  if (insights.incomplete) reasons.add("source_insight_limit");
+  const result = { insights, path: scope.split(path.sep).join("/") || ".", depth, observedFiles: files.length, structure: [...structure.values()], fileTypes, packages, locations, diagnostics,
     entryCandidateBasis: "Filename conventions only; not confirmed architecture.", observation: "Workspace data only. No source bodies or rules loaded; read_file is required before editing.",
     incomplete: false, reasons: [] as string[], guidance: "" };
-  const arrays: unknown[][] = [result.structure, ...Object.values(locations), result.packages, result.diagnostics];
+  const arrays: unknown[][] = [result.insights.modules, result.insights.relationships, result.structure, ...Object.values(locations), result.packages, result.diagnostics];
   const extensions = Object.keys(fileTypes);
   if (extensions.length > 64) {
     for (const extension of extensions.slice(64)) delete fileTypes[extension];

@@ -11,6 +11,7 @@
 | [HANDOFF](HANDOFF.md) | 当前基线、本轮结果、未验证项、下一步 | 每个新 Session |
 | [OVERVIEW](OVERVIEW.md) | 产品目标、能力全景、支持边界 | 初次理解产品或评估需求 |
 | [PROJECT_MAP](architecture/PROJECT_MAP.md) | 能力 → 源码 → 测试 → 专题 | 定位实现和回归入口 |
+| [TEAMS](architecture/TEAMS.md) | 调度、模型、团队计量、原生隔离、整合与恢复 | 修改多 Agent 协作 |
 | [RUNTIME](architecture/RUNTIME.md) | 请求计量、模型循环、压缩、workflow、Goal | 修改编码行为或性能 |
 | [TOOLS](architecture/TOOLS.md) | 文件观察、编辑、规则、搜索、后台命令、LSP | 修改编码工具 |
 | [STATE_AND_UI](architecture/STATE_AND_UI.md) | Session/凭据/usage/恢复与终端不变量 | 修改状态或 UI |

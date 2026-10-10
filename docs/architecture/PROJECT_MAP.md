@@ -8,10 +8,10 @@ Everpeace 是 DeepSeek 优先、Windows 优先的个人开发 CLI；保留官方
 
 - Node.js 22+、TypeScript、ESM；包管理器为 `pnpm@10.22.0`。
 - React + Ink 提供 inline TUI，保留原生 scrollback；同一 `dist/cli/index.js` 也暴露不加载 Ink 的 `everpeace exec`。
-- 普通 Responses 驱动单 Agent ReAct；供应商能力显式配置，不依据 SDK 是否有方法或模型名推断能力。
+- 普通 Responses 驱动默认单 Agent ReAct，可选宿主管理的团队；供应商能力显式配置，不依据 SDK 是否有方法或模型名推断能力。
 - 模型 shell 使用固定原生执行后端；结构化读写、Web、MCP、Skills 各自保持权限与信任边界。
 - TUI、公开 exec、TypeScript SDK 与内部 benchmark 共用生产 Agent factory 和 coding task runner；完整验证结果决定代码 Goal 与成功学习。
-- `everpeace exec` 提供 CLI + JSONL 自动化面，`everpeace/sdk` 的 `runTask` 提供同一非交互任务的公开 TypeScript 接口；ACP、通用 app-server、多 Agent、Web/Desktop 和完整插件架构不是现有产品承诺。
+- `everpeace exec` 提供 CLI + JSONL 自动化面，`everpeace/sdk` 的 `runTask` 提供同一非交互任务的公开 TypeScript 接口；ACP、通用 app-server、递归或分布式团队、Web/Desktop 和完整插件架构不是现有产品承诺。
 - 对比结果与真实 Windows Terminal/API 验收情况以 HANDOFF 为准，不从功能数量推导性能排名。
 
 ## 整体分层与状态归属
@@ -130,3 +130,7 @@ CLI → model registry + keyring → TUI dependencies → App
 - 新能力先确定归属模块与状态所有者，再添加实现；不要把持久化、权限或最终结算下沉到 UI 展示组件。
 - 临时实验、未跟踪用户目录和历史归档不是稳定入口；是否已交付、是否真正运行验收只看当前 HANDOFF 证据。
 - 本页不保存易变版本、提交或测试数量，避免入口知识随每次交付失真。
+
+## 团队与新增项目理解
+
+团队源码、回归与产品边界集中在 [TEAMS](TEAMS.md)。`src/team/` 是共享调度／预算／持久化／隔离整合；`team-surface` 是命令窗口，CLI/SDK 复用 production。项目理解的 `project-insights` 缓存仅存带当前字节指纹的受限 import 解析，不能充当编辑观察。

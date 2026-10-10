@@ -171,3 +171,7 @@ Checkout 的 buildDigest 覆盖入口所在的完整顶层 artifact 目录（构
 三组固定模型原始 ID、`high` 推理、32K 产品输出预算、十五分钟任务时限和最多三轮诊断。报告独立通过次数、首次通过、人工介入、双方均成功任务的配对耗时、总 token/成功任务、缓存统计完整性，以及协议、sandbox、工具差异。
 
 当前 proof、preflight、候选身份和真实终端的执行状态只在 [HANDOFF](HANDOFF.md) 维护。真实调用需要另行显式授权，并同时给出 task 与 campaign token 预算；在此之前不能发布排名、冷缓存结论或相对 dsh 的性能优势声明。
+
+## 团队固定离线对照
+
+`pnpm exec tsx tests/fixtures/team-comparison.ts` 顺序运行单 Agent 和团队相同固定任务，真实 Git worktree／原生检查、合成 Responses、不读取注册凭据、不访问真实模型。独立评分检查目标字节与根验证；报告包含耗时、请求／token、重复调用、冲突和人工介入。团队包含两个编码成员；专门回归验证成员通过而根失败不能成功。fixture 的 token 和时间只描述合成流程，不能据此判断实际供应商效率。付费对照另需 task/campaign 数值授权。

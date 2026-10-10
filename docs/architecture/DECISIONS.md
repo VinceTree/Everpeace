@@ -294,7 +294,7 @@ Responses usage 中的 `input_tokens_details.cached_tokens` 与 `cache_write_tok
 
 并发能力已从工具名白名单迁移到显式 `read_only`、`idempotent`、`parallel_safe` 和资源键；未声明工具串行，MCP 元数据不单独授予本地并发权限。结果按模型顺序持久化，取消、steering、stop 和持久化失败不得留下未配对 function output。
 
-benchmark 只作为协议变更证据，不是自动路由或近期重构理由。hooks、MCP OAuth/elicitation/tasks、Plugin/远端 provider、多 Agent 和外部 app-server 维持明确未实现边界，不用 no-op 或伪造成功暴露。公开 TypeScript SDK 已复用 exec 的生产任务路径，不扩展这些能力。
+benchmark 只作为协议变更证据，不是自动路由或近期重构理由。hooks、MCP OAuth/elicitation/tasks、Plugin/远端 provider、递归／远程团队和外部 app-server 维持明确未实现边界，不用 no-op 或伪造成功暴露。公开 TypeScript SDK 已复用 exec 的生产任务路径，不扩展这些能力。
 
 ## 维护约束
 
@@ -395,3 +395,9 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 - 手动 Memory 等待启动并绑定 runtime generation 和取消信号；全局关闭拒绝请求，聊天 capture 关闭仍允许新的显式偏好。候选及长期条目在持锁原子提交前复核取消与策略，提交后取消不伪造成功或回滚并发内容。请求、异步变更、计量与存储共用所有者，重复及重入 dispose 等待同一完成结果，资源和存储故障关闭准入并保持错误优先级。TUI remember 的迟到成功/失败通过命令身份隔离，临时 runtime 不消费后台队列，服务关闭等待 provider 后的持久化；回归见 [Memory 生命周期](../../tests/unit/memory/manual-lifecycle.test.ts)、[App](../../tests/unit/tui/app.test.tsx) 与 [生产服务](../../tests/unit/tui/dependencies.test.ts)。
 
 - duplex、文件搜索／项目地图及 Skill Git 的子进程也通过共享 process-completion 维持所有权。child error、取消或期限不能在实际 close 及已请求的单次树终止前结算；typed 清理错误优先于普通取消。达到读取保留上限后 drain 到自然退出或既有期限，LSP 先给予 EOF 关闭机会再请求强制终止，期限不代表退出证据。导航故障关闭已排队／后续 server 准入；Skill manager 关闭取消并等待下载／Git，失败 stage 保留且禁止后续安装，TUI dispose 等待所有共享服务。真实 Windows native fixture 只证明受控 detached 后代，不证明任意后代或其他平台。
+
+## 可选宿主管理的团队协作
+
+本轮用户明确授权将原单 Agent 边界扩展为根加最多两个成员；其余外部 runtime 边界保持。共享 production 承载调度，独立 context/模型 scope，根唯一验证结算。当前内容快照保持脏 index 与字节，detached worktree 不 checkout filter、不共享可写依赖。原生探测先于 provider，失败关闭；串行原版本整合、持久 integrationId/目标 hash 与幂等恢复共同保护用户并发修改。
+
+团队总账集中准入、在途预留、sticky unknown 和 request ID 持久化；恢复不重建旧授权或推断成功。独占持久 ownership 拒绝并行宿主认领。模型绑定冻结并在显式恢复时重新核对。默认仍关闭，观察重复调用与离线评分先于任何性能宣称；付费实测另取预算授权。完整约束与入口见 [TEAMS](TEAMS.md)。

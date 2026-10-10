@@ -1,3 +1,4 @@
+import type { TeamOptions } from "../team/types.js";
 export type CliCommand = "run" | "login" | "models" | "logout" | "exec";
 
 interface BaseCliOptions {
@@ -11,6 +12,7 @@ export interface InteractiveCliOptions extends BaseCliOptions {
 
 export interface ExecCliOptions extends BaseCliOptions {
   command: "exec";
+  team?: TeamOptions;
   /** A prompt supplied as the sole positional argument. */
   prompt?: string;
   directory?: string;
@@ -49,7 +51,8 @@ const EXEC_VALUE_OPTIONS = new Map<string, keyof Pick<ExecCliOptions, "directory
   ["--timeout-ms", "timeoutMs"],
   ["--max-steps", "maxSteps"],
 ]);
-const EXEC_FLAGS = new Set(["--json", "--plan"]);
+const EXEC_FLAGS = new Set(["--json", "--plan", "--team"]);
+const TEAM_VALUES = new Set(["--explorer-model", "--worker-model", "--reviewer-model", "--max-agents", "--team-max-attempts", "--resume-team"]);
 
 function isCliCommand(value: string): value is CliCommand {
   return COMMANDS.has(value as CliCommand);
@@ -68,7 +71,7 @@ function positiveInteger(option: string, value: string): number {
 
 function requireValue(args: readonly string[], index: number, option: string): string {
   const value = args[index + 1];
-  if (value === undefined || value.length === 0 || value === "--" || EXEC_VALUE_OPTIONS.has(value) || EXEC_FLAGS.has(value) || value === "--help" || value === "-h") {
+  if (value === undefined || value.length === 0 || value === "--" || EXEC_VALUE_OPTIONS.has(value) || TEAM_VALUES.has(value) || EXEC_FLAGS.has(value) || value === "--help" || value === "-h") {
     throw new CliArgumentError(`Missing value for ${option}`);
   }
   return value;
@@ -91,6 +94,8 @@ function parseExecArgs(args: readonly string[], helpSeen: boolean): ExecCliOptio
   let timeoutMs: number | undefined;
   let maxSteps: number | undefined;
   let positionalOnly = false;
+  let team: TeamOptions | undefined;
+  const teamSeen = new Set<string>();
 
   for (let index = 0; index < args.length; index++) {
     const argument = args[index]!;
@@ -106,6 +111,18 @@ function parseExecArgs(args: readonly string[], helpSeen: boolean): ExecCliOptio
       continue;
     }
 
+    if (!positionalOnly && (argument === "--team" || TEAM_VALUES.has(argument))) {
+      if (teamSeen.has(argument)) duplicate(argument);
+      teamSeen.add(argument); team ??= { enabled: true };
+      if (argument !== "--team") {
+        const value = requireValue(args, index, argument); index++;
+        if (argument === "--max-agents") { team.maxAgents = positiveInteger(argument, value); if (team.maxAgents > 3) throw new CliArgumentError("--max-agents must be from 1 to 3"); }
+        else if (argument === "--team-max-attempts") team.maxAttempts = positiveInteger(argument, value);
+        else if (argument === "--resume-team") team.resumeTeamId = value;
+        else { const role = argument.slice(2, -6) as "explorer" | "worker" | "reviewer"; team.models = { ...team.models, [role]: value }; }
+      }
+      continue;
+    }
     if (!positionalOnly && argument === "--json") {
       if (json) duplicate(argument);
       json = true;
@@ -173,6 +190,7 @@ function parseExecArgs(args: readonly string[], helpSeen: boolean): ExecCliOptio
     command: "exec",
     help,
     json,
+    ...(team ? { team } : {}),
     ...(prompt === undefined ? {} : { prompt }),
     ...(directory === undefined ? {} : { directory }),
     ...(model === undefined ? {} : { model }),

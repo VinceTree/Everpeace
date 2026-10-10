@@ -1,3 +1,5 @@
+import { TeamSurface } from "../components/screens/team-surface.js";
+import { normalizeTeamOptions, type TeamOptions, type TeamSnapshot } from "../../team/types.js";
 import { Spinner } from "@inkjs/ui";
 import { Box, Text, useApp, useInput, usePaste, useStdout, useWindowSize } from "ink";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -113,6 +115,7 @@ type View =
   | { kind: "goal-status"; goal?: SessionGoal }
   | { kind: "workspace-diff"; index: WorkspaceChangeIndex; workflow?: WorkflowState }
   | { kind: "context" }
+  | { kind: "team"; models: Array<{ id: string; name: string }>; snapshot?: TeamSnapshot }
   | { kind: "tasks"; progress?: TaskProgress; workflow?: WorkflowState }
   | { kind: "chat" }
   | { kind: "login" }
@@ -362,6 +365,7 @@ export function EverpeaceApp({
   const [activeTaskProgress, setActiveTaskProgress] = useState<TaskProgress>();
   const activeTaskProgressProjection = useRef<TaskProgress | undefined>(undefined);
   const [memoryPolicy, setMemoryPolicy] = useState<LearnedMemoryPolicy>({ readExisting: true, captureFuture: true });
+  const [teamConfig, setTeamConfig] = useState<TeamOptions>({ enabled: false });
   const [workspacePath, setWorkspacePath] = useState(dependencies.workspacePath);
   const [view, setView] = useState<View>(() => initialView(initialModels.available));
   const [busyLabel, setBusyLabel] = useState<string>();
@@ -626,56 +630,28 @@ export function EverpeaceApp({
     [append],
   );
 
-  const requestBashConfirmation = useCallback(
-    (command: string): Promise<boolean> => {
-      return new Promise((resolve) => {
-        const pending = { kind: "bash" as const, request: command, resolve };
-        confirmationRef.current = pending;
-        setConfirmation(pending);
-      });
-    },
-    [],
-  );
-
-  const requestPatchConfirmation = useCallback(
-    (summary: string): Promise<boolean> => new Promise((resolve) => {
-      const pending = { kind: "patch" as const, request: summary, resolve };
-      confirmationRef.current = pending;
-      setConfirmation(pending);
-    }),
-    [],
-  );
-
-  const requestWebConfirmation = useCallback(
-    (request: string): Promise<boolean> => {
-      return new Promise((resolve) => {
-        const pending = { kind: "web" as const, request, resolve };
-        confirmationRef.current = pending;
-        setConfirmation(pending);
-      });
-    },
-    [],
-  );
-
-  const requestMcpConfirmation = useCallback(
-    (request: string): Promise<boolean> => {
-      return new Promise((resolve) => {
-        const pending = { kind: "mcp" as const, request, resolve };
-        confirmationRef.current = pending;
-        setConfirmation(pending);
-      });
-    },
-    [],
-  );
-
-  const requestGoalConfirmation = useCallback(
-    (request: string): Promise<boolean> => new Promise((resolve) => {
-      const pending = { kind: "goal" as const, request, resolve };
-      confirmationRef.current = pending;
-      setConfirmation(pending);
-    }),
-    [],
-  );
+  const approvalQueue = useRef(Promise.resolve());
+  const requestApproval = useCallback((kind: PendingConfirmation["kind"], request: string, signal?: AbortSignal): Promise<boolean> => {
+    const result = approvalQueue.current.then(() => new Promise<boolean>((resolve) => {
+      if (signal?.aborted) { resolve(false); return; }
+      const settle = (accepted: boolean) => { signal?.removeEventListener("abort", aborted); resolve(accepted); };
+      const pending: PendingConfirmation = { kind, request, resolve: settle };
+      const aborted = () => {
+        if (confirmationRef.current === pending) { confirmationRef.current = undefined; setConfirmation(undefined); }
+        settle(false);
+      };
+      confirmationRef.current = pending; setConfirmation(pending);
+      signal?.addEventListener("abort", aborted, { once: true });
+      if (signal?.aborted) aborted();
+    }));
+    approvalQueue.current = result.then(() => {}, () => {});
+    return result;
+  }, []);
+  const requestBashConfirmation = useCallback((request: string, signal?: AbortSignal) => requestApproval("bash", request, signal), [requestApproval]);
+  const requestPatchConfirmation = useCallback((request: string, signal?: AbortSignal) => requestApproval("patch", request, signal), [requestApproval]);
+  const requestWebConfirmation = useCallback((request: string, signal?: AbortSignal) => requestApproval("web", request, signal), [requestApproval]);
+  const requestMcpConfirmation = useCallback((request: string, signal?: AbortSignal) => requestApproval("mcp", request, signal), [requestApproval]);
+  const requestGoalConfirmation = useCallback((request: string, signal?: AbortSignal) => requestApproval("goal", request, signal), [requestApproval]);
 
   const requestUserInput = useCallback((request: PlanRequest, signal?: AbortSignal, mode: AgentMode = "default"): Promise<Record<string, string>> => (
     new Promise((resolve, reject) => {
@@ -837,12 +813,12 @@ export function EverpeaceApp({
         },
       },
       interaction: {
-        confirm(_kind, tool, prompt) {
-          if (tool === "bash") return requestBashConfirmation(prompt);
-          if (tool === "patch") return requestPatchConfirmation(prompt);
-          if (tool === "web") return requestWebConfirmation(prompt);
-          if (tool === "mcp") return requestMcpConfirmation(prompt);
-          return requestGoalConfirmation(prompt);
+        confirm(_kind, tool, prompt, signal) {
+          if (tool === "bash") return requestBashConfirmation(prompt, signal);
+          if (tool === "patch") return requestPatchConfirmation(prompt, signal);
+          if (tool === "web") return requestWebConfirmation(prompt, signal);
+          if (tool === "mcp") return requestMcpConfirmation(prompt, signal);
+          return requestGoalConfirmation(prompt, signal);
         },
         requestUserInput,
         reviewPlan,
@@ -875,6 +851,11 @@ export function EverpeaceApp({
     [append, clearLiveAssistant, dependencies.sessionStore, ensureWorkflow, executeBash, executeVerification, queueAssistantDelta, requestBashConfirmation, requestGoalConfirmation, requestMcpConfirmation, requestPatchConfirmation, requestUserInput, requestWebConfirmation, reviewPlan, workspacePath],
   );
 
+  useEffect(() => {
+    let active = true;
+    void dependencies.getTeamConfig?.().then((config) => { if (active && !coordinator.activeTask) setTeamConfig(config); }).catch(() => appendTransient("error", "Team configuration could not be loaded."));
+    return () => { active = false; };
+  }, [dependencies]);
   const contextWindow = activeModel
     ? resolveModelStatusMetadata(activeModel.base_url, activeModel.model_name).context_window
     : null;
@@ -883,6 +864,7 @@ export function EverpeaceApp({
       activeModel === undefined
         ? undefined
         : dependencies.createAgent({ ...activeModel, request_settings: requestSettings }, agentIo, {
+            ...(teamConfig.enabled ? { team: teamConfig } : {}),
             initialContext: sessionContext,
             contextWindow,
             initialContextTokens: sessionUsage.context_tokens,
@@ -913,6 +895,11 @@ export function EverpeaceApp({
                 await dependencies.sessionStore.appendUsage(sessionId, usage);
               }
               setSessionUsage((current) => applyUsageSample(current, usage));
+            },
+            async onMemberUsage(usage) {
+              const sessionId = coordinator.sessionId;
+              if (sessionId !== undefined) await dependencies.sessionStore.appendUsage(sessionId, usage, { preserveContext: true });
+              setSessionUsage((current) => ({ ...applyUsageSample(current, usage), context_tokens: usage === null ? null : current.context_tokens }));
             },
             onPhase(phase) {
               setAgentPhase(phase);
@@ -954,10 +941,30 @@ export function EverpeaceApp({
               }
             },
           }),
-    [activeModel, agentIo, clearLiveAssistant, contextWindow, dependencies, requestSettings, sessionContext, sessionEpoch],
+    [activeModel, agentIo, clearLiveAssistant, contextWindow, dependencies, requestSettings, sessionContext, sessionEpoch, teamConfig],
   );
 
   coordinator.setAgent(agent);
+  const configureTeam = async (config: TeamOptions) => {
+    if (coordinator.activeTask || directController.current) throw new Error("Wait for the active task to finish before changing team settings");
+    const next = normalizeTeamOptions(config);
+    await dependencies.configureTeam?.(next);
+    const sessionId = coordinator.sessionId;
+    if (sessionId) { const loaded = await dependencies.sessionStore.load(sessionId); setSessionContext(loaded.context); setSessionUsage(loaded.usage); }
+    setTeamConfig(next);
+  };
+  const showTeam = async (args = "") => {
+    try {
+      if (args === "on" || args === "off") await configureTeam({ ...teamConfig, enabled: args === "on" });
+      const resolved = await dependencies.registry.resolveAll();
+      const requestedTeam = args && args !== "on" && args !== "off" ? args : undefined;
+      if (requestedTeam && !/^[a-f0-9-]{36}$/u.test(requestedTeam)) throw new Error("Use /team, /team on, /team off or /team <team-id>");
+      if (requestedTeam && !coordinator.sessionId) throw new Error("Resume the owning root Session before inspecting a retained team");
+      const snapshot = requestedTeam ? await dependencies.inspectTeam?.(coordinator.sessionId!, requestedTeam) : dependencies.getTeamSnapshot?.() ?? (coordinator.sessionId ? await dependencies.inspectTeam?.(coordinator.sessionId) : undefined);
+      enterCommandView({ kind: "team", models: resolved.available.map((model) => ({ id: model.id, name: model.model_name })), ...(snapshot ? { snapshot } : {}) });
+    } catch (error) { openInfo("/team · Could not load", error instanceof Error ? error.message : "Team operation failed", "error"); }
+  };
+
 
   useEffect(() => {
     agent?.setMemoryPolicy?.(memoryPolicy);
@@ -1458,6 +1465,7 @@ export function EverpeaceApp({
 
   const startTitleGeneration = useCallback(
     (sessionId: string, model: RegisteredModel, firstQuestion: string) => {
+      if (teamConfig.enabled) { void dependencies.sessionStore.updateTitle(sessionId, fallbackSessionTitle(firstQuestion)).catch(() => undefined); return; }
       const titleController = new AbortController();
       titleControllers.current.add(titleController);
       void dependencies
@@ -1466,7 +1474,7 @@ export function EverpeaceApp({
         .catch(() => undefined)
         .finally(() => titleControllers.current.delete(titleController));
     },
-    [dependencies],
+    [dependencies, teamConfig.enabled],
   );
 
   const createNewSession = useCallback(async () => {
@@ -1791,6 +1799,9 @@ export function EverpeaceApp({
         ...(sessionUsage.cache_usage_complete === undefined ? {} : { cache_usage_complete: sessionUsage.cache_usage_complete }),
         ...(sessionUsage.cache_write_usage_complete === undefined ? {} : { cache_write_usage_complete: sessionUsage.cache_write_usage_complete }),
         usage_complete: sessionUsage.complete,
+        configuration_status: activeModel ? "model and credentials loaded" : "model not selected",
+        workflow_status: workflowRuntime.current?.state.result ?? "not settled",
+        ...(agent?.getTeamSnapshot?.() ? { team_state: agent.getTeamSnapshot!()!.state, team_tokens: agent.getTeamSnapshot!()!.usage.inputTokens + agent.getTeamSnapshot!()!.usage.outputTokens, team_usage_complete: agent.getTeamSnapshot!()!.usage.complete } : {}),
       },
     });
   }, [
@@ -2340,6 +2351,7 @@ export function EverpeaceApp({
         if (parsed.command === "/models") void showModels();
         if (parsed.command === "/status") showStatus();
         if (parsed.command === "/context") enterCommandView({ kind: "context" });
+        if (parsed.command === "/team") void showTeam(parsed.args ?? "");
         if (parsed.command === "/tasks") enterCommandView({
           kind: "tasks",
           ...(activeTaskProgressProjection.current === undefined ? {} : { progress: cloneTaskProgress(activeTaskProgressProjection.current) }),
@@ -2352,7 +2364,12 @@ export function EverpeaceApp({
         if (parsed.command === "/reasoning") setReasoning(parsed.args ?? "");
         if (parsed.command === "/doctor") runDoctor(parsed.args ?? "");
         if (parsed.command === "/permissions") enterCommandView({ kind: "permissions" });
-        if (parsed.command === "/mcp") void showMcp();
+        if (parsed.command === "/mcp") {
+          if (parsed.args === "reconnect") {
+            if (coordinator.activeTask || directController.current) appendTransient("system", "Wait for the active task before reconnecting MCP.");
+            else void dependencies.reconnectMcp?.().then(showMcp).catch(() => openInfo("/mcp · Reconnect failed", "Inspect connection configuration and retry explicitly.", "error"));
+          } else void showMcp();
+        }
         if (parsed.command === "/skills") enterCommandView({ kind: "skills" });
         if (parsed.command === "/memory") {
           const args = parsed.args?.trim() ?? "";
@@ -2453,6 +2470,7 @@ export function EverpeaceApp({
       queueGuidance,
       showModels,
       showMcp,
+      showTeam,
       showStatus,
       runCompact,
       setReasoning,
@@ -2594,6 +2612,9 @@ export function EverpeaceApp({
 
   if (view.kind !== "chat") {
     return (
+      // Keep the chat's host container mounted. Removing its ancestor would
+      // free Ink's Static Yoga node before Ink clears the retained reference.
+      <Box width="100%" paddingRight={1} flexDirection="column">
       <CommandScreen>
         {view.kind === "outputs" ? (
           <TextBrowser title="/outputs" entries={timeline.filter((entry) => entry.kind === "output").map((entry) => ({ label: entry.kind === "output" ? entry.command?.command ?? entry.text.split("\n")[0] ?? "Output" : "", text: entry.kind === "output" ? entry.text : "", ...(entry.kind === "output" && entry.command ? { command: entry.command } : {}) })).reverse()} onBack={returnToChat} />
@@ -2685,6 +2706,24 @@ export function EverpeaceApp({
             {...(agent?.getContextSnapshot ? { getSnapshot: () => agent.getContextSnapshot?.() } : {})}
             onBack={returnToChat}
           />
+        ) : view.kind === "team" ? (
+          <TeamSurface
+            config={teamConfig} models={view.models}
+            getSnapshot={() => { const current = agent?.getTeamSnapshot?.(); return view.snapshot && current?.teamId !== view.snapshot.teamId ? view.snapshot : current ?? view.snapshot; }}
+            busy={coordinator.activeTask !== undefined} onConfigure={configureTeam}
+            onAction={async (action, id) => {
+              if (action === "continue") {
+                await configureTeam({ ...teamConfig, enabled: true, resumeTeamId: id });
+                returnToChat(() => appendTransient("system", "Team continuation prepared. Submit guidance to explicitly continue the retained task."));
+              } else {
+                await dependencies.manageTeam?.(action, id, coordinator.sessionId, view.snapshot?.teamId);
+                if (coordinator.sessionId) {
+                  const snapshot = await dependencies.inspectTeam?.(coordinator.sessionId, view.snapshot?.teamId);
+                  if (snapshot) enterCommandView({ ...view, snapshot });
+                }
+              }
+            }} onBack={returnToChat}
+          />
         ) : view.kind === "tasks" ? (
           <TaskProgressSurface progress={view.progress} workflow={view.workflow} onBack={returnToChat} />
         ) : view.kind === "login" ? (
@@ -2757,6 +2796,7 @@ export function EverpeaceApp({
           />
         )}
       </CommandScreen>
+      </Box>
     );
   }
 

@@ -1,3 +1,4 @@
+import type { TeamOptions, TeamSnapshot } from "../../team/types.js";
 import type { AgentIO } from "../../agent/react-agent.js";
 import type { LoopEvent, LoopPhase } from "../../agent/agent-loop.js";
 import type { CommandRecord } from "../../tools/command-record.js";
@@ -31,6 +32,9 @@ import type { ContextInspectionSnapshot } from "../../agent/context-inspection.j
 import type { TaskProgress } from "../../workflow/task-progress.js";
 
 export interface AgentSession {
+  getTeamSnapshot?(): TeamSnapshot | undefined;
+  prepareTeamVerification?: ((signal?: AbortSignal) => Promise<string | undefined>) | undefined;
+  finishTeamVerification?: ((verified: boolean) => Promise<void>) | undefined;
   runTurn(userInput: string, signal?: AbortSignal, options?: AgentTurnOptions): Promise<AgentTurnResult>;
   compact?(signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>>; usage: TokenUsageSample | null }>;
   requestSteering?(text: string, attachments?: readonly FileAttachment[]): boolean;
@@ -50,6 +54,7 @@ export interface AgentSession {
 }
 
 export interface AgentRestoreOptions {
+  team?: TeamOptions;
   initialContext?: readonly Record<string, unknown>[];
   onContextAppend?(items: readonly Record<string, unknown>[]): Promise<void>;
   onContextCompacted?(items: readonly Record<string, unknown>[], automatic: boolean, usage: TokenUsageSample | null): Promise<void>;
@@ -58,6 +63,7 @@ export interface AgentRestoreOptions {
   initialContextTokens?: number | null;
   initialTaskProgress?: TaskProgress;
   onUsage?(usage: TokenUsageSample | null): Promise<void>;
+  onMemberUsage?(usage: TokenUsageSample | null): Promise<void>;
   onPhase?(phase: LoopPhase): void;
   onEvent?(event: LoopEvent): void;
 }
@@ -120,6 +126,12 @@ export interface TuiDependencies {
     onOutput?: (output: BashOutputPreview) => void,
     timeoutMs?: number,
   ): Promise<BashResult>;
+  getTeamConfig?(): Promise<TeamOptions>;
+  configureTeam?(config: TeamOptions): Promise<void>;
+  getTeamSnapshot?(): TeamSnapshot | undefined;
+  inspectTeam?(sessionId: string, teamId?: string): Promise<TeamSnapshot | undefined>;
+  manageTeam?(action: "cancel" | "cleanup", id: string, sessionId?: string, teamId?: string): Promise<void>;
+  reconnectMcp?(): Promise<void>;
   getMcpStatus?(): Promise<string>;
   getSkillsStatus?(): Promise<string>;
   skillManager?: SkillManagerLike;

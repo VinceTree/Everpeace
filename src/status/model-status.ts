@@ -27,6 +27,11 @@ export interface ModelStatusMetadata {
 }
 
 export interface StatusSnapshot {
+  configuration_status?: string;
+  workflow_status?: string;
+  team_state?: string;
+  team_tokens?: number;
+  team_usage_complete?: boolean;
   version: string;
   model_name: string | null;
   provider: ModelStatusMetadata["provider"] | "N/A";
