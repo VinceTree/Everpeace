@@ -88,3 +88,5 @@ Linux/macOS native isolation and live terminal approval flows are not covered by
 ## 成员原生隔离
 
 团队 worker 使用 read-only 基础加自己目录 write 的定制策略，从宿主非 Git anchor 启动；主工作区、其他成员目录、ownership 记录、公共 Git 元数据 deny。Windows PSDrive 修正 denied 父目录导致的 cwd 回退。每次 worker provider 前执行 nonce 绑定的真实探测，无宿主直跑降级。实机 Windows/Linux 证据与适用范围以 HANDOFF 为准，机制见 [TEAMS](TEAMS.md)。
+
+探测失败只返回固定启动类别、退出码和未通过的探测键，不回传原始 backend 输出。Ubuntu hosted CI 通过仅绑定固定原生二进制的 AppArmor `userns` profile 准备 namespace 前提，并保留全局限制；这不是产品自动提权或用户环境修复。详情见 [开发指南](../DEVELOPMENT.md)。

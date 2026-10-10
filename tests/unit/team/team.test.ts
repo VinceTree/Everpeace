@@ -28,7 +28,7 @@ import type { SessionGoal } from "../../../src/storage/session-store.js";
 const usage = { input_tokens: 4, output_tokens: 6, total_tokens: 10, output_tokens_details: { reasoning_tokens: 3 } };
 const model = { id: "registered", model_name: "raw-model", base_url: "https://api.example.test/v1", api_key: "fixture" };
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { promise, resolve }; }
-async function temporary(run: (directory: string) => Promise<void>) { const directory = await fs.mkdtemp(path.join(os.tmpdir(), "ep-team-test-")); try { await run(directory); } finally { await fs.rm(directory, { recursive: true, force: true }); } }
+async function temporary(run: (directory: string) => Promise<void>) { const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "ep-team-test-"))); try { await run(directory); } finally { await fs.rm(directory, { recursive: true, force: true }); } }
 async function repository(directory: string) {
   await git(directory, ["init"]);
   await fs.writeFile(path.join(directory, ".gitignore"), "node_modules/\nignored.txt\n");

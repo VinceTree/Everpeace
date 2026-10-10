@@ -56,6 +56,8 @@ Windows TUI 手工验收仍需真实 Windows Terminal。通过 WSL 调用 Node �
 
 本仓库没有独立 `lint` script，不要为完成检查臆造该命令。Agent 对目标项目运行的最终 suite 与本仓库门禁不同：它发现目标当前 manifest 的实际脚本，并按 `typecheck → lint → test → build` 顺序全部执行。
 
+Linux hosted CI 的 Ubuntu AppArmor 默认限制 unprivileged user namespace。Test workflow 先记录内核设置和普通 namespace 探测，再仅为锁定安装的 Codex 原生二进制加载 `userns` 应用 profile；系统限制保持开启，不全局关闭 AppArmor，不给模型宿主执行降级。profile 是一次性 runner 环境准备，不自动修改用户系统；生成时核对 native package revision，升级后必须重新审查。真实团队隔离和双 worker 整合测试仍必须通过，启动不可用不算验收成功。设计依据见 [Ubuntu namespace 说明](https://ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces) 与 [固定 backend](architecture/SANDBOX.md)。
+
 [类型配置](../tsconfig.json) 显式包含 `src` 和 `tests` 下所有 `.ts`、`.tsx`，保留严格选项和 ES2022 target；[构建配置](../tsconfig.build.json) 显式包含源码 TSX，继续排除测试。测试替身按真实接口返回结果、处理可选参数和收窄联合类型；不得通过扩大生产接口、`any`、忽略错误或移除断言规避检查。辅助写法必须与当前编译库兼容。
 
 [依赖边界回归](../tests/unit/architecture/dependency-boundaries.test.ts) 使用已有 TypeScript 的异步解析 API 扫描 runtime、Agent、workflow、exec、SDK 的源码，禁止普通／类型导入、重导出和字面量动态导入 React、Ink、`@inkjs/ui` 或 TUI。TUI、CLI 适配入口允许 UI 依赖。虚拟文件案例验证语法覆盖与允许边界；解析快照和本地编译器子进程在结束时清理，不增加依赖或独立 lint 工具。TypeScript 的 `unstable` API 是当前已安装编译器的接口，升级编译器时须复核这项回归。

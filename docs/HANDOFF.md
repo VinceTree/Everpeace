@@ -14,6 +14,10 @@
 
 首个发布候选 `c7531e3` 已推 main，但 [Test](https://github.com/VinceTree/Everpeace/actions/runs/38047389689) 未通过：Windows 的受管理 Skill 与 project insight 把大小写不同的 canonical 路径当成重定向；Linux 的 worker 原生隔离启动未取得证据。继续修复，不创建 tag。Windows 改用平台原生 relative 比较并在回归中保留大小写不同的路径；Linux 增加内核 namespace 诊断和仅固定类别/探测键的失败说明，不输出原始 backend 日志，不弱化隔离或跳过测试。后续 CI 与准确发布结果保留外置收据。
 
+诊断候选 `d01d427` 的 Linux [日志](https://github.com/VinceTree/Everpeace/actions/runs/38047827500) 确认 `apparmor_restrict_unprivileged_userns=1`，普通 `unshare` 被拒绝，原生探测为 `os_policy_refusal`。CI 为锁定 native binary 增加专用 `userns` profile，保持系统限制开启；不改变用户系统设置。最新源码的本地门禁已通过：1117 项、1114 通过、3 跳过、0 失败，107601.5327 ms；最新代码 Linux 双成员原生探测通过。后续 CI 验证该环境准备和完整检查，通过前仍不创建 tag。
+
+Hosted Windows 第二轮仍失败；除大小写外，临时根还可能使用短路径/重定向 alias。团队 fixture 创建 owned 临时目录后先 realpath 为原生根，再测试大小写 alias；不放开生产对其他目录重定向的拒绝。该修复保留原有资源所有权和真实文件断言，必须由下一轮两平台 CI 核验。
+
 ## 已实现的阶段
 
 | 阶段 | 当前交付 |
