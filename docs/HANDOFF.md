@@ -8,7 +8,7 @@
 
 保留工作起点的未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`，不纳入提交；不能把用户原有目录当成待清理产物。测试用 Git fixture 的提交只发生在宿主所有的临时目录，不创建用户提交或改用户 index。
 
-发布交付根为 `C:\Users\39850\AppData\Local\Temp\everpeace-publish-20261010`，保留实现验收原收据、发布前源码核对、最终 source/build digest、准确 commit、Windows/Linux CI、tag 和 Release 的远端核验。当前发布准备阶段，真实远端结果以该根 `delivery-receipt.json` 为准，不把计划步骤写成已完成结果。
+发布交付根为 `C:\Users\39850\AppData\Local\Temp\everpeace-publish-20261010`，保留实现验收原收据、发布前源码核对、最终 source/build digest、准确 commit、Windows/Linux CI、tag 和 Release 的远端核验。发布的最终状态及不可自引用的准确 commit 以该根 `delivery-receipt.json` 为准；它只在两平台 CI、tag 与 Release 全部核对后生成，不把计划步骤写成已完成结果。
 
 发布顺序：提交含 `[skip publish]`，先推 main 执行 Windows/Linux Test；两平台通过后显式创建并推送匹配 manifest 的 tag，触发 Release workflow，再核对 tag、Release、正文和最新标记。此标记仅延后分支的自动发布，不跳过 CI，也不阻止已授权的 tag 发布。现有工作流不执行 npm publish。
 
@@ -16,7 +16,9 @@
 
 诊断候选 `d01d427` 的 Linux [日志](https://github.com/VinceTree/Everpeace/actions/runs/38047827500) 确认 `apparmor_restrict_unprivileged_userns=1`，普通 `unshare` 被拒绝，原生探测为 `os_policy_refusal`。CI 为锁定 native binary 增加专用 `userns` profile，保持系统限制开启；不改变用户系统设置。最新源码的本地门禁已通过：1117 项、1114 通过、3 跳过、0 失败，107601.5327 ms；最新代码 Linux 双成员原生探测通过。后续 CI 验证该环境准备和完整检查，通过前仍不创建 tag。
 
-Hosted Windows 第二轮仍失败；除大小写外，临时根还可能使用短路径/重定向 alias。团队 fixture 创建 owned 临时目录后先 realpath 为原生根，再测试大小写 alias；不放开生产对其他目录重定向的拒绝。该修复保留原有资源所有权和真实文件断言，必须由下一轮两平台 CI 核验。
+Hosted Windows 第二轮仍失败；除大小写外，临时根还可能使用短路径/重定向 alias。团队 fixture 创建 owned 临时目录后先 realpath 为原生根，再测试大小写 alias；不放开生产对其他目录重定向的拒绝。该修复保留原有资源所有权和真实文件断言。[环境修复候选](https://github.com/VinceTree/Everpeace/actions/runs/38048097197) 的 Linux job 已通过，包括真实 namespace 隔离和双 worker 整合；Hosted Windows 的原生集成 skip 不替代本机 Windows 证据。
+
+CI 环境与 fixture 修复后最终本地串行门禁通过：typecheck → lint 缺项 → test → build，**1117 项、1114 通过、3 跳过、0 失败，106248.1091 ms**；diff 检查、最新构建的 CLI help/SDK 导入与 pnpm pack 通过。最新 `final-*.log`、Linux 原生证据与 pack 均在发布交付根，历史候选日志保留。最终远端 CI 绑定最终 commit，发布收据重新计算源码/构建/包摘要，不把文档更新前的 source digest 当成最终摘要。
 
 ## 已实现的阶段
 
