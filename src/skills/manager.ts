@@ -774,14 +774,14 @@ export class SkillManager implements SkillManagerLike {
   }
   async #managed(directory: string): Promise<ManagedSkillRecord> {
     const canonical = await fs.realpath(directory);
-    if (canonical !== resolve(directory) || (await fs.lstat(directory)).isSymbolicLink()) throw new Error("Managed Skill directory cannot be redirected");
+    if (relative(resolve(directory), canonical) !== "" || (await fs.lstat(directory)).isSymbolicLink()) throw new Error("Managed Skill directory cannot be redirected");
     const marker = join(directory, ".everpeace-managed.json");
     const stat = await fs.lstat(marker);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) throw new Error("Skill management record is invalid");
     const record = JSON.parse(await fs.readFile(marker, "utf8")) as ManagedSkillRecord;
     if (record.version !== 1 || !["project", "user"].includes(record.scope) || record.name !== basename(directory) || !record.hashes || typeof record.hashes !== "object") throw new Error("Skill is not a managed installation");
     const target = resolve(await this.#targetRoot(record.scope), record.name);
-    if (target !== canonical) throw new Error("Skill is outside the managed destination");
+    if (relative(target, canonical) !== "") throw new Error("Skill is outside the managed destination");
     if (record.sourceUrl) this.#parseSourceUrl(record.sourceUrl);
     return record;
   }
@@ -835,7 +835,7 @@ export class SkillManager implements SkillManagerLike {
       await this.#unchanged(preview.directory, record);
       if (preview.action === "update") {
         const snapshot = await this.#catalog.refresh();
-        if (snapshot.skills.some((skill) => skill.name === record.name && resolve(dirname(skill.path)) !== resolve(preview.directory))) throw new Error("Skill name is ambiguous; resolve duplicates before updating");
+        if (snapshot.skills.some((skill) => skill.name === record.name && relative(resolve(dirname(skill.path)), resolve(preview.directory)) !== "")) throw new Error("Skill name is ambiguous; resolve duplicates before updating");
         if (!candidate) throw new Error("Update candidate is unavailable");
         await copySkillTree(candidate.sourceDirectory, staging); await validateSkillDirectory(staging);
         const marker = join(staging, ".everpeace-managed.json"); if (await exists(marker)) throw new Error("Update source must not include host management metadata");

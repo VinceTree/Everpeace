@@ -12,6 +12,8 @@
 
 发布顺序：提交含 `[skip publish]`，先推 main 执行 Windows/Linux Test；两平台通过后显式创建并推送匹配 manifest 的 tag，触发 Release workflow，再核对 tag、Release、正文和最新标记。此标记仅延后分支的自动发布，不跳过 CI，也不阻止已授权的 tag 发布。现有工作流不执行 npm publish。
 
+首个发布候选 `c7531e3` 已推 main，但 [Test](https://github.com/VinceTree/Everpeace/actions/runs/38047389689) 未通过：Windows 的受管理 Skill 与 project insight 把大小写不同的 canonical 路径当成重定向；Linux 的 worker 原生隔离启动未取得证据。继续修复，不创建 tag。Windows 改用平台原生 relative 比较并在回归中保留大小写不同的路径；Linux 增加内核 namespace 诊断和仅固定类别/探测键的失败说明，不输出原始 backend 日志，不弱化隔离或跳过测试。后续 CI 与准确发布结果保留外置收据。
+
 ## 已实现的阶段
 
 | 阶段 | 当前交付 |

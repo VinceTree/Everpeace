@@ -177,7 +177,9 @@ test("managed Skill previews protect local edits and update/uninstall only after
   await fs.mkdir(path.join(directory, ".git"));
   const original = "---\nname: lifecycle\ndescription: Fixture workflow\n---\nOriginal\n";
   let contents = original;
-  const manager = new SkillManager({ workspacePath: directory, catalog: new SkillCatalog(directory), lookup: async () => [{ address: "93.184.216.34", family: 4 }], fetch: async () => new Response(contents) });
+  // Hosted Windows uses differently cased workspace/temp roots. Keep that alias in the lifecycle.
+  const root = process.platform === "win32" ? directory.toUpperCase() : directory;
+  const manager = new SkillManager({ workspacePath: root, catalog: new SkillCatalog(root), lookup: async () => [{ address: "93.184.216.34", family: 4 }], fetch: async () => new Response(contents) });
   try {
     const prepared = await manager.prepareInstall("https://example.test/SKILL.md");
     const installed = await manager.installPrepared(prepared.id, prepared.candidates[0]!.id, "project");
@@ -198,10 +200,11 @@ test("managed Skill previews protect local edits and update/uninstall only after
 test("project insight cache invalidates current bytes and returns only bounded metadata", async () => temporary(async (directory) => {
   await fs.writeFile(path.join(directory, "a.ts"), "import {b} from './b.js';\n");
   await fs.writeFile(path.join(directory, "a.test.ts"), "import './a.js';\n");
-  const before = await projectInsights(directory, ["a.ts", "a.test.ts"]);
+  const root = process.platform === "win32" ? directory.toUpperCase() : directory;
+  const before = await projectInsights(root, ["a.ts", "a.test.ts"]);
   assert.equal(before.relationships[0]?.test, "a.test.ts");
   await fs.writeFile(path.join(directory, "a.ts"), "import './c.js';\n");
-  const after = await projectInsights(directory, ["a.ts", "a.test.ts"]);
+  const after = await projectInsights(root, ["a.ts", "a.test.ts"]);
   assert.notEqual(before.modules[0]!.sha256, after.modules[0]!.sha256); assert.deepEqual(after.modules[0]!.imports, ["./c.js"]);
 }));
 

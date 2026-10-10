@@ -29,6 +29,16 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      - name: Inspect Linux namespace availability
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sysctl kernel.unprivileged_userns_clone kernel.apparmor_restrict_unprivileged_userns
+          if unshare --user --map-root-user true; then
+            echo "Unprivileged user namespace probe passed"
+          else
+            echo "Unprivileged user namespace probe failed; native sandbox tests remain required"
+          fi
       - name: Run tests
         timeout-minutes: 10
         shell: bash

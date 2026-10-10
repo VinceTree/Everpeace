@@ -35,7 +35,12 @@ export async function verifyTeamIsolation(workspace: TeamWorkspaceRecord, policy
     if (result.cleanupFailed) throw new ProcessCleanupError("Team sandbox probe cleanup failed");
     let evidence: Record<string, boolean> = {};
     try { const bytes = await fs.readFile(ownProbe, "utf8"); const value = JSON.parse(bytes) as Record<string, unknown>; if (value.nonce === id) evidence = value as Record<string, boolean>; } catch { /* A startup failure provides no host-owned, nonce-bound probe evidence. */ }
-    if (result.exitCode !== 0 || !["cwd", "own", "sourceDenied", "stateDenied", "gitDenied", "siblingReadDenied", "siblingWriteDenied"].every((key) => evidence[key] === true)) throw new ToolFeedbackError("SANDBOX_UNAVAILABLE", "Native isolation could not be proved; parallel coding member was not started.", "Inspect /doctor and use the root Agent or read-only members until this backend can enforce the team policy.");
+    const missing = ["cwd", "own", "sourceDenied", "stateDenied", "gitDenied", "siblingReadDenied", "siblingWriteDenied"].filter((key) => evidence[key] !== true);
+    if (result.exitCode !== 0 || missing.length) {
+      // Fixed categories and host-owned probe keys only; never forward backend output or exceptions.
+      const category = /Operation not permitted|Permission denied/iu.test(result.stderr) ? "os_policy_refusal" : /bwrap:/u.test(result.stderr) ? "namespace_startup" : result.timedOut ? "timeout" : result.cancelled ? "cancelled" : "probe_incomplete";
+      throw new ToolFeedbackError("SANDBOX_UNAVAILABLE", `Native isolation could not be proved; parallel coding member was not started (category=${category}, exit=${result.exitCode}, missing=${missing.join(",")}).`, "Inspect /doctor and use the root Agent or read-only members until this backend can enforce the team policy.");
+    }
   } finally {
     // These names are host-generated, exclusive probe artifacts only.
     for (const file of [script, ownProbe, sourceProbe, siblingProbe]) {

@@ -17,7 +17,7 @@ export async function projectInsights(root: string, files: string[], signal?: Ab
     if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
     try {
       const real = await fs.realpath(target);
-      if (real !== target || (await fs.lstat(target)).isSymbolicLink()) { incomplete = true; continue; }
+      if (path.relative(target, real) !== "" || (await fs.lstat(target)).isSymbolicLink()) { incomplete = true; continue; }
       const stat = await fs.stat(target);
       if (!stat.isFile() || stat.size > 64 * 1024 || total + stat.size > 256 * 1024) { incomplete = true; continue; }
       const bytes = await fs.readFile(target); total += bytes.length;
