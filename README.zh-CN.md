@@ -46,7 +46,7 @@ pnpm link --global
 everpeace
 ```
 
-当前源码版本：**0.5.1**。
+当前源码版本：**0.5.2**。
 
 ## 真实调用，验证改动
 
@@ -59,6 +59,8 @@ everpeace
 根到目标目录的规则、`@` 文件附件和按需项目地图帮助 Agent 理解代码。编辑基于当前文件观察，提供绑定权限的预览和拒绝并发覆盖的 undo。Session、fork 和上下文检查点在恢复时保留工作与验证债务。
 
 配置 MCP 的工具、资源和 prompts，以及本地 Skills，可以扩展 Agent。Learned Memory 保存偏好与经过验证的经验；公共网页访问检查重定向与网络边界。搜索的首选服务不可用时，会依次尝试中国区 Bing 和 DuckDuckGo。配置和完整限制见 [使用指南](docs/USAGE.zh-CN.md)。
+
+MCP stdio 程序需要独立的启动信任：使用 `/mcp trust <server>` 审阅并保存当前工作区及准确配置的授权，`/mcp reconnect` 启动或重载，`/mcp revoke <server>` 撤销并取消访问。批准意味着允许程序以宿主用户权限运行；工具调用审批不提供进程沙箱。远程 MCP 必须使用 HTTPS，本机回环 HTTP 需要单独批准，所有重定向均拒绝。缺少启动批准时，非交互 CLI/SDK 在模型请求前返回 `interaction_required`（退出码 5）。
 
 ## 自动执行同一工作流
 

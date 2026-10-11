@@ -1,3 +1,4 @@
+import { approvedMcpFixture } from "../../fixtures/mcp-trust.js";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -15,7 +16,7 @@ function config(transport: McpServerConfig["transport"], overrides: Partial<McpS
 }
 
 function runtimeFor(server: McpServerConfig): McpRuntime {
-  return new McpRuntime({ workspacePath: process.cwd(), async loadConfig() { return [server]; } });
+  return new McpRuntime({ trustStore: approvedMcpFixture(), workspacePath: process.cwd(), async loadConfig() { return [server]; } });
 }
 
 function schemaTool(name: string, type: "string" | "number" = "string"): Tool {
@@ -287,7 +288,7 @@ test("MCP list envelopes attribute the real server and preserve only the wire cu
 test("MCP client advertises the workspace as its single root to a real HTTP server", async (t) => {
   const fixture = await startHttpProtocolFixture({});
   const workspace = process.cwd();
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: workspace,
     async loadConfig() { return [config({ type: "streamable_http", url: fixture.url })]; },
   });

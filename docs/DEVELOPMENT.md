@@ -201,3 +201,7 @@ pnpm benchmark:campaign -- --config .\campaign.json --prove-fixtures
 Oxlint JSON 配置见 [.oxlintrc.json](../.oxlintrc.json)，[官方配置说明](https://oxc.rs/docs/guide/usage/linter/config.html)。只启用 correctness，不做格式化与类型感知 lint。门禁串行 typecheck → lint → test → build，首败停止；lint 通过 Git 清单检查 src/tests/scripts 的 tracked 及非 ignored 待管理新文件，用户其他未跟踪目录、third_party 与生成 dist 不扫描。局部清理/控制字符例外说明必要性，没有全仓旧代码豁免。
 
 `pnpm install:clean` 不复制现有 node_modules、不改用户 index/HEAD，也不包含用户 benchmark 目录；它检验未提交候选的干净源码安装，不证明独立消费者安装。脱离仓库的补丁交付与干净安装包验收仍是分发阻塞项。
+
+## MCP 启动信任专项终端验收
+
+在真实 Windows Terminal 中运行 `pnpm exec tsx tests/fixtures/tui-offline.ts --root <新绝对目录> --mcp-trust`。fixture 使用 root 内 trust store 和合成 HMAC key，不读取用户授权、keyring 或模型凭据。先 `/mcp` 核对 trust_required 且没有 mcp-started.txt；再 `/mcp trust offline`，检查宿主权限提示、Cancel 默认选择、Esc/Cancel/Ctrl+C 与 resize。取消后没有 grant 或进程；批准保存后 `/mcp reconnect` 应 ready 且只有一次启动记录。`/mcp revoke offline` 后 callable 清空、stdio 已退出、持久 grant 删除，重连不能再次启动。离开窗口回同一 Session、只保留一个 prompt。软件按键、窗口截图与人工操作分开记录；失败或无法取得焦点不能记为验收通过。

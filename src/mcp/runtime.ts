@@ -1,10 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
-import { delimiter, extname, isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
-  getDefaultEnvironment,
   StdioClientTransport,
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -13,6 +11,12 @@ import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv
 import type { JsonSchemaType, JsonSchemaValidator } from "@modelcontextprotocol/sdk/validation";
 import { readCodexCliJson } from "../codex/cli.js";
 import { serializeMcpPage, serializeMcpResult } from "./results.js";
+import { canonicalWorkspace, mcpTrustKind, mcpTrustMaterial, mcpTrustSummary, prepareMcpConfig, stableJson, validateMcpUrl } from "./launch.js";
+import { McpPermanentConnectionError, McpTrustRequiredError } from "./errors.js";
+import { McpTrustStore, type McpTrustStoreLike, type McpTrustPreview } from "./trust.js";
+import { createMcpHttp } from "./http.js";
+export { McpPermanentConnectionError } from "./errors.js";
+export type { McpTrustPreview } from "./trust.js";
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
 const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
@@ -44,6 +48,8 @@ interface RawHttpTransport {
   http_headers?: Record<string, string> | null;
   env_http_headers?: Record<string, string> | null;
   http_headers_helper?: string | null;
+  /** Host-frozen headers; never accepted from Codex's raw config. */
+  resolved_headers?: Record<string, string>;
 }
 
 type RawTransport = RawStdioTransport | RawHttpTransport;
@@ -88,10 +94,11 @@ export interface McpToolInfo {
 export interface McpServerStatus {
   name: string;
   transport: "stdio" | "streamable_http";
-  state: "disabled" | "connecting" | "reconnecting" | "ready" | "failed";
+  state: "disabled" | "connecting" | "reconnecting" | "ready" | "failed" | "trust_required";
   tools: number;
   detail?: string;
   unsupportedTools?: readonly { name: string; reason: string }[];
+  trustKind?: "mcp_start" | "mcp_http";
 }
 
 export interface McpSnapshot {
@@ -118,7 +125,9 @@ interface CatalogCandidate {
 
 interface ServerSupervisor {
   config: McpServerConfig;
-  state: Extract<McpServerStatus["state"], "connecting" | "reconnecting" | "ready" | "failed">;
+  state: Exclude<McpServerStatus["state"], "disabled">;
+  authorization?: string;
+  lifetime: AbortController;
   detail: string | undefined;
   client: Client | undefined;
   connectionId: string | undefined;
@@ -169,6 +178,7 @@ export interface McpClientFactoryContext {
   onClientCreated?(client: Client): void;
   onClose(): void;
   onToolsChanged(): void;
+  onPolicyFailure?(error: McpPermanentConnectionError): void;
 }
 
 export type McpClientFactory = (
@@ -182,6 +192,7 @@ export interface McpRuntimeOptions {
   loadConfig?(workspacePath: string, signal?: AbortSignal): Promise<McpServerConfig[]>;
   clientFactory?: McpClientFactory;
   clock?: McpRuntimeClock;
+  trustStore?: McpTrustStoreLike;
 }
 
 export interface McpRuntimeLike {
@@ -189,13 +200,6 @@ export interface McpRuntimeLike {
   toolInfo(name: string): McpToolInfo | undefined;
   call(name: string, argumentsJson: string, signal?: AbortSignal): Promise<string>;
   call(name: string, argumentsJson: string, binding: string, signal?: AbortSignal): Promise<string>;
-}
-
-export class McpPermanentConnectionError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = "McpPermanentConnectionError";
-  }
 }
 
 function secondsToMs(value: number | null | undefined, fallback: number): number {
@@ -348,6 +352,7 @@ export class McpRuntime {
   readonly #loadConfig: NonNullable<McpRuntimeOptions["loadConfig"]>;
   readonly #clientFactory: McpClientFactory;
   readonly #clock: McpRuntimeClock;
+  readonly #trust: McpTrustStoreLike;
   #loaded = false;
   #loading: Promise<void> | undefined;
   #epoch = 0;
@@ -357,12 +362,14 @@ export class McpRuntime {
   #instructions = "";
   readonly #uncertainClosedNames = new Set<string>();
   readonly #transportClosed = new WeakMap<Client, Promise<void>>();
+  readonly #httpCleanup = new WeakMap<Client, () => Promise<void>>();
 
   constructor(options: McpRuntimeOptions) {
     this.#workspacePath = options.workspacePath;
     this.#version = options.version ?? "0.0.0";
     this.#loadConfig = options.loadConfig ?? loadCodexMcpServers;
     this.#clock = options.clock ?? SYSTEM_CLOCK;
+    this.#trust = options.trustStore ?? new McpTrustStore();
     this.#clientFactory = options.clientFactory ?? ((config, context) => this.#createClient(config, context));
   }
 
@@ -379,7 +386,89 @@ export class McpRuntime {
 
   async ensureReady(signal?: AbortSignal): Promise<McpSnapshot> {
     if (!this.#loaded) await this.#load(false, signal);
+    for (const supervisor of this.#supervisors.filter((server) => server.state === "ready")) {
+      try { await this.#authorize(supervisor, signal); }
+      catch (error) { if (signal?.aborted) throw error; await this.#blockServer(supervisor, error); }
+    }
+    signal?.throwIfAborted();
     return this.snapshot();
+  }
+
+  async previewTrust(name: string, signal?: AbortSignal): Promise<McpTrustPreview> {
+    const workspace = await canonicalWorkspace(this.#workspacePath);
+    const config = await this.#freshConfig(name, signal);
+    const kind = mcpTrustKind(config);
+    if (!kind) throw new McpPermanentConnectionError("This HTTPS endpoint does not require a plaintext exception");
+    const identity = await this.#trust.evaluate(workspace, config.name, kind, mcpTrustMaterial(config));
+    signal?.throwIfAborted();
+    return { ...identity, summary: mcpTrustSummary(config, workspace) };
+  }
+
+  async approveTrust(preview: McpTrustPreview, signal?: AbortSignal): Promise<void> {
+    const epoch = this.#epoch;
+    const current = await this.previewTrust(preview.name, signal);
+    if (epoch !== this.#epoch || current.workspace !== preview.workspace || current.kind !== preview.kind || current.fingerprint !== preview.fingerprint || current.revision !== preview.revision) throw new McpPermanentConnectionError("MCP configuration or trust changed; review a new preview");
+    signal?.throwIfAborted();
+    const prepared = await this.#freshConfig(preview.name, signal);
+    const checked = await this.#trust.evaluate(current.workspace, prepared.name, current.kind, mcpTrustMaterial(prepared));
+    if (checked.fingerprint !== preview.fingerprint) throw new McpPermanentConnectionError("MCP configuration changed; review a new preview");
+    const material = stableJson(mcpTrustMaterial(prepared));
+    await this.#trust.grant(current, signal, async () => {
+      const fresh = await this.#freshConfig(preview.name, signal);
+      if (epoch !== this.#epoch || stableJson(mcpTrustMaterial(fresh)) !== material) throw new McpPermanentConnectionError("MCP configuration changed; review a new preview");
+    });
+    // Approval persists authority only; connection happens after an explicit refresh.
+  }
+
+  async revokeTrust(name: string): Promise<void> {
+    const workspace = await canonicalWorkspace(this.#workspacePath);
+    const matches = this.#supervisors.filter((server) => server.config.name === name);
+    // Remove capability bindings and cancel generations before awaiting disk I/O.
+    const closures = matches.map((server) => this.#blockServer(server, new McpTrustRequiredError()));
+    const results = await Promise.allSettled([this.#trust.revoke(workspace, name), ...closures]);
+    for (const result of results) if (result.status === "rejected") throw result.reason;
+  }
+
+  async #freshConfig(name: string, signal?: AbortSignal): Promise<McpServerConfig> {
+    const configs = await this.#loadConfig(this.#workspacePath, signal);
+    signal?.throwIfAborted();
+    const matching = configs.filter((config) => config.name === name);
+    if (matching.length !== 1 || !matching[0]!.enabled) throw new McpTrustRequiredError();
+    this.#assertSupportedConfig(matching[0]!);
+    return prepareMcpConfig(matching[0]!, this.#workspacePath);
+  }
+
+  async #authorize(supervisor: ServerSupervisor, signal?: AbortSignal): Promise<McpServerConfig> {
+    const epoch = this.#epoch;
+    const config = await this.#freshConfig(supervisor.config.name, signal);
+    const kind = mcpTrustKind(config);
+    const material = mcpTrustMaterial(config);
+    const authorization = kind
+      ? await this.#trust.evaluate(await canonicalWorkspace(this.#workspacePath), config.name, kind, material).then((identity) => {
+        if (!identity.approved) throw new McpTrustRequiredError();
+        return identity.fingerprint;
+      })
+      : digest(stableJson(material));
+    signal?.throwIfAborted();
+    if (epoch !== this.#epoch || supervisor.stopped) throw new McpTrustRequiredError();
+    if (supervisor.authorization && supervisor.client && supervisor.authorization !== authorization) throw new McpTrustRequiredError();
+    supervisor.authorization = authorization;
+    return config;
+  }
+
+  async #blockServer(supervisor: ServerSupervisor, error: unknown): Promise<void> {
+    supervisor.stopped = true;
+    supervisor.generation++;
+    supervisor.lifetime.abort(new Error("MCP authorization ended"));
+    supervisor.connectAbort?.abort(new Error("MCP authorization ended"));
+    for (const timer of [supervisor.reconnectTimer, supervisor.stableTimer, supervisor.refreshTimer]) if (timer !== undefined) this.#clock.clearTimeout(timer);
+    supervisor.reconnectTimer = supervisor.stableTimer = supervisor.refreshTimer = undefined;
+    supervisor.state = error instanceof McpTrustRequiredError ? "trust_required" : "failed";
+    supervisor.detail = error instanceof McpPermanentConnectionError ? error.message : "MCP authorization could not be checked";
+    supervisor.toolCandidates = []; supervisor.advancedCandidates = []; supervisor.instructions = "";
+    this.#rebuildCatalog();
+    const closed = await this.#retireCurrentConnection(supervisor, supervisor.generation - 1);
+    if (!closed) { supervisor.state = "failed"; supervisor.detail = "The MCP connection did not close within 5 seconds"; }
   }
 
   async refresh(signal?: AbortSignal): Promise<McpSnapshot> {
@@ -404,6 +493,7 @@ export class McpRuntime {
           transport: supervisor.config.transport.type,
           state: supervisor.state,
           tools: supervisor.publishedTools,
+          ...(supervisor.state === "trust_required" ? { trustKind: supervisor.config.transport.type === "stdio" ? "mcp_start" as const : "mcp_http" as const } : {}),
           ...(supervisor.detail ? { detail: supervisor.detail } : {}),
           ...(supervisor.unsupportedTools.length ? { unsupportedTools: supervisor.unsupportedTools.map((tool) => ({ ...tool })) } : {}),
         };
@@ -448,9 +538,12 @@ export class McpRuntime {
       return JSON.stringify({ status: "error", error: "Invalid MCP tool arguments" });
     }
     try {
+      try { await this.#authorize(tool.supervisor, signal); }
+      catch (error) { if (signal?.aborted) throw error; await this.#blockServer(tool.supervisor, error); throw error; }
+      if (this.#tools.get(name) !== tool || tool.supervisor.generation !== tool.generation) throw new McpTrustRequiredError();
       const options = {
         timeout: secondsToMs(tool.supervisor.config.tool_timeout_sec, DEFAULT_TOOL_TIMEOUT_MS),
-        ...(signal ? { signal } : {}),
+        signal: signal ? AbortSignal.any([signal, tool.supervisor.lifetime.signal]) : tool.supervisor.lifetime.signal,
       };
       let result: unknown;
       if (tool.kind === "tool") {
@@ -496,7 +589,7 @@ export class McpRuntime {
       if (signal?.aborted) throw error;
       return JSON.stringify({
         status: "error",
-        error: error instanceof Error ? error.message : String(error),
+        error: this.#safeError(tool.supervisor.config, error),
       });
     }
   }
@@ -536,7 +629,7 @@ export class McpRuntime {
         transport: "stdio",
         state: "failed",
         tools: 0,
-        detail: errorMessage(error),
+        detail: "Codex MCP configuration could not be read",
       } }];
       this.#loaded = true;
       return;
@@ -556,7 +649,7 @@ export class McpRuntime {
           transport: config.transport.type,
           state: "disabled",
           tools: 0,
-          ...(config.disabled_reason ? { detail: config.disabled_reason } : {}),
+          ...(config.disabled_reason ? { detail: this.#safeError(config, config.disabled_reason) } : {}),
         } });
         continue;
       }
@@ -583,6 +676,7 @@ export class McpRuntime {
       const supervisor: ServerSupervisor = {
         config,
         state: "connecting",
+        lifetime: new AbortController(),
         detail: undefined,
         client: undefined,
         connectionId: undefined,
@@ -625,9 +719,6 @@ export class McpRuntime {
 
   async #createClient(config: McpServerConfig, context: McpClientFactoryContext): Promise<Client> {
     this.#assertSupportedConfig(config);
-    if (config.transport.type === "stdio" && !this.#stdioCommandExists(config.transport, context.workspacePath)) {
-      throw new McpPermanentConnectionError(`MCP stdio command was not found: ${config.transport.command}`);
-    }
     const client = new Client(
       { name: "everpeace", version: context.version },
       {
@@ -653,20 +744,16 @@ export class McpRuntime {
     }));
     let transportError: Error | undefined;
     client.onclose = context.onClose;
+    const http = config.transport.type === "streamable_http" ? createMcpHttp(config.transport.url, (error) => {
+      transportError = error;
+      context.onPolicyFailure?.(error);
+    }) : undefined;
+    if (http) this.#httpCleanup.set(client, http.close);
     const transport = config.transport.type === "stdio"
       ? new StdioClientTransport({
           command: config.transport.command,
           args: config.transport.args ?? [],
-          env: {
-            ...getDefaultEnvironment(),
-            ...Object.fromEntries(
-              (config.transport.env_vars ?? []).flatMap((name) => {
-                const value = process.env[name];
-                return value === undefined ? [] : [[name, value]];
-              }),
-            ),
-            ...config.transport.env,
-          },
+          env: config.transport.env ?? {},
           cwd: config.transport.cwd
             ? resolve(context.workspacePath, config.transport.cwd)
             : context.workspacePath,
@@ -674,7 +761,7 @@ export class McpRuntime {
         })
       : new StreamableHTTPClientTransport(
           new URL(config.transport.url),
-          { requestInit: { headers: this.#httpHeaders(config.transport) } },
+          { requestInit: { headers: this.#httpHeaders(config.transport) }, fetch: http!.fetch },
         );
     if (transport instanceof StdioClientTransport) {
       transport.stderr?.on("data", () => undefined);
@@ -712,6 +799,7 @@ export class McpRuntime {
 
   #assertSupportedConfig(config: McpServerConfig): void {
     if (config.transport.type === "streamable_http") {
+      validateMcpUrl(config.transport.url);
       if (config.transport.http_headers_helper) {
         throw new McpPermanentConnectionError("MCP http_headers_helper is not supported by this runtime");
       }
@@ -726,40 +814,11 @@ export class McpRuntime {
     }
   }
 
-  #stdioCommandExists(transport: RawStdioTransport, workspacePath: string): boolean {
-    const cwd = transport.cwd ? resolve(workspacePath, transport.cwd) : workspacePath;
-    const command = transport.command;
-    if (isAbsolute(command) || command.includes("/") || command.includes("\\")) {
-      return existsSync(isAbsolute(command) ? command : resolve(cwd, command));
-    }
-    const environment = { ...getDefaultEnvironment(), ...transport.env };
-    const pathValue = Object.entries(environment)
-      .find(([name]) => name.toLowerCase() === "path")?.[1] ?? "";
-    const pathExtValue = Object.entries(environment)
-      .find(([name]) => name.toLowerCase() === "pathext")?.[1];
-    const extensions = process.platform === "win32" && !extname(command)
-      ? (pathExtValue?.split(delimiter).filter(Boolean) ?? [".COM", ".EXE", ".BAT", ".CMD"])
-      : [""];
-    return pathValue.split(delimiter).filter(Boolean).some((directory) =>
-      extensions.some((extension) => existsSync(resolve(directory, `${command}${extension}`))),
-    );
-  }
-
   #httpHeaders(transport: RawHttpTransport): Headers {
     if (transport.http_headers_helper) {
       throw new Error("MCP http_headers_helper is not supported by this runtime");
     }
-    const headers = new Headers(transport.http_headers ?? {});
-    for (const [header, envName] of Object.entries(transport.env_http_headers ?? {})) {
-      const value = process.env[envName];
-      if (value !== undefined) headers.set(header, value);
-    }
-    if (transport.bearer_token_env_var) {
-      const token = process.env[transport.bearer_token_env_var];
-      if (!token) throw new Error(`MCP bearer token environment variable is missing: ${transport.bearer_token_env_var}`);
-      headers.set("authorization", `Bearer ${token}`);
-    }
-    return headers;
+    return new Headers(transport.resolved_headers ?? {});
   }
 
   async #connectSupervisor(supervisor: ServerSupervisor, outerSignal?: AbortSignal): Promise<void> {
@@ -782,7 +841,10 @@ export class McpRuntime {
     let client: Client | undefined;
     try {
       this.#assertSupportedConfig(supervisor.config);
-      client = await this.#clientFactory(supervisor.config, {
+      const launch = await this.#authorize(supervisor, signal);
+      signal.throwIfAborted();
+      supervisor.config = launch;
+      client = await this.#clientFactory(launch, {
         workspacePath: this.#workspacePath,
         version: this.#version,
         signal,
@@ -792,6 +854,7 @@ export class McpRuntime {
         },
         onClose: () => { void this.#handleDisconnect(supervisor, generation); },
         onToolsChanged: () => this.#queueToolRefresh(supervisor, generation),
+        onPolicyFailure: (error) => { void this.#blockServer(supervisor, error); },
       });
       if (supervisor.stopped || supervisor.generation !== generation) {
         await this.#closeDetachedClient(supervisor.config.name, client);
@@ -802,6 +865,7 @@ export class McpRuntime {
       const listedTools = await this.#listTools(supervisor, client, signal, deadline);
       const { candidates: toolCandidates, unsupportedTools } = this.#toolCandidates(supervisor.config, listedTools, deadline);
       const advancedCandidates = this.#advancedCallables(supervisor, client);
+      await this.#authorize(supervisor, signal);
       if (supervisor.stopped
         || supervisor.generation !== generation
         || supervisor.client !== client) {
@@ -839,11 +903,11 @@ export class McpRuntime {
         return;
       }
       if (this.#isPermanentFailure(error)) {
-        supervisor.state = "failed";
-        supervisor.detail = errorMessage(error);
+        supervisor.state = error instanceof McpTrustRequiredError ? "trust_required" : "failed";
+        supervisor.detail = this.#safeError(supervisor.config, error);
         return;
       }
-      this.#scheduleReconnect(supervisor, errorMessage(error));
+      this.#scheduleReconnect(supervisor, this.#safeError(supervisor.config, error));
     }
   }
 
@@ -900,7 +964,7 @@ export class McpRuntime {
       void this.#connectSupervisor(supervisor).catch((error) => {
         if (!supervisor.stopped) {
           supervisor.state = "failed";
-          supervisor.detail = errorMessage(error);
+          supervisor.detail = this.#safeError(supervisor.config, error);
         }
       });
     }, delayMs);
@@ -962,7 +1026,7 @@ export class McpRuntime {
           && supervisor.generation === generation
           && supervisor.client === client
           && supervisor.state === "ready") {
-          supervisor.detail = `Tool refresh failed; using previous catalog: ${errorMessage(error)}`;
+          supervisor.detail = `Tool refresh failed; using previous catalog: ${this.#safeError(supervisor.config, error)}`;
         }
       }
     })();
@@ -1233,6 +1297,17 @@ export class McpRuntime {
     return /(?:\b401\b|\b403\b|unauthori[sz]ed|forbidden|authentication failed)/iu.test(errorMessage(error));
   }
 
+  #safeError(config: McpServerConfig, error: unknown): string {
+    let message = errorMessage(error).replace(/https?:\/\/[^\s"'<>]+/giu, "<endpoint>");
+    const transport = config.transport;
+    const secrets = transport.type === "stdio"
+      ? [...Object.values(transport.env ?? {}), ...(transport.args ?? []).flatMap((arg) => arg.includes("=") ? [arg, arg.slice(arg.indexOf("=") + 1)] : [arg])]
+      : [...Object.values(transport.http_headers ?? {}), ...Object.values(transport.resolved_headers ?? {}), ...Object.values(transport.env_http_headers ?? {}).map((name) => process.env[name] ?? ""), transport.bearer_token_env_var ? process.env[transport.bearer_token_env_var] ?? "" : ""];
+    const values = secrets.flatMap((value) => /^(?:Bearer|Basic)\s+/iu.test(value) ? [value, value.replace(/^(?:Bearer|Basic)\s+/iu, "")] : [value]);
+    for (const value of values.filter(Boolean).sort((a, b) => b.length - a.length)) message = message.split(value).join("<redacted>");
+    return message;
+  }
+
   async #retireCurrentConnection(supervisor: ServerSupervisor, generation: number): Promise<boolean> {
     const client = supervisor.client;
     supervisor.client = undefined;
@@ -1254,6 +1329,7 @@ export class McpRuntime {
     const closePromise = Promise.all([
       Promise.resolve().then(() => client.close()),
       this.#transportClosed.get(client),
+      this.#httpCleanup.get(client)?.(),
     ]);
     const result = await new Promise<boolean>((resolveResult) => {
       let settled = false;
@@ -1282,6 +1358,7 @@ export class McpRuntime {
     this.#instructions = "";
     const closures = supervisors.map(async (supervisor) => {
       supervisor.stopped = true;
+      supervisor.lifetime.abort(new Error("MCP runtime stopped"));
       supervisor.connectAbort?.abort(new Error("MCP runtime stopped"));
       if (supervisor.reconnectTimer !== undefined) this.#clock.clearTimeout(supervisor.reconnectTimer);
       if (supervisor.stableTimer !== undefined) this.#clock.clearTimeout(supervisor.stableTimer);

@@ -133,6 +133,9 @@ export interface TuiDependencies {
   manageTeam?(action: "cancel" | "cleanup", id: string, sessionId?: string, teamId?: string): Promise<void>;
   reconnectMcp?(): Promise<void>;
   getMcpStatus?(): Promise<string>;
+  previewMcpTrust?(name: string, signal?: AbortSignal): Promise<import("../../mcp/trust.js").McpTrustPreview>;
+  approveMcpTrust?(preview: import("../../mcp/trust.js").McpTrustPreview, signal?: AbortSignal): Promise<void>;
+  revokeMcpTrust?(name: string): Promise<void>;
   getSkillsStatus?(): Promise<string>;
   skillManager?: SkillManagerLike;
   generateSkillDraft?(model: RegisteredModel, description: string, signal?: AbortSignal): Promise<string>;

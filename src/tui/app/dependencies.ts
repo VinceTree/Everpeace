@@ -435,8 +435,11 @@ export function createDefaultTuiDependencies(
       } finally { await release(); }
     },
     async reconnectMcp() { await mcp.refresh(); },
+    previewMcpTrust: (name, signal) => mcp.previewTrust(name, signal),
+    approveMcpTrust: (preview, signal) => mcp.approveTrust(preview, signal),
+    revokeMcpTrust: (name) => mcp.revokeTrust(name),
     async getMcpStatus() {
-      return formatMcpStatus(await mcp.refresh());
+      return formatMcpStatus(await mcp.ensureReady()) + "\n\n/mcp trust <server> · Review startup approval\n/mcp revoke <server> · Revoke startup approval\n/mcp reconnect · Reload configuration";
     },
     async getSkillsStatus() {
       return formatSkillsStatus(await skills.refresh());

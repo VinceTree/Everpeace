@@ -1,3 +1,7 @@
+import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { approvedMcpFixture } from "../../fixtures/mcp-trust.js";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -110,6 +114,14 @@ function fakeTool(name: string, overrides: Partial<FakeTool> = {}): FakeTool {
   };
 }
 
+async function until(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 5000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("MCP fixture did not reach the expected state");
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 async function flushAsync(): Promise<void> {
   for (let index = 0; index < 4; index++) await new Promise<void>((resolve) => setImmediate(resolve));
 }
@@ -133,7 +145,7 @@ function config(overrides: Partial<McpServerConfig> = {}): McpServerConfig {
 }
 
 test("MCP runtime discovers namespaced stdio tools, instructions, and calls", async (t) => {
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     version: "test",
     async loadConfig() { return [config()]; },
@@ -167,7 +179,7 @@ test("MCP runtime discovers namespaced stdio tools, instructions, and calls", as
 });
 
 test("MCP runtime respects Codex enabled tools and isolates server failures", async (t) => {
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     async loadConfig() {
       return [
@@ -195,7 +207,7 @@ test("MCP snapshot binds approval metadata and atomically replaces changed tools
     fakeTool("write", { annotations: { readOnlyHint: true, destructiveHint: false } }),
   ]);
   let context: McpClientFactoryContext | undefined;
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     clock,
     async loadConfig() { return [config()]; },
@@ -248,7 +260,7 @@ test("MCP disconnect removes tools, does not replay calls, and reconnects with a
   let factories = 0;
   let rejectCall: ((error: Error) => void) | undefined;
   clients[0]!.callToolImpl = () => new Promise((_, reject) => { rejectCall = reject; });
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     clock,
     async loadConfig() { return [config()]; },
@@ -264,7 +276,7 @@ test("MCP disconnect removes tools, does not replay calls, and reconnects with a
   const binding = first.toolInfo?.[0]?.binding;
   assert.ok(binding);
   const inFlight = runtime.call(name, "{}", binding);
-  await flushAsync();
+  await until(() => clients[0]!.callToolCalls === 1);
   assert.equal(clients[0]!.callToolCalls, 1);
 
   contexts[0]!.onClose();
@@ -279,7 +291,7 @@ test("MCP disconnect removes tools, does not replay calls, and reconnects with a
   await flushAsync();
   assert.equal(factories, 1);
   clock.advance(1);
-  await flushAsync();
+  await until(() => runtime.snapshot().servers[0]?.state === "ready");
   const reconnected = runtime.snapshot();
   assert.equal(factories, 2);
   assert.equal(reconnected.servers[0]?.state, "ready");
@@ -291,7 +303,7 @@ test("MCP disconnect removes tools, does not replay calls, and reconnects with a
 test("MCP retry budget exhausts after ten attempts and permanent errors do not retry", async () => {
   const clock = new FakeClock();
   let attempts = 0;
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     clock,
     async loadConfig() { return [config()]; },
@@ -303,9 +315,9 @@ test("MCP retry budget exhausts after ten attempts and permanent errors do not r
   await runtime.refresh();
   assert.equal(runtime.snapshot().servers[0]?.state, "reconnecting");
   const delays = [500, 1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000, 30_000];
-  for (const delay of delays) {
+  for (const [index, delay] of delays.entries()) {
     clock.advance(delay);
-    await flushAsync();
+    await until(() => attempts === index + 2 && runtime.snapshot().servers[0]?.state !== "connecting");
   }
   assert.equal(attempts, 11);
   assert.equal(runtime.snapshot().servers[0]?.state, "failed");
@@ -315,7 +327,7 @@ test("MCP retry budget exhausts after ten attempts and permanent errors do not r
 
   const permanentClock = new FakeClock();
   let permanentAttempts = 0;
-  const permanent = new McpRuntime({
+  const permanent = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     clock: permanentClock,
     async loadConfig() { return [config()]; },
@@ -353,7 +365,7 @@ test("MCP authentication and unsupported HTTP configuration fail without connect
   ];
   const clock = new FakeClock();
   let factories = 0;
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     clock,
     async loadConfig() { return configs; },
@@ -377,7 +389,7 @@ test("MCP reconnect backoff resets only after thirty stable seconds", async (t) 
   const contexts: McpClientFactoryContext[] = [];
   const clients = [new FakeMcpClient(), new FakeMcpClient(), new FakeMcpClient()];
   let attempts = 0;
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     clock,
     async loadConfig() { return [config()]; },
@@ -393,7 +405,7 @@ test("MCP reconnect backoff resets only after thirty stable seconds", async (t) 
   await runtime.refresh();
   assert.match(runtime.snapshot().servers[0]?.detail ?? "", /500 ms/u);
   clock.advance(500);
-  await flushAsync();
+  await until(() => runtime.snapshot().servers[0]?.state === "ready");
   assert.equal(runtime.snapshot().servers[0]?.state, "ready");
 
   contexts[1]!.onClose();
@@ -403,7 +415,7 @@ test("MCP reconnect backoff resets only after thirty stable seconds", async (t) 
   await flushAsync();
   assert.equal(attempts, 2);
   clock.advance(1);
-  await flushAsync();
+  await until(() => runtime.snapshot().servers[0]?.state === "ready");
   assert.equal(attempts, 3);
   assert.equal(runtime.snapshot().servers[0]?.state, "ready");
 
@@ -413,7 +425,7 @@ test("MCP reconnect backoff resets only after thirty stable seconds", async (t) 
   assert.match(runtime.snapshot().servers[0]?.detail ?? "", /2000 ms/u);
 
   clock.advance(2_000);
-  await flushAsync();
+  await until(() => runtime.snapshot().servers[0]?.state === "ready");
   assert.equal(runtime.snapshot().servers[0]?.state, "ready");
   clock.advance(30_000);
   await flushAsync();
@@ -440,7 +452,7 @@ test("MCP business errors, request timeouts, and cancellation do not reconnect",
       else signal?.addEventListener("abort", cancel, { once: true });
     });
   };
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     clock,
     async loadConfig() { return [config({ tool_timeout_sec: 0.001 })]; },
@@ -479,7 +491,7 @@ test("MCP streamable HTTP recovery is isolated from another ready server", async
   const beta = new FakeMcpClient([fakeTool("beta")]);
   const contexts = new Map<string, McpClientFactoryContext[]>();
   let betaAttempts = 0;
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     clock,
     async loadConfig() {
@@ -508,7 +520,7 @@ test("MCP streamable HTTP recovery is isolated from another ready server", async
   const alphaBinding = first.toolInfo?.find((info) => info.serverName === "stdio_server")?.binding;
 
   clock.advance(500);
-  await flushAsync();
+  await until(() => runtime.snapshot().servers.find((server) => server.name === "http_server")?.state === "ready");
   const recovered = runtime.snapshot();
   assert.deepEqual(recovered.tools.map((tool) => tool.name).sort(), [
     "mcp__http_server__beta",
@@ -527,7 +539,7 @@ test("MCP tool-change storms coalesce and a failed paged refresh keeps the compl
   const clock = new FakeClock();
   const client = new FakeMcpClient([fakeTool("stable")]);
   let context: McpClientFactoryContext | undefined;
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     clock,
     async loadConfig() { return [config()]; },
@@ -584,7 +596,7 @@ test("MCP refresh isolates late close notifications from the replacement connect
   const contexts: McpClientFactoryContext[] = [];
   const clients = [new FakeMcpClient(), new FakeMcpClient()];
   let nextClient = 0;
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     clock,
     async loadConfig() { return [config()]; },
@@ -616,7 +628,7 @@ test("MCP discovery rejects repeated cursors without publishing a partial catalo
   client.listToolsImpl = async (cursor) => cursor
     ? { tools: [fakeTool("second")], nextCursor: "repeat" }
     : { tools: [fakeTool("first")], nextCursor: "repeat" };
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     async loadConfig() { return [config()]; },
     async clientFactory() { return client as never; },
@@ -683,7 +695,7 @@ test("MCP discovery enforces page, tool, byte, and duplicate-name limits", async
     const clock = new FakeClock();
     const client = new FakeMcpClient();
     discoveryCase.configure(client);
-    const runtime = new McpRuntime({
+    const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
       workspacePath: process.cwd(),
       clock,
       async loadConfig() { return [config({ name: discoveryCase.label })]; },
@@ -712,7 +724,7 @@ test("MCP discovery shares one deadline across pages", async (t) => {
     clock.advance(60);
     return { tools: [fakeTool(cursor ?? "first")], nextCursor: cursor ? "third" : "second" };
   };
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(), clock,
     async loadConfig() { return [config({ startup_timeout_sec: 0.1 })]; },
     async clientFactory() { return client as never; },
@@ -729,7 +741,7 @@ test("MCP discovery preserves an opaque empty cursor instead of losing the next 
   client.listToolsImpl = async (cursor) => cursor === undefined
     ? { tools: [fakeTool("first")], nextCursor: "" }
     : { tools: [fakeTool("second")] };
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     async loadConfig() { return [config()]; },
     async clientFactory() { return client as never; },
@@ -747,7 +759,7 @@ test("MCP rejects malformed output schemas before publishing a new directory", a
   ]) {
     const clock = new FakeClock();
     const client = new FakeMcpClient([fakeTool("invalid", { outputSchema })]);
-    const runtime = new McpRuntime({
+    const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
       workspacePath: process.cwd(), clock,
       async loadConfig() { return [config()]; },
       async clientFactory() { return client as never; },
@@ -764,7 +776,7 @@ test("MCP close cancels reconnect timers and ignores late callbacks", async () =
   const clock = new FakeClock();
   const contexts: McpClientFactoryContext[] = [];
   let factories = 0;
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     clock,
     async loadConfig() { return [config()]; },
@@ -787,6 +799,10 @@ test("MCP close cancels reconnect timers and ignores late callbacks", async () =
 });
 
 test("MCP workspace switch closes a late connection and cannot revive the old workspace", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "everpeace-mcp-switch-"));
+  const nextWorkspace = join(directory, "next");
+  await mkdir(nextWorkspace);
+  t.after(() => rm(directory, { recursive: true, force: true }));
   const clock = new FakeClock();
   const contexts: McpClientFactoryContext[] = [];
   const lateClient = new FakeMcpClient([fakeTool("old")]);
@@ -794,8 +810,8 @@ test("MCP workspace switch closes a late connection and cannot revive the old wo
   let factories = 0;
   let releaseLate!: (client: never) => void;
   const lateConnection = new Promise<never>((resolve) => { releaseLate = resolve; });
-  const runtime = new McpRuntime({
-    workspacePath: "C:\\old-workspace",
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
+    workspacePath: directory,
     clock,
     async loadConfig() { return [config()]; },
     async clientFactory(_server, context) {
@@ -808,9 +824,9 @@ test("MCP workspace switch closes a late connection and cannot revive the old wo
   t.after(() => runtime.close());
 
   const loading = runtime.refresh();
-  await flushAsync();
+  await until(() => factories === 1);
   assert.equal(runtime.snapshot().servers[0]?.state, "connecting");
-  const switching = runtime.setWorkspace("C:\\new-workspace");
+  const switching = runtime.setWorkspace(nextWorkspace);
   await flushAsync();
   releaseLate(lateClient as never);
   await Promise.all([loading, switching]);
@@ -824,7 +840,7 @@ test("MCP workspace switch closes a late connection and cannot revive the old wo
 
   const current = await runtime.ensureReady();
   assert.equal(factories, 2);
-  assert.equal(contexts[1]?.workspacePath, "C:\\new-workspace");
+  assert.equal(contexts[1]?.workspacePath, nextWorkspace);
   assert.deepEqual(current.tools.map((tool) => tool.name), ["mcp__test_server__current"]);
 });
 
@@ -833,7 +849,7 @@ test("MCP close timeout prevents a replacement connection", async () => {
   const client = new FakeMcpClient();
   client.closeImpl = () => new Promise(() => undefined);
   let factories = 0;
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     clock,
     async loadConfig() { return [config()]; },
@@ -860,7 +876,7 @@ test("MCP disconnect close timeout stops automatic recovery", async () => {
   client.closeImpl = () => new Promise(() => undefined);
   let context: McpClientFactoryContext | undefined;
   let factories = 0;
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     clock,
     async loadConfig() { return [config()]; },
@@ -889,7 +905,7 @@ test("MCP failed initialization waits for its partial client before reconnecting
   let completeClose!: () => void;
   partial.closeImpl = () => new Promise<void>((resolve) => { completeClose = resolve; });
   let factories = 0;
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(), clock,
     async loadConfig() { return [config()]; },
     async clientFactory(_config, context) {
@@ -901,7 +917,7 @@ test("MCP failed initialization waits for its partial client before reconnecting
   });
   t.after(() => runtime.close());
   const loading = runtime.ensureReady();
-  await flushAsync();
+  await until(() => partial.closeCalls === 1);
   assert.equal(partial.closeCalls, 1);
   clock.advance(1_000);
   await flushAsync();
@@ -909,7 +925,7 @@ test("MCP failed initialization waits for its partial client before reconnecting
   completeClose();
   await loading;
   clock.advance(500);
-  await flushAsync();
+  await until(() => runtime.snapshot().servers[0]?.state === "ready");
   assert.equal(factories, 2);
   assert.equal(runtime.snapshot().servers[0]?.state, "ready");
 });
@@ -919,7 +935,7 @@ test("MCP failed initialization cannot retry after partial-client close timeout"
   const partial = new FakeMcpClient();
   partial.closeImpl = () => new Promise(() => undefined);
   let factories = 0;
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(), clock,
     async loadConfig() { return [config()]; },
     async clientFactory(_config, context) {
@@ -929,7 +945,7 @@ test("MCP failed initialization cannot retry after partial-client close timeout"
     },
   });
   const loading = runtime.ensureReady();
-  await flushAsync();
+  await until(() => partial.closeCalls === 1);
   clock.advance(5_000);
   await loading;
   assert.equal(runtime.snapshot().servers[0]?.state, "failed");

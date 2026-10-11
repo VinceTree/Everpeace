@@ -84,7 +84,7 @@ export const TUI_HELP = `Slash commands
   /verify  Run discovered checks, or /verify <command>
   /undo    Undo the latest Agent turn when its files are unchanged
   /permissions  Select read-only, ask, workspace-write, or full-access tools
-  /mcp     Inspect MCP servers; /mcp reconnect reconnects without replay
+  /mcp     Inspect MCP servers; trust/revoke <server>; reconnect without replay
   /skills  Create, install, inspect, and use local skills
   /memory  View and manage learned experience
   /plan    Plan a request; show, execute an approved plan, or exit

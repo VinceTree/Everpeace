@@ -12,6 +12,26 @@ import type { ProviderRuntime } from "../../../src/providers/openai-compatible.j
 import { createProductionAgent } from "../../../src/runtime/production.js";
 import { SessionStore } from "../../../src/storage/session-store.js";
 import type { BashResult } from "../../../src/tools/bash.js";
+import { McpRuntime } from "../../../src/mcp/runtime.js";
+import { McpTrustStore } from "../../../src/mcp/trust.js";
+import { MemoryAuthStorage } from "../../fixtures/mcp-trust.js";
+
+test("headless startup trust requires interaction before any model request, including Plan and full-access", async (t) => {
+  for (const transport of ["stdio", "http"] as const) for (const plan of [false, true]) {
+    const provider = fakeProvider(() => { throw new Error("Model must not be called before startup trust"); });
+    const f = await fixture(provider, { mode: "full-access", web: true }); t.after(() => f.cleanup());
+    const mcp = new McpRuntime({ workspacePath: f.workspacePath, trustStore: new McpTrustStore({ path: path.join(f.root, "trust.json"), authStorage: new MemoryAuthStorage() }), async loadConfig() {
+      return [{ name: "untrusted", enabled: true, transport: transport === "stdio" ? { type: "stdio", command: process.execPath, args: ["-e", "throw new Error('must not start')"] } : { type: "streamable_http", url: "http://127.0.0.1:1/mcp" } }];
+    } }); t.after(() => mcp.close());
+    f.dependencies.createAgent = (options) => createProductionAgent({ ...options, providerRuntime: provider, mcp, skills: null, learnedMemoryStore: null, codeNavigation: null });
+    const events: ExecEvent[] = [];
+    const result = await runExec({ prompt: "inspect", workspacePath: f.workspacePath, plan, onEvent(event) { events.push(event); } }, f.dependencies);
+    assert.equal(result.classification, "interaction_required"); assert.equal(result.exitCode, 5);
+    assert.equal(result.interaction?.tool, transport === "stdio" ? "mcp_start" : "mcp_http"); assert.equal(provider.calls, 0);
+    assert.ok(events.some((event) => event.type === "interaction_required"));
+    assert.equal(mcp.snapshot().tools.length, 0);
+  }
+});
 
 const model = {
   id: "registration-1",

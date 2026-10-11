@@ -874,7 +874,19 @@ export class ReactAgent {
     const assistantTexts: string[] = [];
     let contextRecoveryRemaining = this.#contextRecoveryBudget;
     let persistenceFailed = false;
+    let initialMcpSnapshot: McpSnapshot | undefined;
     try {
+      if (this.#mcp && this.#turnMode === "default") {
+        const snapshot = await this.#mcp.ensureReady(signal);
+        initialMcpSnapshot = snapshot;
+        const pending = snapshot.servers.find((server) => server.state === "trust_required");
+        if (pending) {
+          const interactionRequired: AgentInteractionRequired = { kind: "approval", tool: pending.trustKind ?? (pending.transport === "stdio" ? "mcp_start" : "mcp_http"), prompt: "MCP startup requires approval. Use /mcp trust <server> in this workspace." };
+          this.#turnResult = { interactionRequired };
+          this.#io.writeTool?.(interactionRequired.prompt!);
+          return { ...this.#turnResult };
+        }
+      }
       await this.#learnedMemory?.beginTurn?.();
       const goal = await this.#goalRuntime?.get();
       this.#turnGoalId = goal?.status === "active" ? goal.goal_id : undefined;
@@ -893,7 +905,8 @@ export class ReactAgent {
           await this.#drainBackgroundNotices();
           loopSignal?.throwIfAborted();
           const mcpPreparation = this.#mcp && this.#turnMode === "default"
-            ? this.#mcp.ensureReady(loopSignal).then((snapshot) => {
+            ? (initialMcpSnapshot ? Promise.resolve(initialMcpSnapshot) : this.#mcp.ensureReady(loopSignal)).then((snapshot) => {
+              initialMcpSnapshot = undefined;
               const cloned = structuredClone(snapshot);
               const toolInfo = new Map<string, McpToolInfo>(
                 cloned.toolInfo?.map((info) => [info.callableName, info] as const) ?? [],

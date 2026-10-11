@@ -1548,6 +1548,46 @@ test("/mcp refreshes status and /skills opens the transient Skill manager", asyn
   view.unmount();
 });
 
+test("/mcp startup preview defaults to Cancel, survives resize, approves once and supports revoke", async () => {
+  const model: RegisteredModel = { id: "trust", model_name: "test", base_url: "https://example.com/v1", api_key: "secret" };
+  const f = createFixture({ initial: [model] });
+  let approvals = 0; let revocations = 0;
+  const preview = { workspace: "C:\\fixture", name: "calendar", kind: "mcp_start" as const, fingerprint: "a".repeat(64), revision: 0, approved: false, summary: "Program: fixture.exe\nSource: effective Codex configuration (file origin unknown)\nAllowing startup means running this program with your host user permissions." };
+  f.dependencies.previewMcpTrust = async (name) => { assert.equal(name, "calendar"); return preview; };
+  f.dependencies.approveMcpTrust = async (received) => { assert.deepEqual(received, preview); approvals++; };
+  f.dependencies.revokeMcpTrust = async (name) => { assert.equal(name, "calendar"); revocations++; };
+  f.dependencies.getMcpStatus = async () => "calendar · stdio · trust_required";
+  const view = render(<EverpeaceApp dependencies={f.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+  const submit = async (command: string) => { await tick(); view.stdin.write(command); await tick(); view.stdin.write("\r"); };
+  await submit("/mcp trust calendar"); await waitFor(() => (view.lastFrame() ?? "").includes("Approve startup"));
+  await tick(); view.stdin.write("\r"); await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything")); assert.equal(approvals, 0);
+  await submit("/mcp trust calendar"); await waitFor(() => (view.lastFrame() ?? "").includes("Approve startup"));
+  Object.defineProperty(view.stdout, "columns", { configurable: true, value: 60 }); view.stdout.emit("resize");
+  await waitFor(() => (view.lastFrame() ?? "").includes("fixture.exe"));
+  assert.match(view.lastFrame() ?? "", /host user permissions/u);
+  await tick(); view.stdin.write("\u001B"); await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything")); assert.equal(approvals, 0);
+  await submit("/mcp trust calendar"); await waitFor(() => (view.lastFrame() ?? "").includes("Approve startup"));
+  await tick(); view.stdin.write("\u0003"); await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything")); assert.equal(approvals, 0);
+  await submit("/mcp trust calendar"); await waitFor(() => (view.lastFrame() ?? "").includes("Approve startup"));
+  await tick(); view.stdin.write("\u001B[B"); await tick(); view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Approval saved")); view.stdin.write("\r"); await tick(); assert.equal(approvals, 1);
+  await tick(); view.stdin.write("\u001B"); await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything"));
+  await submit("/mcp revoke calendar"); await waitFor(() => (view.lastFrame() ?? "").includes("trust_required")); assert.equal(revocations, 1);
+});
+
+test("late MCP trust previews cannot reopen a cancelled command window", async () => {
+  const model: RegisteredModel = { id: "trust-cancel", model_name: "test", base_url: "https://example.com/v1", api_key: "secret" };
+  const f = createFixture({ initial: [model] });
+  let finish!: (preview: import("../../../src/mcp/trust.js").McpTrustPreview) => void;
+  f.dependencies.previewMcpTrust = async () => new Promise((resolve) => { finish = resolve; }); f.dependencies.approveMcpTrust = async () => { throw new Error("Must not approve cancelled preview"); };
+  const view = render(<EverpeaceApp dependencies={f.dependencies} initialModels={{ available: [model], missing: [] }} onReplayOutput={(update) => update()} />);
+  await tick(); view.stdin.write("/mcp trust calendar"); await tick(); view.stdin.write("\r");
+  await waitFor(() => (view.lastFrame() ?? "").includes("Reading MCP startup configuration"));
+  await tick(); view.stdin.write("\u0003"); await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace to do anything"));
+  finish({ workspace: "fixture", name: "calendar", kind: "mcp_start", fingerprint: "a".repeat(64), revision: 0, approved: false, summary: "late preview" }); await tick();
+  assert.doesNotMatch(view.lastFrame() ?? "", /late preview|Approve startup/u);
+});
+
 test("/memory opens a transient learned experience surface and supports pause", async () => {
   const model: RegisteredModel = { id: "memory-model", model_name: "test", base_url: "https://example.com/v1", api_key: "secret" };
   const fixture = createFixture({ initial: [model] });

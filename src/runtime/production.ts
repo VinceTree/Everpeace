@@ -108,6 +108,7 @@ export interface ProductionAgentHandle {
   skills?: SkillCatalogLike;
   readableRoots(): readonly string[];
   provider: ProviderRuntime;
+  prepareMcp?(signal?: AbortSignal): Promise<import("../agent/react-agent.js").AgentInteractionRequired | undefined>;
   dispose(): Promise<void>;
 }
 
@@ -364,6 +365,10 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     ...(skills ? { skills } : {}),
     readableRoots: () => skillReadableRoots(skills),
     provider,
+    async prepareMcp(signal) {
+      const pending = (await mcp?.ensureReady(signal))?.servers.find((server) => server.state === "trust_required");
+      return pending ? { kind: "approval", tool: pending.trustKind ?? (pending.transport === "stdio" ? "mcp_start" : "mcp_http"), prompt: "MCP startup requires approval. Use /mcp trust <server> in this workspace." } : undefined;
+    },
     dispose,
   };
 }

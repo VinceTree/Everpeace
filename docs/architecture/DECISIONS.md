@@ -1,5 +1,11 @@
 # Architecture Decisions
 
+## MCP 启动信任与传输安全
+
+stdio 在宿主权限下运行，独立于工具调用审批。以工作区、服务名和冻结启动配置的 HMAC 指纹保存独立信任，密钥在系统 keyring；用户确认、配置/存储 revision 和 runtime generation 共同约束提交。授权不进入 Session，项目配置不能提升信任。撤销使 binding 失效并关闭当前服务；其他进程在下一次启动/派发检查撤销。本轮不实现 MCP 原生沙箱或依赖完整性验证。
+
+非回环 HTTP 全部拒绝，不提供私网明文例外；回环 HTTP 需要单独批准。localhost 连接固定为回环，HTTP 的批准地址不会再次依赖 DNS。全部重定向拒绝，SDK 所有请求共用受控 fetch 与 transport 自有 dispatcher，保持长期 SSE 生命周期。HTTPS 保留内网兼容和证书校验。状态、失败、CLI/SDK 交互与回归契约见 [集成能力](CODEX_CAPABILITIES.md#启动信任与-http-边界)。
+
 ## DeepSeek 推理连续性与候选调度
 
 协议修正与效率实验分离。provider 投影集中处理 DeepSeek instructions/system 和 OpenAI/generic 布局；注册的可选 responses_profile 向后兼容，显式中转始终显示 configured。完整 Responses reasoning 不按 Chat Completions 字段重建，恢复与压缩保留完整交互和验证债务。

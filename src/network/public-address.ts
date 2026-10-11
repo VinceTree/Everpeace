@@ -22,6 +22,7 @@ globalV6.addSubnet("2000::", 3, "ipv6");
 for (const [address, prefix] of [["2001::", 23], ["2001:db8::", 32], ["2002::", 16], ["2620:4f:8000::", 48], ["3fff::", 20]] as const) blocked.addSubnet(address, prefix, "ipv6");
 
 export function isPublicIpAddress(address: string): boolean {
+  if (address.includes("%")) return false;
   const family = isIP(address);
   if (family === 4) return !blocked.check(address, "ipv4");
   if (family === 6) return globalV6.check(address, "ipv6") && !blocked.check(address, "ipv6");

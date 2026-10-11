@@ -528,7 +528,10 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
         onSystemMessage(message) { queueTimeline("system", safeText(message, Number.MAX_SAFE_INTEGER)); },
       },
     });
-    const runnerResult = await runner.run({ text: options.prompt, mode: options.plan === true ? "plan" : "default", source: restored ? "session_resume" : "exec", signal: taskSignal });
+    const startupInteraction = await handle.prepareMcp?.(taskSignal);
+    const runnerResult: CodingTaskRunnerResult = startupInteraction
+      ? { disposition: "stopped", agentResult: { interactionRequired: startupInteraction }, diagnosticRounds: 0 }
+      : await runner.run({ text: options.prompt, mode: options.plan === true ? "plan" : "default", source: restored ? "session_resume" : "exec", signal: taskSignal });
     await timeline;
     const assistantText = lastAssistantText;
     result = successfulResult(runnerResult, sessionId, assistantText, ledger);

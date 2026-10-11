@@ -66,6 +66,8 @@ import { SkillWizard } from "../components/wizards/skill-wizard.js";
 import { MemorySurface } from "../components/screens/memory-surface.js";
 import { ApprovedPlanSurface, PlanQuestionsSurface, PlanReviewSurface } from "../components/screens/plan-surface.js";
 import { GoalConfirmationSurface, GoalStatusSurface } from "../components/screens/goal-surface.js";
+import { McpTrustSurface } from "../components/screens/mcp-trust-surface.js";
+import type { McpTrustPreview } from "../../mcp/trust.js";
 import { WorkspaceDiffSurface } from "../components/screens/workspace-diff-surface.js";
 import { ContextSurface } from "../components/screens/context-surface.js";
 import { TaskProgressSurface } from "../components/screens/task-progress-surface.js";
@@ -107,6 +109,7 @@ type View =
   | { kind: "terminal-setup" }
   | { kind: "permissions" }
   | { kind: "skills" }
+  | { kind: "mcp-trust"; preview: McpTrustPreview; approve(): void; cancel(): void }
   | { kind: "memory"; status: LearnedMemoryStatus; policy: LearnedMemoryPolicy }
   | { kind: "plan-questions"; request: PlanRequest; mode: AgentMode; complete(answers: Record<string, string>): void; cancel(): void }
   | { kind: "plan-review"; submitted: SubmittedPlan; decide(decision: PlanReviewResult): void; cancelTask(): void }
@@ -1053,6 +1056,30 @@ export function EverpeaceApp({
       replaceCommandView(infoView("/mcp · Could not load", error instanceof Error ? error.message : String(error), "error"));
     }
   }, [dependencies, isCurrentCommandOperation, replaceCommandView, startCommandLoad]);
+
+  const reviewMcpTrust = useCallback(async (name: string) => {
+    const controller = new AbortController();
+    const cancel = () => { controller.abort(); returnToChat(); };
+    const operation = startCommandLoad("/mcp · Startup trust", "Reading MCP startup configuration", true, true, cancel);
+    try {
+      if (!dependencies.previewMcpTrust || !dependencies.approveMcpTrust) throw new Error("MCP trust management is unavailable.");
+      const preview = await dependencies.previewMcpTrust(name, controller.signal);
+      if (!isCurrentCommandOperation(operation)) return;
+      let submitted = false;
+      replaceCommandView({ kind: "mcp-trust", preview, cancel, approve() {
+        if (submitted || !isCurrentCommandOperation(operation)) return;
+        submitted = true;
+        const approval = startCommandLoad("/mcp · Startup trust", "Saving startup approval", true, true, cancel);
+        void dependencies.approveMcpTrust!(preview, controller.signal).then(() => {
+          if (isCurrentCommandOperation(approval)) replaceCommandView(infoView("/mcp · Startup trusted", "Approval saved. Use /mcp reconnect to start the service."));
+        }).catch(() => {
+          if (isCurrentCommandOperation(approval)) replaceCommandView(infoView("/mcp · Approval failed", "Configuration or trust changed, or storage is unavailable. Review a new preview.", "error"));
+        });
+      } });
+    } catch {
+      if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/mcp · Could not review", "The server is unavailable or violates the MCP transport policy.", "error"));
+    }
+  }, [dependencies, isCurrentCommandOperation, replaceCommandView, returnToChat, startCommandLoad]);
 
   const showMemory = useCallback(async (enterFromChat = true) => {
     const operation = startCommandLoad(
@@ -2367,7 +2394,14 @@ export function EverpeaceApp({
         if (parsed.command === "/doctor") runDoctor(parsed.args ?? "");
         if (parsed.command === "/permissions") enterCommandView({ kind: "permissions" });
         if (parsed.command === "/mcp") {
-          if (parsed.args === "reconnect") {
+          const args = parsed.args?.trim() ?? "";
+          if (args.startsWith("trust ")) {
+            if (coordinator.activeTask || directController.current) appendTransient("system", "Wait for the active task before approving MCP startup.");
+            else void reviewMcpTrust(args.slice(6).trim());
+          } else if (args.startsWith("revoke ")) {
+            coordinator.cancelTask();
+            void dependencies.revokeMcpTrust?.(args.slice(7).trim()).then(showMcp).catch(() => openInfo("/mcp · Revoke failed", "MCP startup was blocked locally, but persistent trust could not be updated.", "error"));
+          } else if (args === "reconnect") {
             if (coordinator.activeTask || directController.current) appendTransient("system", "Wait for the active task before reconnecting MCP.");
             else void dependencies.reconnectMcp?.().then(showMcp).catch(() => openInfo("/mcp · Reconnect failed", "Inspect connection configuration and retry explicitly.", "error"));
           } else void showMcp();
@@ -2544,6 +2578,14 @@ export function EverpeaceApp({
   useInput(
     (input, key) => {
       if (key.eventType === "release") return;
+      if (key.ctrl && input === "c" && view.kind === "mcp-trust") {
+        view.cancel();
+        return;
+      }
+      if (key.ctrl && input === "c" && view.kind === "loading" && view.onCancel) {
+        view.onCancel();
+        return;
+      }
       if (view.kind === "plan-questions" && (key.escape || (key.ctrl && input === "c"))) {
         view.cancel();
         return;
@@ -2567,7 +2609,7 @@ export function EverpeaceApp({
         return;
       }
     },
-    { isActive: view.kind === "chat" || view.kind === "context" || view.kind === "plan-questions" || confirmation !== undefined || (view.kind === "loading" && directController.current !== undefined) },
+    { isActive: view.kind === "chat" || view.kind === "context" || view.kind === "plan-questions" || view.kind === "mcp-trust" || confirmation !== undefined || (view.kind === "loading" && (directController.current !== undefined || view.onCancel !== undefined)) },
   );
 
   useEffect(
@@ -2693,6 +2735,8 @@ export function EverpeaceApp({
             onConfirm={view.confirm}
             onCancel={view.cancel}
           />
+        ) : view.kind === "mcp-trust" ? (
+          <McpTrustSurface preview={view.preview} onApprove={view.approve} onCancel={view.cancel} />
         ) : view.kind === "goal-status" ? (
           <GoalStatusSurface {...(view.goal ? { goal: view.goal } : {})} onPause={pauseGoal} onResume={resumeGoal} onBack={returnToChat} />
         ) : view.kind === "workspace-diff" ? (

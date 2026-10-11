@@ -202,7 +202,7 @@ TUI 命令：
 - `/verify [command]`：运行自动发现的完整工作区检查集合，并绑定取消与文件 revision；显式命令只记录为补充证据。
 - `/undo`：在文件仍未被用户改动时撤销最新 Agent 回合；不会覆盖用户修改。
 - `/permissions`：选择只读、逐条审批、工作区写入或完全访问模式，分别控制公共网页和模型 shell 联网，并保存用户/项目命令策略。
-- `/mcp`：重新加载 Codex MCP 配置、连接已启用服务器并查看 tool/resource/prompt 状态。
+- `/mcp`：查看状态；`/mcp trust <server>` 审阅启动信任，`/mcp revoke <server>` 撤销，`/mcp reconnect` 重载配置并连接获准服务器。
 - `/skills`：创建、安装、查看并显式调用本地 Skills。
 - `/memory`：查看 learned 经验和独立的 Memory 模型用量、全局启用或关闭读取与自动学习、切换当前聊天是否读取或记录 memory、归档或清理条目、使用 `/memory view` 查看最近一次实际注入快照，或在全局启用时使用 `/memory remember <偏好>` 保存长期用户偏好。`Esc` 取消提取并返回同一 Session。聊天策略会随 Session 恢复；开关只控制 learned Memory，与按需 Session 历史检索独立。
 - `/plan` 或 `/plan <需求>`：进入严格只读规划。审阅菜单提供 **Approve plan**（批准）、**Revise plan**（输入修订意见）、**Cancel plan**（取消）。批准后保持 Plan 模式并空闲等待；`/plan show` 查看已批准计划，`/plan execute` 才把完整正文交给正常编码与验证闭环。批准仅保留在当前进程、Session 和 Agent 中；继续讨论、`/plan exit`、成功切换会话或替换 Agent 会清除，重启或恢复不会重建。修订输入中 Esc 返回审阅菜单，菜单中 Esc 取消规划；两处 Ctrl+C 都取消活动任务。未处理的 Plan guidance 返回草稿，等待再次提交。普通 coding 中模型需要澄清时也会使用同一阻塞式问题窗口；在 coding 问题中取消会停止整个活动任务。执行器会拒绝 Plan step 未提供的工具，包括编辑和 Goal 写操作。
@@ -222,6 +222,8 @@ TUI 命令：
 - `/clear`：结束当前对话并清屏；下一次提问创建新 session，同时保留当前模型。
 - `/help`、`/exit`：显示帮助或退出。
 - `!<command>`：直接运行当前系统的命令行（Windows 使用 PowerShell，macOS/Linux 使用 Bash），不再次确认；PTY 排版结果会流式写入 TUI 历史，不再暂停或整页刷新交互界面。
+
+stdio 启动必须单独通过 `/mcp trust <server>` 批准。预览默认 Cancel，隐藏参数值、环境值与凭据 Header。授权按工作区和准确启动配置保存，配置或环境变化后重新审阅。`/mcp reconnect` 启动获准服务，`/mcp revoke <server>` 取消访问并移除 callable binding。程序仍以宿主用户权限运行；full-access 和普通工具审批不能授予启动信任。非回环 HTTP 拒绝，回环 HTTP 需单独批准，所有重定向均拒绝。存在启用但未信任的服务时，CLI/SDK 在模型请求前返回退出码 5 / interaction_required。用户级信任元数据位于 permissions.json 同目录，指纹密钥仅在系统凭据存储；存储不可用时禁止启动。
 
 MCP 复用 Codex 配置，不另建 Everpeace 凭据文件。使用 `pnpm exec codex mcp add ...` 或其他已安装 Codex CLI 配置服务器，再运行 `/mcp`。当前支持 stdio 和 Streamable HTTP tools、resources 与 prompts，以及静态/环境 header 和 bearer-token 环境变量。每个 server 独立维护 `connecting`/`reconnecting` 生命周期：瞬时断连会移除其工具，并以 500 ms–30 s 指数退避最多重试十次；永久配置或认证错误直接停止。连接连续 ready 30 秒才重置重试次数，五秒内无法确认旧连接关闭则停止自动恢复。中断中的工具调用不会重放；业务错误、单次调用超时和取消本身不会触发重连。
 

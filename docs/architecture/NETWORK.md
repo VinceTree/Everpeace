@@ -19,6 +19,10 @@
 
 [地址校验](../../src/network/public-address.ts)拒绝非 HTTP/HTTPS、URL 凭据、本地域名、空答案、非公网／特殊范围、格式或 family 不一致及混合答案。IPv6 采用保守的全球单播允许范围，排除特殊用途和转换范围；特殊用途地址即使存在部分全球可达例外也拒绝。
 
+带 `%` zone/interface 的 IPv6 一律拒绝，即使 Node isIP 将其识别为 IPv6 且其地址位于允许范围。独立 [IANA 地址用例](../../tests/unit/network/public-address.test.ts)覆盖范围首尾、相邻全球单播、注册表例外、映射/转换/scoped IPv6 和 URL 的整数、八进制、十六进制写法；预期值不从生产网段表生成。
+
+MCP 不使用这个仅允许公网的响应租约层。其独立策略要求非回环 HTTPS，本机 HTTP 单独授权，并拒绝全部重定向；长期 SSE 的 dispatcher 归 MCP transport 所有，关闭时统一销毁。启动信任及凭据边界见 [MCP](CODEX_CAPABILITIES.md#启动信任与-http-边界)。
+
 每次请求生成不可变地址快照，新的 Undici Agent 的 connector 只能连接此集合；地址失败时依次使用同一集合，不重新解析 origin。HTTP Host 保留原 URL，TLS 使用原域名的 SNI 与证书身份，始终启用证书校验。每次重定向建立新快照。DNS、连接和正文使用同一个取消／期限信号；系统 DNS 查询本身无法强制取消，迟到答案不能创建连接。
 
 响应只能在 `withPublicResponse` 的消费回调内使用。退出后取消未读正文、销毁 dispatcher、关闭并等待所有直属及 TLS wrapper socket。固定诊断包括 invalid_target、dns_failed、non_public_address、proxy_configuration、proxy_failed、connection_failed、response_failed；不转发内部异常对象或代理凭据。

@@ -37,9 +37,21 @@ Windows 的 Codex restricted-token backend 可以运行系统 PowerShell，但 G
 - 启动/调用超时、enabled/disabled tool 过滤、单服务器失败隔离；
 - server instructions、按初始化 capabilities 注册工具/资源/提示入口、受限分页工具发现与 `notifications/tools/list_changed` 热更新；
 - `mcp__<server>__<tool>` 命名空间、参数转发、有界结果和取消；
-- `/mcp` 强制重载配置、重置重试状态，并显示 disabled/connecting/reconnecting/ready/failed 状态。
+- `/mcp` 查看状态和信任管理入口；`/mcp reconnect` 显式重载配置、重置重试状态，显示 disabled/connecting/reconnecting/ready/failed/trust_required 状态。
 
-每个 server 有独立 supervisor。瞬时启动失败或断连使用 500 ms 起步、30 秒封顶的指数退避，最多重试十次；连接连续稳定 30 秒才清零计数。配置不支持、认证不可用、stdio executable 明确缺失等永久错误直接进入 failed。断连先从目录原子移除该 server 的全部 callable，再关闭旧 client；初始化未完成的 client 也由 supervisor 管理，关闭同时等待 SDK close 完成及 transport 的实际 close 事件。五秒内不能确认关闭时停止自动恢复，不能同时建立替代连接。退出、切换工作区、`/mcp` 主动刷新都会取消旧 generation 的连接和 timer，迟到 callback 不能复活它。默认 TUI 在正常退出和启动失败路径都等待共享 `TuiDependencies.dispose()`；它关闭活动 Memory runtime 与 `McpRuntime`，即使清理失败也继续恢复终端模式。
+### 启动信任与 HTTP 边界
+
+stdio 的宿主进程启动与 MCP tool-call 审批是独立权限边界。默认没有启动授权；`/mcp trust <server>` 读取有效 Codex 配置，展示工作区、解析后的程序、cwd、脱敏参数、环境名称和来源。CLI 不能证明配置文件来源时明确显示 unknown。确认默认 Cancel；批准只保存权限，`/mcp reconnect` 才显式启动。允许启动相当于允许运行该程序，其权限仍为宿主用户；本轮没有添加 MCP 原生沙箱，也不验证程序及依赖完整性。
+
+[信任存储](../../src/mcp/trust.ts)在平台用户配置目录保存 `mcp-trust.json` schema v1，记录规范化工作区、服务名、授权种类和 HMAC 指纹；密钥仅通过 AuthStorage/keyring 保存。fingerprint 包含 transport、实际解析的 command、args、cwd 和冻结的完整环境，HTTP 例外绑定完整 URL、header 来源和实际凭据。项目配置不能授予信任，Session 也不恢复授权。文件读写使用跨进程锁和原子替换；坏文件、丢失密钥、keyring 或写入异常均不能自动放行。审批提交及落盘前重读配置并核对预览指纹、存储 revision 与 runtime generation。确认取消不授予权限。
+
+启动、自动重连、目录准备及工具派发检查当前配置和授权；stdio 与本机 HTTP 未信任时是 `trust_required`，不进入自动重试。`/mcp revoke <server>` 先使当前 callable/binding 失效，取消初始化、计时器和活动调用，再等待关闭和持久撤销。其他进程的撤销在下一次检查时生效，不声称可以即时终止另一进程已经运行的程序。`full-access` 和普通 MCP tool-call 批准不能授予启动权限。非交互 CLI/SDK 在模型请求前以 `interaction_required`、`mcp_start`/`mcp_http` 返回；默认交互编码任务也暂停并提示使用 `/mcp`。
+
+非回环 HTTP 无论凭据是否存在均拒绝；HTTPS 保留证书校验，允许公网与内网端点。HTTP 只对字面 `127.0.0.0/8`、`::1` 和固定连接到回环的 `localhost` 提供单独批准，其他域名即使 DNS 返回回环也不获得例外。[MCP HTTP 客户端](../../src/mcp/http.ts)使用 transport 自有 dispatcher，适配长期 SSE；SDK 初始化、POST、GET/SSE/恢复、DELETE 共用自定义 fetch，所有 3xx 都释放响应并拒绝下一跳。禁止 URL 内嵌凭据和 fragment。Header 和 stdio 环境在获准连接前冻结，参数、header 值、URL 路径/查询和内部异常不直接进入 UI 或诊断。生产仍不接入 OAuth。
+
+真实进程门禁、持久/跨进程授权、撤销与迟到初始化、HTTP 与 TLS、SDK SSE 重定向回归见 [security tests](../../tests/unit/mcp/security.test.ts)。既有 MCP 协议 fixture 通过显式注入测试授权，不访问用户 keyring。TUI 确认/取消/resize 和 headless preflight 分别在 app 与 exec 回归中覆盖；实际终端验收状态只在 HANDOFF 记录。
+
+每个 server 有独立 supervisor。瞬时启动失败或断连使用 500 ms 起步、30 秒封顶的指数退避，最多重试十次；连接连续稳定 30 秒才清零计数。配置不支持、认证不可用、stdio executable 明确缺失等永久错误直接进入 failed。断连先从目录原子移除该 server 的全部 callable，再关闭旧 client；初始化未完成的 client 也由 supervisor 管理，关闭同时等待 SDK close 完成及 transport 的实际 close 事件。五秒内不能确认关闭时停止自动恢复，不能同时建立替代连接。退出、切换工作区、`/mcp reconnect` 主动刷新都会取消旧 generation 的连接和 timer，迟到 callback 不能复活它。默认 TUI 在正常退出和启动失败路径都等待共享 `TuiDependencies.dispose()`；它关闭活动 Memory runtime 与 `McpRuntime`，即使清理失败也继续恢复终端模式。
 
 恢复只影响后续调用。断连时正在进行的 tool call 不自动重放；普通业务错误、单次 tool timeout 和用户取消不会单独触发 reconnect。Streamable HTTP 已有 session ID 收到 404 时，宿主将该会话视为失效，通过同一关闭/重连流程建立后续连接；SDK 自身的 SSE 流恢复仍由 SDK 管理。`tools/list_changed` 通知以 50 ms 合并；每次先完整读取分页结果，再原子替换该 server 的工具定义和执行校验器。失败时保持上一份完整目录并在 status 中记录错误，真正断连则立即移除。发现最多 100 页、1,000 个工具和 2 MiB 定义，连接、发现及校验器编译共享配置的启动期限；重复 cursor、重复原始工具名及超限都明确失败。
 
@@ -57,7 +69,7 @@ MCP 文本投影保留文本、URI 和 MIME；只处理协议明确的 tool `con
 
 MCP 的真实 stdio 恢复回归见 [stdio-recovery.test.ts](../../tests/unit/mcp/stdio-recovery.test.ts)。fixture 启动期限覆盖 Node／tsx／SDK 冷启动，首代主动不回应初始化以触发超时；仍严格检查恰好两代、旧进程先退出、binding 失效和不重放。测试时间预算见 [开发指南](../DEVELOPMENT.md#独立测试-ci-与证据范围)，不会修改生产默认期限或恢复策略。
 
-MCP SDK 安全修复按 [官方公告](https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-6qxp-vccf-f47h) 升级并同步 lock。实际 `src/mcp/runtime.ts` 的 StreamableHTTP transport 仅传 requestInit headers，不配置 OAuth authProvider；stdio 也没有 OAuth 调用路径。依赖告警需要处理，但不能据此声称当前应用已经泄漏 OAuth client 凭据。stdio、Streamable HTTP、断连不重放与资源关闭仍由真实协议回归验证，远端告警状态在最终交接记录。
+MCP SDK 安全修复按 [官方公告](https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-6qxp-vccf-f47h) 升级并同步 lock。实际 `src/mcp/runtime.ts` 的 StreamableHTTP transport 传冻结的 requestInit headers 和受控 fetch，不配置 OAuth authProvider；stdio 也没有 OAuth 调用路径。依赖告警需要处理，但不能据此声称当前应用已经泄漏 OAuth client 凭据。stdio、Streamable HTTP、断连不重放与资源关闭仍由真实协议回归验证，远端告警状态在最终交接记录。
 
 ## Skills
 

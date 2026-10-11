@@ -1,3 +1,4 @@
+import { approvedMcpFixture } from "../../fixtures/mcp-trust.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -38,7 +39,7 @@ async function until(predicate: () => boolean): Promise<void> {
 async function fixture(t: TestContext, mode: "disconnect" | "initialize_timeout") {
   const directory = await mkdtemp(join(tmpdir(), "everpeace-stdio-recovery-"));
   const logPath = join(directory, "calls.jsonl");
-  const runtime = new McpRuntime({
+  const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: process.cwd(),
     async loadConfig() {
       return [{

@@ -46,7 +46,7 @@ pnpm link --global
 everpeace
 ```
 
-Current source version: **0.5.1**.
+Current source version: **0.5.2**.
 
 ## Real tools, checked changes
 
@@ -59,6 +59,8 @@ These isolated Windows scenarios use the production runner, a native sandbox and
 Root-to-directory rules, `@` attachments and an on-demand project map help the agent understand your code. Edits use current file observations, permission-bound previews and conflict-aware undo. Sessions, forks and context checkpoints preserve work and verification debt across recovery.
 
 Configured MCP tools, resources and prompts and local Skills extend the agent. Learned Memory can retain preferences and verified lessons. Public web tools check redirects and network boundaries. Search falls back to Bing China and DuckDuckGo when the first provider is unavailable. See the [usage guide](docs/USAGE.md) for setup and limits.
+
+MCP stdio programs require separate startup trust. Use `/mcp trust <server>` to review and save approval for the current workspace and exact configuration, `/mcp reconnect` to start or reload, and `/mcp revoke <server>` to cancel access. Approval allows the program to run with your host user permissions; MCP tool-call approval does not sandbox it. Remote MCP requires HTTPS. Loopback HTTP requires its own explicit exception; redirects are blocked. Headless CLI/SDK runs return `interaction_required` (exit 5) before model requests when startup approval is missing.
 
 ## Automate the same workflow
 

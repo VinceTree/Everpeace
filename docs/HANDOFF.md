@@ -1,65 +1,39 @@
 # 当前交接
 
-更新日期：2026-10-10。先完整读取 [AGENTS](../AGENTS.md)，再按 [索引](README.md) 定位。本轮专题为 [公共网络边界](architecture/NETWORK.md)、[开发与安装](DEVELOPMENT.md)、[当前候选团队验收准备](benchmark/TEAM_READINESS.md)。前轮团队实现与发布记录原样保存在 [历史交接](archive/HANDOFF-2026-10-10-teams.md)，其中旧授权与测试不能转记为本轮结果。
+更新日期：2026-10-11。本轮入口为 [AGENTS](../AGENTS.md)，专题为 [集成能力](architecture/CODEX_CAPABILITIES.md#启动信任与-http-边界)、[公共网络](architecture/NETWORK.md) 与 [开发验收](DEVELOPMENT.md#mcp-启动信任专项终端验收)。前轮网络、安装、团队准备及补丁交付记录保存于 [历史交接](archive/HANDOFF-2026-10-10-network-readiness.md)，不能作为本轮验证或发布授权。
 
-## 当前范围与工作区
+## 范围与工作区
 
-本轮授权实施网络连接边界修复、lint/源码安装保障、benchmark 团队配置和离线验收准备。用户随后明确授权按**补丁更新**提交、推送、更新版本和 GitHub Release；源码展示更新为 **0.5.1**，起点为 `7c4a6b7cf57c4d0974ff4d143ac85d8c83dfd51a`。付费模型调用仍为零，没有读取实测凭据。当前提交、CI、tag 与 Release 的准确状态以补丁交付根的外置收据为准，不提前把未执行步骤记为成功。
+用户明确授权实施 MCP 独立启动信任、工作区持久保存、HTTP 限制、TUI/headless 接入和回归，并随后授权按补丁更新版本、提交、推送及 GitHub Release。展示版本由 **0.5.1** 更新为 **0.5.2**，同步 package.json 与双语 README。保留所有既有 untracked `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`；开始时没有 tracked 改动。没有付费模型请求或 npm publish。
 
-实现开始时 tracked 工作区干净；原有未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}` 全部保留，未当成临时产物清理，也不纳入本次提交。只提交本轮实现、测试、脚本与相关文档。此前测试提交只发生在宿主所有的临时 Git fixture；当前真实提交依据新的用户授权。
+## 实现
 
-## 已完成
+- stdio 在冻结的 command/args/cwd/env 下启动；workspace/server/transport 的 HMAC 配置授权保存在平台用户配置目录，密钥由 AuthStorage/keyring 管理。文件带 schema/revision，跨进程锁与原子替换；坏存储/缺钥不能放行。审批提交及落盘前核对当前配置、preview、store revision 和 generation。
+- `/mcp trust <server>` 默认 Cancel，批准只保存权限；`/mcp reconnect` 显式启动或重载，`/mcp revoke <server>` 先取消 callable/binding、计时器、初始化和在途调用，再关闭服务并撤销持久授权。其他进程在下次授权检查时观察撤销，已运行宿主程序并非跨进程即时终止。
+- 非回环 HTTP 全拒绝。回环 HTTP 需要单独授权，localhost 固定回环连接；HTTPS 保留内网兼容和证书校验。SDK 所有请求（含不继承 requestInit 的 SSE GET）通过受控 fetch 拒绝全部重定向，dispatcher 归 transport 管理。认证与环境冻结，预览、状态、日志和 Session 不存原始凭据。
+- CLI/SDK enabled 未信任服务在模型请求前返回 interaction_required/exit 5，区分 mcp_start/mcp_http；full-access 与工具审批均不能授予启动信任。Session schema 不变，授权不由历史恢复。
+- Web 原有 DNS 绑定保持；补充独立 IANA 端点/邻接/格式回归，发现并拒绝此前会被允许的公网 scoped IPv6。
 
-| 阶段 | 交付与边界 |
-| --- | --- |
-| P0 网络 | 内部公共地址解析、Undici 受控连接和响应租约；所有搜索源、网页读取、Skill HTTP 下载与 Git 克隆共用批准地址快照。直连重试不重新解析 origin，每次重定向重新校验；保留 HTTP Host、TLS SNI 与证书身份。HTTP/HTTPS 宿主代理 CONNECT 到获准 IP，认证仅到代理；Git 专属临时认证转发器及继承 config/env 隔离 |
-| P1 门禁/安装 | 固定 Oxlint correctness、警告失败与实际 `pnpm lint`；局部必要例外说明原因，修复真实未使用 signal 等问题。Windows/Linux CI 按 typecheck → lint → test → build 首败停止。固定 node-pty 并核验实际补丁，增加干净源码安装、CLI/SDK 和原生 PTY 检查 |
-| P2 验收准备 | optional team 贯穿 campaign/checkout/worker/production；团队 settled attempts 按来源幂等汇总，sticky unknown 与 reasoning 不重复扣除。固定隔离失败码停止阶段并保留 skipped 分母。当前代码/构建、任务评分器、准备 harness 和配置冻结；无凭据 preflight、同根模型离线对照和全目录评分器 proof |
+## 验证状态
 
-`src/network/` 不改变模型 API/MCP 的信任边界。公共资源拒绝混合 DNS、特殊用途地址、格式/family 异常及无法验证目标；IPv6 采用保守全球单播范围。系统 DNS 不能强制取消，但任务期限结束后迟到答案不能连接。dispatcher 销毁与 socket 关闭按顺序执行，清理异常仍收回所有直属 socket，并返回固定诊断。
+当前候选最终串行 `pnpm typecheck → pnpm lint → pnpm test → pnpm build` 全部 exit 0；`git diff --check` 与新增文件空白检查通过。全量共 1,156 项：1,153 通过、0 失败、3 跳过。跳过分别为本机文件 symlink 权限、Windows 临时目录 alias（由 clean-checkout CI 覆盖）和 Unix 子进程超时场景；不算平台实测通过，本轮没有执行 Linux 门禁。
 
-Git 子进程禁用 URL 重写/额外代理/credential helper/配置注入/交互认证/重定向，强制 TLS 校验，保留原 shallow/sparse/预览确认。取消先拒绝新 CONNECT，保持已有隧道直到观察到进程树终止，再关闭转发器；真实 Windows Git 回归证明该顺序避免 taskkill 与提前退出的竞态。代理 token 不进入 argv、Session 或日志。
+MCP 安全回归 15 项全部通过、无跳过，覆盖真实 stdio 零启动/批准/重启/工作区隔离、审批提交期间配置变化与取消、跨进程锁/撤销、活动调用与迟到初始化、坏存储/keyring、HTTP 拒绝/本机例外、凭据脱敏、所有请求方法与重定向、真实 SDK SSE、受信 HTTPS 降级拒绝、localhost 固定回环和 TLS 失败。既有协议、stdio 恢复、Web DNS 绑定、独立 IANA 地址、headless Plan/full-access 和 TUI 回归包含在最终全量结果中。
 
-## 当前验证证据
+首次全量有 3 项 Agent 快照回归失败：新增 preflight 重复读取首步目录。已改为首步复用该快照，3 项定向回归与最终完整门禁通过；失败原始日志保存在外置 `initial-test.log`，不覆盖为成功记录。
 
-更新补丁版本后重新串行执行 **pnpm typecheck → pnpm lint → pnpm test → pnpm build**，全部通过。完整测试 **1135 项，1132 通过、3 跳过、0 失败，92562.1118 ms**。发布前日志位于 `C:\Users\39850\AppData\Local\Temp\everpeace-patch-20261010\final-{typecheck,lint,test,build}.log`，实际串行退出结果记录在该根 `local-gates.json`。`git diff --check` 另行通过。实现阶段原日志、摘要与 fixture 收据保留在 security final readiness 根，不覆盖原始证据。
+真实 Windows Terminal 已以 owned 离线 fixture 验证：未批准、默认 Cancel、Esc 和 Ctrl+C 均零启动；resize 保留预览；取消后返回同一 Session 且单 prompt。批准仅落盘，重连 ready/6 tools、marker 恰好 1 次；撤销后 grant 删除、工具归零、stdio 退出，再重连没有新增启动。测试使用软件按键与实际窗口截图，未冒称人工按键；owned 终端和 fixture 均已退出。之后仅补诊断脱敏，相关路径由最终自动回归验证。
 
-三项跳过是文件 symlink 的平台限制、Windows 临时目录 alias 的既有 clean-checkout CI 专项，以及 Unix 子进程专项。没有跳过网络、代理、真实 Git 或原生团队隔离用例。
+本轮外置证据根：`C:\Users\39850\AppData\Local\Temp\everpeace-mcp-security-fd060153a5e34e7ab5315d8ef5666f3b`，包含 `gates.json`、`final-*.log`、`terminal-receipt.json`、`terminal-evidence/actions.jsonl` 和窗口截图。真实终端使用 owned fixture、合成 HMAC 与 marker；没有修改用户 MCP 配置或 keyring。
 
-网络专项使用真实本地 HTTP/TLS、IPv6、HTTP/HTTPS CONNECT 代理和 Git http-backend，记录实际 socket；覆盖批准后 DNS 变化、地址重试、混合/异常答案、私网重定向、Host/SNI/证书身份、认证隔离、代理拒绝/超时、慢 DNS/响应、正文截断/错误/取消、Git 注入及取消资源收束。测试映射与公开 fixture CA 仅在 Node test mock 中生效，生产没有本地地址映射或关闭证书检查的选项。新增网络专项 14 项；既有网页/Skill/权限/sandbox 与团队回归同时执行。
+## 补丁交付
 
-`pnpm install:clean` 对更新补丁版本后的候选创建独占干净源码快照，未复制已有 node_modules 或用户目录；冻结 lockfile 安装、实际补丁检查、构建、CLI help/SDK 导入以及 6 项原生 PTY 生命周期检查全部通过。发布前日志为补丁交付根 `clean-source-install.log`，安装 fixture 完成后已按所有权清理；实现阶段原日志继续保留。
+用户随后明确授权将上述修复作为补丁提交、推送、更新展示版本和 GitHub Release。补丁起点为 `5665724b64e86431af2fc481e572dc5ba3454162`，tag 与 manifest 对应 `v0.5.2`。提交标题按 MCP 启动信任与网络修复命名，携带 `[skip publish]` 暂缓分支自动发布，Test workflow 保持启用；Windows/Ubuntu CI 通过后才推送 tag、运行现有 Release workflow 并核对双语说明、tag commit 与 latest 标记。
 
-**Windows 原生：**当前完整回归和同模型离线对照实际执行固定原生后端，覆盖两个 worker 独立编码/整合、并发修改保护及成员通过而根验证失败；不是 mock 或 CI skip。
+补丁交付根为 `C:\Users\39850\AppData\Local\Temp\everpeace-patch-20261011-501d21521426410e85fb0d5f07a6e78d`。更新展示版本后重新执行串行门禁，准确结果保存为 `local-gates.json`、`final-*.log`；实际 commit、远端 CI、tag 和 Release 由最终 `delivery-receipt.json` 记录，不提前把尚未执行的步骤写成成功。此前实现证据继续保留，不冒充新候选身份。
 
-**Linux 原生：**补丁候选源码重新编译到宿主所有的 `everpeace-team-linux-20261010/dist`，WSL Ubuntu / Node v22.22.1 的两成员实际隔离探测通过：owned cwd、主目录/其他成员读写/Git metadata denial。发布前日志为补丁交付根 `linux-native.log`。保留 WSL mirrored 网络初始化失败并回退 None 的提示，探测不需要外网；此结果不代表完整 Linux CI、网络 suite 或 TUI 验收。既有 Windows Terminal 手工证据在历史交接，本轮没有新增终端交互功能，也没有冒充重新验收。
+补丁候选四项门禁全部 exit 0，完整测试仍为 1,156 项、1,153 通过、3 项平台跳过、0 失败。`pnpm install:verify` 核对固定原生依赖及实际补丁通过；`pnpm install:smoke` 的构建 CLI、SDK 导入与 6 项真实 PTY 生命周期检查通过、无跳过。差异空白检查通过。源码、构建及提交身份由交付收据绑定。
 
-## 冻结候选与离线评测
+## 保留边界
 
-最终准备根：`C:\Users\39850\AppData\Local\Temp\everpeace-security-readiness-final-20261010`。
-
-- `candidate.json`：当前 revision/source/build、准备 harness、任务/评分器与待授权配置摘要；修改输入后必须创建新候选，不能盲目继续旧配置。
-- `preflight.json`：单 Agent 1 次请求、团队 5 次请求（含两个成员），输入/输出全部计入团队总账；相同根模型、high reasoning/32768 输出上限。全部合成 Responses，阻断 socket，networkCalls=0，不读取 Key。
-- `fixture-proof.json` 与 `fixture-proof-provenance.json`：十个固定任务全部 seeded 错误被拒绝、reference 修复被接受。证明执行在先前 owned readiness 根，核对 evaluationDigest 完全相同后复用独立评分器证据；原根源码/构建已经过期，不把旧 preflight 或旧候选身份搬到新根。
-- `offline-comparison.jsonl`：当前同根模型固定任务，单 Agent 与根加两 worker 都经真实根检查和独立断言评分；只证明合成请求的工程行为。`delivery-receipt.json`：核对最终摘要、检查日志、安装/原生/离线结果及无付费调用边界。
-- `compatibility-plan.json`：两项短协议探测，待授权 10000/task、20000/stage；明确 high/1024 输出，与正式比较设置分开，不能作为 campaign 配置或授权执行。
-- `smoke.json`：目录前三任务 single/team 各一次，共六次，草案 100000/task、600000/stage。
-- `comparison.json`：全部十任务 single/team 各三次，共六十次，草案 100000/task、6000000/stage。
-
-评分器 proof 原始日志和资料在 `everpeace-security-readiness-20261010`、`everpeace-security-fixture-proof.log`；保留历史结果，不覆盖失败尝试。当前 preflight、同模型对照原日志分别为 `everpeace-security-preflight-final.log`、`everpeace-security-comparison-final.log`。总 tokens、耗时、重复调用、冲突和人工介入由 fixture 输出保留，不据此宣称团队更快、更省或实际模型质量更好。
-
-## 未完成范围与后续条件
-
-本轮仅支持仓库内 pnpm 源码安装。`pnpm pack` 成功不证明消费者获得仓库补丁；脱离仓库的补丁交付和干净消费者安装包验收仍阻塞独立安装包/npm 分发，没有加入消费者 postinstall 修改依赖。
-
-HTTP/HTTPS 代理来自宿主环境并作为受信任基础设施，必须忠实连接已批准 IP；不支持 SOCKS/PAC，失败不回退直连。缺少 lint、安装限制、历史沙箱修复与缺少当前付费验收分别记账，不能统称当前漏洞。
-
-付费实测仍未授权。配置使用 REQUIRES_MODEL_AUTHORIZATION / provider.invalid 占位符；用户明确实际模型注册、端点/profile 与 task/campaign 数值预算后，另行创建绑定最终候选的配置并依次兼容 → smoke → 正式对照。unknown usage、清理失败或原生隔离失败停止阶段，失败/skipped 保留在计划分母。草案预算不是供应商账单硬上限。
-
-## 补丁发布交付
-
-新的用户授权明确将本次变更按补丁修复交付，保持现有功能定位。补丁交付根为 `C:\Users\39850\AppData\Local\Temp\everpeace-patch-20261010`；发布前检查日志、准确源码/构建摘要、远端两平台 CI、tag 与 Release 核对结果都保留在该根，最终以 `delivery-receipt.json` 为准。
-
-先提交含 `[skip publish]` 的修复标题并推 main，保留 Test workflow；两平台 CI 通过后显式推送与 manifest 匹配的 tag，触发现有 Release workflow，再核对正文、tag commit 与 latest 标记。补丁说明描述网络、资源清理、计量和工程门禁修复，不把离线准备包装成新产品功能或真实模型质量提升。workflow 不执行 npm publish。
-
-版本更新和最终 commit 会改变候选身份。之前 final readiness 根只代表实现阶段，不能作为补丁发布候选；发布交付根重新绑定当前 source/build/revision 和 preflight。独立评分器 proof 仅在 evaluationDigest 一致时复用并保留来源；旧 live 或合成候选结果不迁移为当前付费验收。
+MCP 启动批准仍意味着宿主用户权限，未新增原生进程沙箱或程序/依赖完整性验证。受信任程序仍可能产生自主副作用；工具审批不约束其宿主权限。生产不支持 OAuth/header helper。独立 npm 消费者补丁分发、真实付费团队评测等前轮事项仅作为未完成历史保留，未获本轮新授权。
