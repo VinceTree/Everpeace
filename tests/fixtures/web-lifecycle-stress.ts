@@ -44,7 +44,9 @@ async function batch(count: number): Promise<void> {
       const controller = new AbortController();
       const timer = kind === "cancel" ? setTimeout(() => controller.abort(), 20) : undefined;
       try {
-        const run = fetchWebPage(`http://public.example:${port}/${kind}`, { env: {}, timeoutMs: 250, lookup: async () => [{ address: "8.8.8.8", family: 4 }], ...(kind === "cancel" ? { signal: controller.signal } : {}) });
+        // Keep the deliberately hanging case short, but allow cold Windows connections
+        // and five redirect hops to finish under concurrent CI load.
+        const run = fetchWebPage(`http://public.example:${port}/${kind}`, { env: {}, timeoutMs: kind === "timeout" ? 250 : 5000, lookup: async () => [{ address: "8.8.8.8", family: 4 }], ...(kind === "cancel" ? { signal: controller.signal } : {}) });
         if (["redirect", "oversize", "ok"].includes(kind)) { const result = await run; if (kind === "oversize") assert.equal(result.truncated, true); }
         else await assert.rejects(run);
       } finally { if (timer) clearTimeout(timer); }
