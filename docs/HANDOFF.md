@@ -2,7 +2,7 @@
 
 ## 范围与候选
 
-用户授权实施问题 11–20，完成后提交推送并按补丁交付；本轮不执行付费模型或 Brave 请求。起点 main `84be0baafc67f3c41d3e17e65cc45e32f0f6d34a`，分支 `codex/security-diagnostics-evaluation`。候选号仍为 **0.5.3**，此前正式 Release v0.5.2；交付前再次核对远端。前次问题 5–10 的证据归档于 [前次交接](archive/HANDOFF-2026-10-11-distribution.md)，不迁移为本轮候选成功。
+用户授权实施问题 11–20，完成后提交推送并按补丁交付；本轮不执行付费模型或 Brave 请求。起点 main `84be0baafc67f3c41d3e17e65cc45e32f0f6d34a`，分支 `codex/security-diagnostics-evaluation`。最终补丁候选为 **0.5.3**，冻结 commit `8b6888cc1eb0bae682dc1e418d995e47d3b899be`；此前正式 Release v0.5.2。最终候选来自已通过保护门禁的 main，实现与最后 Memory 回归修正分别由 PR #5/#6 合并；本文件后续只补交接记录，不把文档提交重定义为已验收包的候选。前次问题 5–10 的证据归档于 [前次交接](archive/HANDOFF-2026-10-11-distribution.md)，不迁移为本轮候选成功。
 
 ## 实现与边界
 
@@ -21,7 +21,9 @@
 
 最终本地串行 `typecheck → lint → test → build` 全部通过：1196 tests，1193 pass、3 skip、0 fail；`git diff --check` 通过。跳过不作为原生沙箱验收。门禁收据 `local-gates-15.json` 及 `final-15-*` 记录实际命令和退出码。九项完整评分器证明见 `expanded-drain-final/expanded-proof.json`，evaluation digest `d19c65dd1f592cec824bb7e5c67067e0d8170f846817f8505b60409ad5fc875a`，真实模型运行零次。工作证据根：`C:\Users\39850\AppData\Local\Temp\everpeace-security-2e61f0e7347246339d51bc14e24b8f50`。工作证明不冒充发布候选收据；安装目录许可证检查包含关键组件，最终仍须验收新锁、新补丁和准确候选的消费者产物。
 
-远端 CI 的失败均保持 Required checks 拒绝：新面板改为等待实际画面与交互输入；正常 Web 连接期限与故意超时分开；取消模拟器在异步准入后检查已取消状态；CI 显式固定 Python 3.12，并保留严格取消验收。本地全量复验另发现真实 Windows Conpty worker 的 EPIPE 关闭竞态，修复到既有分发补丁，真实 stream 回归验证关闭后停止写入、继续排空，其他错误仍报告；冻结锁与评分器依赖同步更新。失败日志仅供诊断，不重用旧 commit 的成功证据。[PR #5](https://github.com/VinceTree/Everpeace/pull/5) 的最终 head `57cfe304d4a3949d8a9e3db21ab0d03b4e33ceea` 两平台、安全扫描和 Required checks 全成功，已合并为 main `a9b5ef1ed5e9b46aa73bdab37d4b259c059911a3`。该候选的 [验收运行](https://github.com/VinceTree/Everpeace/actions/runs/38129042650) 平台检查、安全、打包、六种同包消费者安装和供应链汇总全成功；availability 缺 RUNNER_READ_TOKEN，native skipped、gate failure、publish skipped，没有发布。包 SHA-256 `3f0694d417b6902dbc60a3126de29bfa56a8b50d16fe214f36a27ebe8abd3ed1`，下载后已核验 commit、摘要和未脏状态。并行 main CI 的 Memory 成功重启用例超时；该用例改为可靠 Usage 与串行队列结算后读取，并保留失败诊断，定向和本地完整四门禁通过。此测试修正仍须通过新 PR 的完整检查，再重新冻结 main 候选；本段旧候选收据不迁移为新候选成功。
+远端失败保持可见，Required checks 拒绝未通过提交：终端 fixture 使用真实画面和交互输入；正常 Web 请求与故意超时分开；取消模拟器检查已取消状态；Python 工具链固定。Conpty EPIPE 的实际关闭竞态修复到分发补丁并冻结依赖。Memory 成功重启 fixture 使用明确完成状态和可靠 Usage，先等待串行队列结算，失败保留合成状态诊断；未知 Usage 不重试的生产语义未改。
+
+[PR #5](https://github.com/VinceTree/Everpeace/pull/5) 的 [完整检查](https://github.com/VinceTree/Everpeace/actions/runs/38128729869) 与 [PR #6](https://github.com/VinceTree/Everpeace/pull/6) 的 [完整检查](https://github.com/VinceTree/Everpeace/actions/runs/38130249449) 各自 Windows/Linux、安全和 Required checks 全成功，均经保护门禁合并。冻结最终 main 候选 `8b6888cc1eb0bae682dc1e418d995e47d3b899be` 的 [独立验收与产物](https://github.com/VinceTree/Everpeace/actions/runs/38130540901) 重新执行平台、安全、打包、两平台三种消费者安装与供应链汇总；候选 tarball、实际依赖版本、许可证、原生二进制及各摘要均以该 run 的 `verified-evidence/supply-chain.json`、`receipt.json` 和消费者收据为准。此前 `a9b5ef1` 包的六种安装与汇总成功，但其并行 main 回归失败且候选已替换；旧收据仅保留作诊断，绝不迁移为最终候选成功。
 
 ## 发布与外部依赖
 
