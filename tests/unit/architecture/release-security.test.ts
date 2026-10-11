@@ -22,6 +22,28 @@ test("release rejects failed, missing, cancelled and skipped required platform r
   policy.requireSuccess({ linux: "success", windows: "success" }, ["linux", "windows"]);
 });
 
+test("portable candidates cannot use a producer missing the Linux native build", () => {
+  policy.requirePortableBuild("linux", "x64");
+  for (const [platform, arch] of [["win32", "x64"], ["darwin", "arm64"], ["linux", "arm64"]]) assert.throws(() => policy.requirePortableBuild(platform, arch));
+});
+
+test("package launchers work through node_modules bin shims and closed exports", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-manager-layout-"));
+  try {
+    const directory = path.join(root, "node_modules/pnpm/bin");
+    const shim = path.join(root, "node_modules/.bin/pnpm.cmd");
+    await fs.mkdir(directory, { recursive: true });
+    await fs.mkdir(path.dirname(shim));
+    await fs.writeFile(shim, "This shell fixture must never run.\n");
+    await fs.writeFile(path.join(directory, "../package.json"), '{"name":"pnpm","exports":{}}');
+    const entry = path.join(directory, "pnpm.cjs");
+    await fs.writeFile(entry, "console.log('fixture-manager');\n");
+    const launcher = commands.findManagerLauncher("pnpm", [shim]);
+    assert.equal(launcher, entry);
+    assert.match(await commands.runCommand(process.execPath, [launcher, "--version"]), /fixture-manager/u);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
 test("a dedicated runner disappearing after preflight cancels only the current run", async () => {
   let time = 0;
   const mutations: string[] = [];

@@ -93,7 +93,7 @@ jobs:
           artifact-ids: ${{ needs.package.outputs.artifact }}
           path: candidate-package
           merge-multiple: true
-      - run: node scripts/release/consumer-install.mjs candidate-package
+      - run: pnpm install:consumer candidate-package
         env:
           CANDIDATE_SHA: ${{ needs.candidate.outputs.sha }}
           PACKAGE_SHA256: ${{ needs.package.outputs.digest }}

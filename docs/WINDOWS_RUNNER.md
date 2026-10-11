@@ -34,4 +34,4 @@ Release is dispatched on main with an exact 40-character candidate commit SHA. T
 
 First run Release with `failure_drill=true` on a disposable reviewed candidate. Windows executes the intentional failing test; `drill` must observe validation failure, gate failure and publishing skipped. Check the run/job identities and repository tags/Releases to confirm zero publishing. The overall run is expected to fail. This mode can only fail checks and always disables publishing; it is not a bypass. Then run normal acceptance on the intended candidate. Save the workflow URL and artifacts with its exact commit. No model credentials or paid provider calls are needed.
 
-The machine is not yet provisioned. Its future registration, branch-protection activation and live workflow drill must be reported separately from local tests.
+The machine is not yet provisioned. Main's Required checks protection has been activated and read back, and the live failure drill has blocked all publishing; exact commit/run evidence is maintained in HANDOFF. Runner registration and candidate native acceptance remain separate from local tests.

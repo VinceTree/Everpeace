@@ -19,7 +19,7 @@
 
 1. 分别验证控制台查询竞态、输入 socket 和 worker 清理。先核对上游已发布包，仅当实际包通过所有行为回归，才精确锁定并移除相应本地补丁；上游 main 或 issue 状态不等于发行包已修复。
 2. 若无满足条件的发行包，采用维护者构建阶段生成的 patched bundled dependency：在独占 staging 中从校验过的上游包应用补丁，以标准 npm bundle 语义纳入主 tarball。保留源码、许可证、原生安装材料及平台 prebuild，锁定必要构建依赖，记录上游完整 revision、原包完整性和补丁摘要。普通 prepack 拒绝未准备包并指向 pack:release，专用入口执行准备/核验，不能悄悄生成未修补包。不依赖消费者继承 pnpm-workspace.yaml，不增加消费者 postinstall 改写依赖。跨平台 bundle 安装或脚本行为未验证时，分发继续阻塞。
-3. 新增独立消费者验收：空项目 `npm install <tgz>`、`pnpm add <tgz>`、隔离 prefix 的全局 CLI 安装。目录不得拥有仓库配置、tsx、源码 node_modules 或用户授权；生产安装不得依赖 devDependencies。明确 pnpm 原生构建准入和系统工具要求，不能放开全部第三方脚本掩盖问题。
+3. 新增独立消费者验收：空项目 `npm install <tgz>`、`pnpm add <tgz>`、隔离 prefix 的全局 CLI 安装。目录不得拥有仓库配置、tsx、源码 node_modules 或用户授权；生产安装不得依赖 devDependencies。明确构建机原生编译工具要求，不能放开全部第三方脚本掩盖问题。Linux pnpm 不执行 bundled 子包脚本，正式 Ubuntu x64 产物需在已校验 staging 编译并携带 PTY/helper prebuild；Windows 本地打包仅作开发。
 4. 从安装结果启动 CLI、导入公开 SDK，并实际验证 PTY 输出/输入、resize、正常退出、重复启动、启动即取消与清理。Windows 用 PID/退出证据检查受控后代消失，helper/socket/worker 不拖住宿主，不能只搜索补丁文本。将“AttachConsole 异常返回空列表”和“进程树已清理”分别验收，前者不能证明后者。
 
 验收：同一个 tarball 的 Windows/Linux npm/pnpm/全局安装全部成功，Windows 必需生命周期用例零跳过，用户无需克隆或手动打补丁。保留源码安装回归，更新双语安装说明及实际受验架构；npm registry 发布不是本计划的隐含操作。

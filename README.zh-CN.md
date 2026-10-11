@@ -123,6 +123,6 @@ pnpm build
 
 公共网页和远程 Skill 请求将校验过的 DNS 地址绑定到实际连接，包括 HTTP/HTTPS 代理 CONNECT。代理只读取宿主 HTTP_PROXY、HTTPS_PROXY、NO_PROXY，兼容小写变量。代理基础设施属于受信任边界；暂不支持 SOCKS/PAC，失败不回退直连，HTTPS 证书校验始终开启。[网络边界](docs/architecture/NETWORK.md)。
 
-源码安装使用 pnpm 和固定 node-pty 补丁。运行 `pnpm install:verify`，构建后运行 `pnpm install:smoke`；维护者可用 `pnpm install:clean` 核验干净源码安装。生成独立 tarball 使用 `pnpm build`，然后 `pnpm pack:release --output <空目录>`，产物携带修补后的原生依赖及许可证；普通 npm/pnpm pack 会被拒绝。`pnpm install:consumer <安装包目录> --local` 在无模型凭据的隔离目录核验 npm、pnpm 和全局安装。Linux 原生构建需要 Python、make 和 C++ 编译器；pnpm 消费者明确允许 node-pty 构建脚本。npm registry 发布仍待完成。
+源码安装使用 pnpm 和固定 node-pty 补丁。运行 `pnpm install:verify`，构建后运行 `pnpm install:smoke`；维护者可用 `pnpm install:clean` 核验干净源码安装。生成独立 tarball 使用 `pnpm build`，然后 `pnpm pack:release --output <空目录>`，产物携带修补后的原生依赖及许可证；普通 npm/pnpm pack 会被拒绝。`pnpm install:consumer <安装包目录> --local` 在无模型凭据的隔离目录核验 npm、pnpm 和全局安装。正式可移植候选在 Ubuntu 24.04 x64 构建：打包器在已校验 staging 编译 Linux PTY 和 helper，同时保留上游 Windows prebuild，不要求 pnpm 执行 bundled 子包脚本。构建机需要 Python、make 和 C++；Windows 本地打包仅用于开发。其他 Linux 系统/架构尚未验收。npm registry 发布仍待完成。
 
 Windows/Linux 有 Node 22 CI。**macOS 为实验性支持**，尚无完整 CI 或原生沙箱验收。Release 必须指定 main 上的准确提交，平台/安装包检查与专用 Windows 原生验收全部通过；缺少 Runner 或必需测试跳过均阻止发布。维护者部署和失败演练见 [Windows Runner 指南](docs/WINDOWS_RUNNER.md)。开发门禁依次为 `pnpm typecheck`、`pnpm lint`、`pnpm test`、`pnpm build`，首败停止，另跑 `git diff --check`。[当前团队实测准备](docs/benchmark/TEAM_READINESS.md)仅使用离线证据，付费测试另需数值授权。

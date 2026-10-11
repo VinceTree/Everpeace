@@ -15,6 +15,11 @@ export function candidateSha(value) {
   return value;
 }
 
+export function requirePortableBuild(platform, arch) {
+  assert.equal(platform, "linux", "Portable candidates must be built on Linux; Windows packing is development only");
+  assert.equal(arch, "x64", "Portable candidates currently require the tested Linux x64 toolchain");
+}
+
 export function requireSuccess(results, required) {
   for (const name of required) assert.equal(results[name]?.result ?? results[name], "success", `Required check ${name} did not succeed`);
 }
