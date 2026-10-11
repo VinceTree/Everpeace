@@ -19,7 +19,7 @@ const identity = sourceIdentity(process.cwd());
 if (process.env.GITHUB_ACTIONS === "true") assert.equal(identity.dirty, false, "Native CI needs a clean candidate");
 let success = false;
 try {
-  await runCommand(process.execPath, ["--import", "tsx", "--test", "--test-concurrency=1", "--test-reporter=./scripts/release/native-reporter.mjs", "tests/unit/tools/sandbox-boundaries.test.ts", "tests/unit/team/team.test.ts"], {
+  await runCommand(process.execPath, ["--import", "tsx", "--test", "--test-concurrency=1", "--test-reporter=./scripts/release/native-reporter.mjs", "tests/unit/tools/sandbox-boundaries.test.ts", "tests/unit/team/team.test.ts", "tests/unit/team/workspace-layout.test.ts"], {
     stdio: "inherit", timeout: 20 * 60_000, env: { ...process.env, EVERPEACE_NATIVE_EVENTS: events },
   });
   requireNativeResults(readFileSync(events, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)));

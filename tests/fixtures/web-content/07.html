@@ -1,0 +1,131 @@
+<!doctype html><html><head><title>开发、验证与交付</title><base href="https://invalid.example/"></head><body><nav>Navigation account subscription portal</nav><main><h1>开发、验证与交付</h1>
+<p>用途：准备开发环境、选择测试入口、解释 CI 边界和完成交付。先读根目录 <a href="../AGENTS.md">AGENTS.md</a> 与 <a href="HANDOFF.md">HANDOFF.md</a>，再按本次任务定位源码；不需要每次重新扫描整个项目。当前展示版本、提交、测试计数和最近执行证据只在 HANDOFF 维护。</p>
+<h2>工具链与安装</h2>
+<ul>
+<li>Node.js 22+，使用仓库指定的 <code>pnpm@10.22.0</code>；版本要求和脚本以 <a href="../package.json">package.json</a> 为准。</li>
+<li>TypeScript + ESM，采用 NodeNext 模块解析。源码内本地导入保留 <code>.js</code> 扩展；配置见 <a href="../tsconfig.json">tsconfig.json</a> 和 <a href="../tsconfig.build.json">tsconfig.build.json</a>。</li>
+<li><code>tsx</code> 运行开发入口与 Node test runner；<code>tsc</code> 输出到 <code>dist/</code>，构建会先清理该生成目录。</li>
+<li>Git 用于工作区跟踪；模型 search/glob、Composer <code>@</code> 候选和 doctor 使用固定的 <code>@vscode/ripgrep@1.18.0</code> 平台 optional dependency，并通过绝对路径运行。Windows 使用系统 PowerShell，macOS/Linux 模型 shell 使用 Bash。</li>
+<li>只运行离线测试、类型检查和构建不需要模型凭据。交互登录通过系统 keyring 保存 Key；不要把凭据加入文件、命令记录或测试快照。</li>
+</ul>
+<p>在全新 checkout 中安装和启动：</p>
+<pre><code class="language-powershell">node --version
+pnpm --version
+git --version
+pnpm install --frozen-lockfile
+pnpm dev
+</code></pre>
+<p>不要以 <code>--no-optional</code> 安装：随包 ripgrep 当前覆盖 Windows x64/arm64/ia32、macOS x64/arm64，以及 Linux x64/arm64/arm/ia32/ppc64/riscv64/s390x。其他系统/架构或缺少匹配 optional package 时，搜索、<code>@</code> 候选和 doctor 会明确报告 unavailable；程序不会回退到系统 <code>PATH</code> 中的 <code>rg</code>。所有应用内调用继续传 <code>--no-config</code>，用户 <code>RIPGREP_CONFIG_PATH</code> 不会改变行为。</p>
+<p>已有工作区先检查差异，不要为了安装成功删除用户目录、重置 lockfile 或重新生成无关依赖。确需修改依赖时，同步审查 manifest、lockfile 和相关补丁。</p>
+<h3>Windows、WSL 与原生依赖</h3>
+<p>同一 checkout 的 <code>node_modules</code> 必须与运行它的 Node 平台一致。Windows 安装的 esbuild、TypeScript 平台二进制、keyring 和 node-pty 不能直接交给 WSL Linux Node；反向亦然。需要双平台开发时使用各自 checkout 和安装目录。</p>
+<p>从 WSL 操作已经使用 Windows Node 安装依赖的仓库，可以显式调用 Windows 工具链：</p>
+<pre><code class="language-bash">cmd.exe /d /s /c &quot;pnpm typecheck&quot;
+cmd.exe /d /s /c &quot;pnpm lint&quot;
+cmd.exe /d /s /c &quot;pnpm test&quot;
+cmd.exe /d /s /c &quot;pnpm build&quot;
+</code></pre>
+<p>Windows TUI 手工验收仍需真实 Windows Terminal。通过 WSL 调用 Node 或执行单测不能证明终端按键、滚动和重放正确。</p>
+<p><a href="../pnpm-workspace.yaml">pnpm-workspace.yaml</a> 指定 <a href="../patches/node-pty@1.1.0.patch">node-pty 补丁</a>，修复 Windows 控制台取消竞态及 socket/worker 清理；pnpm 安装构建准入只允许 <code>node-pty</code>。不要删除补丁或放开全部依赖安装脚本来规避安装问题。使用仓库与 pnpm 安装才能应用这些补丁；作为其他项目的 npm 依赖安装不会自动继承它们。</p>
+<p>独立产物改用 <code>pnpm build</code> 后的 <code>pnpm pack:release --output &lt;空目录&gt;</code>。打包器按 <a href="../scripts/release/native-packages.json">原生依赖固定身份</a> 下载并校验上游 tarball，在独占 staging 应用补丁，将 node-pty 与精确 node-addon-api、平台 prebuild、源码和 MIT 许可证一并 bundle。补丁同时覆盖 console helper 异常、PTY socket/worker 释放，以及输出代理关闭后的 EPIPE/ECONNRESET：停止向已关闭代理写入，继续排空 Conpty，其他错误仍上报；<a href="../tests/unit/tools/node-pty-worker.test.ts">安装目录回归</a> 使用真实 stream 验证错误与尾部排空。没有消费者补丁 hook，不复制开发机 build/Release；正式候选要求 Ubuntu 24.04 x64 打包，在已校验 staging 通过上游构建脚本编译 Linux PTY，并按摘要记录和封装 prebuild，保留 Windows/macOS 上游 prebuild。构建机需要 Python/make/C++，其他 Linux 环境尚未验收；Windows 本地包仅作开发。普通 npm/pnpm pack 的 prepack 明确拒绝未准备的产物，使用专用入口。收据绑定候选/脏状态、源码及 lockfile 摘要、补丁与 tarball 摘要；正式候选要求干净且准确提交匹配。</p>
+<h2>开发与检查命令</h2>
+<p>双语 README 的汇总图统一引用 <code>assets/features.webp</code>；图片使用无损 WebP，并随 package 的 <code>files</code> 清单包含的 assets 目录打包，避免安装产物中的相对引用缺图。原始测试日志与详细结果不属于公开资源，不纳入仓库或 npm 包。替换结果图时需检查 GitHub 显示宽度下的可读性，并同步图旁的验收范围说明。</p>
+<table>
+<thead>
+<tr>
+<th>命令</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>pnpm dev</code></td>
+<td>用 tsx 启动开发 CLI/TUI</td>
+</tr>
+<tr>
+<td><code>pnpm dev -- exec &lt;prompt&gt; ...</code></td>
+<td>用 tsx 运行公开非交互 CLI 路径</td>
+</tr>
+<tr>
+<td><code>pnpm typecheck</code></td>
+<td>严格检查全部源码与测试 <code>.ts</code> / <code>.tsx</code></td>
+</tr>
+<tr>
+<td><code>pnpm lint</code></td>
+<td>Oxlint correctness；维护的 src/tests/scripts，警告也失败</td>
+</tr>
+<tr>
+<td><code>pnpm install:verify</code></td>
+<td>核对固定 node-pty 与实际 pnpm 补丁</td>
+</tr>
+<tr>
+<td><code>pnpm install:smoke</code></td>
+<td>构建后 CLI、SDK 与原生 PTY 生命周期</td>
+</tr>
+<tr>
+<td><code>pnpm install:clean</code></td>
+<td>在独占临时目录复制候选源码并冻结安装，验证补丁及启动</td>
+</tr>
+<tr>
+<td><code>pnpm pack:release --output &lt;空目录&gt;</code></td>
+<td>构建后生成携带原生补丁的 tarball 与收据</td>
+</tr>
+<tr>
+<td><code>pnpm install:consumer &lt;目录&gt; --local</code></td>
+<td>本地未提交候选的 npm/pnpm/全局消费者安装；CI 禁止 local 模式</td>
+</tr>
+<tr>
+<td><code>pnpm native:verify</code></td>
+<td>Windows required 模式原生 suite 与准确源码身份收据</td>
+</tr>
+<tr>
+<td><code>pnpm ci:verify</code></td>
+<td>校验 workflow 完整 SHA、容器身份及发布门禁结构</td>
+</tr>
+<tr>
+<td><code>pnpm test</code></td>
+<td>执行全部测试，文件并发度固定为 4</td>
+</tr>
+<tr>
+<td><code>pnpm build</code></td>
+<td>清理并重新生成构建产物</td>
+</tr>
+<tr>
+<td><code>pnpm start</code></td>
+<td>运行已经构建的 CLI</td>
+</tr>
+<tr>
+<td><code>git diff --check</code></td>
+<td>检查 tracked 差异的空白问题</td>
+</tr>
+</tbody></table>
+<p>本仓库门禁依次执行 <code>pnpm typecheck → pnpm lint → pnpm test → pnpm build</code>，首败停止。Agent 对目标项目运行的最终 suite 则发现目标当前 manifest 的实际脚本，按同样顺序执行所有存在的检查；不能凭本仓库脚本推断目标项目具有对应检查。</p>
+<p>Linux hosted CI 的 Ubuntu AppArmor 默认限制 unprivileged user namespace。Test workflow 先记录内核设置和普通 namespace 探测，再仅为锁定安装的 Codex 原生二进制加载 <code>userns</code> 应用 profile；系统限制保持开启，不全局关闭 AppArmor，不给模型宿主执行降级。profile 是一次性 runner 环境准备，不自动修改用户系统；生成时核对 native package revision，升级后必须重新审查。真实团队隔离和双 worker 整合测试仍必须通过，启动不可用不算验收成功。设计依据见 <a href="https://ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces">Ubuntu namespace 说明</a> 与 <a href="architecture/SANDBOX.md">固定 backend</a>。</p>
+<p><a href="../tsconfig.json">类型配置</a> 显式包含 <code>src</code> 和 <code>tests</code> 下所有 <code>.ts</code>、<code>.tsx</code>，保留严格选项和 ES2022 target；<a href="../tsconfig.build.json">构建配置</a> 显式包含源码 TSX，继续排除测试。测试替身按真实接口返回结果、处理可选参数和收窄联合类型；不得通过扩大生产接口、<code>any</code>、忽略错误或移除断言规避检查。辅助写法必须与当前编译库兼容。</p>
+<p><a href="../tests/unit/architecture/dependency-boundaries.test.ts">依赖边界回归</a> 使用已有 TypeScript 的异步解析 API 扫描 runtime、Agent、workflow、exec、SDK 的源码，禁止普通／类型导入、重导出和字面量动态导入 React、Ink、<code>@inkjs/ui</code> 或 TUI。TUI、CLI 适配入口允许 UI 依赖。虚拟文件案例验证语法覆盖与允许边界；解析快照和本地编译器子进程在结束时清理，不增加依赖或独立 lint 工具。TypeScript 的 <code>unstable</code> API 是当前已安装编译器的接口，升级编译器时须复核这项回归。</p>
+<p>开发期间先运行与变化相关的测试，再执行交付门禁。定向测试直接使用相同的 tsx/Node runner：</p>
+<p>Linux 真实进程取消验收需处理进程在探测期间被回收的竞态：signal 0 的 ESRCH，或随后读取 <code>/proc/&lt;pid&gt;/stat</code> 的 ENOENT/ESRCH 都表示进程已消失；仍存在的进程只接受已停止的 Z/X 状态。其他错误与存活状态继续失败，不能通过忽略进程错误或跳过清理检查稳定 CI。</p>
+<pre><code class="language-powershell">pnpm exec tsx --test tests/unit/workflow/task-runner.test.ts
+pnpm exec tsx --test tests/unit/storage/session-store.test.ts tests/unit/tui/app.test.tsx
+pnpm exec tsx --test --test-name-pattern=&quot;cancel&quot; tests/unit/agent/react-agent.test.ts
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>修改范围</th>
+<th>首选测试入口</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>分层依赖、类型配置</td>
+<td><a href="../tests/unit/architecture/dependency-boundaries.test.ts">dependency-boundaries.test.ts</a>；用 <code>tsc --listFilesOnly</code> 对照 tracked <code>.ts</code> / <code>.tsx</code> 清单</td>
+</tr>
+<tr>
+<td>模型任务准入、取消、会话身份与批准</td>
+<td><a href="../tests/unit/runtime/application-coordinator.test.ts">application-coordinator.test.ts</a>、<a href="../tests/unit/tui/app.test.tsx">app.test.tsx</a>、<a href="../tests/unit/runtime/plan-execution.test.tsx">生产 Plan 闭环</a></td>
+</tr>
+<tr>
+<td>采样、工具调度、取消、上下文</td>
+<td><a href="../tests/unit/agent/">agent tests</a></td>
+</tr>
+</tbody></table>
+</main><form>Credentials input</form><footer>Footer advertising tracking</footer><script>throw new Error('never executed')</script></body></html>

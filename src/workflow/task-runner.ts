@@ -10,6 +10,8 @@ import type { VerificationSuiteResult, WorkflowRunResult, WorkflowTaskSource } f
 import { verificationPrompt } from "./verifier.js";
 
 export interface CodingTaskAgent {
+  recordPerformanceTiming?(operation: string, ms: number): void;
+  recordRepairRound?(): void;
   runTurn(userInput: string, signal?: AbortSignal, options?: { mode?: AgentMode; attachments?: readonly FileAttachment[] }): Promise<AgentTurnResult>;
   finishTeamVerification?: ((verified: boolean) => Promise<void>) | undefined;
   prepareTeamVerification?: ((signal?: AbortSignal) => Promise<string | undefined>) | undefined;
@@ -22,6 +24,7 @@ export interface CodingTaskAgent {
 }
 
 export interface CodingTaskRunnerHost {
+  evaluationRepairDecision?(state: import("./types.js").WorkflowState): string | undefined;
   executeVerification(command: string, signal?: AbortSignal, timeoutMs?: number): Promise<BashResult>;
   getGoal(): Promise<SessionGoal | undefined>;
   addGoalTime(seconds: number): Promise<SessionGoal | undefined>;
@@ -51,7 +54,7 @@ export interface CodingTaskRunnerResult {
 const continuationPrompt = "Continue working toward the active session goal. Call get_goal, make concrete progress, verify the result, and update the goal when complete or genuinely blocked.";
 
 function stoppedMessage(result: AgentTurnResult): string {
-  if (result.stopReason === "budget_limited") return "Goal token budget reached. Work stopped before further tools or model requests.";
+  if (result.stopReason === "budget_limited") return "Request token budget reached. Work stopped before further tools or model requests; in-flight billing is not a hard spending cap.";
   if (result.stopReason === "usage_limited") return [result.requestFailure, "Goal usage could not be measured reliably. Work stopped before further tools or model requests."].filter(Boolean).join(" ");
   if (result.stopReason === "step_limit") return "Agent step limit reached. Work stopped without reporting completion.";
   return "Agent turn deadline reached. Work stopped without reporting completion.";
@@ -72,6 +75,7 @@ export class CodingTaskRunner {
   }
 
   async run(input: CodingTaskRunnerInput): Promise<CodingTaskRunnerResult> {
+    if (this.#host.evaluationRepairDecision && input.source !== "benchmark") throw new Error("Experimental repair decisions require the benchmark entry point");
     if (this.#running) throw new Error("A coding task is already running or cleaning up");
     if (this.#cleanupFailure) throw this.#cleanupFailure;
     this.#running = true;
@@ -105,7 +109,15 @@ export class CodingTaskRunner {
         else await this.#workflow.beginTurn({ mode: "default", source: taskSource });
         workflowStarted = true;
       } else if (nextMode === "default" && this.#workflow.state.phase === "diagnose") {
+        const evaluationStop = this.#host.evaluationRepairDecision?.(this.#workflow.state);
+        if (evaluationStop) {
+          await this.#workflow.stopEvaluationRepairs(evaluationStop);
+          await this.#agent.finalizePendingGoalCompletion?.(false); await this.#agent.finishMemoryTurn?.("failed");
+          this.#host.onSystemMessage?.(evaluationStop);
+          return taskResult("completed", lastAgentResult, { ...lastWorkflowResult, state: this.#workflow.state, changed: true });
+        }
         const repair = await this.#workflow.startRepairTurn();
+        if (repair.phase !== "blocked") this.#agent.recordRepairRound?.();
         if (repair.phase === "blocked") {
           await this.#agent.finalizePendingGoalCompletion?.(false);
           await this.#agent.finishMemoryTurn?.("failed");
@@ -115,10 +127,15 @@ export class CodingTaskRunner {
       }
 
       const started = now();
-      lastAgentResult = await this.#agent.runTurn(nextText, input.signal, {
-        mode: nextMode,
-        ...(nextAttachments === undefined ? {} : { attachments: nextAttachments }),
-      }) ?? {};
+      const repairStarted = this.#workflow.state.repair_attempts > 0 && this.#workflow.state.phase === "implement" ? performance.now() : undefined;
+      try {
+        lastAgentResult = await this.#agent.runTurn(nextText, input.signal, {
+          mode: nextMode,
+          ...(nextAttachments === undefined ? {} : { attachments: nextAttachments }),
+        }) ?? {};
+      } finally {
+        if (repairStarted !== undefined) this.#agent.recordPerformanceTiming?.("repair", performance.now() - repairStarted);
+      }
       nextAttachments = undefined;
       input.signal?.throwIfAborted();
       if (lastAgentResult.interactionRequired) {
@@ -151,7 +168,9 @@ export class CodingTaskRunner {
         const teamPrompt = await this.#agent.prepareTeamVerification(input.signal);
         if (teamPrompt) { nextText = teamPrompt; nextMode = "default"; this.#host.resetAssistant?.(); continue; }
       }
-      lastWorkflowResult = await this.#workflow.finishTurn(this.#host.executeVerification, input.signal);
+      const verificationStarted = performance.now();
+      try { lastWorkflowResult = await this.#workflow.finishTurn(this.#host.executeVerification, input.signal); }
+      finally { this.#agent.recordPerformanceTiming?.("verification", performance.now() - verificationStarted); }
       firstVerificationSuite ??= lastWorkflowResult.verificationSuite;
       input.signal?.throwIfAborted();
       if (lastWorkflowResult.prompt && this.#workflow.state.phase === "diagnose") {

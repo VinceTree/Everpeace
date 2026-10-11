@@ -15,6 +15,7 @@ import {
 } from "../../providers/openai-compatible.js";
 import type { RegisteredModel } from "../../storage/model-registry.js";
 import { SessionStore } from "../../storage/session-store.js";
+import { SessionPrivacy } from "../../storage/session-privacy.js";
 import { InputHistory } from "../../storage/input-history.js";
 import { runBash } from "../../tools/bash.js";
 import { createEffectiveSandboxPolicy } from "../../tools/sandbox-policy.js";
@@ -124,10 +125,12 @@ export function createDefaultTuiDependencies(
   registry: TuiModelRegistry,
 ): TuiDependencies {
   const sessionStore = new SessionStore();
+  const privacy = new SessionPrivacy(sessionStore);
   const teamConfig = new TeamConfigStore();
   const teamStore = new TeamStore();
   let teamModels: RegisteredModel[] = [];
   let activeTeam: TeamRuntime | undefined;
+  let activeAgent: import("../../agent/react-agent.js").ReactAgent | undefined;
   const version = packageVersion();
   const webSettings = new SearchSettingsStore();
   const costSettings = new CostSettingsStore();
@@ -144,7 +147,7 @@ export function createDefaultTuiDependencies(
   const skillManager = new SkillManager({ workspacePath: process.cwd(), catalog: skills });
   const mcp = new McpRuntime({ workspacePath: process.cwd(), version });
   const learnedMemoryStore = new LearnedMemoryStore();
-  const auxiliaryExecutor = new AuxiliaryRequestExecutor();
+  const auxiliaryExecutor = new AuxiliaryRequestExecutor(() => activeAgent?.performance);
   let activeLearnedMemory: LearnedMemoryRuntime | undefined;
   const manualMemoryControllers = new Set<AbortController>();
   const memoryOperations = new Set<Promise<unknown>>();
@@ -184,6 +187,8 @@ export function createDefaultTuiDependencies(
     workspacePath: process.cwd(),
     sessionStore,
     inputHistory: new InputHistory(),
+    acquireSessionActivity: (id) => sessionStore.activity.acquire(id),
+    getInFlightRequests: () => activeAgent?.getInFlightRequests(),
     getAuxiliaryUsage: () => auxiliaryExecutor.getUsage(),
     skillManager,
     async listModels(baseUrl, apiKey, signal) {
@@ -237,9 +242,15 @@ export function createDefaultTuiDependencies(
         },
       });
       activeTeam = handle.team;
+      activeAgent = handle.agent;
       if (activeLearnedMemory) void trackMemoryDisposal(activeLearnedMemory.dispose()).catch(() => undefined);
       activeLearnedMemory = handle.learnedMemory as LearnedMemoryRuntime | undefined;
       return handle.agent;
+    },
+    privacy,
+    async reviewMemory(scope, workspacePath, id, revision, action, correction) {
+      cancelManualMemory(new Error("Memory entry reviewed"));
+      await (activeLearnedMemory?.reviewEntry(scope, workspacePath, id, revision, action, correction) ?? learnedMemoryStore.reviewEntry(scope, workspacePath, id, revision, action, correction));
     },
     async getMemoryStatus(workspacePath) {
       return activeLearnedMemory?.status(workspacePath) ?? learnedMemoryStore.status(workspacePath);
@@ -412,7 +423,7 @@ export function createDefaultTuiDependencies(
       try {
         const result = await runLiveDiagnostics(model, runtime, { ...(signal ? { signal } : {}), observe: (run, requestSignal) => runAuxiliary("doctor", run, undefined, requestSignal, model) });
         await new DiagnosticStore().save(result);
-        lines.push(`Diagnostic requests: ${result.requests}/8; request token budget: 20000; known usage: ${result.inputTokens + result.outputTokens}; metering: ${result.usageComplete ? "complete" : "incomplete"}`);
+        lines.push(`Diagnostic requests: ${result.requests}/8; Request token budget: 20000; known usage: ${result.inputTokens + result.outputTokens}; in-flight requests: 0 (probe finished); metering: ${result.usageComplete ? "complete" : "incomplete"}`);
         lines.push(...Object.entries(result.stages).map(([stage, evidence]) => `${stage}: ${evidence.state} · ${evidence.detail}`));
       } catch (error) {
         lines.push(`Model request: failed\n${modelErrorGuidance(error)}`);
@@ -439,6 +450,7 @@ export function createDefaultTuiDependencies(
       return createProductionCommandExecutor({
         workspacePath: cwd,
         policy,
+        onProcessStarted: (ms) => activeAgent?.recordPerformanceTiming("sandbox_startup", ms),
         readableRoots: () => skills.readableRoots(),
       })(command, signal, timeoutMs, onOutput);
     },

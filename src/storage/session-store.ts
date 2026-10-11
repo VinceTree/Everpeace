@@ -6,6 +6,9 @@ import os from "node:os";
 import path from "node:path";
 import lockfile from "proper-lockfile";
 import { PerformanceTrace } from "../performance/trace.js";
+import { SessionActivity } from "./session-activity.js";
+import { isTaskPerformanceReport, type TaskPerformanceReport } from "../performance/task-report.js";
+import { isVerificationEvidence } from "../workflow/verification-evidence.js";
 import { isCommandRecord, type CommandRecord } from "../tools/command-record.js";
 import {
   applyUsageSample,
@@ -147,6 +150,7 @@ export interface SessionLineage {
 }
 
 export interface LoadedSession {
+  performanceReport?: TaskPerformanceReport;
   costs?: import("../status/cost.js").CostEstimate[];
   summary: SessionSummary;
   timeline: StoredTimelineEntry[];
@@ -348,6 +352,7 @@ interface TeamUpdatedEvent extends EventBase { type: "team_updated"; team: Sessi
 
 type SessionEvent =
   | (EventBase & { type: "cost_estimated"; estimate: import("../status/cost.js").CostEstimate })
+  | (EventBase & { type: "performance_report"; report: TaskPerformanceReport })
   | TeamUpdatedEvent
   | SessionCreatedEvent
   | TitleUpdatedEvent
@@ -458,6 +463,10 @@ function parseEvent(value: unknown): SessionEvent {
   }
 
   const base = { version: SESSION_FORMAT_VERSION, at: value.at } as const;
+  if (value.type === "performance_report") {
+    if (!isTaskPerformanceReport(value.report)) throw new Error("Session performance report is invalid");
+    return { ...base, type: "performance_report", report: structuredClone(value.report) };
+  }
   if (value.type === "cost_estimated") {
     if (!isCostEstimate(value.estimate)) throw new Error("Session cost estimate is invalid");
     return { ...base, type: "cost_estimated", estimate: structuredClone(value.estimate) };
@@ -680,7 +689,8 @@ function isVerificationSuite(value: unknown): value is VerificationSuiteResult {
       typeof command.id === "string" && typeof command.label === "string" && typeof command.command === "string" &&
       (command.tier === "fast" || command.tier === "full") && typeof command.timeoutMs === "number") &&
     (value.reason === undefined || typeof value.reason === "string") &&
-    (value.stale === undefined || typeof value.stale === "boolean");
+    (value.stale === undefined || typeof value.stale === "boolean") &&
+    (value.evidence === undefined || isVerificationEvidence(value.evidence));
 }
 
 function isWorkflow(value: unknown): value is WorkflowState {
@@ -734,6 +744,7 @@ function workflowSnapshot(workflow: WorkflowState): WorkflowState {
         skipped: suite.skipped.map((command) => ({ ...command })),
         ...(suite.reason ? { reason: suite.reason } : {}),
         ...(suite.stale === undefined ? {} : { stale: suite.stale }),
+        ...(suite.evidence ? { evidence: structuredClone(suite.evidence) } : {}),
       },
     }),
   };
@@ -789,6 +800,7 @@ async function readSession(filePath: string, trace: PerformanceTrace, summaryOnl
   let context: Array<Record<string, unknown>> = [];
   let usage = createEmptySessionUsage();
   const costs: CostEstimate[] = [];
+  let performanceReport: TaskPerformanceReport | undefined;
 
   let goal: SessionGoal | undefined;
   let workflow: WorkflowState | undefined;
@@ -820,6 +832,7 @@ async function readSession(filePath: string, trace: PerformanceTrace, summaryOnl
     }
     updatedAt = event.at;
     if (event.type === "cost_estimated" && !summaryOnly) costs.push(event.estimate);
+    if (event.type === "performance_report" && !summaryOnly) performanceReport = event.report;
     if (event.type === "title_updated") {
       title = event.title;
       titlePending = false;
@@ -889,6 +902,7 @@ async function readSession(filePath: string, trace: PerformanceTrace, summaryOnl
     context,
     usage,
     ...(costs.length ? { costs } : {}),
+    ...(performanceReport ? { performanceReport } : {}),
     ...(goal ? { goal } : {}),
     ...(workflow ? { workflow } : {}),
     ...(taskProgress ? { taskProgress: cloneTaskProgress(taskProgress) } : {}),
@@ -1144,6 +1158,7 @@ function sessionHeaderDigest(serialized: string): string {
 }
 
 export class SessionStore implements SessionStoreLike {
+  readonly activity: SessionActivity;
   readonly performanceTrace: PerformanceTrace;
   readonly #directory: string;
   readonly #now: () => Date;
@@ -1160,6 +1175,7 @@ export class SessionStore implements SessionStoreLike {
   constructor(options: SessionStoreOptions = {}) {
     this.performanceTrace = options.trace ?? new PerformanceTrace();
     this.#directory = options.directory ?? defaultSessionDirectory();
+    this.activity = new SessionActivity(this.#directory);
     this.#now = options.now ?? (() => new Date());
     this.#createId = options.createId ?? randomUUID;
     this.#outputs = new SessionOutputStorage(this.#directory, this.performanceTrace);
@@ -1387,6 +1403,11 @@ export class SessionStore implements SessionStoreLike {
     return this.#append(sessionId, { version: SESSION_FORMAT_VERSION, type: "cost_estimated", at: this.#now().toISOString(), estimate: structuredClone(estimate) });
   }
 
+  appendPerformance(sessionId: string, report: TaskPerformanceReport): Promise<void> {
+    if (!isTaskPerformanceReport(report)) throw new Error("Invalid performance report");
+    return this.#append(sessionId, { version: SESSION_FORMAT_VERSION, type: "performance_report", at: this.#now().toISOString(), report: structuredClone(report) });
+  }
+
   appendUsage(
     sessionId: string,
     usage: TokenUsageSample | null,
@@ -1425,7 +1446,8 @@ export class SessionStore implements SessionStoreLike {
     await this.setGoal(sessionId, { ...current, ...patch, updated_at: patch.updated_at ?? this.#now().toISOString() });
   }
 
-  setTeam(sessionId: string, team: SessionTeamReference): Promise<void> {
+  async setTeam(sessionId: string, team: SessionTeamReference): Promise<void> {
+    for (const member of team.members) if (member.sessionId) await this.activity.retainTeam(member.sessionId);
     return this.#append(sessionId, { version: SESSION_FORMAT_VERSION, type: "team_updated", at: this.#now().toISOString(), team: structuredClone(team) });
   }
   setWorkflow(sessionId: string, workflow: WorkflowState): Promise<void> {
@@ -1728,24 +1750,30 @@ export class SessionStore implements SessionStoreLike {
     return { matches: matches.slice(offset, offset + limit), total, skipped };
   }
 
-  async deleteMany(sessionIds: readonly string[]): Promise<void> {
+  async deleteMany(sessionIds: readonly string[], expectedActivity?: Readonly<Record<string, string>>): Promise<void> {
     const uniqueIds = [...new Set(sessionIds)];
     uniqueIds.forEach((sessionId) => this.#assertSessionId(sessionId));
-    uniqueIds.forEach((sessionId) => {
-      this.#deletedSessionIds.add(sessionId);
-      this.#dropSearchCache(this.#filePath(sessionId));
-    });
     await Promise.all(uniqueIds.map((sessionId) => {
       const previous = this.#writeQueues.get(sessionId) ?? Promise.resolve();
       const next = previous
         .catch(() => undefined)
         .then(async () => {
           await this.#ensureOutputsInitialized();
-          await this.#withSessionLock(sessionId, async () => {
-            await this.#outputs.deleteSession(sessionId);
-            await fs.rm(this.#filePath(sessionId), { force: true });
+          await this.activity.withInactive(sessionId, () => this.#withSessionLock(sessionId, async () => {
+            if (expectedActivity?.[sessionId] !== undefined) {
+              const loaded = await readSession(this.#filePath(sessionId), this.performanceTrace, true);
+              const stat = await fs.lstat(this.#filePath(sessionId));
+              const fingerprint = `${loaded.summary.updated_at}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+              if (fingerprint !== expectedActivity[sessionId] || loaded.summary.team) throw new Error("Session cleanup preview changed or has retained team ownership");
+            }
+            this.#deletedSessionIds.add(sessionId);
+            this.#dropSearchCache(this.#filePath(sessionId));
+            try {
+              await this.#outputs.deleteSession(sessionId);
+              await fs.rm(this.#filePath(sessionId), { force: true });
+            } catch (error) { this.#deletedSessionIds.delete(sessionId); throw error; }
             this.#outputReferences.delete(sessionId);
-          });
+          }), expectedActivity?.[sessionId] !== undefined);
         });
       this.#writeQueues.set(sessionId, next);
       void next.finally(() => {

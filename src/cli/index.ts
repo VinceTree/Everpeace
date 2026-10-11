@@ -26,6 +26,10 @@ async function createRegistry() {
 }
 
 export async function main(args = process.argv.slice(2)): Promise<number> {
+  if (args[0] === "privacy") {
+    const { runPrivacyCommand } = await import("./commands/privacy.js");
+    return runPrivacyCommand(args.slice(1));
+  }
   let options;
   try {
     options = parseArgs(args);

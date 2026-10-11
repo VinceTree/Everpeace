@@ -1,5 +1,7 @@
 # Coding Task Benchmarking
 
+修复分配与 single/team 是两个独立实验。`pnpm exec tsx tests/fixtures/prepare-controlled-experiments.ts <新绝对证据目录>` 在 build 后准备冻结的 19 任务、每臂三次、配对交错计划和无网络生产 preflight；端点/model/budget 草案不是付费授权。`ordering: paired` 保留每个 task/repetition 的两臂，交替先后顺序，不用重跑替换失败。[计量、比较规则与限制](architecture/VALIDATION_PRIVACY_PERFORMANCE.md)。
+
 Everpeace 的 benchmark 层比较 harness、模型策略和恢复策略在真实 coding task 上的表现。主指标是固定请求预算内，由独立断言确认的任务通过率。该层不改变 Agent 的权限、验证和 Session JSONL 语义，也不会自动 reset 或清理日常工作区。
 
 当前 [十项 Node 清单](benchmark/DEEPSEEK_NODE_TASKS.json) 已包含固定 revision、setup、pristine assertion、reviewed seed/reference patch 与 evaluator-owned acceptance；正式 parser 缺少任一项都会在模型请求前拒绝。十项 Chalk、Commander 和 Day.js fixture 已逐项离线证明 pristine pass → seeded assertion failure → reference pass。Commander 与 Day.js 使用上游 lockfile；Chalk 固定 revision 原本用 `.npmrc` 禁用 lockfile，因此评测材料保存 evaluator-owned `chalk-package-lock.json`，准备器在 setup 前排他复制。三组统一用显式 npmjs registry 执行 `npm ci --ignore-scripts`，避免本机 registry 配置改变依赖来源。

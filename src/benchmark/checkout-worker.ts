@@ -14,6 +14,7 @@ interface CheckoutWorkerInput {
   sessionsRoot: string;
   model?: RegisteredModel;
   loopStrategy?: LoopStrategy;
+  repairStrategy?: "baseline" | "candidate";
   team?: TeamOptions;
 }
 
@@ -112,7 +113,7 @@ export async function main(): Promise<void> {
     ? installPreflightProviderBoundary(request.model.model_name, request.team)
     : undefined;
   const module = await import(request.productionModule) as {
-    createProductionBenchmarkAdapter?: (options: { model: RegisteredModel; sessionsRoot: string; loopStrategy?: LoopStrategy; team?: TeamOptions }) => BenchmarkHarnessAdapter;
+    createProductionBenchmarkAdapter?: (options: { model: RegisteredModel; sessionsRoot: string; loopStrategy?: LoopStrategy; team?: TeamOptions; repairStrategy?: "baseline" | "candidate" }) => BenchmarkHarnessAdapter;
   };
   if (typeof module.createProductionBenchmarkAdapter !== "function") throw new Error("Checkout production module does not export createProductionBenchmarkAdapter");
   if (!request.model || !request.task || !request.sessionsRoot) throw new Error("Checkout worker run input is incomplete");
@@ -120,7 +121,7 @@ export async function main(): Promise<void> {
     throw new Error("Checkout benchmark requires high reasoning and 32768 output tokens");
   }
   const ledger = new RequestAttemptLedger((request.tokenBudget === undefined ? {} : { tokenBudget: request.tokenBudget }));
-  const adapter = module.createProductionBenchmarkAdapter({ model: request.model, sessionsRoot: request.sessionsRoot, ...(request.loopStrategy === undefined ? {} : { loopStrategy: request.loopStrategy }), ...(request.team ? { team: request.team } : {}) });
+  const adapter = module.createProductionBenchmarkAdapter({ model: request.model, sessionsRoot: request.sessionsRoot, ...(request.loopStrategy === undefined ? {} : { loopStrategy: request.loopStrategy }), ...(request.team ? { team: request.team } : {}), ...(request.repairStrategy === undefined ? {} : { repairStrategy: request.repairStrategy }) });
   const controller = new AbortController();
   const result = await adapter.run(request.task, {
     task: request.task,

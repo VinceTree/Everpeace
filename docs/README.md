@@ -17,6 +17,7 @@
 | [TOOLS](architecture/TOOLS.md) | 文件观察、编辑、规则、搜索、后台命令、LSP | 修改编码工具 |
 | [STATE_AND_UI](architecture/STATE_AND_UI.md) | Session/凭据/usage/恢复与终端不变量 | 修改状态或 UI |
 | [SECURITY_AND_DIAGNOSTICS](architecture/SECURITY_AND_DIAGNOSTICS.md) | 私密报告、供应链、来源、搜索、doctor、估算和公开成绩 | 修改问题 11–20 |
+| [VALIDATION_PRIVACY_PERFORMANCE](architecture/VALIDATION_PRIVACY_PERFORMANCE.md) | 验证解释、隐私、Memory 到期、子目录、正文与性能 | 修改问题 20–30 |
 | [DEVELOPMENT](DEVELOPMENT.md) | 工具链、命令、测试、CI、交付 | 开始修改及交付前 |
 | [WINDOWS_RUNNER](WINDOWS_RUNNER.md) | 专用 Windows 原生验收部署、发布门禁与失败演练 | 接入 Runner 与交付候选 |
 | [PLAN](PLAN.md) | 当前里程碑、剩余证据、后续顺序 | 规划工作 |

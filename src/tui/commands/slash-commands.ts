@@ -14,6 +14,8 @@ export const SLASH_COMMANDS = [
   "/mcp",
   "/web",
   "/cost",
+  "/perf",
+  "/privacy",
   "/skills",
   "/memory",
   "/plan",
@@ -89,6 +91,8 @@ export const TUI_HELP = `Slash commands
   /mcp     Inspect MCP servers; trust/revoke <server>; reconnect without replay
   /web     Configure HTML search or your Brave LLM Context API subscription
   /cost    View estimates and configure model prices; token budgets are not spending caps
+  /perf    View the latest task performance report without a model request
+  /privacy Inspect storage, configure retention, scan and safely export sessions
   /skills  Create, install, inspect, and use local skills
   /memory  View and manage learned experience
   /plan    Plan a request; show, execute an approved plan, or exit

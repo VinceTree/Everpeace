@@ -75,6 +75,7 @@
     "@types/node": "^22.10.0",
     "@types/proper-lockfile": "^4.1.4",
     "@types/react": "^19.3.0",
+    "fast-check": "4.10.2",
     "ink-testing-library": "^4.0.0",
     "oxlint": "1.87.0",
     "react-test-renderer": "19.3.0",

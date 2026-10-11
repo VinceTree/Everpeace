@@ -1,5 +1,13 @@
 # 当前开发计划
 
+## 当前：验证证据、隐私、Memory 与性能（20–30）
+
+按用户授权补齐 Request token budget 表述、可选验证解释、任务性能报告、Session 保留/安全导出/扫描、Memory 到期及 revision-bound 审查、Git 子目录/linked worktree、运行时状态抽取、结构化正文及安全属性回归。契约见 [专题](architecture/VALIDATION_PRIVACY_PERFORMANCE.md)，实际门禁与交付见 HANDOFF。
+
+生产保持最多三轮修复和默认单 Agent，benchmark 才能启用修复候选策略。独立 repair/team 交错计划、固定分母和未知计量用于未来对照；无任务专属错误修改证据不能计算错误率或推荐改默认。修复收益、团队收益、Memory 实际模型效果及既有 DeepSeek 闭环仍缺真实数据；本轮零付费调用。
+
+新代码重新冻结候选，不能复用前次成功收据。沿用当前用户的提交、推送、补丁及 Release 授权；保护 PR 门禁、准确候选消费者和专用 Windows required native 全成功前禁止发布。用户机器未就绪时先完成代码和部署说明，不降低门槛。
+
 ## 已实施：安全、诊断与评测补丁（11–20）
 
 按用户已批准方案完成私密报告、持续供应链门禁、多层 SBOM 与发布收据、外部来源/宿主注入验收、Web 压力/DOM 与 Brave、分阶段 doctor、九类固定评分器、逐候选成绩与请求费用估算。实现契约与入口统一在 [安全与诊断专题](architecture/SECURITY_AND_DIAGNOSTICS.md)，进度和实际证据只在 HANDOFF。
@@ -91,4 +99,4 @@
 
 DeepSeek 既有协议工程及付费 A/B 准备保留；历史候选不能代表当前团队实现，源码变化需重绑定 source/build/harness/evaluation digest。预算草案见 [BENCHMARKING](BENCHMARKING.md)，不构成调用授权。递归团队、成员互调、远程分布式执行、Web/Desktop、OAuth、私有 Skill 和插件市场留待独立设计。
 
-此前团队交付已完成，证据见交接归档。后续提交或发布需新的明确授权，不继承旧授权；保留用户全部既有 tracked/untracked 内容。
+此前团队交付已完成，证据见交接归档。历史交接本身不授予新操作权限；本轮提交、推送和补丁交付按当前用户明确授权执行，付费模型实验仍需另行取得数值预算授权。保留用户全部既有 tracked/untracked 内容。

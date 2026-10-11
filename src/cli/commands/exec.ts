@@ -127,6 +127,7 @@ export function createProcessExecCommandHost(options: { outputStallMs?: number }
 
 function progressEvent(event: ExecEvent): ExecProgressEvent {
   switch (event.type) {
+    case "performance_report": return { ...event };
     case "cost_estimated": return { ...event };
     case "team_updated": case "agent_updated": case "team_usage": case "agent_integrated":
     case "session_started":

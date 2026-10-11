@@ -39,6 +39,11 @@ Usage:
 ${EXEC_HELP}
 
 Commands inside the agent:
+  /privacy                  Inspect retention, scan or safely export local Sessions
+  /perf                     Show the latest task performance report
+  /memory                   Inspect and review learned entries
+  /cost                     Configure user prices and estimated-cost alerts
+  /web                      Configure HTML search or the Brave provider
   !<command>                Run a native shell command directly
   /login                    Login and activate one model
   /model                    Switch the active model

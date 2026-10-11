@@ -10,10 +10,21 @@ import type { ApplyPatchOperation } from "../tools/apply-patch.js";
 
 const MAX_FILES = 10_000;
 const MAX_BYTES = 64 * 1024 * 1024;
-export interface TeamWorkspaceRecord { version: 1; source: string; workspace: string; owner: string; commonGitDir: string; baseline: Record<string, string | null>; }
+export interface TeamWorkspaceRecord { version: 1 | 2; source: string; workspace: string; owner: string; commonGitDir: string; baseline: Record<string, string | null>; gitRoot?: string; workspaceRoot?: string; workspacePrefix?: string; }
 export function within(root: string, target: string): boolean {
   const relative = path.relative(path.resolve(root), path.resolve(target));
   return relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`));
+}
+export function workspaceTraversalRoots(record: TeamWorkspaceRecord): string[] {
+  const roots = [record.owner];
+  if (record.workspaceRoot && path.resolve(record.workspaceRoot) !== path.resolve(record.workspace)) {
+    let current = record.workspaceRoot; roots.push(current);
+    const relative = path.relative(current, path.dirname(record.workspace));
+    if (relative && relative !== "." && !relative.startsWith("..") && !path.isAbsolute(relative)) {
+      for (const component of relative.split(path.sep)) { current = path.join(current, component); roots.push(current); }
+    }
+  }
+  return roots;
 }
 export function teamWorkspaceRoot(): string { return path.join(os.tmpdir(), "everpeace-teams"); }
 export function workspaceOwnershipFile(owner: string): string { if (!/^[a-f0-9-]{36}$/u.test(path.basename(owner)) || path.dirname(path.resolve(owner)) !== path.resolve(teamWorkspaceRoot())) throw new Error("Invalid workspace owner"); return path.join(teamWorkspaceRoot(), "records", `${path.basename(owner)}.json`); }
@@ -59,17 +70,19 @@ async function names(root: string, signal?: AbortSignal): Promise<string[]> {
 export async function createTeamWorkspace(sourcePath: string, signal?: AbortSignal, onOwned?: (record: TeamWorkspaceRecord) => Promise<void>): Promise<TeamWorkspaceRecord> {
   const source = await fs.realpath(sourcePath);
   const root = await fs.realpath((await git(source, ["rev-parse", "--show-toplevel"], signal)).trim());
-  if (source !== root) throw new Error("Parallel coding currently requires the Git repository root as workspace");
+  if (!within(root, source)) throw new Error("Workspace is outside its Git repository");
+  const prefix = path.relative(root, source).split(path.sep).join("/");
   const head = (await git(source, ["rev-parse", "--verify", "HEAD"], signal)).trim();
   const entries = await git(source, ["ls-files", "--stage", "-z"], signal);
   if (entries.split("\0").some((entry) => entry.startsWith("160000 "))) throw new Error("Parallel coding cannot snapshot Git submodules");
   const commonGitDir = path.resolve(source, (await git(source, ["rev-parse", "--git-common-dir"], signal)).trim());
   const owner = path.join(teamWorkspaceRoot(), randomUUID());
-  const workspace = path.join(owner, "w");
+  const workspaceRoot = path.join(owner, "w");
+  const workspace = path.join(workspaceRoot, prefix);
   const baseline: Record<string, string | null> = Object.create(null) as Record<string, string | null>;
   const contents = new Map<string, Buffer | null>();
   let total = 0;
-  const headFiles = (await git(source, ["ls-tree", "-r", "--name-only", "-z", head], signal)).split("\0").filter(Boolean);
+  const headFiles = (await git(root, ["ls-tree", "-r", "--full-tree", "--name-only", "-z", head, "--", prefix || "."], signal)).split("\0").filter(Boolean).map((name) => prefix ? name.slice(prefix.length + 1) : name);
   const currentFiles = await names(source, signal);
   const listed = [...new Set([...headFiles, ...currentFiles])];
   if (listed.length > MAX_FILES) throw new Error("Team snapshot has too many files");
@@ -87,7 +100,7 @@ export async function createTeamWorkspace(sourcePath: string, signal?: AbortSign
     if ((current === null ? null : sha256Bytes(current)) !== baseline[name]) throw new Error(`Workspace changed during snapshot: ${name}`);
   }
   if ((await git(source, ["rev-parse", "--verify", "HEAD"], signal)).trim() !== head) throw new Error("Git HEAD changed during snapshot");
-  const record: TeamWorkspaceRecord = { version: 1, source, workspace, owner, commonGitDir, baseline };
+  const record: TeamWorkspaceRecord = { version: 2, source, workspace, owner, commonGitDir, baseline, gitRoot: root, workspaceRoot, workspacePrefix: prefix };
   const ownershipText = JSON.stringify(record);
   if (Buffer.byteLength(ownershipText) > 2 * 1024 * 1024) throw new Error("Team snapshot metadata exceeded its byte limit");
   await fs.mkdir(path.join(teamWorkspaceRoot(), "records"), { recursive: true });
@@ -96,8 +109,9 @@ export async function createTeamWorkspace(sourcePath: string, signal?: AbortSign
   await fs.writeFile(workspaceOwnershipFile(owner), ownershipText, { flag: "wx", mode: 0o600 });
   // Failed creation retains its ownership marker and partial files for explicit cleanup.
   await onOwned?.(record);
-  await git(source, ["worktree", "add", "--detach", "--no-checkout", workspace, head], signal);
-  await git(workspace, ["read-tree", head], signal);
+  await git(source, ["worktree", "add", "--detach", "--no-checkout", workspaceRoot, head], signal);
+  await git(workspaceRoot, ["read-tree", head], signal);
+  await fs.mkdir(workspace, { recursive: true });
   for (const [name, content] of contents) {
     signal?.throwIfAborted();
     const target = path.join(workspace, name);
@@ -107,13 +121,22 @@ export async function createTeamWorkspace(sourcePath: string, signal?: AbortSign
   return record;
 }
 export async function loadTeamWorkspace(workspace: string, source: string, allowMissing = false): Promise<TeamWorkspaceRecord> {
-  const owner = path.dirname(path.resolve(workspace));
-  if (!within(teamWorkspaceRoot(), owner) || path.basename(workspace) !== "w") throw new Error("Unowned team workspace");
-  for (const directory of [teamWorkspaceRoot(), path.join(teamWorkspaceRoot(), "records"), owner, workspace]) { try { const stat = await fs.lstat(directory); if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Team workspace ownership traverses a link"); } catch (error) { if (!(allowMissing && directory === workspace && (error as NodeJS.ErrnoException).code === "ENOENT")) throw error; } }
+  const parts = path.relative(teamWorkspaceRoot(), path.resolve(workspace)).split(path.sep);
+  if (parts.length < 2 || parts[1] !== "w" || !/^[a-f0-9-]{36}$/u.test(parts[0] ?? "")) throw new Error("Unowned team workspace");
+  const owner = path.join(teamWorkspaceRoot(), parts[0]!);
+  const workspaceRoot = path.join(owner, "w");
+  const directories = [teamWorkspaceRoot(), path.join(teamWorkspaceRoot(), "records"), owner, ...parts.slice(1).map((_, i) => path.join(owner, ...parts.slice(1, i + 2)))];
+  for (const directory of directories) { try { const stat = await fs.lstat(directory); if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Team workspace ownership traverses a link"); } catch (error) { if (!(allowMissing && within(workspaceRoot, directory) && (error as NodeJS.ErrnoException).code === "ENOENT")) throw error; } }
   const marker = workspaceOwnershipFile(owner); const markerStat = await fs.lstat(marker);
   if (!markerStat.isFile() || markerStat.isSymbolicLink() || markerStat.size > 2 * 1024 * 1024) throw new Error("Invalid workspace ownership record");
   const value = JSON.parse(await fs.readFile(marker, "utf8")) as TeamWorkspaceRecord;
-  if (value.version !== 1 || value.owner !== owner || value.workspace !== workspace || value.source !== await fs.realpath(source) || !value.baseline || typeof value.baseline !== "object") throw new Error("Team workspace ownership mismatch");
+  if (![1, 2].includes(value.version) || value.owner !== owner || value.workspace !== workspace || value.source !== await fs.realpath(source) || !value.baseline || typeof value.baseline !== "object") throw new Error("Team workspace ownership mismatch");
+  if (value.version === 1 && workspace !== workspaceRoot) throw new Error("Legacy workspace mapping mismatch");
+  if (value.version === 2) {
+    const gitRoot = await fs.realpath((await git(value.source, ["rev-parse", "--show-toplevel"])).trim());
+    const prefix = path.relative(gitRoot, value.source).split(path.sep).join("/");
+    if (!within(gitRoot, value.source) || value.gitRoot !== gitRoot || value.workspaceRoot !== workspaceRoot || value.workspacePrefix !== prefix || value.workspace !== path.join(workspaceRoot, prefix)) throw new Error("Workspace mapping changed");
+  }
   if (Array.isArray(value.baseline) || Object.entries(value.baseline).length > MAX_FILES || Object.entries(value.baseline).some(([name, hash]) => !name || path.isAbsolute(name) || name.includes(":") || name.includes("\0") || !within(workspace, path.join(workspace, name)) || hash !== null && (typeof hash !== "string" || !/^[a-f0-9]{64}$/u.test(hash)))) throw new Error("Invalid team baseline record");
   if (value.commonGitDir !== path.resolve(value.source, (await git(value.source, ["rev-parse", "--git-common-dir"])).trim())) throw new Error("Team Git ownership changed");
   return value;
@@ -161,8 +184,9 @@ export async function workspaceOperations(record: TeamWorkspaceRecord, allowedPa
 }
 export async function removeTeamWorkspace(record: TeamWorkspaceRecord): Promise<void> {
   await loadTeamWorkspace(record.workspace, record.source, true);
-  const registered = (await git(record.source, ["worktree", "list", "--porcelain", "-z"])).split("\0").some((entry) => entry === `worktree ${record.workspace}`);
-  if (registered) await git(record.source, ["worktree", "remove", "--force", record.workspace]);
+  const worktree = record.workspaceRoot ?? record.workspace;
+  const registered = (await git(record.source, ["worktree", "list", "--porcelain", "-z"])).split("\0").some((entry) => entry.startsWith("worktree ") && path.resolve(entry.slice(9)) === path.resolve(worktree));
+  if (registered) await git(record.source, ["worktree", "remove", "--force", worktree]);
   const owner = await fs.realpath(record.owner);
   const root = await fs.realpath(teamWorkspaceRoot());
   if (!within(root, owner) || owner === root) throw new Error("Unsafe team cleanup target");

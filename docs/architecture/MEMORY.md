@@ -1,5 +1,7 @@
 # Learned Memory
 
+项目条目在创建/人工复核后 90 天到期并暂停召回，自动合并和使用不续期；长期用户偏好不自动到期。`/memory list/inspect/renew/correct/disable/delete` 使用 revision-bound 人工操作；实际请求前重新检查有效性。来源集合、superseded 关系和回归见 [Memory 生命周期](VALIDATION_PRIVACY_PERFORMANCE.md)。
+
 Everpeace 的 learned memory 是本地、分层、可审计的经验存储。它不替代当前 Session context、`AGENTS.md`、仓库证据或用户当前指令，也不使用向量数据库。设计参考 Codex 的“提取与整理分离”原则，但使用 Markdown、JSON 任务文件和普通 Responses 请求适配当前单 Agent 与兼容端点。
 
 ## 数据与作用域

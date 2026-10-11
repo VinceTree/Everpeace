@@ -8,6 +8,7 @@ export const nativeTests = [
   "native LSP profile denies writes, state reads and direct networking",
   "native team sandbox proves root/state/Git denial before coding, or fails closed",
   "two production workers integrate independently and only the root native check determines success",
+  "native subdirectory and linked worktree isolation protects Git and sibling roots",
 ];
 
 export function candidateSha(value) {

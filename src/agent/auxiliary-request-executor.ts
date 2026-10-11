@@ -10,6 +10,7 @@ interface RequestScope extends RequestAccountingScope {
 
 /** Keep operation admission separate from the lifetime auxiliary usage display. */
 export class AuxiliaryRequestExecutor {
+  constructor(readonly performance?: () => import("../performance/task-report.js").TaskPerformance | undefined) {}
   #usage = createEmptySessionUsage();
   readonly #scopes = new WeakMap<AbortSignal | RequestAttemptLedger, RequestScope>();
   #cleanupFailure: ResourceCleanupError | undefined;
@@ -36,7 +37,8 @@ export class AuxiliaryRequestExecutor {
     if (scope && accounting && scope.executor !== accounting.executor) throw new Error("Request accounting scope changed executors");
     if (!scope) {
       const ledger = accounting?.ledger ?? new RequestAttemptLedger();
-      scope = { ledger, executor: accounting?.executor ?? new RequestExecutor(ledger), recorded: ledger.snapshot().attempts.length };
+      // A dynamic observer remains owned by the executor that admitted the operation.
+      scope = { ledger, executor: accounting?.executor ?? new RequestExecutor(ledger, undefined, this.performance?.()), recorded: ledger.snapshot().attempts.length };
       if (scopeKey) this.#scopes.set(scopeKey, scope);
     }
     const controller = new AbortController();
