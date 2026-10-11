@@ -1,3 +1,5 @@
+import { redactAdditionalSecrets } from "./sensitive-scan.js";
+
 function redactPrivateKeys(value: string): string {
   return value.replace(/-----BEGIN [^-]+-----[\s\S]*?(?:-----END [^-]+-----|$)/giu, (secret) =>
     secret.replace(/[^\r\n]+/gu, (line) => `${line.match(/^[\t ]*/u)?.[0] ?? ""}[private key redacted]`),
@@ -14,7 +16,7 @@ function redactJsonStringSecrets(value: string): string {
   // Unchanged literals retain their original escaping and surrounding layout.
   return value.replace(/"(?:\\[\s\S]|[^"\\])*"/gu, (literal) => {
     const decoded = JSON.parse(literal) as string;
-    const redacted = redactPlainSecrets(decoded, true);
+    const redacted = redactAdditionalSecrets(redactPlainSecrets(decoded, true));
     return decoded === redacted ? literal : JSON.stringify(redacted);
   });
 }
@@ -38,5 +40,5 @@ function redactPlainSecrets(value: string, preserveValueQuotes: boolean): string
 
 /** Redact before retaining or paging text; false preserves legacy Memory quote handling. */
 export function redactSecretsPreservingLayout(value: string, preserveValueQuotes = true): string {
-  return redactPlainSecrets(preserveValueQuotes ? redactJsonStringSecrets(value) : value, preserveValueQuotes);
+  return redactAdditionalSecrets(redactPlainSecrets(preserveValueQuotes ? redactJsonStringSecrets(value) : value, preserveValueQuotes));
 }

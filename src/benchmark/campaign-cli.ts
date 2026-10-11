@@ -16,6 +16,7 @@ import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult, BenchmarkTask } f
 import { isResponsesProfile, type ResponsesProfile } from "../providers/capabilities.js";
 import { normalizeBaseUrl } from "../providers/openai-compatible.js";
 import { compareAgentStrategies } from "./strategy-comparison.js";
+import { controlledComparison } from "./controlled-comparison.js";
 import { normalizeTeamOptions, type TeamOptions } from "../team/types.js";
 import { captureBenchmarkEvaluationDigest } from "./evaluation-identity.js";
 import { publicBenchmarkReport, benchmarkMarkdown } from "./report.js";
@@ -30,7 +31,7 @@ interface ExternalHarnessConfig {
   expected: { model: string; reasoning: "high"; maxOutputTokens: number };
 }
 
-interface ProductionHarnessConfig { kind: "everpeace"; name?: "everpeace"; team?: TeamOptions }
+interface ProductionHarnessConfig { kind: "everpeace"; name?: string; team?: TeamOptions; repairStrategy?: "baseline" | "candidate" }
 
 interface CheckoutHarnessConfig {
   kind: "everpeace-checkout";
@@ -42,6 +43,7 @@ interface CheckoutHarnessConfig {
   buildDigest: string;
   expected: { model: string; reasoning: "high"; maxOutputTokens: 32_768 };
   loopStrategy?: "baseline" | "candidate";
+  repairStrategy?: "baseline" | "candidate";
   team?: TeamOptions;
 }
 
@@ -68,6 +70,7 @@ export interface CampaignConfig {
   modelBaseUrl?: string;
   evaluationDigest?: string;
   seed: number;
+  ordering?: "random" | "paired";
   repetitions: number;
   taskTokenBudget: number;
   campaignTokenBudget: number;
@@ -112,7 +115,10 @@ export function parseCampaignConfig(value: unknown, configPath: string): Campaig
   if (!Array.isArray(input.harnesses) || input.harnesses.length === 0) throw new Error("harnesses must be a non-empty array");
   const harnesses = input.harnesses.map((item, index): ProductionHarnessConfig | CheckoutHarnessConfig | ExternalHarnessConfig | DshHarnessConfig => {
     const harness = record(item, `harnesses[${index}]`);
-    if (harness.kind === "everpeace") return { kind: "everpeace", name: "everpeace", ...(harness.team === undefined ? {} : { team: normalizeTeamOptions(record(harness.team, `harnesses[${index}].team`) as TeamOptions) }) };
+    if (harness.kind === "everpeace") {
+      if (harness.repairStrategy !== undefined && !["baseline", "candidate"].includes(String(harness.repairStrategy))) throw new Error("repairStrategy must be baseline or candidate");
+      return { kind: "everpeace", name: harness.name === undefined ? "everpeace" : string(harness.name, "harness.name"), ...(harness.repairStrategy ? { repairStrategy: harness.repairStrategy as "baseline" | "candidate" } : {}), ...(harness.team === undefined ? {} : { team: normalizeTeamOptions(record(harness.team, `harnesses[${index}].team`) as TeamOptions) }) };
+    }
     if (harness.kind !== "instrumented-process" && harness.kind !== "dsh" && harness.kind !== "everpeace-checkout") throw new Error(`harnesses[${index}].kind is unsupported`);
     const expected = record(harness.expected, `harnesses[${index}].expected`);
     if (expected.reasoning !== "high") throw new Error(`harnesses[${index}].expected.reasoning must be high`);
@@ -139,10 +145,12 @@ export function parseCampaignConfig(value: unknown, configPath: string): Campaig
       };
     }
     if (harness.kind === "everpeace-checkout") {
+      if (harness.repairStrategy !== undefined && harness.repairStrategy !== "baseline" && harness.repairStrategy !== "candidate") throw new Error("Invalid repairStrategy");
       if (harness.loopStrategy !== undefined && harness.loopStrategy !== "baseline" && harness.loopStrategy !== "candidate") throw new Error("loopStrategy must be baseline or candidate");
       return {
         kind: "everpeace-checkout",
         ...shared,
+        ...(harness.repairStrategy === undefined ? {} : { repairStrategy: harness.repairStrategy as "baseline" | "candidate" }),
         ...(harness.team ? { team: normalizeTeamOptions(record(harness.team, `harnesses[${index}].team`) as TeamOptions) } : {}),
         ...(harness.loopStrategy === undefined ? {} : { loopStrategy: harness.loopStrategy as "baseline" | "candidate" }),
         sourceRoot: resolve(root, string(harness.sourceRoot, `harnesses[${index}].sourceRoot`)),
@@ -159,13 +167,15 @@ export function parseCampaignConfig(value: unknown, configPath: string): Campaig
       argsTemplate: stringArray(harness.argsTemplate, `harnesses[${index}].argsTemplate`),
     };
   });
-  const harnessNames = harnesses.map((harness) => harness.kind === "everpeace" ? "everpeace" : harness.name);
+  const harnessNames = harnesses.map((harness) => harness.name ?? "everpeace");
   if (new Set(harnessNames).size !== harnessNames.length) throw new Error("Harness names must be unique");
   const path = (field: string) => resolve(root, string(input[field], field));
   const taskIds = input.taskIds === undefined ? undefined : stringArray(input.taskIds, "taskIds");
   if (input.responsesProfile !== undefined && !isResponsesProfile(input.responsesProfile)) throw new Error("Invalid responsesProfile");
   if (taskIds?.length === 0) throw new Error("taskIds must contain at least one task when provided");
   if (taskIds && new Set(taskIds).size !== taskIds.length) throw new Error("taskIds must not contain duplicates");
+  if (input.ordering !== undefined && input.ordering !== "random" && input.ordering !== "paired") throw new Error("Invalid ordering");
+  if (input.ordering === "paired" && harnesses.length !== 2) throw new Error("Paired campaigns require two harnesses");
   return {
     campaignId: string(input.campaignId, "campaignId"),
     catalogPath: path("catalogPath"),
@@ -178,6 +188,7 @@ export function parseCampaignConfig(value: unknown, configPath: string): Campaig
     ...(input.modelBaseUrl === undefined ? {} : { modelBaseUrl: normalizeBaseUrl(string(input.modelBaseUrl, "modelBaseUrl")) }),
     ...(input.evaluationDigest === undefined ? {} : { evaluationDigest: sha256(input.evaluationDigest, "evaluationDigest") }),
     seed: integer(input.seed, "seed"),
+    ...(input.ordering === undefined ? {} : { ordering: input.ordering as "random" | "paired" }),
     repetitions: integer(input.repetitions, "repetitions"),
     taskTokenBudget: integer(input.taskTokenBudget, "taskTokenBudget"),
     campaignTokenBudget: integer(input.campaignTokenBudget, "campaignTokenBudget"),
@@ -270,7 +281,7 @@ const DSH_PREFLIGHT_TIMEOUT_MS = process.platform === "win32" ? 60_000 : 30_000;
 export async function preflight(config: CampaignConfig): Promise<void> {
   const results: PreflightHarnessResult[] = [];
   for (const harness of config.harnesses) {
-    const name = harness.kind === "everpeace" ? "everpeace" : harness.name;
+    const name = harness.name ?? "everpeace";
     try {
       if (harness.kind === "everpeace") {
         throw new Error("Credential-free preflight requires a named everpeace-checkout with revision and source/build digests");
@@ -364,12 +375,13 @@ async function live(config: CampaignConfig): Promise<void> {
     }
   }
   const harnesses = config.harnesses.map((harness) => {
-    if (harness.kind === "everpeace") return createProductionBenchmarkAdapter({ model, sessionsRoot: config.sessionsRoot, ...(harness.team ? { team: harness.team } : {}) });
+    if (harness.kind === "everpeace") return createProductionBenchmarkAdapter({ model, name: harness.name ?? "everpeace", sessionsRoot: resolve(config.sessionsRoot, harness.name ?? "everpeace"), ...(harness.repairStrategy ? { repairStrategy: harness.repairStrategy } : {}), ...(harness.team ? { team: harness.team } : {}) });
     if (harness.kind === "everpeace-checkout") {
       return createCheckoutBenchmarkAdapter({
         name: harness.name,
         ...(harness.team ? { team: harness.team } : {}),
         ...(harness.loopStrategy === undefined ? {} : { loopStrategy: harness.loopStrategy }),
+        ...(harness.repairStrategy === undefined ? {} : { repairStrategy: harness.repairStrategy }),
         sourceRoot: harness.sourceRoot,
         entryPath: harness.entryPath,
         revision: harness.revision,
@@ -397,7 +409,7 @@ async function live(config: CampaignConfig): Promise<void> {
     return externalAdapter(harness);
   });
   const tasks = await loadTasks(config);
-  const plan = createBenchmarkCampaignPlan(tasks, harnesses, config.repetitions, config.seed);
+  const plan = createBenchmarkCampaignPlan(tasks, harnesses, config.repetitions, config.seed, config.ordering);
   const identities: Record<string, { codeDigest: string; buildDigest: string }> = {};
   for (const harness of config.harnesses) {
     if (harness.kind === "instrumented-process") continue;
@@ -411,6 +423,7 @@ async function live(config: CampaignConfig): Promise<void> {
   await writeFile(resolve(config.artifactsRoot, "campaign-plan.json"), JSON.stringify({
     campaignId: config.campaignId,
     seed: config.seed,
+    ordering: config.ordering,
     model: model.model_name,
     taskTokenBudget: config.taskTokenBudget,
     campaignTokenBudget: config.campaignTokenBudget,
@@ -420,6 +433,7 @@ async function live(config: CampaignConfig): Promise<void> {
   const result = await runBenchmarkCampaign(tasks, harnesses, {
     campaignId: config.campaignId,
     seed: config.seed,
+    ...(config.ordering === undefined ? {} : { ordering: config.ordering }),
     repetitions: config.repetitions,
     taskTokenBudget: config.taskTokenBudget,
     campaignTokenBudget: config.campaignTokenBudget,
@@ -445,6 +459,14 @@ async function live(config: CampaignConfig): Promise<void> {
   const publicReport = publicBenchmarkReport(result, { realModelRuns: true, evaluationDigest, byAdapter: identities, sourceTypes: Object.fromEntries(tasks.map((task) => [task.id, task.source?.sourceType ?? "seeded_upstream"])) });
   await writeFile(resolve(config.artifactsRoot, "public-report.json"), JSON.stringify(publicReport, null, 2) + "\n", "utf8");
   await writeFile(resolve(config.artifactsRoot, "public-report.md"), benchmarkMarkdown(publicReport), "utf8");
+  if (config.ordering === "paired" && config.harnesses.length === 2) {
+    const candidateArm = config.harnesses.find((h) => (h.kind === "everpeace" || h.kind === "everpeace-checkout") && (h.repairStrategy === "candidate" || h.team?.enabled === true));
+    const baselineArm = config.harnesses.find((h) => h !== candidateArm);
+    if (candidateArm && baselineArm && (candidateArm.kind === "everpeace" || candidateArm.kind === "everpeace-checkout")) {
+      const comparison = controlledComparison(result, baselineArm.name ?? "everpeace", candidateArm.name ?? "everpeace", candidateArm.repairStrategy === "candidate" ? "repair" : "team", true);
+      await writeFile(resolve(config.artifactsRoot, "controlled-comparison.json"), JSON.stringify(comparison, null, 2) + "\n", "utf8");
+    }
+  }
   const baseline = config.harnesses.find((harness) => harness.kind === "everpeace-checkout" && harness.loopStrategy === "baseline");
   const candidate = config.harnesses.find((harness) => harness.kind === "everpeace-checkout" && harness.loopStrategy === "candidate");
   if (baseline && candidate && baseline.kind === "everpeace-checkout" && candidate.kind === "everpeace-checkout") {

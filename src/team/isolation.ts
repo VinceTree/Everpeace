@@ -6,7 +6,7 @@ import { runBash } from "../tools/bash.js";
 import { createEffectiveSandboxPolicy } from "../tools/sandbox-policy.js";
 import type { PermissionPolicy } from "../permissions/policy.js";
 import type { TeamWorkspaceRecord } from "./workspace.js";
-import { teamWorkspaceRoot, within, workspaceOwnershipFile } from "./workspace.js";
+import { teamWorkspaceRoot, within, workspaceOwnershipFile, workspaceTraversalRoots } from "./workspace.js";
 import { ToolFeedbackError } from "../tools/tool-feedback.js";
 
 /** PowerShell can initialize at its drive root when ancestors are denied. Use a drive rooted at the owned workspace so provider traversal cannot reset cwd. */
@@ -31,7 +31,7 @@ export async function verifyTeamIsolation(workspace: TeamWorkspaceRecord, policy
   await fs.writeFile(script, payload, { flag: "wx", mode: 0o600 });
   const quote = (value: string) => process.platform === "win32" ? `'${value.replace(/'/gu, "''")}'` : `'${value.replace(/'/gu, "'''")}'`;
   try {
-    const result = await runBash(isolatedCommand(`${process.platform === "win32" ? "& " : ""}${quote(process.execPath)} ${quote(script)}`, workspace.workspace), { cwd: workspace.workspace, streamOutput: false, timeoutMs: 30_000, ...(signal ? { signal } : {}), sandbox: { policy: createEffectiveSandboxPolicy(policy, workspace.workspace, [], { isolation: { deniedRoots: [workspace.source, teamWorkspaceRoot(), ...(within(workspace.source, workspace.commonGitDir) ? [] : [workspace.commonGitDir])], writableRoot: workspace.workspace, traversalRoots: [workspace.owner] } }) } });
+    const result = await runBash(isolatedCommand(`${process.platform === "win32" ? "& " : ""}${quote(process.execPath)} ${quote(script)}`, workspace.workspace), { cwd: workspace.workspace, streamOutput: false, timeoutMs: 30_000, ...(signal ? { signal } : {}), sandbox: { policy: createEffectiveSandboxPolicy(policy, workspace.workspace, [], { isolation: { deniedRoots: [workspace.gitRoot ?? workspace.source, teamWorkspaceRoot(), ...(within(workspace.gitRoot ?? workspace.source, workspace.commonGitDir) ? [] : [workspace.commonGitDir])], writableRoot: workspace.workspace, traversalRoots: workspaceTraversalRoots(workspace) } }) } });
     if (result.cleanupFailed) throw new ProcessCleanupError("Team sandbox probe cleanup failed");
     let evidence: Record<string, boolean> = {};
     try { const bytes = await fs.readFile(ownProbe, "utf8"); const value = JSON.parse(bytes) as Record<string, unknown>; if (value.nonce === id) evidence = value as Record<string, boolean>; } catch { /* A startup failure provides no host-owned, nonce-bound probe evidence. */ }

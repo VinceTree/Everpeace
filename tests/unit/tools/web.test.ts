@@ -154,7 +154,7 @@ test("fetchWebPage extracts readable text from a public HTML page", async () => 
 
   assert.deepEqual(requestedUrls, ["https://example.com/article"]);
   assert.equal(result.title, "Example");
-  assert.match(result.content, /Hello\nUseful & current\./u);
+  assert.match(result.content, /^# Hello\n\nUseful & current\./u);
   assert.doesNotMatch(result.content, /hidden|ignore/u);
   assert.equal(result.truncated, false);
 });

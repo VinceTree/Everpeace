@@ -109,7 +109,7 @@ import { cloneTaskProgress, type TaskProgress } from "../../workflow/task-progre
 
 type View =
   | { kind: "cost" }
-  | { kind: "action-confirm"; text: string; start(): void; cancel(): void }
+  | { kind: "action-confirm"; text: string; startLabel?: string; start(): void; cancel(): void }
   | { kind: "web" }
   | { kind: "outputs" }
   | { kind: "input-history" }
@@ -984,6 +984,22 @@ export function EverpeaceApp({
   useEffect(() => {
     agent?.setRequestSettings?.(requestSettings);
   }, [agent, requestSettings]);
+
+  useEffect(() => {
+    void agent?.ensureSessionActivity?.().catch(() => appendTransient("error", "Session activity ownership could not be acquired. Requests remain blocked."));
+  }, [agent, sessionEpoch, appendTransient]);
+
+  useEffect(() => {
+    let ended = false; let lease: import("../../storage/session-activity.js").ActivityLease | undefined;
+    void (async () => {
+      const id = coordinator.sessionId;
+      if (id && dependencies.acquireSessionActivity) lease = await dependencies.acquireSessionActivity(id);
+      if (ended) { await lease?.(); return; }
+      const result = await dependencies.privacy?.autoCleanup();
+      if (result && !ended) appendTransient("system", `Privacy cleanup: ${result.deleted} deleted, ${result.failed} failed, ${result.excluded} excluded.`);
+    })().catch(() => { if (!ended) appendTransient("error", "Privacy ownership or automatic cleanup could not complete. Use /privacy to inspect and retry."); });
+    return () => { ended = true; void lease?.().catch(() => undefined); };
+  }, [dependencies.acquireSessionActivity, dependencies.privacy, sessionEpoch, appendTransient]);
 
   const activateModel = useCallback(
     (model: RegisteredModel, message = `Enabled model ${model.model_name}`) => {
@@ -2003,7 +2019,7 @@ export function EverpeaceApp({
           error instanceof LoopStoppedError && error.reason === "usage_limited"
             ? "Context compaction stopped because model usage is incomplete. No further request was sent."
             : error instanceof LoopStoppedError && error.reason === "budget_limited"
-              ? "Context compaction stopped because the token budget is exhausted. No further request was sent."
+              ? "Context compaction stopped because the Request token budget is exhausted. No further request was sent."
               : error instanceof Error ? error.message : String(error),
           "error",
         ));
@@ -2355,6 +2371,73 @@ export function EverpeaceApp({
           : "The last Agent checkpoint is unavailable after restart.");
   }, [appendTransient, ensureWorkflow]);
 
+  const runPrivacy = useCallback(async (args: string) => {
+    const privacy = dependencies.privacy;
+    if (!privacy) { openInfo("/privacy · Unavailable", "Privacy management is unavailable in this host.", "error"); return; }
+    if (coordinator.activeTask || directController.current) { openInfo("/privacy · Busy", "Wait for the active task or command to finish."); return; }
+    const operation = startCommandLoad("/privacy · Local storage", "Reading local privacy state", true, false);
+    try {
+      const [action, ...rest] = args.trim().split(/\s+/u);
+      const current = () => isCurrentCommandOperation(operation);
+      const confirm = (text: string, work: () => Promise<unknown>) => {
+        if (!current()) return;
+        enterCommandView({ kind: "action-confirm", text, startLabel: "Confirm privacy change", cancel: returnToChat, start: () => {
+          const pending = startCommandLoad("/privacy · Working", "Updating local privacy state", true, false);
+          void work().then((result) => { if (isCurrentCommandOperation(pending)) replaceCommandView(infoView("/privacy · Result", typeof result === "string" ? result : JSON.stringify(result ?? { saved: true }))); }).catch(() => { if (isCurrentCommandOperation(pending)) replaceCommandView(infoView("/privacy · Failed", "Storage, ownership or preview changed. Preview again before retrying.", "error")); });
+        } });
+      };
+      if (action === "retention") {
+        const days = rest[0] === "forever" ? null : Number(rest[0]);
+        const preview = await privacy.preview(days);
+        confirm(`Set retention to ${days === null ? "forever" : days + " days"}?\nEligible: ${preview.candidates.length} sessions, ${preview.candidates.reduce((n, c) => n + c.bytes, 0)} log bytes.\nExcluded: ${preview.excluded.length}; invalid records: ${preview.invalidRecords}.\n${[...new Set(preview.excluded.map((e) => e.reason))].join(", ")}\nCleanup also removes owned attachments. Memory, credentials and exports are retained.`, () => privacy.configure(preview.token));
+      } else if (action === "cleanup") {
+        const settings = await privacy.settings.read(); const preview = await privacy.preview(settings.retentionDays);
+        confirm(`Delete ${preview.candidates.length} expired sessions and their owned attachments?\nExcluded: ${preview.excluded.length}; invalid: ${preview.invalidRecords}.\nThis removes application files. Backups and external copies are unaffected.`, () => privacy.cleanup(preview.token));
+      } else if (action === "scan") {
+        if (!coordinator.sessionId) throw new Error("No Session");
+        const report = await privacy.scan(coordinator.sessionId); if (current()) replaceCommandView(infoView("/privacy · Sensitive output scan", JSON.stringify(report, null, 2) + "\nOnly rule counts are shown. Unrecognized customer data may remain."));
+      } else if (action === "export" || action === "export-conversation") {
+        const sessionId = coordinator.sessionId; if (!sessionId || !rest.length) throw new Error("Session and target required");
+        const target = rest.join(" ");
+        const scan = await privacy.scan(sessionId);
+        const conversation = action === "export-conversation" ? await privacy.previewExport(sessionId) : undefined;
+        const preview = conversation?.text ?? "Diagnostic metadata only; conversation, tool bodies, source code, paths and reasoning are excluded.";
+        const { redactSecretsPreservingLayout } = await import("../../util/redact-secrets.js");
+        confirm(`Export ${action === "export" ? "diagnostic summary" : "redacted conversation"} to a new file?\nSensitive findings: ${scan.findings}.\n${redactSecretsPreservingLayout(preview)}\nAutomated redaction cannot identify all business data.`, () => privacy.export(sessionId, target, action === "export-conversation", conversation?.fingerprint));
+      } else {
+        const text = await privacy.describe(); if (current()) replaceCommandView(infoView("/privacy · Local storage", text + "\n\n/privacy retention forever|30|90|180|<days>\n/privacy cleanup\n/privacy scan\n/privacy export <new-file>\n/privacy export-conversation <new-file>"));
+      }
+    } catch { if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/privacy · Failed", "Use a valid retention, Session and new export file. Storage may be unavailable.", "error")); }
+  }, [dependencies, enterCommandView, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad]);
+
+  const runMemoryReview = useCallback(async (args: string) => {
+    if (coordinator.activeTask || directController.current) { openInfo("/memory · Busy", "Wait for the active task or command to finish."); return; }
+    const operation = startCommandLoad("/memory · Review", "Reading learned entries", true, false);
+    try {
+      const [action, scope, id, ...rest] = args.split(/\s+/u);
+      const status = await dependencies.getMemoryStatus?.(workspacePath); const entries = status?.entries ?? status?.recent ?? [];
+      const { memoryEntryRevision, memoryEntryExpired } = await import("../../memory/learned-memory.js");
+      if (!isCurrentCommandOperation(operation)) return;
+      if (action === "list") { replaceCommandView(infoView("/memory · Entries", entries.map((e) => `${e.scope}#${e.id} · ${e.status}${memoryEntryExpired(e) ? " · expired, recall paused" : ""}\n${e.lesson}`).join("\n\n") || "No entries.")); return; }
+      const entry = entries.find((e) => e.scope === scope && e.id === id); if (!entry) throw new Error("Entry not found");
+      const revision = memoryEntryRevision(entry);
+      const sources = await Promise.all((entry.sourceSessionIds ?? (entry.sourceSessionId ? [entry.sourceSessionId] : [])).map(async (source) => {
+        try { await dependencies.sessionStore.load(source); return `${source} (available)`; } catch { return `${source} (unavailable)`; }
+      }));
+      if (!isCurrentCommandOperation(operation)) return;
+      const detail = `${entry.scope}#${entry.id}\n${entry.lesson}\nApply when: ${entry.applyWhen}\nExtraction confidence: ${entry.confidence}\nCreated: ${entry.createdAt}\nExpires: ${entry.expiresAt ?? "no automatic expiry"}\nStatus: ${entry.status}${memoryEntryExpired(entry) ? "; expired, recall paused" : ""}\nSource sessions: ${sources.join(", ") || "unknown"}\nRevision: ${revision}`;
+      if (action === "inspect") { replaceCommandView(infoView("/memory · Entry", detail + '\n\n/memory renew|disable|delete <scope> <id>\n/memory correct <scope> <id> {"lesson":"...","applyWhen":"..."}')); return; }
+      if (!["renew", "disable", "delete", "correct"].includes(action!) || !dependencies.reviewMemory) throw new Error("Invalid action");
+      const reviewAction = action as "renew" | "disable" | "delete" | "correct";
+      let correction: { lesson: string; applyWhen: string } | undefined;
+      if (action === "correct") { const value: unknown = JSON.parse(rest.join(" ")); if (!value || typeof value !== "object" || !("lesson" in value) || !("applyWhen" in value) || typeof value.lesson !== "string" || typeof value.applyWhen !== "string") throw new Error("Invalid correction"); correction = { lesson: value.lesson, applyWhen: value.applyWhen }; }
+      enterCommandView({ kind: "action-confirm", text: `${detail}\n\nConfirm ${action}?${correction ? "\n" + JSON.stringify(correction) : ""}`, startLabel: "Confirm Memory review", cancel: returnToChat, start: () => {
+        const pending = startCommandLoad("/memory · Saving review", "Applying revision-bound review", true, false);
+        void dependencies.reviewMemory!(entry.scope, workspacePath, entry.id, revision, reviewAction, correction).then(() => { if (isCurrentCommandOperation(pending)) replaceCommandView(infoView("/memory · Reviewed", "Entry updated. Inspect again before another action.")); }).catch(() => { if (isCurrentCommandOperation(pending)) replaceCommandView(infoView("/memory · Failed", "Entry or storage changed; inspect again.", "error")); });
+      } });
+    } catch { if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/memory · Review unavailable", "Use /memory list, then inspect, renew, disable, delete or correct <scope> <id>.", "error")); }
+  }, [dependencies, enterCommandView, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad, workspacePath]);
+
   const handleSubmit = useCallback(
     (input: string): boolean | Promise<boolean> => {
       const parsed = parseTuiInput(input);
@@ -2393,6 +2476,15 @@ export function EverpeaceApp({
         }
         if (parsed.command === "/models") void showModels();
         if (parsed.command === "/status") showStatus();
+        if (parsed.command === "/privacy") void runPrivacy(parsed.args ?? "");
+        if (parsed.command === "/perf") {
+          const operation = startCommandLoad("/perf · Task performance", "Loading local performance report", true, false);
+          void import("../../performance/task-report.js").then(async ({ formatTaskPerformance }) => {
+            const sessionId = coordinator.sessionId;
+            const report = sessionId ? (await dependencies.sessionStore.load(sessionId)).performanceReport : undefined;
+            if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/perf · Task performance", formatTaskPerformance(report)));
+          }).catch(() => { if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/perf · Unavailable", "The local report could not be read.", "error")); });
+        }
         if (parsed.command === "/context") enterCommandView({ kind: "context" });
         if (parsed.command === "/team") void showTeam(parsed.args ?? "");
         if (parsed.command === "/tasks") enterCommandView({
@@ -2429,6 +2521,7 @@ export function EverpeaceApp({
           else if (args.toLowerCase() === "pause") toggleMemory(false);
           else if (args.toLowerCase() === "resume") toggleMemory(true);
           else if (args.toLowerCase() === "view") void showMemoryPrompt();
+          else if (/^(?:list|inspect|renew|disable|delete|correct)(?:\s|$)/u.test(args)) void runMemoryReview(args);
           else void showMemory();
         }
         if (parsed.command === "/plan") {
@@ -2528,6 +2621,8 @@ export function EverpeaceApp({
       setReasoning,
       setResponsesProfile,
       runDoctor,
+      runPrivacy,
+      runMemoryReview,
       workspacePath,
     ],
   );
@@ -2752,7 +2847,7 @@ export function EverpeaceApp({
             onCancel={view.cancel}
           />
         ) : view.kind === "action-confirm" ? (
-          <ActionConfirmation text={view.text} start={view.start} cancel={view.cancel} />
+          <ActionConfirmation text={view.text} start={view.start} cancel={view.cancel} {...(view.startLabel ? { startLabel: view.startLabel } : {})} />
         ) : view.kind === "web" ? (
           <WebSurface configure={dependencies.configureWeb} onBack={returnToChat} />
         ) : view.kind === "cost" ? (
@@ -2760,7 +2855,7 @@ export function EverpeaceApp({
         ) : view.kind === "mcp-trust" ? (
           <McpTrustSurface preview={view.preview} onApprove={view.approve} onCancel={view.cancel} />
         ) : view.kind === "goal-status" ? (
-          <GoalStatusSurface {...(view.goal ? { goal: view.goal } : {})} onPause={pauseGoal} onResume={resumeGoal} onBack={returnToChat} />
+          <GoalStatusSurface {...(view.goal ? { goal: view.goal } : {})} {...(dependencies.getInFlightRequests?.() === undefined ? {} : { inFlightRequests: dependencies.getInFlightRequests!()! })} onPause={pauseGoal} onResume={resumeGoal} onBack={returnToChat} />
         ) : view.kind === "workspace-diff" ? (
           <WorkspaceDiffSurface
             initialIndex={view.index}

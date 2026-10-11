@@ -424,6 +424,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
       }
     };
     handle = createAgent({
+      onPerformanceReport: (report) => emit({ type: "performance_report", report }),
       model: selected.model,
       onCostEstimate: (estimate) => emit({ type: "cost_estimated", estimate }),
       ...(options.team ? { team: { ...options.team, maxAttempts: Math.min(options.maxSteps ?? Infinity, options.team.maxAttempts ?? 96) }, teamModels: resolved.available, onTeamEvent: async (event: import("../team/types.js").TeamEvent) => { await emit(event); } } : {}),
@@ -459,6 +460,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
     });
     if (handle.team) ledger = handle.team.accounting;
     execute = createCommandExecutor({
+      onProcessStarted: (ms) => handle?.agent.recordPerformanceTiming?.("sandbox_startup", ms),
       workspacePath,
       policy: () => policy,
       readableRoots: handle.readableRoots,
@@ -496,6 +498,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
           repairAttempts: state.repair_attempts,
           maxRepairAttempts: state.max_repair_attempts,
           pendingVerification: state.pending_verification === true,
+          ...(state.last_verification_suite?.evidence ? { verificationEvidence: state.last_verification_suite.evidence } : {}),
         });
       },
     });
@@ -530,6 +533,13 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
       },
     });
     const startupInteraction = await handle.prepareMcp?.(taskSignal);
+    // Acquire the current Session lease before considering startup cleanup.
+    await handle.agent.ensureSessionActivity?.();
+    if (dependencies.sessionStore === undefined) {
+      const { SessionPrivacy } = await import("../storage/session-privacy.js");
+      try { await new SessionPrivacy(sessionStore).autoCleanup(); }
+      catch { queueTimeline("system", "Automatic privacy cleanup could not complete. Use the privacy CLI to preview and retry."); }
+    }
     const runnerResult: CodingTaskRunnerResult = startupInteraction
       ? { disposition: "stopped", agentResult: { interactionRequired: startupInteraction }, diagnosticRounds: 0 }
       : await runner.run({ text: options.prompt, mode: options.plan === true ? "plan" : "default", source: restored ? "session_resume" : "exec", signal: taskSignal });
@@ -588,6 +598,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
   }
 
   if (result && handle?.team) { const snapshot = handle.team.snapshot(); if (snapshot) result.team = snapshot; }
+  if (result && handle?.agent.getPerformanceReport) { const report = handle.agent.getPerformanceReport(); if (report) result.performanceReport = report; }
   return result ?? runtimeResult("runtime_error", 1, "runtime_error", ledger, {
     ...(sessionId ? { sessionId } : {}),
     error: "Exec ended without a terminal result",

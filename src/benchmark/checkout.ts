@@ -50,6 +50,7 @@ export interface CheckoutBenchmarkAdapterOptions {
   model: RegisteredModel;
   loopStrategy?: import("../agent/tool-feedback-policy.js").LoopStrategy;
   team?: TeamOptions;
+  repairStrategy?: "baseline" | "candidate";
   sessionsRoot: string;
 }
 
@@ -125,7 +126,7 @@ function preflightNetworkGuardPath(): string {
 }
 
 export async function preflightBenchmarkCheckout(
-  options: Pick<CheckoutBenchmarkAdapterOptions, "sourceRoot" | "entryPath" | "revision" | "sourceDigest" | "buildDigest" | "loopStrategy" | "team"> & { modelName?: string; modelBaseUrl?: string; responsesProfile?: import("../providers/capabilities.js").ResponsesProfile },
+  options: Pick<CheckoutBenchmarkAdapterOptions, "sourceRoot" | "entryPath" | "revision" | "sourceDigest" | "buildDigest" | "loopStrategy" | "team" | "repairStrategy"> & { modelName?: string; modelBaseUrl?: string; responsesProfile?: import("../providers/capabilities.js").ResponsesProfile },
 ): Promise<BenchmarkCheckoutPreflight> {
   const identity = await assertBenchmarkCheckoutIdentity(options);
   const stdout = new BoundedOutputBuffer(MAX_OUTPUT_BYTES);
@@ -136,6 +137,7 @@ export async function preflightBenchmarkCheckout(
       mode: "preflight",
       ...(options.team ? { team: options.team } : {}),
       ...(options.loopStrategy === undefined ? {} : { loopStrategy: options.loopStrategy }),
+      ...(options.repairStrategy === undefined ? {} : { repairStrategy: options.repairStrategy }),
       productionModule: pathToFileURL(identity.entryPath).href,
       task: { id: "checkout-preflight", prompt: "Return a short preflight acknowledgement without using tools.", workspacePath: root },
       tokenBudget: options.team?.enabled !== false && options.team ? 200_000 : 100,
@@ -202,6 +204,7 @@ export function createCheckoutBenchmarkAdapter(options: CheckoutBenchmarkAdapter
         ...(options.team ? { team: options.team } : {}),
         tokenBudget: context.tokenBudgetRemaining, sessionsRoot: options.sessionsRoot,
         ...(options.loopStrategy === undefined ? {} : { loopStrategy: options.loopStrategy }),
+        ...(options.repairStrategy === undefined ? {} : { repairStrategy: options.repairStrategy }),
         model: { ...options.model, request_settings: { reasoningEffort: "high", maxOutputTokens: 32_768 } },
       });
       const child = spawn(process.execPath, [...process.execArgv, checkoutWorkerPath()], {

@@ -1161,7 +1161,7 @@ test("agent refreshes learned memory per step and captures only after verificati
   await agent.finishMemoryTurn("verified");
   await agent.runTurn("continue");
   await agent.finishMemoryTurn("verified");
-  assert.equal(loadCount, 3);
+  assert.equal(loadCount, 6); // Step preparation and every actual request recheck persisted validity.
   assert.equal(captures.length, 2);
   assert.match(prompts[0]!, /Prefer the existing test style/u);
   assert.doesNotMatch(instructions[0]!, /Prefer the existing test style/u);

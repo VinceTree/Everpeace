@@ -47,6 +47,8 @@ export function MemorySurface({
         <Text>Capture future memory: <Text color={policy.captureFuture ? "green" : "yellow"}>{policy.captureFuture ? "enabled" : "disabled"}</Text></Text>
         <Text>Project lessons: {status.projectEntries}</Text>
         <Text>User preferences: {status.userEntries}</Text>
+        <Text>Expired project entries awaiting review: {status.needsReview ?? "unknown"}</Text>
+        <Text dimColor>Confidence is extraction confidence. /memory list shows IDs; inspect, renew, correct, disable or delete an entry.</Text>
         {status.capture ? <Text>Automatic capture: <Text color={status.capture.state === "failed" ? "red" : status.capture.state === "succeeded" ? "green" : "yellow"}>{status.capture.state}</Text></Text> : null}
         {status.capture?.queued !== undefined ? <Text>Queued captures: {status.capture.queued}</Text> : null}
         {status.capture?.usage === null ? <Text>Memory model usage: unknown</Text> : status.capture?.usage ? <Text>Memory model usage: {status.capture.usage.total_tokens} tokens</Text> : null}
@@ -56,7 +58,7 @@ export function MemorySurface({
           <Text bold>Recent</Text>
           {status.recent.map((entry) => (
             <Text key={`${entry.createdAt}-${entry.scope}-${entry.lesson}`}>
-              {entry.scope === "user" ? "user" : "project"}: {entry.lesson}
+              [{entry.scope}#{entry.id}] {entry.lesson}{entry.expiresAt ? ` · expires ${entry.expiresAt.slice(0, 10)}` : ""}
             </Text>
           ))}
         </Box>

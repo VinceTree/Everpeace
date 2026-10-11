@@ -1,5 +1,7 @@
 # 项目定位与开发路由
 
+验证解释、SessionPrivacy/活动租约、TaskPerformance、Memory 到期、运行时抽取及结构化网页的新入口和回归统一在 [验证、隐私与性能](VALIDATION_PRIVACY_PERFORMANCE.md)。
+
 此页用于按问题选择文档、源码与测试，避免每次启动都重新扫描仓库。先读根 [AGENTS.md](../../AGENTS.md) 和 [HANDOFF](../HANDOFF.md)，再选择下面的一行；不要求同时打开所有入口。历史设计原因见 [DECISIONS](DECISIONS.md)，待做事项见 [PLAN](../PLAN.md)。
 
 ## 产品与技术边界

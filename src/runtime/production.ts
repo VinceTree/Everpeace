@@ -2,7 +2,7 @@ import { isolatedCommand, verifyTeamIsolation } from "../team/isolation.js";
 import { sanitizeExecOutput } from "../cli/exec-output.js";
 import { TeamRuntime, type MemberExecution } from "../team/runtime.js";
 import { TeamStore } from "../team/store.js";
-import { teamWorkspaceRoot, within } from "../team/workspace.js";
+import { teamWorkspaceRoot, within, workspaceTraversalRoots } from "../team/workspace.js";
 import type { TeamOptions, TeamEvent } from "../team/types.js";
 import { CodingWorkflowRuntime } from "../workflow/runtime.js";
 import { CodingTaskRunner } from "../workflow/task-runner.js";
@@ -73,6 +73,8 @@ export type ProductionAgentRestore = Pick<
 class MemberInteractionStop extends Error {}
 
 export interface ProductionAgentOptions {
+  sharedPerformance?: import("../performance/task-report.js").TaskPerformance;
+  onPerformanceReport?(report: import("../performance/task-report.js").TaskPerformanceReport): Promise<void> | void;
   model: RegisteredModel;
   team?: TeamOptions;
   teamModels?: readonly RegisteredModel[];
@@ -241,7 +243,8 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     let memberHandle: ProductionAgentHandle | undefined;
     let interaction: { kind: "approval" | "question"; tool: string; prompt?: string } | undefined;
     const workflow = new CodingWorkflowRuntime({ workspacePath, onState: (state) => options.sessionStore.setWorkflow(session.id, state) });
-    const executeNative = createProductionCommandExecutor({ workspacePath, policy: getPolicy, ...(execution.workspace ? { isolation: { deniedRoots: [options.workspacePath, teamWorkspaceRoot(), ...(within(options.workspacePath, execution.workspace.commonGitDir) ? [] : [execution.workspace.commonGitDir])], writableRoot: workspacePath, traversalRoots: [execution.workspace.owner] } } : {}) });
+    const sourceRoot = execution.workspace?.gitRoot ?? options.workspacePath;
+    const executeNative = createProductionCommandExecutor({ workspacePath, policy: getPolicy, onProcessStarted: (ms) => { agent.recordPerformanceTiming("sandbox_startup", ms); memberHandle?.agent.recordPerformanceTiming("sandbox_startup", ms); }, ...(execution.workspace ? { isolation: { deniedRoots: [sourceRoot, teamWorkspaceRoot(), ...(within(sourceRoot, execution.workspace.commonGitDir) ? [] : [execution.workspace.commonGitDir])], writableRoot: workspacePath, traversalRoots: workspaceTraversalRoots(execution.workspace) } } : {}) });
     const label = `[Team ${execution.member.agentId} / ${execution.member.task.role}] ${workspacePath}\n`;
     const execute: ProductionCommandExecutor = async (command, signal, timeoutMs, onOutput) => {
       const policy = getPolicy(); const revision = permissionPolicyRevision(policy);
@@ -270,6 +273,7 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     });
     try {
       memberHandle = createProductionAgent({ model, workspacePath, io, sessionStore: options.sessionStore, sessionId: () => session.id, mcp: null, learnedMemoryStore: null, codeNavigation: null, requestAttemptLedger: execution.ledger,
+        sharedPerformance: agent.performance,
         costSettingsStore: costSettings, costWarningTracker: costTracker, costResetOnTask: false,
         onCostEstimate: async (estimate) => { if (rootCostSessionId) await options.sessionStore.appendCost(rootCostSessionId, estimate); await options.onCostEstimate?.(estimate); options.restore?.onEvent?.({ type: "cost_estimated", estimate }); },
         restore: {
@@ -297,7 +301,31 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
       onMemberUsage: async (usage) => { if (restore?.onMemberUsage) await restore.onMemberUsage(usage); else { const id = options.sessionId(); if (id) await options.sessionStore.appendUsage(id, usage, { preserveContext: true }); } await team?.recordGoalUsage(usage); },
     });
   }
+  let releaseActivity: import("../storage/session-activity.js").ActivityLease | undefined;
+  let activitySession: string | undefined;
+  let performanceSession: string | undefined;
+  let activation: Promise<void> = Promise.resolve();
+  let activityDisposed = false;
+  const ensureActivity = (): Promise<void> => activation = activation.then(async () => {
+    if (activityDisposed) throw new Error("Session activity has been disposed");
+    const sessionId = options.sessionId();
+    if (sessionId !== activitySession) {
+      await releaseActivity?.(); releaseActivity = undefined; activitySession = undefined;
+      if (sessionId) { releaseActivity = await options.sessionStore.activity.acquire(sessionId); activitySession = sessionId; }
+    }
+    releaseActivity?.assertValid();
+  });
   const agent = new ReactAgent({
+    beforeTask: async () => {
+      await ensureActivity(); performanceSession = activitySession;
+    },
+    beforeRequest: ensureActivity,
+    ...(options.sharedPerformance ? { sharedPerformance: options.sharedPerformance } : {}),
+    onPerformanceReport: async (report) => {
+      const sessionId = performanceSession;
+      if (sessionId) await options.sessionStore.appendPerformance(sessionId, report);
+      await options.onPerformanceReport?.(report);
+    },
     ...(costSettings && (team || options.requestAttemptLedger) ? { requestCost: {
       modelId: options.model.id,
       price: () => costSettings.price(options.model.id),
@@ -374,7 +402,9 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
   const disposeAgent = agent.dispose.bind(agent);
   let disposal: Promise<void> | undefined;
   const dispose = (): Promise<void> => disposal ??= (async () => {
+    activityDisposed = true;
     const failures: unknown[] = [];
+    try { await activation; } catch (error) { failures.push(error); }
     for (const cleanup of [
       () => team?.cancel(new Error("Production runtime disposed")),
       () => disposeAgent(),
@@ -384,6 +414,7 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     ]) {
       try { await cleanup(); } catch (error) { failures.push(error); }
     }
+    try { await releaseActivity?.(failures.length === 0); } catch (error) { failures.push(error); }
     if (failures.length === 1) throw failures[0];
     if (failures.length > 1) throw new AggregateError(failures, "Failed to dispose production services");
   })();
@@ -399,6 +430,7 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     readableRoots: () => skillReadableRoots(skills),
     provider,
     async prepareMcp(signal) {
+      await ensureActivity();
       const pending = (await mcp?.ensureReady(signal))?.servers.find((server) => server.state === "trust_required");
       return pending ? { kind: "approval", tool: pending.trustKind ?? (pending.transport === "stdio" ? "mcp_start" : "mcp_http"), prompt: "MCP startup requires approval. Use /mcp trust <server> in this workspace." } : undefined;
     },

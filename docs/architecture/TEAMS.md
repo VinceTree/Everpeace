@@ -12,7 +12,7 @@
 
 依赖只读成员完成，或编码成员完成整合后才启动后续任务。重叠编码范围串行，Windows 范围比较忽略大小写。取消单个成员不取消独立成员；根取消、权限 revision 改变、存储或清理故障向团队传播，迟到结果不发布成功。用户 steering 使受影响的旧 worker 失去自动整合资格，新任务仍可按当前指导委派。
 
-编码要求 Git 根目录，宿主在 TEMP/everpeace-teams 下创建 detached worktree，不创建用户提交、不碰用户 index。用 HEAD 文件清单加当前 tracked 字节／删除及非 ignored 普通 untracked 文件构成快照；不运行 checkout filter，不共享可写 node_modules，不硬链接源文件。外部链接、子模块、非根工作区、数量／大小上限或快照不完整明确拒绝。依赖只能在成员目录按当前命令权限独立准备。
+编码支持 Git 根及授权子目录、已有 linked worktree，宿主在 TEMP/everpeace-teams 下创建 detached worktree，不创建用户提交、不碰用户 index。HEAD 清单、tracked 字节/删除及非 ignored 普通 untracked 只枚举授权子树；gitRoot/workspacePrefix 映射参与恢复及整合。不运行 checkout filter，不共享可写 node_modules，不硬链接源文件。外部链接、子模块、数量／大小上限或快照不完整明确拒绝。依赖只能在成员目录按当前命令权限独立准备；需要授权子树外文件时明确报告限制。[布局与验收](VALIDATION_PRIVACY_PERFORMANCE.md)。
 
 HEAD 在快照前解析为不可变 commit，文件复核期间 HEAD 改变则拒绝；之后创建 worktree 和初始化成员 index 都使用捕获的 commit。Windows Git 调用显式启用 core.longpaths，不修改用户 Git 配置；文件枚举报告不完整时拒绝快照，保留中文路径、BOM 和 CRLF 原始字节。
 

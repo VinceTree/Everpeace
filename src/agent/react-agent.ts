@@ -1,10 +1,16 @@
+import { ModelRequestRuntime } from './model-request-runtime.js';
+import { AgentContextRuntime, ContextCompactionError } from './context-runtime.js';
+import { FileToolRuntime } from './file-tool-runtime.js';
+import { ResponseStreamConsumer } from './response-stream-consumer.js';
 import { decorateToolDiagnostic } from "../tools/diagnostics.js";
+import { TaskPerformance, type TaskPerformanceReport } from "../performance/task-report.js";
 import { markExternalToolOutput, externalSourceKinds } from "./source-context.js";
 import type { TeamAgentBridge } from "../team/types.js";
 import { TEAM_TOOL_NAMES } from "../team/tools.js";
 import { TeamLimitError } from "../team/ledger.js";
 import { LoopSteeredError, LoopStoppedError, runAgentLoop, classifySamplingError, type LoopEvent, type LoopPhase, type ToolCall, type LoopStopReason, integerBudget } from "./agent-loop.js";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { projectCodingContext } from "../providers/request-projection.js";
 import { CANDIDATE_CODING_INSTRUCTIONS, CANDIDATE_SCHEDULING_INSTRUCTIONS, ToolFeedbackPolicy, type LoopStrategy } from "./tool-feedback-policy.js";
 import { PersistenceError, persistState } from "../storage/persistence-error.js";
@@ -14,10 +20,8 @@ import { formatWorkflowContext, projectWorkflowContext, type WorkflowContext } f
 import { invalidToolArgument, POLICY_DENIED_REMEDY, ToolFeedbackError, toolFeedbackFields } from "../tools/tool-feedback.js";
 import {
   isContextLimitError,
-  isStreamUnsupportedError,
   ModelResponseError,
   ModelStreamCleanupError,
-  ResponseStreamIncompleteError,
 } from "./response-errors.js";
 import {
   BASH_TOOL_DEFINITION,
@@ -40,7 +44,7 @@ import {
   type SkillCatalogLike,
   type SkillTurnContext,
 } from "../skills/catalog.js";
-import { FILE_TOOL_DEFINITIONS, FileSearchSession, runFileTool } from "../tools/files.js";
+import { FILE_TOOL_DEFINITIONS } from "../tools/files.js";
 import { CODE_NAVIGATION_TOOL_DEFINITION, parseCodeNavigationArguments, type CodeNavigationRuntimeLike } from "../tools/code-navigation.js";
 import { BackgroundJobManager, parseBackgroundCommand, parseBackgroundJobId, type BackgroundJobCompletion, type BackgroundJobSnapshot } from "../tools/background-jobs.js";
 import { ProcessCleanupError } from "../tools/process-completion.js";
@@ -58,7 +62,6 @@ import {
   READ_WORKSPACE_CHANGE_TOOL_DEFINITION,
   WORKSPACE_DIFF_TOOL_DEFINITION,
   WORKSPACE_STATUS_TOOL_DEFINITION,
-  WorkspaceReviewSession,
   formatWorkspaceInspection,
   workspaceDiff,
   workspaceStatus,
@@ -154,10 +157,6 @@ export interface AgentResponse {
 
 export type ResponseStreamLike = AsyncIterable<Record<string, unknown>>;
 
-function isResponseStream(value: AgentResponse | ResponseStreamLike): value is ResponseStreamLike {
-  return typeof value === "object" && value !== null && Symbol.asyncIterator in value;
-}
-
 export interface ResponseRecoveryState {
   events: readonly Record<string, unknown>[];
   lastEventId?: string;
@@ -245,6 +244,10 @@ export interface AgentInteractionRequired {
 }
 
 export interface ReactAgentOptions {
+  beforeTask?(): Promise<void>;
+  beforeRequest?(): Promise<void>;
+  onPerformanceReport?(report: TaskPerformanceReport): Promise<void> | void;
+  sharedPerformance?: TaskPerformance;
   onPhase?(phase: LoopPhase): void;
   onEvent?(event: LoopEvent): void;
   onToolEvent?: import("./agent-loop.js").AgentLoopOptions["onToolEvent"];
@@ -479,13 +482,6 @@ function prunedToolOutput(
   }
 }
 
-class ContextCompactionError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = "ContextCompactionError";
-  }
-}
-
 const CODING_INSTRUCTIONS = `Work autonomously within the user's request, understand the existing implementation before editing, preserve unrelated user changes, and finish coding tasks with evidence from actual verification.
 Treat a request to build, fix, or improve something as authorization to carry the requested work through implementation, focused checks, and change review. Make reasonable routine decisions and continue until the requested outcome is handled; do not stop at a plan or offer to implement later. Ask for input only when a missing requirement materially changes the result or a host permission boundary requires it. Existing authorization persists within the task.
 For coding work, first inspect the current workspace changes and applicable project rules, then read the relevant implementation and tests. Start with focused file search and expand only when evidence requires it. Preserve staged, unstaged, and untracked user work; never reset, overwrite, or clean unrelated changes. Session history and inherited plans provide context, not current file observations or authorization.
@@ -547,6 +543,9 @@ function freezeSnapshot<T>(value: T): T {
 }
 
 export class ReactAgent {
+  readonly #context = new AgentContextRuntime();
+  readonly #files: FileToolRuntime;
+  readonly #streams: ResponseStreamConsumer;
   #running = false;
   readonly #onPhase: ((phase: LoopPhase) => void) | undefined;
   readonly #onEvent: ((event: LoopEvent) => void) | undefined;
@@ -578,13 +577,10 @@ export class ReactAgent {
   readonly #onUsage:
     | ((usage: TokenUsageSample | null) => Promise<void>)
     | undefined;
-  #history: Array<Record<string, unknown>>;
   #pendingSteering: Array<{ text: string; attachments: readonly FileAttachment[] }> = [];
   #sampleController: AbortController | undefined;
   #turnController: AbortController | undefined;
   #turnOperation: Promise<AgentTurnResult> | undefined;
-  #compactionController: AbortController | undefined;
-  #compactionOperation: Promise<ContextCompactionResult> | undefined;
   #disposed = false;
   #disposal: Promise<void> | undefined;
   #mcpSnapshot: McpSnapshot = { tools: [], toolInfo: [], instructions: "", servers: [] };
@@ -596,9 +592,7 @@ export class ReactAgent {
   #learnedPrompt = "";
   #learnedPromptKey: string | undefined;
   #learnedSnapshot: MemorySnapshot | undefined;
-  #activeFiles = new Set<string>();
   /** Host-owned read versions. Deliberately not restored from Session context. */
-  #fileObservations = new Map<string, string | null>();
   #pendingLearnedTurn: LearnedTurn | undefined;
   #turnItems: Array<Record<string, unknown>> | undefined;
   #turnMode: AgentMode = "default";
@@ -607,16 +601,11 @@ export class ReactAgent {
   #projectRuleSnapshot: ProjectRuleSnapshot | undefined;
   #stepWorkflowContext: WorkflowContext | undefined;
   #pendingGoalCompletion = false;
-  #historyRevision = 0;
-  #lastCompactedRevision = -1;
   #logicalStep = 0;
   #lastPruneAttemptStep = -1;
-  #contextWindow: number | null;
-  #contextTokens: number | null;
   readonly #providerCapabilities: ProviderCapabilities;
   #requestSettings: ModelRequestSettings;
-  #compacting = false;
-  #responseTransport: "stream" | "buffered";
+  readonly #requests: ModelRequestRuntime;
   #advancedPromptCacheEnabled: boolean;
   #streamRecoveryRemaining = 0;
   readonly #parallelToolCalls: boolean;
@@ -642,8 +631,6 @@ export class ReactAgent {
   readonly #backgroundNoticeSlots = new Set<string>();
   readonly #pendingBackgroundNotices = new Map<string, BackgroundJobCompletion>();
   readonly #toolOutputs = new ToolOutputStore();
-  readonly #fileSearches = new FileSearchSession();
-  readonly #workspaceReviews: WorkspaceReviewSession;
   readonly #requestAttemptLedger: RequestAttemptLedger | undefined;
   readonly #costTracker: import("../status/cost.js").CostWarningTracker | undefined;
   readonly #team: TeamAgentBridge | undefined;
@@ -651,13 +638,33 @@ export class ReactAgent {
   readonly #requestExecutor: RequestExecutor | undefined;
   readonly #codeNavigation: CodeNavigationRuntimeLike | undefined;
   #contextInspection: ContextInspectionSnapshot | undefined;
+  readonly performance = new TaskPerformance();
+  #lastPerformance: TaskPerformanceReport | undefined;
+  readonly #onPerformanceReport: ReactAgentOptions["onPerformanceReport"];
+  readonly #beforeTask: ReactAgentOptions["beforeTask"];
+  readonly #beforeRequest: ReactAgentOptions["beforeRequest"];
+  readonly #sharedPerformance: TaskPerformance | undefined;
+  #unledgerAttempt = 0;
+  #activeProviderRequests = 0;
+  readonly #unledgerNamespace = randomUUID();
 
   constructor(options: ReactAgentOptions) {
     this.#onPhase = options.onPhase;
-    this.#onEvent = options.onEvent;
+    this.#onPerformanceReport = options.onPerformanceReport;
+    this.#beforeTask = options.beforeTask;
+    this.#beforeRequest = options.beforeRequest;
+    this.#sharedPerformance = options.sharedPerformance;
+    this.#onEvent = (event) => {
+      const revision = event.type === "tool_finished" && event.call.name === "read_file" ? (() => {
+        try { const args = JSON.parse(event.call.arguments) as { path?: unknown }; return typeof args.path === "string" ? this.#files.observations.get(this.#files.key(args.path)) ?? undefined : undefined; } catch { return undefined; }
+      })() : undefined;
+      this.performance.observe(event, revision);
+      options.sharedPerformance?.observe(event, revision);
+      options.onEvent?.(event);
+    };
     this.#onToolEvent = options.onToolEvent;
     this.#workspacePath = path.resolve(options.workspacePath ?? process.cwd());
-    this.#workspaceReviews = new WorkspaceReviewSession(this.#workspacePath);
+    this.#files = new FileToolRuntime(this.#workspacePath);
     this.#client = options.client;
     this.#model = options.model;
     this.#io = options.io;
@@ -678,6 +685,8 @@ export class ReactAgent {
     this.#streamRecoveryBudget = integerBudget("streamRecoveryBudget", options.streamRecoveryBudget, 1);
     this.#streamIdleTimeoutMs = integerBudget("streamIdleTimeoutMs", options.streamIdleTimeoutMs, 60_000, 1);
     this.#contextRecoveryBudget = integerBudget("contextRecoveryBudget", options.contextRecoveryBudget, 1);
+    this.#streams = new ResponseStreamConsumer({ recovery: this.#client.responses.recovery !== undefined, recoveryCacheMaxBytes: this.#recoveryCacheMaxBytes, idleTimeoutMs: this.#streamIdleTimeoutMs, onEvent: this.#onEvent, writeAssistantDelta: (text) => this.#io.writeAssistantDelta?.(text), onToolProgress: (progress) => this.#io.onToolProgress?.(progress) });
+    this.#requests = new ModelRequestRuntime(this.#client, this.#streams, options.client.responses.stream ? "stream" : "buffered", this.#onEvent);
     this.#web = options.web ?? createWebToolExecutor();
     this.#mcp = options.mcp;
     this.#skills = options.skills;
@@ -689,7 +698,7 @@ export class ReactAgent {
     this.#taskProgress = options.initialTaskProgress
       ? cloneTaskProgress(options.initialTaskProgress)
       : { plan: [], updated_at: new Date(0).toISOString() };
-    this.#history = repairToolContext(options.initialHistory ?? []).map((item) =>
+    this.#context.history = repairToolContext(options.initialHistory ?? []).map((item) =>
       item.type === "function_call_output" && typeof item.output === "string" && Buffer.byteLength(item.output, "utf8") > MODEL_TOOL_OUTPUT_MAX_BYTES
         ? { ...item, output: this.#toolOutputs.bound(item.output) }
         : item);
@@ -702,30 +711,30 @@ export class ReactAgent {
     this.#team = options.team;
     this.#requestAttemptLedger = options.requestAttemptLedger;
     this.#costTracker = options.requestCost?.resetOnTask === false ? undefined : options.requestCost?.tracker;
-    this.#requestExecutor = options.requestAttemptLedger ? new RequestExecutor(options.requestAttemptLedger, options.requestCost) : undefined;
+    this.#requestExecutor = options.requestAttemptLedger ? new RequestExecutor(options.requestAttemptLedger, options.requestCost, options.sharedPerformance ? [this.performance, options.sharedPerformance] : this.performance) : undefined;
     this.#codeNavigation = options.codeNavigation;
-    this.#contextWindow = options.contextWindow ?? null;
-    this.#contextTokens = options.initialContextTokens ?? null;
+    this.#context.window = options.contextWindow ?? null;
+    this.#context.tokens = options.initialContextTokens ?? null;
     this.#providerCapabilities = options.providerCapabilities ?? resolveProviderCapabilities("https://api.openai.com/v1");
     this.#requestSettings = options.requestSettings ?? defaultModelRequestSettings(this.#providerCapabilities);
-    this.#responseTransport = options.client.responses.stream ? "stream" : "buffered";
+
   }
 
   async compact(signal?: AbortSignal): Promise<ContextCompactionResult> {
     this.#assertAvailable();
     if (this.#running) throw new Error("Cannot compact while an agent turn is running");
-    if (this.#compacting) throw new Error("Context compaction is already running");
+    if (this.#context.compacting) throw new Error("Context compaction is already running");
     signal?.throwIfAborted();
     const controller = new AbortController();
-    this.#compactionController = controller;
+    this.#context.controller = controller;
     const baseSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     const ownedSignal = baseSignal;
     const operation = this.#compactContext(false, ownedSignal);
-    this.#compactionOperation = operation;
+    this.#context.operation = operation;
     try { return await operation; }
     finally {
-      this.#compactionOperation = undefined;
-      this.#compactionController = undefined;
+      this.#context.operation = undefined;
+      this.#context.controller = undefined;
       this.#assertResourceCleanup();
     }
   }
@@ -734,7 +743,7 @@ export class ReactAgent {
     if (this.#team && this.#taskActive) throw new Error("Team model settings are frozen until the task ends");
     this.#assertAvailable();
     if (this.#running) throw new Error("Request settings can only change between turns");
-    if (this.#compacting) throw new Error("Request settings cannot change during context compaction");
+    if (this.#context.compacting) throw new Error("Request settings cannot change during context compaction");
     this.#requestSettings = { ...settings };
   }
 
@@ -750,7 +759,9 @@ export class ReactAgent {
   async beginTask(options: AgentTaskOptions): Promise<void> {
     this.#assertAvailable();
     if (this.#running) throw new Error("Cannot start a task while an agent turn is running");
-    if (this.#compacting) throw new Error("Cannot start a task during context compaction");
+    if (this.#context.compacting) throw new Error("Cannot start a task during context compaction");
+    await this.#beforeTask?.();
+    this.#assertAvailable();
     await this.#team?.begin(options.mode);
     await this.#learnedMemory?.beginTask?.();
     this.#assertAvailable();
@@ -758,6 +769,7 @@ export class ReactAgent {
     this.#costTracker?.reset();
     this.#toolFeedback.reset();
     this.#taskActive = true;
+    this.performance.begin();
     this.#taskStepsRemaining = this.#taskStepLimitEnabled ? this.#maxSteps : undefined;
     this.#taskGeneration += 1;
     this.#backgroundNoticeAdmission = options.mode === "default";
@@ -769,10 +781,22 @@ export class ReactAgent {
   }
 
   async endTask(): Promise<void> {
-    await this.#team?.end();
-    this.#clearTaskState();
-    if (!this.#disposed) await this.#learnedMemory?.endTask?.();
+    try {
+      await this.#team?.end();
+      this.#clearTaskState();
+      if (!this.#disposed) await this.#learnedMemory?.endTask?.();
+    } finally {
+      const report = this.performance.finish();
+      if (report) { this.#lastPerformance = report; await this.#onPerformanceReport?.(report); }
+    }
   }
+
+  async ensureSessionActivity(): Promise<void> { await this.#beforeTask?.(); }
+
+  getPerformanceReport(): TaskPerformanceReport | undefined { return this.#lastPerformance ? structuredClone(this.#lastPerformance) : undefined; }
+  recordPerformanceTiming(operation: string, ms: number): void { this.performance.timing(operation, ms); }
+  recordRepairRound(): void { this.performance.repaired(); }
+  getInFlightRequests(): number { return this.#requestAttemptLedger?.openRequests ?? this.#activeProviderRequests; }
 
   #clearTaskState(): void {
     this.#taskActive = false;
@@ -812,11 +836,11 @@ export class ReactAgent {
     this.#clearTaskState();
     const reason = new Error("The agent has been disposed");
     this.#turnController?.abort(reason);
-    this.#compactionController?.abort(reason);
+    this.#context.controller?.abort(reason);
     try {
       const [turn, compaction, background] = await Promise.allSettled([
         this.#turnOperation ?? Promise.resolve(),
-        this.#compactionOperation ?? Promise.resolve(),
+        this.#context.operation ?? Promise.resolve(),
         this.#backgroundJobs.dispose(),
       ]);
       this.#assertResourceCleanup();
@@ -827,8 +851,7 @@ export class ReactAgent {
     }
     finally {
       this.#toolOutputs.clear();
-      this.#fileSearches.clear();
-      this.#workspaceReviews.clear();
+      this.#files.dispose();
     }
     this.#assertResourceCleanup();
   }
@@ -836,7 +859,7 @@ export class ReactAgent {
   async runTurn(userInput: string, signal?: AbortSignal, options: AgentTurnOptions = {}): Promise<AgentTurnResult> {
     this.#assertAvailable();
     if (this.#running) throw new Error("An agent turn is already running");
-    if (this.#compacting) throw new Error("Cannot start an agent turn during context compaction");
+    if (this.#context.compacting) throw new Error("Cannot start an agent turn during context compaction");
     signal?.throwIfAborted();
     if (!this.#taskActive) this.#toolFeedback.reset();
     const controller = new AbortController();
@@ -875,7 +898,7 @@ export class ReactAgent {
     this.#learnedPromptKey = undefined;
     this.#streamRecoveryRemaining = this.#streamRecoveryBudget;
     const attachments = options.attachments?.map((attachment) => ({ ...attachment })) ?? [];
-    attachments.forEach((attachment) => this.#activeFiles.add(attachment.path));
+    attachments.forEach((attachment) => this.#files.activeFiles.add(attachment.path));
     const assistantTexts: string[] = [];
     let contextRecoveryRemaining = this.#contextRecoveryBudget;
     let persistenceFailed = false;
@@ -896,7 +919,7 @@ export class ReactAgent {
       const goal = await this.#goalRuntime?.get();
       this.#turnGoalId = goal?.status === "active" ? goal.goal_id : undefined;
       this.#goalPrompt = this.#turnMode === "default" && goal?.status === "active" ? `Active session goal: ${goal.objective}\nContinue until verified complete. Before completion, audit the objective and call update_goal with complete. Mark blocked only after the same blocker recurs for three consecutive goal turns.` : "";
-      this.#history = repairToolContext(this.#history);
+      this.#context.history = repairToolContext(this.#context.history);
       await this.#applyPendingSteering();
       await this.#record([userMessageWithAttachments(userInput, attachments)]);
       if (this.#taskStepsRemaining === 0) {
@@ -934,7 +957,7 @@ export class ReactAgent {
               return structuredClone(value);
             })
             : Promise.resolve(this.#skillTurn);
-          const projectPreparation = loadProjectRuleSnapshot(this.#workspacePath, [".", ...this.#activeFiles]);
+          const projectPreparation = loadProjectRuleSnapshot(this.#workspacePath, [".", ...this.#files.activeFiles]);
           const memoryPreparation = this.#refreshLearnedPrompt(turnInput);
           const [mcpPrepared, skillTurn, projectRules] = await Promise.all([
             mcpPreparation,
@@ -979,7 +1002,7 @@ export class ReactAgent {
         },
         sample: async (loopSignal) => {
           try {
-            return await this.#requestResponse([...this.#history], loopSignal);
+            return await this.#requestResponse([...this.#context.history], loopSignal);
           } catch (error) {
             if (error instanceof ResourceCleanupError) throw error;
             signal?.throwIfAborted();
@@ -997,7 +1020,7 @@ export class ReactAgent {
               }
               const stopReason = await this.#checkStop();
               if (stopReason) throw new LoopStoppedError(stopReason);
-              return this.#requestResponse([...this.#history], loopSignal);
+              return this.#requestResponse([...this.#context.history], loopSignal);
             }
             throw error;
           }
@@ -1062,9 +1085,9 @@ export class ReactAgent {
     } finally {
       try {
         if (!persistenceFailed && this.#pendingSteering.length > 0) {
-          const repaired = repairToolContext(this.#history);
+          const repaired = repairToolContext(this.#context.history);
           // Only trailing missing results can remain here; persist them before guidance.
-          await this.#record(repaired.slice(this.#history.length));
+          await this.#record(repaired.slice(this.#context.history.length));
           await this.#applyPendingSteering();
         }
       } finally {
@@ -1149,9 +1172,8 @@ export class ReactAgent {
 
   #appendRecordedHistory(items: readonly Record<string, unknown>[]): void {
     const copies = items.map((item) => ({ ...item }));
-    this.#history.push(...copies);
+    this.#context.append(copies);
     this.#turnItems?.push(...copies);
-    if (copies.length > 0) this.#historyRevision += 1;
   }
 
   async #replaceTaskProgress(progress: TaskProgress): Promise<void> {
@@ -1371,7 +1393,7 @@ export class ReactAgent {
         ([scope, revision]) => this.#projectRuleSnapshot?.targetRevisions[scope] !== revision,
       );
       if (staleScopes.length > 0) {
-        operations.forEach((operation) => this.#activeFiles.add(operation.path));
+        operations.forEach((operation) => this.#files.activeFiles.add(operation.path));
         return JSON.stringify({
           status: "rules_refresh_required",
           errorCode: "RULES_REFRESH_REQUIRED",
@@ -1382,9 +1404,9 @@ export class ReactAgent {
       }
       const guardedOperations: ApplyPatchOperation[] = [];
       for (const operation of operations) {
-        const key = this.#fileObservationKey(operation.path);
+        const key = this.#files.key(operation.path);
         if (operation.action !== "create") {
-          if (!this.#fileObservations.has(key) || this.#fileObservations.get(key) === null) {
+          if (!this.#files.observations.has(key) || this.#files.observations.get(key) === null) {
             return JSON.stringify({
               status: "rejected",
               errorCode: "FILE_NOT_OBSERVED",
@@ -1392,7 +1414,7 @@ export class ReactAgent {
               remedy: "Read the file with read_file, then retry the edit.",
             });
           }
-          const observed = this.#fileObservations.get(key)!;
+          const observed = this.#files.observations.get(key)!;
           if (operation.expectedSha256 && operation.expectedSha256 !== observed) {
             return JSON.stringify({
               status: "rejected",
@@ -1442,7 +1464,7 @@ export class ReactAgent {
           this.#io.writeTool?.("Applying workspace patch");
           const result = await this.#io.runApplyPatch(boundOperations, signal);
           if (result.status === "applied" && preview?.status === "ready") {
-            preview.files.forEach((file) => this.#fileObservations.set(this.#fileObservationKey(file.path), file.afterSha256));
+            this.#files.applied(preview);
           }
           let followup: WorkflowPatchFollowup | void;
           try {
@@ -1470,7 +1492,7 @@ export class ReactAgent {
     } else if (call.name === LIST_WORKSPACE_CHANGES_TOOL_DEFINITION.name) {
       this.#io.onToolProgress?.({ phase: "started", name: call.name });
       try {
-        output = JSON.stringify(await this.#workspaceReviews.list(call.arguments, signal));
+        output = JSON.stringify(await this.#files.reviews.list(call.arguments, signal));
       } catch (error) {
         if (signal?.aborted) throw error;
         output = JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error) });
@@ -1479,7 +1501,7 @@ export class ReactAgent {
     } else if (call.name === READ_WORKSPACE_CHANGE_TOOL_DEFINITION.name) {
       this.#io.onToolProgress?.({ phase: "started", name: call.name });
       try {
-        output = JSON.stringify(await this.#workspaceReviews.read(call.arguments, signal));
+        output = JSON.stringify(await this.#files.reviews.read(call.arguments, signal));
       } catch (error) {
         if (signal?.aborted) throw error;
         output = JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error) });
@@ -1490,7 +1512,7 @@ export class ReactAgent {
       this.#io.writeTool?.("Querying TypeScript language server");
       try {
         const request = parseCodeNavigationArguments(call.arguments);
-        this.#activeFiles.add(request.path);
+        this.#files.activeFiles.add(request.path);
         output = JSON.stringify({ status: "ok", data: await this.#codeNavigation.query(request, signal) });
       } catch (error) {
         if (error instanceof ResourceCleanupError || signal?.aborted) throw error;
@@ -1533,13 +1555,7 @@ export class ReactAgent {
       this.#io.onToolProgress?.({ phase: "started", name: call.name });
       this.#io.writeTool?.(`File tool: ${call.name}`);
       try {
-        const result = await runFileTool(call.name, call.arguments, this.#workspacePath, signal, this.#fileSearches);
-        if (call.name === "read_file" && result && typeof result === "object") {
-          const record = result as { path?: unknown; exists?: unknown; sha256?: unknown };
-          if (typeof record.path === "string" && typeof record.exists === "boolean" && (typeof record.sha256 === "string" || record.sha256 === null)) {
-            this.#fileObservations.set(this.#fileObservationKey(record.path), record.sha256);
-          }
-        }
+        const result = await this.#files.run(call.name, call.arguments, signal);
         output = JSON.stringify({ status: "ok", data: result });
       } catch (error) {
         if (error instanceof ResourceCleanupError || signal?.aborted) throw error;
@@ -1547,7 +1563,7 @@ export class ReactAgent {
       }
       try {
         const parsed = JSON.parse(call.arguments) as { path?: unknown };
-        if (call.name !== "project_map" && typeof parsed.path === "string" && parsed.path) this.#activeFiles.add(parsed.path);
+        if (call.name !== "project_map" && typeof parsed.path === "string" && parsed.path) this.#files.activeFiles.add(parsed.path);
       } catch {
         // Invalid arguments are already represented by the tool result.
       }
@@ -1648,11 +1664,6 @@ export class ReactAgent {
     }
   }
 
-  #fileObservationKey(value: string): string {
-    const normalized = path.normalize(value);
-    return process.platform === "win32" ? normalized.toLowerCase() : normalized;
-  }
-
   async #requestResponse(
     input: Array<Record<string, unknown>>,
     signal?: AbortSignal,
@@ -1686,7 +1697,7 @@ export class ReactAgent {
     this.#onEvent?.({ type: "model_progress", milestone: "first_event" });
     if (response.output_text) this.#onEvent?.({ type: "model_progress", milestone: "first_text" });
     const usage = normalizeTokenUsageSample(response.usage);
-    this.#contextTokens = usage?.total_tokens ?? null;
+    this.#context.tokens = usage?.total_tokens ?? null;
     signal?.throwIfAborted();
     if (response.status && response.status !== "completed") {
       throw new ModelResponseError(response);
@@ -1695,26 +1706,26 @@ export class ReactAgent {
   }
 
   #contextPressure(forceEstimatedMeasurement = false): ContextPressure {
-    const estimatedTokens = this.#buildRequestSnapshot(this.#history, this.#advancedPromptCacheEnabled).snapshot.estimatedInputTokens;
-    const measuredTokens = this.#contextWindow !== null && this.#contextWindow >= 10_000
-      ? Math.max(this.#contextTokens ?? 0, estimatedTokens)
+    const estimatedTokens = this.#buildRequestSnapshot(this.#context.history, this.#advancedPromptCacheEnabled).snapshot.estimatedInputTokens;
+    const measuredTokens = this.#context.window !== null && this.#context.window >= 10_000
+      ? Math.max(this.#context.tokens ?? 0, estimatedTokens)
       : forceEstimatedMeasurement
         ? estimatedTokens
-        : this.#contextTokens ?? 0;
-    const headroom = this.#contextWindow === null
+        : this.#context.tokens ?? 0;
+    const headroom = this.#context.window === null
       ? 0
-      : Math.min(Math.floor(this.#contextWindow * 0.05), 32_768);
+      : Math.min(Math.floor(this.#context.window * 0.05), 32_768);
     const outputBudget = this.#requestSettings.maxOutputTokens;
-    const threshold = this.#contextWindow === null
+    const threshold = this.#context.window === null
       ? null
       : Math.min(
-          Math.floor(this.#contextWindow * 0.8),
-          Math.max(0, this.#contextWindow - outputBudget - headroom),
+          Math.floor(this.#context.window * 0.8),
+          Math.max(0, this.#context.window - outputBudget - headroom),
         );
     return {
       estimatedTokens,
       threshold,
-      pressured: this.#contextWindow === null || threshold === null
+      pressured: this.#context.window === null || threshold === null
         ? forceEstimatedMeasurement
         : measuredTokens > 0 && measuredTokens >= threshold,
     };
@@ -1723,10 +1734,10 @@ export class ReactAgent {
   async #maybeAutoCompact(signal?: AbortSignal): Promise<void> {
     const pressure = this.#contextPressure();
     if (
-      this.#compacting ||
-      this.#contextWindow === null ||
+      this.#context.compacting ||
+      this.#context.window === null ||
       pressure.threshold === null ||
-      this.#lastCompactedRevision === this.#historyRevision ||
+      this.#context.lastCompactedRevision === this.#context.revision ||
       !pressure.pressured
     ) return;
     const pruned = await this.#pruneContext(signal);
@@ -1741,13 +1752,13 @@ export class ReactAgent {
     if (!resolve || !this.#onContextPruned) return false;
     signal?.throwIfAborted();
 
-    const protectedStart = protectedRecentStart(this.#history);
+    const protectedStart = protectedRecentStart(this.#context.history);
     if (protectedStart <= 0) return false;
-    const openChainSiblings = openChainSiblingOutputs(this.#history);
+    const openChainSiblings = openChainSiblingOutputs(this.#context.history);
     const calls = new Map<string, { name: string } | null>();
     const candidates: Array<ToolResultHistoryCandidate & { index: number; output: string }> = [];
-    for (let index = 0; index < this.#history.length; index += 1) {
-      const item = this.#history[index]!;
+    for (let index = 0; index < this.#context.history.length; index += 1) {
+      const item = this.#context.history[index]!;
       if (item.type === "function_call") {
         if (typeof item.call_id !== "string" || typeof item.name !== "string") {
           calls.clear();
@@ -1769,7 +1780,7 @@ export class ReactAgent {
         Array.from(item.output).length <= TOOL_RESULT_PRUNE_CODEPOINTS
       ) continue;
       candidates.push({
-        candidate_id: `${this.#historyRevision}:${index}`,
+        candidate_id: `${this.#context.revision}:${index}`,
         call_id: item.call_id,
         tool_name: origin.name,
         body_sha256: sessionHistoryBodyDigest(item.output),
@@ -1787,7 +1798,7 @@ export class ReactAgent {
       group.push(resolution);
       resolutionGroups.set(resolution.candidate_id, group);
     }
-    const next = this.#history.map((item) => ({ ...item }));
+    const next = this.#context.history.map((item) => ({ ...item }));
     let prunedResults = 0;
     for (const candidate of candidates) {
       const group = resolutionGroups.get(candidate.candidate_id);
@@ -1806,7 +1817,7 @@ export class ReactAgent {
     if (prunedResults === 0) return false;
 
     const originalRequestBytes = Buffer.byteLength(JSON.stringify(
-      this.#buildRequestSnapshot(this.#history, this.#advancedPromptCacheEnabled).snapshot.request,
+      this.#buildRequestSnapshot(this.#context.history, this.#advancedPromptCacheEnabled).snapshot.request,
     ), "utf8");
     const prunedRequestBytes = Buffer.byteLength(JSON.stringify(
       this.#buildRequestSnapshot(next, this.#advancedPromptCacheEnabled).snapshot.request,
@@ -1819,79 +1830,25 @@ export class ReactAgent {
     };
     signal?.throwIfAborted();
     await persistState("Context pruning persistence failed", () => this.#onContextPruned!(next, metadata));
-    this.#history = next;
-    this.#historyRevision += 1;
-    this.#contextTokens = null;
+    this.#context.history = next;
+    this.#context.revision += 1;
+    this.#context.tokens = null;
     return true;
   }
 
-  async #compactContext(
-    automatic: boolean,
-    signal?: AbortSignal,
-  ): Promise<ContextCompactionResult> {
-    if (this.#compacting) throw new Error("Context compaction is already running");
-    if (this.#history.length === 0) throw new Error("There is no conversation context to compact");
-    this.#compacting = true;
-    const compactionStarted = performance.now();
-    const attempts: Array<TokenUsageSample | null> = [];
-    let persistedAttempts = 0;
+  async #compactContext(automatic: boolean, signal?: AbortSignal): Promise<ContextCompactionResult> {
     const priorGoalId = this.#turnGoalId;
     try {
-      this.#onEvent?.({ type: "compaction_started", automatic });
-      if (!automatic) {
-        const goal = await this.#goalRuntime?.get();
-        this.#turnGoalId = goal && ["active", "budget_limited", "usage_limited"].includes(goal.status) ? goal.goal_id : undefined;
-      }
-      signal?.throwIfAborted();
-      // Project rules are persisted as revisioned context events, but the current
-      // workspace snapshot is supplied separately on every request. Excluding old
-      // snapshots here prevents compaction from making stale rules authoritative.
-      const input = projectConversationCheckpoints(repairToolContext(this.#history.filter((item) => !isPersistedProjectRuleSnapshot(item))));
+      if (!automatic) { const goal = await this.#goalRuntime?.get(); this.#turnGoalId = goal && ['active', 'budget_limited', 'usage_limited'].includes(goal.status) ? goal.goal_id : undefined; }
       const workflowContext = automatic ? this.#stepWorkflowContext : this.#io.getWorkflowContext?.();
-      const workflowInstructions = formatWorkflowContext(workflowContext === undefined ? undefined : projectWorkflowContext(workflowContext));
-      const observeAttempt = async (usage: TokenUsageSample | null): Promise<void> => {
-        attempts.push(usage);
-        await this.#recordGoalUsage(usage);
-      };
-      const response = this.#providerCapabilities.compaction === "native"
-        ? await this.#nativeCompact(input, signal, observeAttempt, workflowInstructions)
-        : await this.#summaryCompact(input, signal, observeAttempt, workflowInstructions);
-      while (persistedAttempts < Math.max(0, attempts.length - 1)) {
-        await this.#recordSessionUsage(attempts[persistedAttempts++]!);
-      }
-      if (!Array.isArray(response.output) || !response.output.every((item) => item && typeof item === "object" && !Array.isArray(item))) {
-        throw new Error("The compaction response returned an invalid context window");
-      }
-      const items = response.output.map((item) => ({ ...item }));
-      const usage = normalizeTokenUsageSample(response.usage);
-      signal?.throwIfAborted();
-      await persistState("Compaction persistence failed", () => this.#onContextCompacted?.(items, automatic, usage));
-      persistedAttempts = attempts.length;
-      if (!this.#onContextCompacted) await this.#recordSessionUsage(usage);
-      this.#history = items;
-      this.#lastCompactedRevision = this.#historyRevision;
-      this.#contextTokens = null;
-      signal?.throwIfAborted();
-      const result = { items, usage };
-      this.#onEvent?.({ type: "compaction_completed", automatic, usage });
-      return result;
-    } catch (error) {
-      while (persistedAttempts < attempts.length) {
-        await this.#recordSessionUsage(attempts[persistedAttempts++]!);
-      }
-      if (signal?.aborted) throw error;
-      if (error instanceof ContextCompactionError || error instanceof PersistenceError || error instanceof ResourceCleanupError || error instanceof LoopStoppedError) throw error;
-      throw new ContextCompactionError(
-        error instanceof Error ? error.message : String(error),
-        { cause: error },
-      );
-    } finally {
-      try { this.#onEvent?.({ type: "timing_recorded", operation: "compaction", durationMs: performance.now() - compactionStarted }); }
-      finally {
-        if (!automatic) this.#turnGoalId = priorGoalId;
-        this.#compacting = false;
-      }
-    }
+      const instructions = formatWorkflowContext(workflowContext === undefined ? undefined : projectWorkflowContext(workflowContext));
+      return await this.#context.compact(automatic, {
+        isStaleRule: isPersistedProjectRuleSnapshot,
+        compact: (input, observe) => this.#providerCapabilities.compaction === 'native' ? this.#nativeCompact(input, signal, observe, instructions) : this.#summaryCompact(input, signal, observe, instructions),
+        persist: this.#onContextCompacted,
+        usage: (usage) => this.#recordSessionUsage(usage), goalUsage: (usage) => this.#recordGoalUsage(usage), event: this.#onEvent,
+      }, signal);
+    } finally { if (!automatic) this.#turnGoalId = priorGoalId; }
   }
 
   async #nativeCompact(
@@ -1974,7 +1931,7 @@ export class ReactAgent {
     try { validateCheckpoint(summary); }
     catch (error) { throw new ContextCompactionError(error instanceof Error ? error.message : String(error), { cause: error }); }
     const output = [
-      frameCheckpoint(summary, externalSourceKinds(this.#history)),
+      frameCheckpoint(summary, externalSourceKinds(this.#context.history)),
       ...recent,
     ];
     if (Buffer.byteLength(JSON.stringify(output), "utf8") >= Buffer.byteLength(JSON.stringify(input), "utf8")) {
@@ -2007,100 +1964,19 @@ export class ReactAgent {
     advancedPromptCache: boolean,
     recoveryBudget: { remaining: number },
   ): Promise<AgentResponse> {
-    const { snapshot, cacheOptions, stableInstructions, dynamicInstructions } = this.#buildRequestSnapshot(input, advancedPromptCache);
+    const { snapshot, cacheOptions } = this.#buildRequestSnapshot(input, advancedPromptCache);
     const params = snapshot.request as Record<string, unknown>;
     this.#requestReservation = Buffer.byteLength(JSON.stringify(params)) + 1024;
     const options = { maxRetries: 0, timeout: requestSettingsForPurpose("coding", this.#requestSettings).timeoutMs, ...(signal ? { signal } : {}), ...cacheOptions };
-    this.#onEvent?.({ type: "sampling_started" });
-    if (this.#responseTransport === "stream" && this.#client.responses.stream) {
-      let eventsSeen = 0;
-      const consumeStreamAttempt = async (
-        open: (attemptOptions: ResponsesRequestOptions) => Promise<ResponseStreamLike> | ResponseStreamLike,
-      ): Promise<AgentResponse> => {
-        const transportController = new AbortController();
-        const attemptSignal = signal
-          ? AbortSignal.any([signal, transportController.signal])
-          : transportController.signal;
-        try {
-          return await this.#consumeResponseStream(
-            await open({ ...options, signal: attemptSignal }),
-            () => { eventsSeen += 1; },
-            () => transportController.abort(new Error("Model stream closed by host")),
-          );
-        } finally {
-          if (!transportController.signal.aborted) transportController.abort(new Error("Model stream settled"));
-        }
-      };
-      try {
-        try {
-          return await this.#runProviderAttempt(
-            "coding",
-            () => {
-              this.#publishContextInspection(snapshot, stableInstructions, dynamicInstructions);
-              this.#reportRequestComposition(params, stableInstructions, dynamicInstructions);
-              return consumeStreamAttempt((attemptOptions) => this.#client.responses.stream!(params, attemptOptions));
-            },
-          );
-        } catch (error) {
-          if (error instanceof ResourceCleanupError || error instanceof PersistenceError || error instanceof LoopStoppedError) throw error;
-          const adapter = this.#client.responses.recovery;
-          const state = error instanceof ResponseStreamIncompleteError
-            ? (error as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState }).recoveryState
-            : undefined;
-          if (!signal?.aborted && adapter && state && recoveryBudget.remaining > 0) {
-            recoveryBudget.remaining -= 1;
-            this.#onEvent?.({ type: "stream_recovery_started" });
-            try {
-              const result = await this.#runProviderAttempt("coding", async () => {
-                this.#publishContextInspection(snapshot, stableInstructions, dynamicInstructions);
-                this.#reportRequestComposition(params, stableInstructions, dynamicInstructions);
-                const recoveryController = new AbortController();
-                const recoverySignal = signal
-                  ? AbortSignal.any([signal, recoveryController.signal])
-                  : recoveryController.signal;
-                try {
-                  const recovered = await adapter.resume(params, state, { ...options, signal: recoverySignal });
-                  return isResponseStream(recovered)
-                    ? await this.#consumeResponseStream(
-                        recovered,
-                        () => { eventsSeen += 1; },
-                        () => recoveryController.abort(new Error("Recovered model stream closed by host")),
-                      )
-                    : recovered;
-                } finally {
-                  if (!recoveryController.signal.aborted) recoveryController.abort(new Error("Recovered model request settled"));
-                }
-              });
-              if (result.status && result.status !== "completed") throw new ModelResponseError(result);
-              this.#onEvent?.({ type: "stream_recovery_finished" });
-              return result;
-            } catch (recoveryError) {
-              if (recoveryError instanceof ResourceCleanupError || recoveryError instanceof PersistenceError || recoveryError instanceof LoopStoppedError) throw recoveryError;
-              this.#onEvent?.({ type: "stream_recovery_finished", success: false });
-              throw error;
-            }
-          }
-          throw error;
-        }
-      } catch (error) {
-        if (error instanceof ResourceCleanupError || error instanceof PersistenceError || error instanceof LoopStoppedError) throw error;
-        if (signal?.aborted) throw error;
-        if (eventsSeen === 0 && isStreamUnsupportedError(error)) {
-          this.#responseTransport = "buffered";
-          this.#onEvent?.({ type: "sampling_started" });
-          return this.#runProviderAttempt("coding", () => {
-            this.#publishContextInspection(snapshot, stableInstructions, dynamicInstructions);
-            this.#reportRequestComposition(params, stableInstructions, dynamicInstructions);
-            return this.#client.responses.create(params, options);
-          });
-        }
-        throw error;
-      }
-    }
-    return this.#runProviderAttempt("coding", () => {
-      this.#publishContextInspection(snapshot, stableInstructions, dynamicInstructions);
-      this.#reportRequestComposition(params, stableInstructions, dynamicInstructions);
-      return this.#client.responses.create(params, options);
+    return this.#requests.create(options, signal, recoveryBudget, {
+      execute: (run) => this.#runProviderAttempt('coding', run),
+      prepare: async () => {
+        if (this.#learnedMemory) { this.#learnedPromptKey = undefined; await this.#refreshLearnedPrompt(this.#turnInput.join('\n')); }
+        const current = this.#buildRequestSnapshot(input, advancedPromptCache);
+        this.#publishContextInspection(current.snapshot, current.stableInstructions, current.dynamicInstructions);
+        this.#reportRequestComposition(current.snapshot.request, current.stableInstructions, current.dynamicInstructions);
+        return structuredClone(current.snapshot.request) as Record<string, unknown>;
+      },
     });
   }
 
@@ -2109,6 +1985,7 @@ export class ReactAgent {
     run: () => Promise<T>,
     observeAttempt?: (usage: TokenUsageSample | null) => Promise<void>,
   ): Promise<T> {
+    await this.#beforeRequest?.();
     this.#assertResourceCleanup();
     const goalStop = await this.#checkGoalStop();
     if (goalStop) {
@@ -2118,10 +1995,16 @@ export class ReactAgent {
     const observe = purpose === "coding" ? (usage: TokenUsageSample | null) => this.#recordStandaloneUsage(usage) : observeAttempt;
     let admitted = false;
     let reported = false;
-    const execute = () => { admitted = true; return run(); };
+    const started = performance.now(); const localId = `${this.#unledgerNamespace}:${++this.#unledgerAttempt}`;
+    const observers = [this.performance, ...(this.#sharedPerformance ? [this.#sharedPerformance] : [])].filter((observer) => observer.active).map((observer) => ({ observer, generation: observer.generation }));
+    const trace = (status: "completed" | "failed" | "cancelled", usage: TokenUsageSample | null) => {
+      if (!this.#requestExecutor) for (const { observer, generation } of observers) if (observer.generation === generation) observer.settle(localId, purpose, status, usage, performance.now() - started);
+    };
+    const execute = async () => { admitted = true; this.#activeProviderRequests++; try { return await run(); } finally { this.#activeProviderRequests--; } };
     try {
-      const result = await (this.#requestExecutor ? this.#requestExecutor.execute(purpose, execute, { reservation: (purpose === "coding" ? this.#requestReservation : Buffer.byteLength(JSON.stringify(this.#history)) + Buffer.byteLength(this.#stableInstructions()) + 1024) + requestSettingsForPurpose(purpose === "coding" ? "coding" : "summary", this.#requestSettings).maxOutputTokens, ...(this.#turnController ? { signal: this.#team?.signal(this.#turnController.signal) ?? this.#turnController.signal } : {}) }) : execute());
+      const result = await (this.#requestExecutor ? this.#requestExecutor.execute(purpose, execute, { reservation: (purpose === "coding" ? this.#requestReservation : Buffer.byteLength(JSON.stringify(this.#context.history)) + Buffer.byteLength(this.#stableInstructions()) + 1024) + requestSettingsForPurpose(purpose === "coding" ? "coding" : "summary", this.#requestSettings).maxOutputTokens, ...(this.#turnController ? { signal: this.#team?.signal(this.#turnController.signal) ?? this.#turnController.signal } : {}) }) : execute());
       reported = true;
+      trace("completed", normalizeTokenUsageSample(result.usage));
       await observe?.(normalizeTokenUsageSample(result.usage));
       return result;
     } catch (error) {
@@ -2130,6 +2013,7 @@ export class ReactAgent {
       }
       if (admitted && !reported) {
         reported = true;
+        trace(this.#turnController?.signal.aborted ? "cancelled" : "failed", error instanceof ModelStreamCleanupError ? error.usage : null);
         await observe?.(error instanceof ModelStreamCleanupError ? error.usage : null);
       }
       if (error instanceof ResourceCleanupError || error instanceof PersistenceError) throw error;
@@ -2226,7 +2110,7 @@ export class ReactAgent {
       };
     const snapshot = createRequestSnapshot({
       request,
-      contextRevision: this.#historyRevision,
+      contextRevision: this.#context.revision,
       outputReserveTokens: this.#requestSettings.maxOutputTokens,
       stablePrefix: { instructions: stableInstructions, tools: this.#stepToolCatalog?.definitions ?? [] },
       dynamicContext: dynamicInstructions,
@@ -2265,182 +2149,6 @@ export class ReactAgent {
     await this.#recordGoalUsage(usage);
   }
 
-  async #consumeResponseStream(
-    stream: ResponseStreamLike,
-    onEvent: () => void,
-    abortRequest: () => void,
-  ): Promise<AgentResponse> {
-    let response: AgentResponse | undefined;
-    let outputText = "";
-    const items = new Map<string, ResponseOutputItem>();
-    const events: Array<Record<string, unknown>> = [];
-    let eventsSeen = 0;
-    let recoveryBytes = 0;
-    let retainEvents = this.#client.responses.recovery !== undefined;
-    let lastEventId: string | undefined;
-    let responseId: string | undefined;
-    let reasoningActive = false;
-    let firstEventSeen = false;
-    let firstTextSeen = false;
-    let exhausted = false;
-    let pendingNext: Promise<IteratorResult<Record<string, unknown>>> | undefined;
-    const iterator = stream[Symbol.asyncIterator]();
-    try {
-      while (true) {
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        pendingNext = Promise.resolve(iterator.next());
-        const next = await Promise.race([
-          pendingNext,
-          new Promise<never>((_resolve, reject) => {
-            timer = setTimeout(() => reject(new ResponseStreamIncompleteError({ cause: new Error(`Model stream was idle for ${this.#streamIdleTimeoutMs}ms`) })), this.#streamIdleTimeoutMs);
-          }),
-        ]).finally(() => { if (timer) clearTimeout(timer); });
-        if (next.done) { exhausted = true; break; }
-        const event = next.value;
-        onEvent();
-        if (!firstEventSeen) {
-          firstEventSeen = true;
-          this.#onEvent?.({ type: "model_progress", milestone: "first_event" });
-        }
-        eventsSeen += 1;
-        if (retainEvents) {
-          recoveryBytes += Buffer.byteLength(JSON.stringify(event), "utf8");
-          if (recoveryBytes <= this.#recoveryCacheMaxBytes) events.push(event);
-          else { retainEvents = false; events.length = 0; }
-        }
-        if (typeof event.id === "string") lastEventId = event.id;
-        if (event.response && typeof event.response === "object" && typeof (event.response as Record<string, unknown>).id === "string") {
-          responseId = (event.response as Record<string, unknown>).id as string;
-        }
-        const type = event.type;
-        if ((type === "response.reasoning_text.delta" || type === "response.reasoning_summary_text.delta") && typeof event.delta === "string") {
-          if (!reasoningActive) {
-            reasoningActive = true;
-            this.#onEvent?.({ type: "reasoning_started" });
-          }
-        } else if (type === "response.output_text.delta" && typeof event.delta === "string") {
-          if (!firstTextSeen && event.delta.length > 0) {
-            firstTextSeen = true;
-            this.#onEvent?.({ type: "model_progress", milestone: "first_text" });
-          }
-          if (reasoningActive) {
-            reasoningActive = false;
-            this.#onEvent?.({ type: "reasoning_finished" });
-          }
-          outputText += event.delta;
-          const renderStarted = performance.now();
-          try { this.#io.writeAssistantDelta?.(event.delta); }
-          finally { this.#onEvent?.({ type: "timing_recorded", operation: "rendering", durationMs: performance.now() - renderStarted }); }
-        } else if (type === "response.output_item.added" && event.item && typeof event.item === "object") {
-          const item = event.item as ResponseOutputItem;
-          const key = typeof event.output_index === "number"
-            ? String(event.output_index)
-            : item.id ?? item.call_id ?? `${items.size}`;
-          items.set(key, { ...item });
-          if (item.type === "function_call") {
-            this.#io.onToolProgress?.({
-              phase: "streaming",
-              name: typeof item.name === "string" ? item.name : "tool",
-              ...(typeof item.arguments === "string" ? { detail: item.arguments } : {}),
-            });
-          }
-        } else if (type === "response.function_call_arguments.delta" && typeof event.delta === "string") {
-          const key = typeof event.output_index === "number"
-            ? String(event.output_index)
-            : typeof event.item_id === "string" ? event.item_id : "";
-          const item = items.get(key);
-          if (item) {
-            item.arguments = `${item.arguments ?? ""}${event.delta}`;
-            this.#io.onToolProgress?.({
-              phase: "streaming",
-              name: typeof item.name === "string" ? item.name : "tool",
-              detail: item.arguments,
-            });
-          }
-        } else if (type === "response.output_item.done" && event.item && typeof event.item === "object") {
-          const item = event.item as ResponseOutputItem;
-          const key = typeof event.output_index === "number"
-            ? String(event.output_index)
-            : item.id ?? item.call_id ?? `${items.size}`;
-          items.set(key, { ...item });
-      } else if (type === "response.completed" && event.response && typeof event.response === "object") {
-        response = event.response as AgentResponse;
-        break;
-      } else if (type === "response.failed" || type === "response.incomplete") {
-        const failedResponse = event.response && typeof event.response === "object"
-          ? event.response as Record<string, unknown>
-            : undefined;
-          response = {
-            id: typeof failedResponse?.id === "string" ? failedResponse.id : "stream",
-            output: [],
-            output_text: outputText,
-            status: type === "response.incomplete" ? "incomplete" : "failed",
-          ...(failedResponse?.usage === undefined ? {} : { usage: failedResponse.usage }),
-          ...(failedResponse?.error === undefined ? {} : { error: failedResponse.error }),
-          ...(failedResponse?.incomplete_details === undefined ? {} : { incomplete_details: failedResponse.incomplete_details }),
-        };
-        break;
-      }
-      }
-    } catch (error) {
-      if (error instanceof ResourceCleanupError || error instanceof ModelResponseError || error instanceof PersistenceError) throw error;
-      if (error instanceof ResponseStreamIncompleteError) {
-        const incomplete = error as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState };
-        if (!retainEvents) delete incomplete.recoveryState;
-        if (retainEvents && incomplete.recoveryState === undefined) {
-          incomplete.recoveryState = {
-            events,
-            ...(lastEventId === undefined ? {} : { lastEventId }),
-            ...(responseId === undefined ? {} : { responseId }),
-          };
-        }
-        throw incomplete;
-      }
-      if (eventsSeen > 0) {
-        const incomplete = new ResponseStreamIncompleteError({ cause: error });
-        if (retainEvents) (incomplete as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState }).recoveryState = {
-          events,
-          ...(lastEventId === undefined ? {} : { lastEventId }),
-          ...(responseId === undefined ? {} : { responseId }),
-        };
-        throw incomplete;
-      }
-      throw error;
-    } finally {
-      abortRequest();
-      if (!exhausted) {
-        try {
-          // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
-          if (typeof iterator.return !== "function") throw new Error("The stream iterator exposes no close operation");
-          const closed = await iterator.return();
-          // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
-          if (closed.done !== true) throw new Error("The stream iterator did not confirm closure");
-          // A timeout may leave next() active even after return() reports done.
-          await pendingNext?.then(() => {}, () => {});
-        } catch (cause) {
-          const failure = cause instanceof ModelStreamCleanupError ? cause : new ModelStreamCleanupError(cause, response?.usage);
-          this.#cleanupFailure ??= failure;
-          // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
-          throw failure;
-        }
-      }
-    }
-    if (reasoningActive) this.#onEvent?.({ type: "reasoning_finished" });
-    if (!response) {
-      const incomplete = new ResponseStreamIncompleteError();
-      if (retainEvents) (incomplete as ResponseStreamIncompleteError & { recoveryState?: ResponseRecoveryState }).recoveryState = {
-        events,
-        ...(lastEventId === undefined ? {} : { lastEventId }),
-        ...(responseId === undefined ? {} : { responseId }),
-      };
-      throw incomplete;
-    }
-    const result = response;
-    if (result.output.length === 0 && items.size > 0) result.output = [...items.values()];
-    if (!result.output_text) result.output_text = outputText;
-    return result;
-  }
-
   #promptCacheRequest(advancedPromptCache: boolean): {
     key: string | undefined;
     params: Record<string, unknown>;
@@ -2464,14 +2172,14 @@ export class ReactAgent {
 
   async #refreshLearnedPrompt(userInput: string): Promise<void> {
     if (!this.#learnedMemory) return;
-    const key = JSON.stringify([userInput, [...this.#activeFiles].sort()]);
+    const key = JSON.stringify([userInput, [...this.#files.activeFiles].sort()]);
     if (key === this.#learnedPromptKey) return;
     try {
       if (this.#learnedMemory.loadSnapshot) {
-        this.#learnedSnapshot = await this.#learnedMemory.loadSnapshot(this.#workspacePath, userInput, [...this.#activeFiles]);
+        this.#learnedSnapshot = await this.#learnedMemory.loadSnapshot(this.#workspacePath, userInput, [...this.#files.activeFiles]);
         this.#learnedPrompt = this.#learnedSnapshot.text;
       } else {
-        this.#learnedPrompt = await this.#learnedMemory.loadPrompt(this.#workspacePath, userInput, [...this.#activeFiles]);
+        this.#learnedPrompt = await this.#learnedMemory.loadPrompt(this.#workspacePath, userInput, [...this.#files.activeFiles]);
         this.#learnedSnapshot = undefined;
       }
       this.#learnedPromptKey = key;
@@ -2487,7 +2195,7 @@ export class ReactAgent {
     const count = this.#pendingSteering.length;
     for (let index = 0; index < count; index++) {
       const pending = this.#pendingSteering[0]!;
-      pending.attachments.forEach((attachment) => this.#activeFiles.add(attachment.path));
+      pending.attachments.forEach((attachment) => this.#files.activeFiles.add(attachment.path));
       await this.#record([userMessageWithAttachments(pending.text, pending.attachments)]);
       this.#pendingSteering.shift();
       this.#turnInput.push(pending.text);
@@ -2513,6 +2221,7 @@ export class ReactAgent {
   }
 
   #assertResourceCleanup(): void {
+    if (this.#streams.failure) throw this.#streams.failure;
     if (this.#cleanupFailure) throw this.#cleanupFailure;
     this.#backgroundJobs.assertCleanupComplete();
   }

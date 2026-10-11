@@ -5,6 +5,7 @@ import { retainOutput } from "../tools/command-record.js";
 import { ProcessCleanupError } from "../tools/process-completion.js";
 import type { VerificationCommand, VerificationResult, VerificationSuiteResult, VerificationTier } from "./types.js";
 import { verificationFromBash } from "./types.js";
+import { captureEvidenceReports, collectVerificationEvidence, invalidateVerificationEvidence, type EvidenceContext } from "./verification-evidence.js";
 
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const DEFAULT_FAST_TIMEOUT_MS = 60_000;
@@ -164,14 +165,21 @@ export async function runVerificationSuite(
   commands: readonly VerificationCommand[],
   run: (command: string, signal?: AbortSignal, timeoutMs?: number) => Promise<BashResult>,
   signal?: AbortSignal,
+  evidenceContext?: EvidenceContext,
 ): Promise<VerificationSuiteResult> {
+  const before = evidenceContext ? await captureEvidenceReports(evidenceContext.workspacePath) : undefined;
+  const withEvidence = async (suite: VerificationSuiteResult): Promise<VerificationSuiteResult> => {
+    if (!evidenceContext || !before) return suite;
+    const evidence = collectVerificationEvidence(suite.results, evidenceContext, before, await captureEvidenceReports(evidenceContext.workspacePath));
+    return { ...suite, evidence: evidence.workspaceRevision ? evidence : invalidateVerificationEvidence(evidence) };
+  };
   if (commands.length === 0) {
-    return {
+    return withEvidence({
       status: "unavailable",
       results: [],
       skipped: [],
       reason: "No conventional verification command was discovered",
-    };
+    });
   }
   const results: VerificationResult[] = [];
   for (let index = 0; index < commands.length; index += 1) {
@@ -179,14 +187,14 @@ export async function runVerificationSuite(
     const result = await runVerificationCommand(commands[index]!, run, signal);
     results.push(result);
     if (!result.passed) {
-      return {
+      return withEvidence({
         status: "failed",
         results,
         skipped: commands.slice(index + 1).map((command) => ({ ...command })),
-      };
+      });
     }
   }
-  return { status: "passed", results, skipped: [] };
+  return withEvidence({ status: "passed", results, skipped: [] });
 }
 
 export function verificationSuitePrompt(suite: VerificationSuiteResult): string {

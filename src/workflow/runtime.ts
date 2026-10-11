@@ -7,6 +7,7 @@ import { ProcessCleanupError } from "../tools/process-completion.js";
 import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 import { discoverVerificationCommands, runVerificationCommand, runVerificationSuite, selectVerificationCommand, selectVerificationCommands, verificationPrompt } from "./verifier.js";
 import { WorkspaceChangeTracker, type WorkspaceChangeObservation } from "./workspace-tracker.js";
+import { formatVerificationEvidence, invalidateVerificationEvidence } from "./verification-evidence.js";
 import { createWorkflowState, type VerificationSuiteResult, type WorkflowPatchFollowup, type WorkflowReviewResult, type WorkflowRunResult, type WorkflowState, type VerificationCommand, type WorkflowResultClassification, type WorkflowTaskSource } from "./types.js";
 
 export interface WorkflowRuntimeOptions {
@@ -196,9 +197,11 @@ export class CodingWorkflowRuntime {
       if (refreshes > 0) before = await this.#refreshObservedChanges();
       const commands = await discoverVerificationCommands(this.#workspacePath);
       signal?.throwIfAborted();
-      const suite = await this.#verify(() => runVerificationSuite(selectVerificationCommands(commands, "full"), run, signal));
+      let suite = await this.#verify(() => runVerificationSuite(selectVerificationCommands(commands, "full"), run, signal, { workspacePath: this.#workspacePath, changedPaths: before.changedPaths, ...(before.available && before.complete && before.revision ? { revision: before.revision } : {}) }));
       signal?.throwIfAborted();
       const after = await this.#refreshObservedChanges();
+      const stale = before.available && before.complete && after.available && after.complete && before.revision !== after.revision;
+      if (stale && suite.status === "failed" && suite.evidence) suite = { ...suite, stale: true, evidence: invalidateVerificationEvidence(suite.evidence) };
       const verification = suite.results.find((result) => !result.passed) ?? suite.results.at(-1);
       if (suite.status === "failed") {
         const phase = this.#state.repair_attempts >= this.#state.max_repair_attempts && this.#state.repair_attempts > 0
@@ -214,12 +217,10 @@ export class CodingWorkflowRuntime {
         return { state: this.state, ...(verification ? { verification } : {}), verificationSuite: suite, changed: true };
       }
 
-      const stale = before.available && before.complete && after.available && after.complete
-        && before.revision !== after.revision;
       if (stale && refreshes < MAX_VERIFICATION_REFRESHES) continue;
       if (stale) {
         const reason = `Workspace contents changed during final verification after ${refreshes + 1} passes`;
-        const unavailable: VerificationSuiteResult = { ...suite, status: "unavailable", stale: true, reason };
+        const unavailable: VerificationSuiteResult = { ...suite, status: "unavailable", stale: true, reason, ...(suite.evidence ? { evidence: invalidateVerificationEvidence(suite.evidence) } : {}) };
         await this.#set({
           phase: "done",
           result: "unverified",
@@ -302,7 +303,7 @@ export class CodingWorkflowRuntime {
     options.signal?.throwIfAborted();
     await this.#tracker.trackPaths(this.#state.changed_paths);
     const before = await this.#tracker.observe();
-    const suite = await this.#verify(() => runVerificationSuite(commands, run, options.signal));
+    const suite = await this.#verify(() => runVerificationSuite(commands, run, options.signal, { workspacePath: this.#workspacePath, changedPaths: this.#state.changed_paths, supplemental: options.supplemental, ...(before.available && before.complete && before.revision ? { revision: before.revision } : {}) }));
     options.signal?.throwIfAborted();
     const after = await this.#tracker.observe();
     const gitBound = before.available && before.complete && after.available && after.complete;
@@ -310,7 +311,7 @@ export class CodingWorkflowRuntime {
     let structurallyBound = false;
     if (!gitBound && this.#checkpoint.available) structurallyBound = (await this.#checkpoint.reviewCurrent()).passed;
     const settled: VerificationSuiteResult = stale
-      ? { ...suite, status: "unavailable", stale: true, reason: "Workspace contents changed during manual verification" }
+      ? { ...suite, status: "unavailable", stale: true, reason: "Workspace contents changed during manual verification", ...(suite.evidence ? { evidence: invalidateVerificationEvidence(suite.evidence) } : {}) }
       : !gitBound && !structurallyBound
         ? { ...suite, status: "unavailable", reason: before.reason ?? after.reason ?? "The verification result could not be bound to a complete workspace snapshot" }
         : suite;
@@ -335,6 +336,11 @@ export class CodingWorkflowRuntime {
       }
     }
     return this.state;
+  }
+
+  async stopEvaluationRepairs(reason: string): Promise<void> {
+    if (this.#state.task_source !== "benchmark" || this.#state.phase !== "diagnose") throw new Error("Evaluation repair stop is unavailable outside a benchmark diagnostic round");
+    await this.#set({ phase: "blocked", result: "failed", pending_verification: true, result_reason: reason });
   }
 
   async undo(): Promise<UndoResult> {
@@ -405,5 +411,5 @@ export function formatWorkflowSummary(result: WorkflowRunResult): string | undef
       : `${suite.status}; ran ${suite.results.map((item) => item.command.command).join(", ") || "none"}${suite.skipped.length > 0 ? `; skipped ${suite.skipped.map((item) => item.command).join(", ")}` : ""}`
     : "not run";
   const reason = result.state.result_reason ? ` Reason: ${result.state.result_reason}.` : "";
-  return `Development workflow result: ${result.state.result ?? "unverified"}. Changed paths: ${paths}. Verification: ${checks}.${reason}`;
+  return `Development workflow result: ${result.state.result ?? "unverified"}. Changed paths: ${paths}. Project checks: ${checks}.${reason} ${formatVerificationEvidence(suite?.evidence)}`;
 }

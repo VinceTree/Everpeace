@@ -142,6 +142,8 @@ async function main(): Promise<number> {
     async removeMany() { throw new Error("The offline fixture model cannot be removed"); },
   };
   const sessionStore = new SessionStore({ directory: sessionDirectory });
+  const { SessionPrivacy } = await import("../../src/storage/session-privacy.js");
+  const privacy = new SessionPrivacy(sessionStore, path.join(root, "privacy.json"));
   if (!marker.seedSessionId) {
     const seed = await sessionStore.create({ title: "Offline debt seed", titlePending: false, workspacePath, model: { id: model.id, model_name: model.model_name, base_url: model.base_url } });
     const text = "Offline fixture: fixture.txt has inherited verification debt. Reopen, fork, enter Plan, cancel coding, then resume coding to exercise production recovery.";
@@ -219,6 +221,8 @@ async function main(): Promise<number> {
   const handles = new Set<ProductionAgentHandle>();
   let policy: PermissionPolicy = { mode: "workspace-write", web: false, shellNetwork: "deny" };
   const dependencies: TuiDependencies = {
+    privacy,
+    acquireSessionActivity: (id) => sessionStore.activity.acquire(id),
     registry, version: "offline-fixture", workspacePath, sessionStore,
     inputHistory: new InputHistory(path.join(root, "input-history.json")),
     async listModels() { return [model.model_name]; },

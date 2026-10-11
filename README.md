@@ -66,6 +66,8 @@ MCP stdio programs require separate startup trust. Use `/mcp trust <server>` to 
 
 Search uses DOM selectors by default. `/web` can explicitly select Brave LLM Context; its key stays in the system credential store, and saving sends no request. `/doctor --live` previews bounded streaming/tool/usage/cancellation probes and defaults to Cancel. `/cost` records user-priced estimates, unknown/partial metering and task warnings; request token budgets are not spending caps. [Security and diagnostic contracts](docs/architecture/SECURITY_AND_DIAGNOSTICS.md).
 
+`/privacy` shows local persistence and retention (forever by default), previews cleanup, scans credentials and exports diagnostic summaries; conversation export requires a separate review. `everpeace privacy --help` provides the local CLI. `/perf` separates wall time, cumulative phases and known tokens; missing measurements stay unknown. Workflow reports distinguish project checks from independent functional verification. Project Memory expires after 90 days and pauses recall until reviewed with `/memory`; team workers can use authorized Git subdirectories and existing linked worktrees. [Evidence, privacy and performance contracts](docs/architecture/VALIDATION_PRIVACY_PERFORMANCE.md).
+
 Report vulnerabilities privately through [GitHub Security](https://github.com/VinceTree/Everpeace/security/advisories/new). See [SECURITY.md](SECURITY.md) for supported releases and coordinated disclosure. Dependency audit, redacted secret scans, license policy and candidate-bound SBOM evidence are required before merging and publishing.
 
 ## Automate the same workflow

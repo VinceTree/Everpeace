@@ -66,6 +66,8 @@ MCP stdio 程序需要独立的启动信任：使用 `/mcp trust <server>` 审�
 
 默认搜索使用 DOM 选择器；`/web` 可明确选择 Brave LLM Context，密钥只保存在系统凭据库，保存不发请求。`/doctor --live` 先预览有界流式、工具、用量与取消诊断，默认 Cancel。`/cost` 显示用户定价的估算、未知／不完整计量和任务预警；请求 Token 预算不是费用上限。[安全与诊断契约](docs/architecture/SECURITY_AND_DIAGNOSTICS.md)。
 
+`/privacy` 展示持久化和保留策略（默认永久），预览清理、扫描凭据并导出诊断摘要；脱敏对话导出需单独审查。`everpeace privacy --help` 提供无模型请求的 CLI。`/perf` 区分墙钟、累计阶段和已知 Token，缺测仍为未知。工作流报告区分项目检查与独立功能验证；项目 Memory 在 90 天后暂停召回，可通过 `/memory` 逐条审查。团队成员支持授权 Git 子目录及已有 linked worktree。[验证、隐私与性能契约](docs/architecture/VALIDATION_PRIVACY_PERFORMANCE.md)。
+
 漏洞请通过 [GitHub 私密报告](https://github.com/VinceTree/Everpeace/security/advisories/new) 提交，支持范围与协调披露见 [SECURITY.md](SECURITY.md)。依赖审计、脱敏秘密扫描、许可证策略及绑定候选的 SBOM 证据是合并和发布必需检查。
 
 ## 自动执行同一工作流

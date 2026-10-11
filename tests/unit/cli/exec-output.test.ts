@@ -12,6 +12,19 @@ import {
 
 const timestamp = new Date("2026-10-02T03:04:05.000Z");
 
+test("performance and evidence JSONL admit fixed measurements and reject hidden private fields", async () => {
+  const { TaskPerformance } = await import("../../../src/performance/task-report.js");
+  const trace = new TaskPerformance(); trace.begin(); trace.timing("verification", 15); const report = trace.finish()!;
+  const safe = JSON.parse(serializeExecJsonlEvent({ type: "performance_report", report }, timestamp));
+  assert.equal(safe.report.timings.verification.totalMs, 15); assert.match(safe.notice, /overlap/u);
+  const forged = { ...report, path: "private-customer-path" };
+  const rejected = serializeExecJsonlEvent({ type: "performance_report", report: forged }, timestamp);
+  assert.doesNotMatch(rejected, /private-customer-path/u); assert.equal(JSON.parse(rejected).unavailable, true);
+  const evidence = { version: 1 as const, projectChecks: "none" as const, tests: { state: "unknown" as const, assertions: "unknown" as const }, coverage: { state: "unknown" as const, changedFiles: 0, measuredFiles: 0 }, independent: "not_run" as const, source: "project_checks" as const, modifiedTests: false, reportDigests: [], rawParameters: "private-token-fragment" };
+  const workflow = serializeExecJsonlEvent({ type: "workflow_updated", phase: "review", verificationEvidence: evidence }, timestamp);
+  assert.doesNotMatch(workflow, /private-token-fragment|verification_evidence/u);
+});
+
 test("serializeExecJsonlEvent emits a versioned allowlisted session event", () => {
   const line = serializeExecJsonlEvent({
     type: "session_started",

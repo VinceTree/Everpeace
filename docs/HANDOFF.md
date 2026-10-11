@@ -2,31 +2,32 @@
 
 ## 范围与候选
 
-用户授权实施问题 11–20，完成后提交推送并按补丁交付；本轮不执行付费模型或 Brave 请求。起点 main `84be0baafc67f3c41d3e17e65cc45e32f0f6d34a`，分支 `codex/security-diagnostics-evaluation`。最终补丁候选为 **0.5.3**，冻结 commit `8b6888cc1eb0bae682dc1e418d995e47d3b899be`；此前正式 Release v0.5.2。最终候选来自已通过保护门禁的 main，实现与最后 Memory 回归修正分别由 PR #5/#6 合并；本文件后续只补交接记录，不把文档提交重定义为已验收包的候选。前次问题 5–10 的证据归档于 [前次交接](archive/HANDOFF-2026-10-11-distribution.md)，不迁移为本轮候选成功。
+用户已授权实施问题 20–30、提交推送、更新补丁候选及 GitHub Release；本轮不执行付费模型请求。起点 main `7963b45ca1ef9665fb1dc2e2588c110634f3e650`，工作分支 `codex/verification-privacy-performance`。此前正式 Release 为 v0.5.2，本轮沿用未发布候选 **0.5.3**。代码变化后重新冻结 main commit，旧候选 `8b6888cc1eb0bae682dc1e418d995e47d3b899be` 的任何收据均不作为本轮成功证据。前次问题 11–20 的交接归档见 [历史交接](archive/HANDOFF-2026-10-11-security-diagnostics.md)。
 
-## 实现与边界
+## 实现与保留边界
 
-- 私密报告政策、公开 Issue 提醒、npm/Actions Dependabot。已实际启用并回读 GitHub 私密报告、依赖告警/安全更新、Secret Scanning 和 Push Protection；交付前再核对设置。
-- 完整锁文件审计、固定 SHA 工具、脱敏 Gitleaks、SPDX 许可证、多层 Syft SBOM 接入 Required checks 与候选 Release。严重漏洞、服务故障、缺报告或摘要不符拒绝。两平台三种消费者安装分别记录实际依赖及原生二进制；静态链接内部依赖覆盖限制明确保留。
-- MCP 说明、作用域规则、用户调用 Skill 和 Memory 从宿主动态指令层分离；外部工具结果持久来源标记，压缩记录类别。不同 Responses 布局保持低信任；宿主授权机制与 full-access 语义保留，不宣称模型永远不受骗。
-- Web 保留统一响应租约，补压力验收。搜索改 DOM 和真实脱敏结构快照；`/web` 明确选择 Brave，Key 仅 keyring，保存不请求，固定 HTTPS、拒绝重定向及额外付费重试。
-- `/doctor --live` 默认 Cancel，先预览有界阶段，配置假设与实测/未知分开，身份绑定及七天时效。`/cost` 是用户定价的逐请求快照估算，涵盖失败、重试、压缩、辅助和成员；币种分开，缺字段不按零金额，预警不保证停止在途计费。
-- 八类合成任务和固定 node-pty #952 helper 路径冻结外置评分器。历史独立计划保留失败/未知，首页显示成功/计划，不合并不同候选。第 16 项正式 DeepSeek/中转 coding 闭环仍未完成；准备记录不含执行授权或数值预算。
+- 预算界面统一 Request token budget，并区分已知消耗、在途和计量完整性；费用仍为逐请求价格快照估算，不承诺账单硬上限。
+- workflow 增加兼容的验证证据：检查类型、TAP/JUnit 数量、改动文件执行覆盖及独立验证。报告绑定本次文件身份和 workspace revision；断言证据保持 unknown，LCOV 文件执行不等于改动行或功能覆盖。项目脚本、模型新增测试和 `/verify` 不冒充宿主外置评分器。
+- `/privacy` 和无模型 CLI 提供永久/按天保留预览、跨进程活动租约、扫描、白名单诊断导出及显式脱敏对话导出。默认永久保留；旧记录、安全状态不明、活动及团队成员记录保守跳过。TUI 与 Agent 共享引用计数租约，全部安全关闭后才允许自动清理。测试只使用隔离目录，不删除用户历史。逻辑删除不连带 Memory、凭据、输入历史、团队产物或用户导出。
+- 项目 Memory 九十天到期暂停召回；用户长期偏好不自动到期。人工查看来源、纠正、续期、禁用及删除绑定 revision，取消旧操作并使缓存失效；实际 provider 请求及恢复/回退均复核有效性。不把提取 confidence 当事实准确率。
+- 团队支持授权子目录及已有 linked worktree，快照仅复制授权子树，保护共享 Git 元数据和兄弟目录。保留并发原始字节检查、冲突产物、取消 ownership；子模块、链接逃逸、二进制整合和超限仍拒绝。
+- ReactAgent 分离请求/流恢复、上下文/压缩、工具/文件观察状态；根保留取消、steering、准入、Goal/Memory 与最终清理。公开构造和事件顺序不变。
+- `web_fetch` 改有界 DOM 正文抽取，保留标题、列表、引用、代码、表格与来源链接，忽略 base，不加载子资源。十二份有许可的项目技术文档渲染快照比较旧版与新版；外层站点结构明确为合成，不宣称外部网站实测。
+- `/perf`、SDK 事件、JSONL 与诊断导出覆盖墙钟、累计/嵌套阶段、请求用途 Token、压缩和重复调用。任务内随机密钥摘要只在内存保留；记录无路径、命令或参数，未知数据不补零，晚到请求由 generation 隔离。
+- 固定 fast-check 的七类安全不变量、日检扩大用例与可重放报告；专用 Windows native 必需验收新增子目录/linked worktree 隔离用例。修复及 single/team 分别准备十九任务、每臂三次的配对实验，保留计划分母。生产三轮上限与默认单 Agent 不变。
 
-稳定契约、源码与测试入口见 [安全与诊断专题](architecture/SECURITY_AND_DIAGNOSTICS.md)。
+契约、源码与测试入口见 [验证、隐私与性能专题](architecture/VALIDATION_PRIVACY_PERFORMANCE.md)。
 
-## 验证与交付
+## 验证记录
 
-实现阶段：Web 独立 GC 压力预热后十批、每批百次、并发八，批末连接/租约归零，heap/external 增长各在 32 MiB 上限内。九项评分器基线/缺陷/修复证明通过，真实模型运行零次。生产 coding runner 六入口 × 六攻击通过；Ink 和真实 PTY 的新面板确认、取消、Esc、resize 通过。doctor 穿过真实 SDK 的官方/配置型中转/通用布局离线 SSE；旧 ReactAgent/恢复/MCP/Memory/TUI dependencies 兼容回归通过。
+本轮证据根：`C:\Users\39850\AppData\Local\Temp\everpeace-observability-a5fd694c54a64dcaae58b25d28bc184a`。最终本地串行 `typecheck → lint → test → build` 全部通过：1235 tests，1232 pass、3 skip、0 fail；`gate-7.json` 与 `gate-7-*.log` 保存命令、退出码及实际输出，`git diff --check` 和改动文档链接检查通过。跳过不作为原生验收成功；不将旧候选收据迁移为最终成功。
 
-最终本地串行 `typecheck → lint → test → build` 全部通过：1196 tests，1193 pass、3 skip、0 fail；`git diff --check` 通过。跳过不作为原生沙箱验收。门禁收据 `local-gates-15.json` 及 `final-15-*` 记录实际命令和退出码。九项完整评分器证明见 `expanded-drain-final/expanded-proof.json`，evaluation digest `d19c65dd1f592cec824bb7e5c67067e0d8170f846817f8505b60409ad5fc875a`，真实模型运行零次。工作证据根：`C:\Users\39850\AppData\Local\Temp\everpeace-security-2e61f0e7347246339d51bc14e24b8f50`。工作证明不冒充发布候选收据；安装目录许可证检查包含关键组件，最终仍须验收新锁、新补丁和准确候选的消费者产物。
+已完成的定向证明包括真实原生团队子目录与 linked worktree、跨进程 Session 租约/隐私、Memory 到期和请求重试失效、流恢复与新状态子系统、TUI/真实 PTY 确认取消 Esc resize、脱敏 JSONL、DOM 对照与安全日检。日检八个属性测试全部完成规定次数，无 skip；纯属性每项一万例、状态序列每项一千例，报告保存 seed 与重放信息。锁文件审计、Secret/许可证/SBOM 本地共享安全检查通过。十二份网页正文块新版 F1 为 1，八个标准代码块逐字保留；这只证明固定语料。中间两次完整门禁均通过，最终冻结重新执行，实际数量以最终收据为准。
 
-远端失败保持可见，Required checks 拒绝未通过提交：终端 fixture 使用真实画面和交互输入；正常 Web 请求与故意超时分开；取消模拟器检查已取消状态；Python 工具链固定。Conpty EPIPE 的实际关闭竞态修复到分发补丁并冻结依赖。Memory 成功重启 fixture 使用明确完成状态和可靠 Usage，先等待串行队列结算，失败保留合成状态诊断；未知 Usage 不重试的生产语义未改。
+九项扩展评分器基线、缺陷及参考修复全部证明通过，见 `expanded-final/expanded-proof.json`；真实模型请求零次。修复/团队准备脚本已完成四个冻结配置及无凭据生产 preflight；源码变化后必须重新生成 source/build/evaluation 身份。第 21、26 的真实收益及 Memory 模型效果仍未完成；任务专属错误修改分类缺乏独立证据时 rate=null、eligibleForDefault=false，不从 Agent 自评补造。
 
-[PR #5](https://github.com/VinceTree/Everpeace/pull/5) 的 [完整检查](https://github.com/VinceTree/Everpeace/actions/runs/38128729869) 与 [PR #6](https://github.com/VinceTree/Everpeace/pull/6) 的 [完整检查](https://github.com/VinceTree/Everpeace/actions/runs/38130249449) 各自 Windows/Linux、安全和 Required checks 全成功，均经保护门禁合并。冻结最终 main 候选 `8b6888cc1eb0bae682dc1e418d995e47d3b899be` 的 [独立验收与产物](https://github.com/VinceTree/Everpeace/actions/runs/38130540901) 重新执行平台、安全、打包、两平台三种消费者安装与供应链汇总；候选 tarball、实际依赖版本、许可证、原生二进制及各摘要均以该 run 的 `verified-evidence/supply-chain.json`、`receipt.json` 和消费者收据为准。此前 `a9b5ef1` 包的六种安装与汇总成功，但其并行 main 回归失败且候选已替换；旧收据仅保留作诊断，绝不迁移为最终候选成功。
+## 交付与外部依赖
 
-## 发布与外部依赖
+实现和三个状态子系统分批提交，已推送 [PR #8](https://github.com/VinceTree/Everpeace/pull/8)。首轮 CI Linux/安全成功、Windows 失败，日志保留。修正 CRLF 快照摘要、Windows 短路径别名导出与 Worktree 注销；打包使用规范化的补丁副本，不修改补丁语义。第二轮两平台捕获相同成员归属写入竞态，修正同进程重复操作的等待，十六次并发发布及生产 preflight 回归通过。新版两平台 CI、安全门禁、冻结 main 候选和同包消费者验收继续绑定新 commit。专用 Windows 机器未准备，GitHub Runner 回读数量零，RUNNER_READ_TOKEN 未配置。用户选择先完成代码和 [部署说明](WINDOWS_RUNNER.md)；该环境及其真实 native 验收未通过前禁止创建 tag/Release，不以本机测试、hosted skip 或旧候选成功代替。
 
-专用 Windows 机器未准备、Runner 未注册、RUNNER_READ_TOKEN 未配置。用户选择先完成代码与 [部署说明](WINDOWS_RUNNER.md)。新安全门禁、两平台同包消费者和准确 commit 的 required native 全成功前禁止创建 tag/Release；不手工绕过，不复用旧候选证据。付费评测另需明确端点、原始模型 ID、凭据及 task/campaign 数值预算。
-
-保留原有 untracked `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`；没有付费请求、上游投稿或 npm registry 发布。授权允许提交推送及补丁交付，Release 仍受真实门禁约束。
+保留原有 untracked `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`。没有付费模型/Brave 请求，没有 npm registry 发布。后续真实模型实验另需端点、供应商原始模型 ID、凭据及 task/campaign 数值预算。

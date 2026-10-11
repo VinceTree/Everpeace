@@ -1,5 +1,7 @@
 # 公共资源网络边界
 
+`web_fetch` 使用有界结构化 DOM 正文遍历，保留技术结构并以最终 URL 解析链接；响应租约和公网连接策略不变。固定许可语料的指标及覆盖限制见 [正文抽取](VALIDATION_PRIVACY_PERFORMANCE.md)。
+
 网页搜索的 Bing、Bing China、DuckDuckGo、页面读取和 Skill HTTP 下载共用 [公共资源客户端](../../src/network/public-http.ts)。模型 API、MCP 及用户直接 `!` 的网络行为保持各自边界。
 
 ## 当前问题与证据

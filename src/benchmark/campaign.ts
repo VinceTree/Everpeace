@@ -26,6 +26,7 @@ export interface BenchmarkCampaignOptions {
   repetitions: number;
   taskTokenBudget: number;
   campaignTokenBudget: number;
+  ordering?: "random" | "paired";
   liveApi: true;
   signal?: AbortSignal;
   artifactSink?: BenchmarkArtifactSink;
@@ -53,6 +54,7 @@ export function createBenchmarkCampaignPlan(
   harnesses: readonly BenchmarkHarnessAdapter[],
   repetitions: number,
   seed: number,
+  ordering: "random" | "paired" = "random",
 ): BenchmarkCampaignPlanItem[] {
   positiveInteger(repetitions, "repetitions");
   if (!Number.isSafeInteger(seed)) throw new Error("seed must be an integer");
@@ -63,6 +65,12 @@ export function createBenchmarkCampaignPlan(
     for (const adapter of harnesses) values.push({ harness: adapter.name, taskId: task.id, repetition });
   }
   const next = random(seed);
+  if (ordering === "paired") {
+    if (harnesses.length !== 2) throw new Error("Paired campaigns require exactly two harnesses");
+    const pairs = Array.from({ length: values.length / 2 }, (_, index) => values.slice(index * 2, index * 2 + 2));
+    for (let index = pairs.length - 1; index > 0; index--) { const swap = Math.floor(next() * (index + 1)); [pairs[index], pairs[swap]] = [pairs[swap]!, pairs[index]!]; }
+    return pairs.flatMap((pair, index) => index % 2 ? [...pair].reverse() : pair).map((value, index) => ({ index, ...value }));
+  }
   for (let index = values.length - 1; index > 0; index -= 1) {
     const swap = Math.floor(next() * (index + 1));
     [values[index], values[swap]] = [values[swap]!, values[index]!];
@@ -78,7 +86,7 @@ export async function runBenchmarkCampaign(
 ): Promise<BenchmarkCampaignResult> {
   positiveInteger(options.taskTokenBudget, "taskTokenBudget");
   positiveInteger(options.campaignTokenBudget, "campaignTokenBudget");
-  const plan = createBenchmarkCampaignPlan(tasks, harnesses, options.repetitions, options.seed);
+  const plan = createBenchmarkCampaignPlan(tasks, harnesses, options.repetitions, options.seed, options.ordering);
   const taskById = new Map(tasks.map((task) => [task.id, task]));
   const harnessByName = new Map(harnesses.map((adapter) => [adapter.name, adapter]));
   const results: BenchmarkRunResult[] = [];

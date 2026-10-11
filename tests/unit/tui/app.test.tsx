@@ -61,6 +61,58 @@ afterEach(() => {
   renderedViews.clear();
 });
 
+test("privacy confirmation defaults to cancel and perf remains a local command", async () => {
+  const { SessionStore } = await import("../../../src/storage/session-store.js");
+  const { SessionPrivacy } = await import("../../../src/storage/session-privacy.js");
+  const root = await mkdtemp(join(tmpdir(), "ep-ui-privacy-"));
+  const fixture = createFixture();
+  const privacy = new SessionPrivacy(new SessionStore({ directory: join(root, "sessions") }), join(root, "privacy.json"));
+  fixture.dependencies.privacy = privacy;
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await tick(); view.stdin.write("/privacy retention 90"); await tick(); view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Set retention to 90 days"));
+    await new Promise<void>((resolve) => setTimeout(resolve, 30));
+    view.stdin.write("\r"); await tick(); assert.equal((await privacy.settings.read()).retentionDays, null);
+    await waitFor(() => !(view.lastFrame() ?? "").includes("Set retention to 90 days"));
+    view.stdin.write("/privacy retention 90"); await tick(); view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Set retention to 90 days"));
+    await new Promise<void>((resolve) => setTimeout(resolve, 30));
+    view.stdin.write("\u001b[B"); await tick(); view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("saved")); assert.equal((await privacy.settings.read()).retentionDays, 90);
+    await new Promise<void>((resolve) => setTimeout(resolve, 30)); view.stdin.write("\u001b");
+    await waitFor(() => !(view.lastFrame() ?? "").includes("/privacy · Result"));
+    view.stdin.write("/perf"); await tick(); view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Performance report unavailable"));
+    assert.equal(fixture.sessionStore.sessions.size, 0);
+  } finally { view.unmount(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Memory review cancels safely and renews only the inspected revision", async () => {
+  const { LearnedMemoryStore } = await import("../../../src/memory/learned-memory.js");
+  const root = await mkdtemp(join(tmpdir(), "ep-ui-memory-review-")); let now = new Date("2000-01-01T00:00:00Z");
+  const store = new LearnedMemoryStore({ directory: join(root, "memory"), now: () => now });
+  const fixture = createFixture(); fixture.dependencies.workspacePath = root;
+  await store.append("project", root, [{ lesson: "Review fixture lesson", applyWhen: "fixture", sourceSessionId: "deleted-fixture-session" }]);
+  const entry = (await store.read("project", root))[0]!; let reviews = 0;
+  fixture.dependencies.getMemoryStatus = (workspace) => store.status(workspace);
+  fixture.dependencies.reviewMemory = async (scope, workspace, id, revision, action, correction) => { reviews++; now = new Date(); await store.reviewEntry(scope, workspace, id, revision, action, correction); };
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [], missing: [] }} onReplayOutput={(update) => update()} />);
+  try {
+    await tick(); view.stdin.write(`/memory inspect project ${entry.id}`); await tick(); view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("deleted-fixture-session (unavailable)"));
+    assert.match(view.lastFrame()!, /expired, recall paused/u);
+    await new Promise<void>((resolve) => setTimeout(resolve, 30)); view.stdin.write("\u001b"); await tick();
+    await waitFor(() => !(view.lastFrame() ?? "").includes("/memory · Entry"));
+    view.stdin.write(`/memory renew project ${entry.id}`); await tick(); view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Confirm Memory review")); await new Promise<void>((resolve) => setTimeout(resolve, 30)); view.stdin.write("\u001b"); await tick(); assert.equal(reviews, 0);
+    await waitFor(() => !(view.lastFrame() ?? "").includes("Confirm Memory review"));
+    view.stdin.write(`/memory renew project ${entry.id}`); await tick(); view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Confirm Memory review")); await new Promise<void>((resolve) => setTimeout(resolve, 30)); view.stdin.write("\u001b[B"); await tick(); view.stdin.write("\r");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Entry updated")); assert.equal(reviews, 1); assert.equal((await store.status(root)).needsReview, 0);
+  } finally { view.unmount(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("formats active turn elapsed time with useful units", () => {
   assert.equal(formatElapsed(0), "0s");
   assert.equal(formatElapsed(59), "59s");
@@ -135,7 +187,7 @@ function createMemorySessionStore(): MemorySessionStore {
   const timestamp = () => `2026-09-16T00:00:${String(clock++).padStart(2, "0")}.000Z`;
   const requireSession = (sessionId: string) => {
     const session = sessions.get(sessionId);
-    assert.ok(session);
+    assert.ok(session, "Fixture Session does not exist");
     return session;
   };
   return {

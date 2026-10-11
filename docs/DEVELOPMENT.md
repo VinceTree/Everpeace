@@ -1,5 +1,7 @@
 # 开发、验证与交付
 
+问题 20–30 定向入口见 [验证、隐私与性能](architecture/VALIDATION_PRIVACY_PERFORMANCE.md)。安全属性 PR 用例在全量 test 内；`EVERPEACE_PROPERTY_DAILY=1` 扩大十倍，`EVERPEACE_PROPERTY_SEED` 固定重放，`EVERPEACE_PROPERTY_REPORT` 写隔离证据。日检两平台执行，原生 Windows 仍须专用 Runner。新增 Session 操作及 PTY fixture 只使用隔离目录，不清理用户历史。
+
 用途：准备开发环境、选择测试入口、解释 CI 边界和完成交付。先读根目录 [AGENTS.md](../AGENTS.md) 与 [HANDOFF.md](HANDOFF.md)，再按本次任务定位源码；不需要每次重新扫描整个项目。当前展示版本、提交、测试计数和最近执行证据只在 HANDOFF 维护。
 
 ## 工具链与安装

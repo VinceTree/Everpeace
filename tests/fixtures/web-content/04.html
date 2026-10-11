@@ -1,0 +1,109 @@
+<!doctype html><html><head><title>Sandbox comparison and optimization plan</title><base href="https://invalid.example/"></head><body><nav>Navigation account subscription portal</nav><main><h1>Sandbox comparison and optimization plan</h1>
+<p>Audit date: 2026-09-28. Comparison baseline: Everpeace 0.2.22; implementation continued on 0.2.23. This is a comparison of inspected implementations, not a universal ranking or a claim of equivalent enforcement.</p>
+<h2>Fixed references</h2>
+<ul>
+<li>Original comparison: <a href="https://github.com/openai/codex/tree/c0d26949be4144c751894ae96e28d3db2208b764"><code>c0d26949</code></a>. The runtime now pins <code>@openai/codex@0.162.0</code> and Windows <code>windows.sandbox=mxc</code>; see <a href="https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/cli/src/debug_sandbox.rs"><code>debug_sandbox.rs</code></a> and <a href="https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/core/src/config/windows_sandbox_config.rs"><code>windows_sandbox_config.rs</code></a>. Configuration names alone do not establish containment; current evidence is in HANDOFF.</li>
+<li>oh-my-pi: <a href="https://github.com/can1357/oh-my-pi/tree/cabfa74e1f6b4e8f53d1afb71b652c024db339fd"><code>cabfa74e</code></a>, particularly <a href="https://github.com/can1357/oh-my-pi/blob/cabfa74e1f6b4e8f53d1afb71b652c024db339fd/packages/coding-agent/src/exec/bash-executor.ts">bash executor</a>, <a href="https://github.com/can1357/oh-my-pi/blob/cabfa74e1f6b4e8f53d1afb71b652c024db339fd/crates/pi-shell/src/process.rs">process ownership/cancellation</a>, and the separate <a href="https://github.com/can1357/oh-my-pi/blob/cabfa74e1f6b4e8f53d1afb71b652c024db339fd/python/robomp/src/sandbox.py">robomp workspace deployment</a>.</li>
+<li>Grok Build: <a href="https://github.com/xai-org/grok-build/tree/f0e3be1100ef5252488e3be8bb0e91cf68d8c305"><code>f0e3be11</code></a>, <a href="https://github.com/xai-org/grok-build/blob/f0e3be1100ef5252488e3be8bb0e91cf68d8c305/crates/codegen/xai-grok-sandbox/src/lib.rs">sandbox implementation</a>, <a href="https://github.com/xai-org/grok-build/blob/f0e3be1100ef5252488e3be8bb0e91cf68d8c305/crates/codegen/xai-grok-sandbox/src/profiles.rs">profiles</a>, and <a href="https://github.com/xai-org/grok-build/blob/f0e3be1100ef5252488e3be8bb0e91cf68d8c305/crates/codegen/xai-grok-pager/docs/user-guide/18-sandbox.md">sandbox guide</a>.</li>
+<li><a href="https://learn.chatgpt.com/docs/security">Official security documentation</a>: approvals and execution isolation serve different purposes. Source inspection and local tests determine the specific claims below.</li>
+</ul>
+<h2>Comparison and decision</h2>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Everpeace before this change</th>
+<th>Codex</th>
+<th>oh-my-pi</th>
+<th>Grok Build</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Enforcement unit</td>
+<td>Each model shell invocation uses the pinned native backend; Node file tools and MCP remain outside it</td>
+<td>Native platform sandbox plus permission-aware tool orchestration; current source also has sandboxed filesystem execution surfaces</td>
+<td>Inspected main shell uses brush/native execution and host PTY, with application permission classification; this is not evidence of general OS confinement</td>
+<td>With enforcement enabled on supported Unix, restricts the agent process and inherited children</td>
+</tr>
+<tr>
+<td>Platform fit</td>
+<td>Windows PowerShell, Linux/macOS Bash</td>
+<td>Windows backends, Linux isolation, macOS Seatbelt</td>
+<td>Cross-platform shell execution; separate robomp deployment uses UID/workspace/container arrangements</td>
+<td>Landlock/Seatbelt and supplementary Linux mechanisms; non-Unix/non-enforce build has a no-op implementation</td>
+</tr>
+<tr>
+<td>Network</td>
+<td>Built-in web toggle is separate from shell profile and MCP</td>
+<td>Permission policy and managed network machinery</td>
+<td>Main shell features do not establish a kernel network boundary</td>
+<td>Child-network restriction is Linux-only in this revision; documented as no-op on macOS</td>
+</tr>
+<tr>
+<td>Failure</td>
+<td>No host fallback, but text-based helper retry could replay a command</td>
+<td>Typed execution/sandbox orchestration</td>
+<td>Per-run owned process handles, cancellation, timeout/output lifecycle</td>
+<td>Some unsupported/apply-failure branches warn and return success; specific deny protections have stronger refusal paths</td>
+</tr>
+<tr>
+<td>Configuration protection</td>
+<td>Workspace path checks did not exclude control metadata in <code>apply_patch</code>; explicit <code>-P</code> omitted managed requirements opt-in</td>
+<td>Built-in metadata protections and requirements-aware policy resolution</td>
+<td>Permission checks and deployment trust boundaries must be evaluated separately</td>
+<td>Protects global hook/config paths in selected profiles; documents which profiles/platforms enforce them</td>
+</tr>
+</tbody></table>
+<p>For this project&#39;s Windows-first local TypeScript architecture, retaining the pinned Codex backend is the best fit of the three inspected choices. Replacing it with Grok&#39;s process-wide restrictions would affect keyring access, Session persistence, directory switching, API/MCP connections and direct user commands. Those require a separate execution worker design, not a wrapper swap. oh-my-pi&#39;s process ownership and output lifecycle are useful references; its shell session reuse should not be adopted until permission changes and cwd/environment isolation have tests.</p>
+<h2>Confirmed gaps</h2>
+<ol>
+<li><strong>P0 — output-triggered replay:</strong> stdout/stderr from a payload can contain <code>helper_unknown_error</code> or generic sandbox-helper wording. The former retry condition did not even require a failed exit. It could rerun a successful or partially successful command.</li>
+<li><strong>P0 — inherited launcher environment:</strong> the Node CLI launcher inherited the entire host environment before OS isolation. <code>NODE_OPTIONS</code> can load code there, and credential-shaped variables reach the launcher. The backend&#39;s own environment policy is a separate, later boundary.</li>
+<li><strong>P0 — host editor bypass:</strong> <code>apply_patch</code> did not protect <code>.git</code>, <code>.codex</code>, <code>.agents</code>, or <code>.everpeace</code>, and did not reject Windows alternate-stream syntax. File confinement alone is insufficient for control metadata.</li>
+<li><strong>P1 — managed requirements omitted:</strong> the installed CLI explicitly ignores managed requirements with a named <code>-P</code> invocation unless <code>--include-managed-config</code> is supplied. Selecting a familiar profile name does not establish full managed-policy parity.</li>
+<li><strong>P1 — application metadata remains shell-writable:</strong> native Windows smoke verified <code>.git</code> protection, but <code>.everpeace</code> was writable under the built-in workspace profile. The new host-editor guard does not close this shell route.</li>
+<li><strong>P1 — rule parsing is narrower than an execution policy:</strong> current command rules match raw string prefixes. Compound commands, interpreters, substitutions and rule intersection need a dedicated parser and tests. A prefix match is not a sandbox boundary.</li>
+<li><strong>P1 — incomplete common filesystem boundary:</strong> file tools, patching, workflow snapshots and MCP execute in the host process. MCP can perform remote side effects that local process confinement cannot undo.</li>
+<li><strong>P2 — process lifecycle and observability:</strong> buffered and duplex native launchers join process close with a single tree-termination request, retain cleanup errors, and suppress late observer output. Neither the old 500 ms nor five-second watchdog supplies exit evidence. Host Bash, benchmark, search, project-map and Skill Git wrappers share ownership waiting; cleanup failure closes affected task/runtime admission and blocks successful Goal/Memory settlement. A real native Windows fixture covers a detached payload descendant in buffered and duplex modes. Arbitrary descendants and other native platforms still need separate evidence. Sandbox readiness/denial currently lacks a dedicated diagnostic surface.</li>
+</ol>
+<h2>Phase A — implemented local hardening</h2>
+<ul>
+<li><input checked="" disabled="" type="checkbox"> Commands cannot be automatically replayed based on output, whether or not the payload uses the <code>--</code> delimiter. Retain legacy bounded helper retry only for the exact profile-only sandbox invocation. A successful exit cannot be classified as helper failure. Ignore late <code>close</code> callbacks after settlement.</li>
+<li><input checked="" disabled="" type="checkbox"> Filter inherited model-shell variables before starting the Node launcher: names containing KEY/TOKEN/SECRET/PASSWORD/PASSWD/CREDENTIAL and known runtime/startup injection variables. Retain ordinary paths, platform variables and toolchain settings. Do not filter the direct-user PTY or MCP configuration paths.</li>
+<li><input checked="" disabled="" type="checkbox"> Explicitly enable backend default credential exclusions and pass <code>--include-managed-config</code>. A conflicting managed requirement fails the launch; it does not cause a retry without the flag or a host fallback.</li>
+<li><input checked="" disabled="" type="checkbox"> In-process patch preview and dispatch reject control metadata unless host code explicitly enables it after full-access selection. Validate the whole batch before writes; reject alternate-stream paths even with full access. Recheck cancellation and read-only mode after asynchronous workflow checkpoint capture.</li>
+<li><input checked="" disabled="" type="checkbox"> Add regressions for replay on both successful and failed payloads, credential/startup filtering at the actual fake-launcher boundary, pre-cancelled launch, patch batch rejection, and host-controlled full-access editing.</li>
+</ul>
+<p>Environment filtering is name-based defense in depth, not complete secret discovery. Explicit trusted backend configuration may set additional environment values; mounted/readable files and credential services require their own policies. <code>full-access</code> still means host-user filesystem authority, but does not disable the inherited-variable filter. Direct user commands retain their environment.</p>
+<h2>Phase B — unify policy across shell and file tools</h2>
+<p>Phase B is being delivered in independently validated slices:</p>
+<ol>
+<li><input checked="" disabled="" type="checkbox"> Define an immutable effective policy containing workspace roots, protected paths, network mode, environment policy, approval scope and backend identity. Refresh before each new command and invalidate an approval if the live policy revision changed. Project policy continues to be intersected by the existing loader.</li>
+<li><input checked="" disabled="" type="checkbox"> Use a complete native child of <code>:workspace</code> to make workspace control directories read-only and the application&#39;s user-global permission/state root inaccessible to model execution. The host materializes <code>.everpeace</code> before launch because an absent Windows target is not denied, and rejects a redirected control path. Managed conflicts fail closed; full access remains explicit. Windows verifies writes, rename/delete resistance and the missing-target behavior. Linux/macOS native verification remains open.</li>
+<li><input disabled="" type="checkbox"> Route read/list/edit through an isolated local worker or supported pinned filesystem executor with the same effective policy. Keep AuthStorage, Session storage and the TUI in the host. Define brokered file access rather than granting the worker access to the keyring or all application state.</li>
+<li><input checked="" disabled="" type="checkbox"> Replace single raw-command prefix evaluation with conservative top-level command analysis. Every <code>;</code>, newline, pipe and conditional segment is evaluated; nested interpreters, substitutions and unresolved syntax require approval, while embedded explicit denies remain denied. This is intentionally documented as a conservative analyzer rather than a full shell parser.</li>
+<li><input checked="" disabled="" type="checkbox"> Add a persisted shell-network control distinct from public web and MCP. It defaults to the existing profile behavior and requests native denial with <code>--sandbox-state-disable-network</code>; a backend refusal fails the command. Selecting full access clears the user-level deny, while a restrictive project deny remains effective and may fail closed if the backend cannot compose that profile. Domain allowlists remain out of scope because they require a managed proxy. Cross-platform native denial probes remain part of acceptance.</li>
+</ol>
+<p>Acceptance: same protected targets fail through shell and patch; malicious project configuration cannot expand roots or weaken rules; denied compound commands never launch; permission changes invalidate stale approvals; Windows/Linux/macOS tests identify actual enforcement and capability failures. No migration of permissions into Session JSONL.</p>
+<h3>Isolated LSP navigation</h3>
+<p>Optional TypeScript navigation now uses the same pinned native backend through a dedicated duplex process transport rather than host <code>child_process.spawn</code>. Each query launches executable and argv directly with a complete child of <code>:read-only</code>: workspace writes are denied, <code>.git</code>/<code>.codex</code>/<code>.agents</code>/<code>.everpeace</code> plus the global application-state root are inaccessible, and native network denial is requested. This policy is independent of the interactive permission tier, including full access. Before the configured server starts, a direct-socket probe runs under the same policy; if a connection succeeds or denial cannot be proved, the tool and <code>/doctor</code> report unavailable and retain lexical search. There is no host fallback.</p>
+<p>The transport retains raw stdout, honors stdin backpressure, drains bounded stderr and exposes an awaited exit/termination result. The query queue advances only after cleanup. Task cancellation and permission-revision changes terminate the active server. Platform runtime reads and native temporary-directory grants remain ambient backend capabilities; documentation must not describe the process as seeing only workspace bytes.</p>
+<p>Protocol parsing separately limits headers to 8 KiB, frames to 2 MiB, aggregate incoming traffic to 8 MiB and retained stderr to 64 KiB. Native Windows acceptance reproduced the old token backend&#39;s allowed socket, then established workspace write denial, application-state read denial and socket EACCES with the fixed MXC backend. Actual TypeScript language-server queries cover definition, references, implementation and hover. Linux/macOS and future revisions still need their own probe evidence.</p>
+<p>Windows launches a small read-only, host-owned temporary adapter inside the sandbox before the configured server. Only its Node child receives a realpath compatibility import: native promise realpath EPERM falls back to Node&#39;s symlink-resolving JavaScript implementation under the same OS permissions. It does not return unchecked input paths or grant workspace writes. Temporary files are excluded from workspace/protected state, readable rather than writable by the server, and deleted only after awaited child cleanup; failure blocks further navigation. Model shell and MCP do not receive this Node adapter.</p>
+<h2>Phase C — lifecycle, diagnostics and measured performance</h2>
+<ol>
+<li>Introduce typed outcomes (launch failure, policy refusal, command exit, timeout, cancellation), preserving original command exit/output. A helper retry requires a machine-verifiable pre-execution failure, not matching stderr.</li>
+<li>Track owned process handles or native job/process groups, inspired by oh-my-pi; verify descendants exit before claiming termination. Quarantine late output after settlement. Maintain direct-user PTY cancellation behavior.</li>
+<li>Add a transient sandbox diagnostic view: installed backend version, requested/effective policy where available, enforcement availability and probe results. Never infer enforcement from environment markers or expose credentials.</li>
+<li>Benchmark fixed harmless commands with warm/cold backend startup, cancellation and output size. Only consider reusable workers after tests prove policy, cwd, environment and descendant isolation between requests. No promised percentage speedup.</li>
+</ol>
+<p>Acceptance: fake launch failures cause no fallback or replay; cancellation leaves no surviving fixture descendants; output remains bounded; a test fixture cannot mutate metadata, escape roots or use blocked networking. Real provider requests are unnecessary for these sandbox checks. Repeat native probes on Windows, Linux/WSL and macOS before claiming cross-platform acceptance.</p>
+<p>The buffered launcher uses the same strict tree-kill primitive as the duplex transport: Windows awaits <code>taskkill /T /F</code>, Unix targets the detached process group. Cancellation and timeout share one cleanup promise; command results wait for both it and child <code>close</code>. A tree-kill failure remains an error even if the launcher closes. Observer exceptions cannot abandon ownership, and output after close is ignored. This does not infer that arbitrarily detached descendants are contained. See <a href="../../tests/unit/codex/process-lifecycle.test.ts">controlled lifecycle regressions</a> and the <a href="../../tests/unit/codex/cli.test.ts">real fixture tree</a>.</p>
+<p>The duplex transport exposes the same retained cleanup failure after repeated termination. LSP EOF gets a short grace period before requesting forced termination; it still waits for observed exit and cleanup. Navigation and isolation-probe cleanup failure permanently deny subsequent server admission. Search/map bounds stop retention while draining output until normal close or the existing deadline, avoiding a redundant Windows taskkill against an already-exited producer. Skill Git uses a detached Unix group and keeps failed-cleanup staging. These contracts do not change direct-user PTY cancellation.</p>
+<h2>Native smoke evidence and limits</h2>
+<p>Required Windows release acceptance uses the dedicated Runner described in <a href="../WINDOWS_RUNNER.md">WINDOWS_RUNNER</a>. Hosted mode is explicit; <code>GITHUB_ACTIONS</code> alone no longer skips native tests. Required mode rejects missing/skipped/TODO native cases and records the exact source identity. Local successful probes do not establish dedicated Runner availability. macOS remains experimental without complete CI/Seatbelt/Keychain acceptance.</p>
+<p>Windows Node with the installed pinned backend was exercised using disposable directories and fixed fixture commands, without model/API requests. The built-in profile allowed <code>.everpeace</code>, confirming the original gap. The new complete child profile then allowed an ordinary workspace write while rejecting <code>.everpeace</code> file creation, rename and delete attempts; the automated native regression covers ordinary write plus protected write. Non-temp sibling writes, read-only workspace writes and <code>.git</code> writes also failed. A sibling inside the system temp directory was writable, as a temporary-directory grant permits; this is not a workspace escape test.</p>
+<p>The <a href="../../tests/unit/tools/sandbox-boundaries.test.ts">native Windows ownership fixture</a> cancels a payload that starts a detached child and verifies that both reported PIDs have exited. Buffered and duplex modes run through the pinned backend; a natural self-expiry cannot satisfy the assertions. This verifies the controlled fixture, not all possible descendants. Hosted Windows CI and non-Windows explicitly skip this native integration; those skips are not containment evidence.</p>
+<p>Linux/macOS native isolation and live terminal approval flows are not covered by these Windows results. The Windows LSP probe covers one direct TCP/IPv4 socket and is not proof for every protocol or address. Automated counts and the latest full-validation status belong in <a href="../HANDOFF.md">HANDOFF</a>.</p>
+<h2>成员原生隔离</h2>
+</main><form>Credentials input</form><footer>Footer advertising tracking</footer><script>throw new Error('never executed')</script></body></html>

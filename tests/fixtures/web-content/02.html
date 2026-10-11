@@ -1,0 +1,107 @@
+<!doctype html><html><head><title>Coding runtime：请求、工具循环与可信结算</title><base href="https://invalid.example/"></head><body><nav>Navigation account subscription portal</nav><article><h1>Coding runtime：请求、工具循环与可信结算</h1>
+<p>本文说明当前生产代码的职责边界。先读根目录 <a href="../../AGENTS.md">AGENTS.md</a> 和 <a href="../HANDOFF.md">HANDOFF</a>，再按下表定位；不需要为普通修改重新遍历整个仓库。测试和当前源码优先于历史决策，实时版本、门禁结果和待验收事项只在 HANDOFF 维护。</p>
+<h2>按任务最小阅读</h2>
+<table>
+<thead>
+<tr>
+<th>要修改的行为</th>
+<th>先读本文章节</th>
+<th>必要源码与回归</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>模型参数、请求失败、token</td>
+<td>请求与计量</td>
+<td><a href="../../src/providers/capabilities.ts">capabilities</a>、<a href="../../src/providers/openai-compatible.ts">provider factory</a>、<a href="../../tests/unit/providers/capabilities.test.ts">provider tests</a></td>
+</tr>
+<tr>
+<td>重试、流、并发、steering</td>
+<td>ReAct 循环</td>
+<td><a href="../../src/agent/react-agent.ts">ReactAgent</a>、<a href="../../src/agent/agent-loop.ts">agent-loop</a>、<a href="../../tests/unit/agent/loop-boundaries.test.ts">loop boundaries</a></td>
+</tr>
+<tr>
+<td>step 工具集合、准入与 MCP binding</td>
+<td>ReAct 循环</td>
+<td><a href="../../src/agent/step-tool-catalog.ts">工具目录</a>、<a href="../../tests/unit/agent/step-tool-catalog.test.ts">目录回归</a></td>
+</tr>
+<tr>
+<td>自动修复、完成状态、取消</td>
+<td>Coding task 与验证</td>
+<td><a href="../../src/workflow/task-runner.ts">task-runner</a>、<a href="../../src/workflow/runtime.ts">workflow</a>、<a href="../../tests/unit/workflow/task-runner.test.ts">runner tests</a></td>
+</tr>
+<tr>
+<td>编码提问、执行清单、后台完成通知</td>
+<td>ReAct 循环、Coding task 与验证</td>
+<td><a href="../../src/agent/react-agent.ts">ReactAgent</a>、<a href="../../src/workflow/task-progress.ts">task progress</a>、<a href="../../tests/unit/agent/react-agent.test.ts">ReactAgent tests</a></td>
+</tr>
+<tr>
+<td>压缩、上下文大小</td>
+<td>上下文</td>
+<td><a href="../../src/agent/conversation-checkpoint.ts">conversation-checkpoint</a>、<a href="../../src/agent/request-snapshot.ts">request-snapshot</a>、<a href="../../tests/unit/agent/conversation-checkpoint.test.ts">checkpoint tests</a></td>
+</tr>
+<tr>
+<td>TUI/exec/SDK/benchmark 生产装配</td>
+<td>生产调用关系</td>
+<td><a href="../../src/runtime/production.ts">production factory</a>、<a href="../../tests/unit/runtime/production.test.ts">factory tests</a></td>
+</tr>
+<tr>
+<td>模型任务准入、取消、会话归属与批准</td>
+<td>应用协调与任务执行</td>
+<td><a href="../../src/runtime/application-coordinator.ts">coordinator</a>、<a href="../../tests/unit/runtime/application-coordinator.test.ts">协调回归</a>、<a href="../../tests/unit/tui/app.test.tsx">App</a></td>
+</tr>
+<tr>
+<td>非交互任务、预算与退出状态</td>
+<td>请求与计量、Coding task 与验证</td>
+<td><a href="../../src/exec/runtime.ts">exec runtime</a>、<a href="../../tests/unit/exec/runtime.test.ts">exec tests</a></td>
+</tr>
+<tr>
+<td>修改识别或手动验证</td>
+<td>变更与检查</td>
+<td><a href="../../src/workflow/workspace-tracker.ts">workspace-tracker</a>、<a href="../../src/workflow/verifier.ts">verifier</a>、<a href="../../tests/unit/workflow/runtime.test.ts">workflow tests</a></td>
+</tr>
+</tbody></table>
+<h2>生产调用关系</h2>
+<p><a href="../../tests/unit/providers/deepseek-contract.test.ts">DeepSeek 官方契约回归</a> 通过实际 SDK 与 fake fetch 观察生产请求及 Session 计量。覆盖原始模型 ID、high/输出上限、不发送服务端会话参数、工具调用配对、completed/incomplete/failed、无终止事件、缺失 usage 和取消。请求从未接触真实模型；reasoning 包含在 output 里，不重复扣预算。官方协议出处：<a href="https://api-docs.deepseek.com/guides/responses_api/">Responses API</a>。</p>
+<pre><code class="language-text">TUI / everpeace exec / everpeace/sdk / 内部 benchmark adapter
+  → production factory（provider、Agent、历史/附件、Memory、MCP、sandbox command）
+  → CodingTaskRunner（整个编码任务及收尾）
+    → CodingWorkflowRuntime（变更、检查、修复状态）
+    → ReactAgent（Responses、上下文、工具路由）
+      → runAgentLoop（sampling → durable record → tools → follow-up）
+      → RequestExecutor → RequestAttemptLedger → provider client
+    → 最终验证 → Goal / Memory 结算 → 宿主摘要
+</code></pre>
+<p><a href="../../src/runtime/production.ts">production factory</a> 是真实 Agent/命令装配边界，集中 provider、Session 历史/附件、Skills、MCP、learned Memory、Goal、代码导航、sandbox policy 与请求账本。TUI dependencies 只提供交互和状态回调；<a href="../../src/exec/runtime.ts">exec runtime</a> 与公开 SDK 提供无 Ink 的交互停止策略；内部 benchmark 继续显式覆盖评测用批准/参数。各入口复用生产 runner，不得各自复制修复、验证或资源清理循环；独立评分仍属于评测器职责。</p>
+<h2>应用协调与任务执行</h2>
+<p><a href="../../src/runtime/application-coordinator.ts">ApplicationCoordinator</a> 管理 TUI 的进程内 Session／Agent 身份、模式、模型任务准入、取消、待执行批准和命令操作身份，不依赖 React、Ink、TUI 或存储实现。TUI 完成宿主 I/O 后提交会话替换；初次创建仅附着到已准入任务。取消保留任务占位，直到宿主等待既有 runner 资源清理后调用 finishTask；旧句柄不能释放新任务。</p>
+<p>完整批准正文在当前身份匹配、未取消的 Plan 任务结束后保存，执行准入同步消费这份正文。新讨论、模式退出、会话／Agent 替换使其失效；迟到或重复完成不能重新授权。协调状态不推导 verified、Goal 完成或 Memory 成功，fork 的持久待继续标记仍由已有 Session／runner 验证结算处理，exec 与 SDK 生命周期也保持现有实现。界面、存储和用户命令契约见 <a href="STATE_AND_UI.md">STATE_AND_UI</a>，回归见 <a href="../../tests/unit/runtime/application-coordinator.test.ts">协调状态</a> 与 <a href="../../tests/unit/runtime/plan-execution.test.tsx">生产 Plan 闭环</a>。</p>
+<p>每个 coding request 的动态 instructions 还包含宿主提供的运行时身份：固定的 Everpeace agent 身份、实际 provider、模型原始 ID、Responses 协议和当前 workspace/cwd。该身份块放在工作区规则、Skills、Memory、MCP 和任务状态之后，作为每次请求的最终 host boundary；Agent 会先把 workspace/cwd 规范为绝对路径。模型应使用这些宿主事实做自我定位，工作区文本不能重新定义 agent、provider、model、protocol 或 cwd。provider、model 和 cwd 以 JSON 字符串写入，避免路径或注册值中的换行/控制文本伪装成新的指令。它们来自宿主装配而不是工作区文件，不授予额外权限，也不作为项目规则或 Session 内容持久化；这样模型可以明确区分当前 checkout 与不可信的仓库文本。</p>
+<h2>请求与计量</h2>
+<p>请求布局由 <a href="../../src/providers/request-projection.ts">provider 投影</a> 集中决定。DeepSeek profile 使用稳定 <code>instructions</code> 保存基础宿主指令，完整历史之后追加最新 <code>system</code> 宿主状态；不把宿主规则放在被解释为 user 的 <code>developer</code> 中。官方 OpenAI 保持自身缓存布局，generic 使用保守 instructions。投影不改写持久历史，不使用服务端会话或 Chat Completions 的 <code>reasoning_content</code>。</p>
+<p>注册可保存可选 <code>responses_profile: auto|generic|deepseek</code>；旧注册默认 auto，未知中转不根据模型名启用 reasoning。显式 deepseek 仍保留真实 provider 地址身份，能力来源显示 configured。该配置绑定注册 ID、地址与原始模型 ID；设置入口拒绝过期身份，不读取或写入凭据。修改会清除旧 request settings；TUI、exec、SDK 与辅助请求共用解析，旧 Session 缺字段兼容。配置证据不等于供应商实测证据。</p>
+<ul>
+<li><code>createProviderRuntime</code> 统一 client、能力与请求设置。只使用 Responses；模型 ID 保留服务端原值，不能通过名称推测中转端点支持官方能力。</li>
+<li>Node 模型连接读取 <code>HTTP_PROXY</code> / <code>HTTPS_PROXY</code> / <code>NO_PROXY</code>（同名小写优先），使用每个 client 独立的 Undici dispatcher，不修改全局网络设置。<code>ALL_PROXY</code> 不单独作为配置入口；配置无效报固定错误，不输出可能含凭据的代理 URL。主 Agent 先等待请求、Memory 与工具清理，再释放其拥有的连接；外部传入 provider 由调用者负责释放。登录、标题、Skill、手动 Memory 与 doctor 在各自请求结束后释放连接，取消后强制关闭残留 CONNECT。该代理不改变网页 SSRF 或模型 shell 原生隔离边界。回归见 <a href="../../tests/unit/providers/proxy-transport.test.ts">proxy transport</a>。</li>
+<li>官方 DeepSeek 使用普通 reasoning/tool item、summary 压缩和供应商自动前缀缓存；不发送 OpenAI encrypted reasoning、prompt-cache 或 native compact 参数。<code>max</code> 原样映射到 DeepSeek <code>max</code>。</li>
+<li>官方 OpenAI 声明 native compact；未知兼容端点使用 summary 和保守能力。SDK 上存在方法不等于服务端支持该能力。</li>
+<li>编码默认 <code>high</code> / 32,768 输出 tokens；不支持 reasoning 的端点不发送该参数。产品默认输出预算与供应商能力上限分别保存；DeepSeek 当前能力上限为未知。</li>
+<li><code>/reasoning</code> 等设置对后续任务生效，任务内使用一致配置。用途设置由 <code>requestSettingsForPurpose</code> 集中定义：summary 8,192、Skill 4,096、Memory 800、title 64、doctor 16 输出 tokens；辅助请求关闭 reasoning，并各有超时。</li>
+<li>SDK 自动重试关闭，由宿主控制请求边界。辅助请求必须校验终态及所需正文，不能把 incomplete 或空白响应标为成功。</li>
+</ul>
+<p><a href="../../src/agent/request-executor.ts">RequestExecutor</a> 在请求前准入，完成、失败、取消均结算 attempt；被准入拒绝的调用记为 rejected，不假装已消费模型 tokens。编码、摘要、重试、传输 fallback 与生产辅助调用均经过此边界。</p>
+<p>ReactAgent 在每个实际 provider attempt 结束后立即结算 coding 的 Session/Goal 用量；流恢复、采样重试和能力降级各有独立样本，不能只记录逻辑请求的最终成功。账本触发停止仍须保存已发出请求的 unknown 样本。未准入的请求不产生 usage 样本；用量持久化失败不能被 steering、网络重试或 fallback 吞掉。</p>
+<p>已准入的 provider attempt 失败且触发 unknown 停止时，Agent 的当前 turn 保留宿主生成的 HTTP 错误状态（仅 400–599 整数）和固定 sampling category。共享 runner 把它加入停止提示，exec/SDK 使用已有 <code>error</code> 字段返回；仍保持 <code>usage_limited</code>、退出码 4、不重试和不执行后续工具。供应商 message、body、headers、凭据及任意 error 字段不进入该诊断；没有实际请求失败的缺失 usage 不伪造 HTTP 错误。回归见 <a href="../../tests/unit/exec/runtime.test.ts">exec runtime</a>。</p>
+<p>压缩每个 attempt 结束后立即更新 Goal，再检查下一请求准入。Session 保留原有 context_compacted 事件的最终 usage 增量和上下文替换；此前失败样本另存 usage，压缩失败则保存全部样本。不得重复计量或改变既有 schema。prepareStep 中的预算停止返回明确 stop reason，不包装成压缩错误。回归见 <a href="../../tests/unit/agent/request-settlement.test.ts">request settlement</a>。</p>
+<p>手动压缩也绑定当前 active Goal，已达到预算或 usage 停止的 Goal 在准入前拒绝，不依赖可选 task ledger 才生效。预取消不读写 Goal 或发出请求；压缩期间拒绝 turn、task reset、设置变更和第二次压缩。Agent 为 turn 和手动压缩分别持有取消控制器及完成 Promise；dispose 先关闭准入，取消并等待请求、持久化和后台清理，再释放内存，重复 dispose 共用完成结果。取消发生在 context 已持久化后仍保持内存与落盘一致，保留已知用量，但不报告成功。回归见 <a href="../../tests/unit/runtime/manual-compaction.test.ts">生产手动压缩</a>。</p>
+<p>模型流关闭失败时，attempt 记为 failed，同时保留终态实际返回的可靠 usage；没有可靠 usage 则仍为 unknown。计量完整与资源关闭是独立事实：即使用量可计量、账本被重置，故障 executor/Agent 也不能再启动请求。ModelStreamCleanupError 和 ProcessCleanupError 共用 ResourceCleanupError 边界，资源故障优先于取消、steering、预算停止和能力降级。</p>
+<p><a href="../../src/agent/request-attempt-ledger.ts">RequestAttemptLedger</a> 以 input + output 结算预算；reasoning 单列展示，不与已包含它的 output 重复相加。已经发出的请求缺少可靠 usage 后，当前账本的 incomplete 状态不可被后续成功覆盖，禁止继续准入；新宿主任务仅能在没有未结束 attempt 时重置账本。</p>
+<p>TUI 分开显示主编码与辅助用量；Session 编码总量不混入标题请求。exec 的可选 task ledger 覆盖主请求、summary、retry 与 repair，并关闭结束后的 Memory capture，避免产生任务外辅助请求。预算耗尽时禁止下一请求，但已发出的请求可能超出剩余额度，超出量必须保留。usage、缓存命中及写入的完整性分别判断，缺字段不补造零成本或实际账单。</p>
+<p><a href="../../src/agent/auxiliary-request-executor.ts">AuxiliaryRequestExecutor</a> 复用 RequestExecutor，把每项辅助操作的准入与 dependency 实例的累计显示分开。标题、Skill、doctor 和独立 Memory 操作拥有独立账本；同一后台 Memory job 的提取和合并共享 runtime 提供的 scope，用量缺失后不再请求合并，也不自动重试该 job。后续独立操作可以增加已知用量，但不能把累计 unknown 改回完整。资源清理故障则关闭整个辅助所有者的后续准入。dispose 取消并等待所有活动辅助请求及计量；已可靠返回的用量即使结果因取消被丢弃也保留。回归见 <a href="../../tests/unit/agent/auxiliary-request-executor.test.ts">辅助请求所有权</a>、<a href="../../tests/fixtures/tui-auxiliary-offline.ts">实际 SDK fixture</a>。</p>
+<p>ReactAgent 将 Memory 的任务暂停接入已有 beginTask/endTask，范围包含 Plan、宿主验证、修复和 Goal 连续轮次；dispose 只清理 Agent 任务状态，不发送恢复通知；异步 Memory 暂停返回后重新检查 Agent 可用性，关闭不能留下迟到的任务进度。轮次 outcome 只决定新材料能否入队，整项任务退出后才重置可靠队列的五分钟空闲期；没有 pending learned turn 的退出仍通知单轮结束，不能让旧队列永久搁置。runtime 重建同样重新计时。生产行为见 <a href="../../tests/unit/runtime/memory-idle-lifecycle.test.ts">Memory 空闲回归</a>。</p>
+<p>Memory runtime 默认使用同一 job 的 RequestExecutor/ledger 执行提取和合并；生产 factory/TUI 的 host runner 将同一 RequestAccountingScope 交给辅助执行器，后者先检查所有者与取消，再使用该 executor 调用实际 provider。两种用量显示观察同一次结算，不把被拒绝的 wrapper 当成新 provider 请求。响应可靠但随后取消仍计量；准入前取消、关闭或旧资源故障没有新样本，旧故障中的 usage 不重复累计。scope 按 ledger 复用记录位置，换 signal 不清除未知用量，不能在同一 ledger 上悄悄替换 executor。回归见 <a href="../../tests/unit/runtime/memory-request-ownership.test.ts">生产 Memory 准入</a> 和 <a href="../../tests/fixtures/memory-accounting-offline.ts">实际 SDK</a>。</p>
+<p>错误路径继续检查 job 账本是否有缺口；网络、不完整或空白响应不能通过重新排队及新 controller 绕过未知用量限制。可靠响应 usage 在终态与正文校验前保存，已知用量的普通重试保持原行为。后台认领及 pending 写入后复核实时 capture 策略与 generation，尚未准入的停止仍是零用量。此约束也适用于无辅助包装器的默认 runtime，回归见 <a href="../../tests/unit/memory/learned-memory.test.ts">Memory jobs</a>。</p>
+<p>回归入口：<a href="../../tests/unit/agent/request-attempt-ledger.test.ts">attempt ledger</a>、<a href="../../tests/unit/providers/openai-compatible.test.ts">provider compatibility</a>、<a href="../../tests/unit/agent/response-errors.test.ts">response errors</a>。</p>
+<h2>ReAct 循环</h2>
+<p>内部 <code>loopStrategy</code> 默认 baseline，只有显式候选评测采用 candidate。候选精简基础提示及五项读取描述，指导独立读取同轮、依赖操作分轮、失败后调整；名称、参数、目录顺序和四路安全读取边界不变。危险操作仍串行，完整终态 output 落盘前不执行工具。反馈在模型顺序提交结果时处理，避免并发完成顺序影响判断：相同工具、规范化参数与错误连续第二次失败追加一次提醒；正常后台轮询、取消和清理失败不触发。签名仅保留摘要，提醒不新增请求、不重放工具、不绕过批准或重新观察。</p>
+<p>本地评测采集请求次数、批次大小、重复失败、工具等待、实际 usage/cache，以及 instructions、工具定义、工具结果和整个请求的 UTF-8 JSON 字节数。字节比例不当作 token；跨进程事件只传计数、时间和安全状态，不复制正文或 reasoning。只有质量门槛及完整计量满足后才判断候选效率，未证明有效的优化不进入默认生产行为。</p>
+</article><form>Credentials input</form><footer>Footer advertising tracking</footer><script>throw new Error('never executed')</script></body></html>

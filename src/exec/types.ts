@@ -25,6 +25,7 @@ export type ExecClassification =
 export type ExecStopReason = LoopStopReason | "aborted" | "output_closed";
 
 export type ExecEvent =
+  | { type: "performance_report"; report: import("../performance/task-report.js").TaskPerformanceReport }
   | { type: "cost_estimated"; estimate: import("../status/cost.js").CostEstimate }
   | TeamEvent
   | {
@@ -48,6 +49,7 @@ export type ExecEvent =
       repairAttempts?: number;
       maxRepairAttempts?: number;
       pendingVerification?: boolean;
+      verificationEvidence?: import("../workflow/types.js").VerificationEvidence;
     }
   | ({ type: "interaction_required" } & AgentInteractionRequired);
 
@@ -73,6 +75,7 @@ export interface ExecOptions {
 }
 
 export interface ExecResult {
+  performanceReport?: import("../performance/task-report.js").TaskPerformanceReport;
   team?: TeamSnapshot;
   exitCode: number;
   classification: ExecClassification;

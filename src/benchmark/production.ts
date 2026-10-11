@@ -13,8 +13,11 @@ import { createProviderCapabilityProfile } from "./capabilities.js";
 import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult } from "./types.js";
 import { TeamStore } from "../team/store.js";
 import type { TeamOptions } from "../team/types.js";
+import { CandidateRepairPolicy } from "./repair-policy.js";
 
 export interface ProductionBenchmarkAdapterOptions {
+  name?: string;
+  repairStrategy?: "baseline" | "candidate";
   model: RegisteredModel;
   sessionsRoot: string;
   permissionPolicy?: PermissionPolicy;
@@ -33,7 +36,7 @@ function safeName(value: string): string {
 export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAdapterOptions): BenchmarkHarnessAdapter {
   const comparisonSettings = { reasoningEffort: "high" as const, maxOutputTokens: 32_768 };
   return {
-    name: "everpeace",
+    name: options.name ?? "everpeace",
     managesRepairs: true,
     settlesOnCancellation: true,
     async run(task, context): Promise<BenchmarkHarnessResult> {
@@ -114,10 +117,12 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
       });
       const agent = handle.agent;
       try {
+        const repairPolicy = options.repairStrategy === "candidate" ? new CandidateRepairPolicy() : undefined;
         const runner = new CodingTaskRunner({
           agent,
           workflow,
           host: {
+            ...(repairPolicy ? { evaluationRepairDecision: (state: import("../workflow/types.js").WorkflowState) => repairPolicy.decision(state) } : {}),
             executeVerification: timedExecute,
             async getGoal() { return undefined; },
             async addGoalTime() { return undefined; },

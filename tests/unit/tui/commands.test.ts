@@ -11,7 +11,7 @@ test("filterSlashCommands matches a single leading command token by prefix", () 
   assert.deepEqual(filterSlashCommands(" /MO"), ["/model", "/models"]);
   assert.deepEqual(filterSlashCommands("/res"), ["/resume"]);
   assert.deepEqual(filterSlashCommands("/sta"), ["/status"]);
-  assert.deepEqual(filterSlashCommands("/per"), ["/permissions"]);
+  assert.deepEqual(filterSlashCommands("/per"), ["/permissions", "/perf"]);
   assert.deepEqual(filterSlashCommands("/wat"), []);
   assert.deepEqual(filterSlashCommands("message /help"), []);
   assert.deepEqual(filterSlashCommands("/help "), []);

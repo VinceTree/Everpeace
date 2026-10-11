@@ -52,7 +52,10 @@ try {
         const location = path.join(target, file);
         await fs.writeFile(location, (await fs.readFile(location, "utf8")).replaceAll("\r\n", "\n").replace(/\n?$/u, "\n"));
       }
-      execFileSync("git", ["apply", "--", path.join(root, "patches/node-pty@1.1.0.patch")], { cwd: target, windowsHide: true });
+      const patchFile = path.join(staging, "native-dependency.patch");
+      await fs.writeFile(patchFile, (await fs.readFile(path.join(root, "patches/node-pty@1.1.0.patch"), "utf8")).replaceAll("\r\n", "\n"));
+      execFileSync("git", ["apply", "--", patchFile], { cwd: target, windowsHide: true });
+      await fs.rm(patchFile);
     }
   }
   const bundled = JSON.parse(await fs.readFile(path.join(staging, "node_modules/node-pty/package.json"), "utf8"));

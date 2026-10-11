@@ -24,7 +24,7 @@ test("team member details page reports and show scoped tokens without rendering 
   const view = render(<TeamSurface config={{ enabled: true }} models={[]} getSnapshot={() => snapshot} busy={false} onConfigure={async () => {}} onAction={async () => {}} onBack={() => { back++; }} />);
   try {
     await tick(); for (let index = 0; index < 9; index++) { view.stdin.write("\u001b[B"); await tick(); }
-    view.stdin.write("\r"); await tick(); assert.match(view.lastFrame() ?? "", /Tokens: 10/); assert.doesNotMatch(view.lastFrame() ?? "", /Report 99/);
+    view.stdin.write("\r"); await tick(); assert.match(view.lastFrame() ?? "", /Known consumption: 10/); assert.doesNotMatch(view.lastFrame() ?? "", /Report 99/);
     view.stdin.write("\u001b[6~"); await tick(); assert.match(view.lastFrame() ?? "", /Report/);
     view.stdin.write("\u001b"); await tick(); assert.equal(back, 0); view.stdin.write("\u001b"); await tick(); assert.equal(back, 1);
   } finally { view.cleanup(); }

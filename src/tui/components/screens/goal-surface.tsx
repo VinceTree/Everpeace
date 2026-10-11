@@ -20,11 +20,12 @@ export function GoalConfirmationSurface({ objective, tokenBudget, onConfirm, onC
   );
 }
 
-export function GoalStatusSurface({ goal, onResume, onPause, onBack }: {
+export function GoalStatusSurface({ goal, onResume, onPause, onBack, inFlightRequests }: {
   goal?: SessionGoal;
   onResume(): void;
   onPause(): void;
   onBack(): void;
+  inFlightRequests?: number;
 }) {
   const options = goal?.status === "active"
     ? [{ label: "Pause goal", value: "pause" }, { label: "Back to session", value: "back" }]
@@ -36,7 +37,9 @@ export function GoalStatusSurface({ goal, onResume, onPause, onBack }: {
       {goal ? <Box flexDirection="column">
         <Text>Status: <Text color={goal.status === "active" ? "green" : "yellow"}>{goal.status}</Text></Text>
         <Text>Objective: {goal.objective}</Text>
-        <Text>Tokens: {goal.usage_complete ? goal.tokens_used.toLocaleString() : "unknown"}{goal.token_budget === null ? "" : ` / ${goal.token_budget.toLocaleString()}`}</Text>
+        <Text>Request token budget: {goal.token_budget?.toLocaleString() ?? "None"} (not a spending cap)</Text>
+        <Text>Known consumption: {goal.tokens_used.toLocaleString()} tokens · Metering: {goal.usage_complete === undefined ? "unknown" : goal.usage_complete ? "complete so far" : "incomplete"}</Text>
+        <Text>In-flight requests: {inFlightRequests ?? "unavailable"}</Text>
         <Text>Elapsed: {Math.floor(goal.time_used_seconds)}s</Text>
       </Box> : <Text dimColor>No goal exists for this session.</Text>}
       <Select options={options} onChange={(value) => value === "pause" ? onPause() : value === "resume" ? onResume() : onBack()} />

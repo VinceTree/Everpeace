@@ -1,6 +1,8 @@
 import type { TeamEvent } from "../team/types.js";
 import { stripVTControlCharacters } from "node:util";
 import { redactSecretsPreservingLayout } from "../util/redact-secrets.js";
+import { isVerificationEvidence } from "../workflow/verification-evidence.js";
+import { isTaskPerformanceReport } from "../performance/task-report.js";
 import type { WorkflowPhase, WorkflowResultClassification } from "../workflow/types.js";
 import { EXEC_OUTPUT_BUFFER_BYTES, ExecOutputError, outputChunks } from "./exec-writer.js";
 
@@ -44,6 +46,7 @@ export interface ExecToolFinishedEvent {
 
 export interface ExecWorkflowUpdatedEvent {
   type: "workflow_updated";
+  verificationEvidence?: import("../workflow/types.js").VerificationEvidence;
   phase: WorkflowPhase;
   taskId?: string;
   result?: WorkflowResultClassification;
@@ -63,6 +66,7 @@ export interface ExecInteractionRequiredEvent {
 }
 
 export type ExecProgressEvent =
+  | { type: "performance_report"; report: import("../performance/task-report.js").TaskPerformanceReport }
   | { type: "cost_estimated"; estimate: import("../status/cost.js").CostEstimate }
   | TeamEvent
   | ExecSessionStartedEvent
@@ -174,6 +178,8 @@ function payload(event: ExecJsonlEvent, truncation: PayloadTruncation): Record<s
   };
   const identifier = (value: string) => clipped(value, MAX_IDENTIFIER_BYTES);
   switch (event.type) {
+    case "performance_report":
+      return isTaskPerformanceReport(event.report) ? { report: structuredClone(event.report), notice: "Cumulative phases may overlap; missing measurements are unavailable" } : { unavailable: true };
     case "cost_estimated":
       return { estimate: { ...event.estimate, modelId: identifier(event.estimate.modelId) }, notice: "User-configured estimate, not a bill or hard spending limit" };
     case "team_updated": case "agent_updated": case "team_usage": case "agent_integrated":
@@ -222,6 +228,7 @@ function payload(event: ExecJsonlEvent, truncation: PayloadTruncation): Record<s
         ...(repairAttempts === undefined ? {} : { repair_attempts: repairAttempts }),
         ...(maxRepairAttempts === undefined ? {} : { max_repair_attempts: maxRepairAttempts }),
         ...(event.pendingVerification === undefined ? {} : { pending_verification: event.pendingVerification }),
+        ...(isVerificationEvidence(event.verificationEvidence) ? { verification_evidence: event.verificationEvidence } : {}),
       };
     }
     case "interaction_required":

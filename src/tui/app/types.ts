@@ -32,6 +32,8 @@ import type { ContextInspectionSnapshot } from "../../agent/context-inspection.j
 import type { TaskProgress } from "../../workflow/task-progress.js";
 
 export interface AgentSession {
+  recordPerformanceTiming?(operation: string, ms: number): void;
+  ensureSessionActivity?(): Promise<void>;
   getTeamSnapshot?(): TeamSnapshot | undefined;
   prepareTeamVerification?: ((signal?: AbortSignal) => Promise<string | undefined>) | undefined;
   finishTeamVerification?: ((verified: boolean) => Promise<void>) | undefined;
@@ -81,6 +83,10 @@ export interface TuiModelRegistry {
 }
 
 export interface TuiDependencies {
+  getInFlightRequests?(): number | undefined;
+  acquireSessionActivity?(sessionId: string): Promise<import("../../storage/session-activity.js").ActivityLease>;
+  privacy?: import("../../storage/session-privacy.js").SessionPrivacy;
+  reviewMemory?(scope: LearnedScope, workspacePath: string, id: string, revision: string, action: "renew" | "correct" | "disable" | "delete", correction?: { lesson: string; applyWhen: string }): Promise<void>;
   configureWeb?(provider: "html" | "brave", key?: string): Promise<void>;
   configureCost?(modelId: string, price: import("../../status/cost.js").ModelPrice): Promise<void>;
   getCostStatus?(modelId: string): Promise<string>;

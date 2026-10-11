@@ -336,3 +336,11 @@ pnpm build
 Web search/fetch and remote Skill HTTP/Git installation share a DNS-bound public resource transport. Host HTTP_PROXY/HTTPS_PROXY/NO_PROXY settings support lowercase precedence, domain boundaries and optional ports. Proxies must be HTTP or HTTPS and are trusted to CONNECT to the validated IP; proxy credentials remain outside origin requests and diagnostics. Redirects revalidate DNS, TLS keeps the original hostname identity, and cancellation closes task-owned connections and the authenticated Git gateway. Model API/MCP networking retains its own boundary. See [NETWORK](architecture/NETWORK.md).
 
 Repository pnpm installation is the supported path; tarballs do not guarantee downstream patch delivery. Use `pnpm install:verify`, then build and `pnpm install:smoke`. Maintainers can use `pnpm install:clean`; it copies current source to a new owned temporary directory, installs with the frozen lockfile and tests installed CLI/SDK/native PTY. Lint checks maintained code, rejects warnings and excludes user directories. Run typecheck → lint → test → build, stop on first failure, then diff-check. Team benchmark preparation is [documented separately](benchmark/TEAM_READINESS.md); offline proof never authorizes paid execution.
+
+## Local privacy and task observations
+
+Use `/privacy` for retention, cleanup previews, credential scans and safe exports; all actions stay local. Retention defaults to forever. `everpeace privacy preview 90` returns a one-use token for `configure` or `cleanup`; expired tokens and changed Sessions are rejected. `everpeace privacy export <session-id> <new-file>` exports a diagnostic whitelist. Conversation export is a separate reviewed TUI action. Deletion is logical; Memory, credentials, input history, retained teams and exports are separate stores.
+
+`/perf` reports the latest task, including failure/cancellation, known tokens and cumulative phases that can overlap. `Request token budget` is admission control, not a spending cap. `/memory list` shows entry IDs; `inspect`, `renew`, `disable`, `delete` and `correct` take `<scope> <id>` and use a revision-bound confirmation. Project lessons pause recall after 90 days; long-term user preferences do not automatically expire.
+
+[Detailed contracts and evidence limits](architecture/VALIDATION_PRIVACY_PERFORMANCE.md).

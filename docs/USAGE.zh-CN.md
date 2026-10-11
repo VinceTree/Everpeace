@@ -336,3 +336,11 @@ pnpm build
 网页搜索/读取及远程 Skill HTTP/Git 安装共用绑定 DNS 的公共传输。宿主 HTTP_PROXY/HTTPS_PROXY/NO_PROXY 支持小写优先、域名边界及可选端口；只支持 HTTP/HTTPS 代理。代理受信任且必须 CONNECT 到验证过的 IP，代理认证不进入目标请求或诊断。重定向重新验证，TLS 保留原域名身份，取消关闭任务连接及认证 Git 网关。模型 API/MCP 网络保持独立边界，详见 [NETWORK](architecture/NETWORK.md)。
 
 支持路径是仓库内 pnpm 安装，tarball 不保证消费者获得补丁。运行 `pnpm install:verify`，构建后运行 `pnpm install:smoke`。维护者可运行 `pnpm install:clean`，它将当前源码复制到新建临时目录，冻结安装并验证 CLI/SDK/原生 PTY。lint 检查维护的代码，警告也失败，排除用户其他目录。门禁为 typecheck → lint → test → build，首败停止，另跑 diff-check。团队 benchmark 的离线准备见 [专题](benchmark/TEAM_READINESS.md)，不提供付费执行授权。
+
+## 本地隐私与任务观测
+
+`/privacy` 提供保留策略、清理预览、凭据扫描及安全导出，均不请求模型；默认永久保留。`everpeace privacy preview 90` 返回单次 token，供 `configure` 或 `cleanup` 使用；预览到期或会话变化均拒绝。`everpeace privacy export <session-id> <new-file>` 仅导出白名单诊断，对话另需 TUI 预览确认。删除是逻辑删除，Memory、凭据、输入历史、保留团队与导出为独立存储。
+
+`/perf` 包含失败/取消任务、已知用量及可能重叠的累计阶段。`Request token budget` 控制请求准入，不是账单上限。`/memory list` 查看条目 ID；`inspect`、`renew`、`disable`、`delete`、`correct` 使用 `<scope> <id>` 并绑定 revision 确认。项目经验 90 天后暂停召回，长期用户偏好不自动到期。
+
+[详细契约与证据限制](architecture/VALIDATION_PRIVACY_PERFORMANCE.md)。
