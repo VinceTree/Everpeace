@@ -401,14 +401,27 @@ test("persistent capture jobs preserve consecutive turns and resume after restar
         const label = input.includes("alpha") ? "alpha" : "beta";
         return {
           id: `capture-${label}`,
+          status: "completed",
+          usage: { input_tokens: 2, output_tokens: 1, total_tokens: 3 },
           output_text: JSON.stringify({ entries: [{ lesson: `Keep ${label} behavior verified`, applyWhen: `When changing ${label}` }] }),
           output: [],
         };
       } } },
     });
     runtimes.push(resumedRuntime);
-    await waitFor(async () => (await store.read("project", workspacePath)).length === 2);
-    await waitFor(async () => (await store.loadJobs()).length === 0);
+    // Poll the serialized job queue, then inspect committed memory. Repeated
+    // unlocked reads of the destination can interfere with Windows rename.
+    try {
+      await waitFor(async () => {
+        const jobs = await store.loadJobs();
+        assert.equal(jobs.some((job) => job.status === "failed"), false, "A successful restart fixture must not contain failed jobs");
+        return jobs.length === 0;
+      });
+    } catch (error) {
+      // This fixture contains only synthetic text; retain the state instead of
+      // losing the failure reason when its temporary store is cleaned up.
+      throw new Error(JSON.stringify({ capture: (await resumedRuntime.status(workspacePath)).capture, jobs: (await store.loadJobs()).map(({ status, attempts, error }) => ({ status, attempts, error })) }), { cause: error });
+    }
     assert.equal(requests, 2);
     assert.equal(queuedRequests, 0);
     assert.deepEqual((await store.read("project", workspacePath)).map((entry) => entry.lesson).sort(), [
