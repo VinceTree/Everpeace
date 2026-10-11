@@ -28,7 +28,7 @@ An availability check is not a reservation. A runner can disappear after the che
 
 ## Repository activation
 
-After deploying the new workflows, set the stable **Required checks** job from Test as a required status check on main, with branches required to be up to date. Preserve existing protection settings. Read back the configuration through GitHub API; merely adding YAML does not enable branch protection. The current audit found no branch protection, so this remains a deployment step until applied.
+After deploying the workflows, set the stable **Required checks** job from Test as a required status check on main, with branches required to be up to date. Preserve existing protection settings. Read back the configuration through GitHub API; merely adding YAML does not enable branch protection. The protection is now active, requires the GitHub Actions check, and applies to administrators. Verify it remains enabled when operating the runner; current evidence belongs in HANDOFF.
 
 Release is dispatched on main with an exact 40-character candidate commit SHA. The workflow confirms that commit belongs to main, checks it on Windows/Linux, builds one tarball, downloads its exact artifact ID for npm/pnpm/global installation, and requires native acceptance before any tag/Release creation. Download consumers and publishing independently verify the tarball SHA-256 against the build output. Version tags must resolve to the candidate; conflicting tags/assets are never overwritten.
 
