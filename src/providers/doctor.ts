@@ -80,7 +80,9 @@ export async function runLiveDiagnostics(model: RegisteredModel, runtime: Provid
     const single = await request("tool");
     function echo(response: AgentResponse): void {
       const calls = response.output.filter((item) => item.type === "function_call");
-      if (calls.length !== 1 || calls[0]?.name !== "diagnostic_echo" || typeof calls[0]?.call_id !== "string" || typeof calls[0]?.arguments !== "string" || JSON.parse(calls[0].arguments).nonce !== "probe") throw new Error("Synthetic tool protocol evidence missing");
+      if (calls.length !== 1 || calls[0]?.name !== "diagnostic_echo" || typeof calls[0]?.call_id !== "string" || !calls[0].call_id || typeof calls[0]?.arguments !== "string") throw new Error("Synthetic tool protocol evidence missing");
+      const args: unknown = JSON.parse(calls[0].arguments);
+      if (!args || typeof args !== "object" || Array.isArray(args) || !("nonce" in args) || args.nonce !== "probe" || Object.keys(args).length !== 1) throw new Error("Synthetic tool arguments do not match the offered schema");
       input.push(...response.output, { type: "function_call_output", call_id: calls[0].call_id, output: '{"nonce":"probe"}' });
     }
     echo(single); stages.single_tool = { state: "verified", detail: "Streamed function call with valid arguments" };
@@ -94,11 +96,16 @@ export async function runLiveDiagnostics(model: RegisteredModel, runtime: Provid
     active = "cancellation";
     const cancel = await request("cancel");
     stages.cancellation = { state: cancel.cancelled ? "verified" : "inconclusive", detail: "Local stream abort and iterator cleanup completed; provider-side billing cancellation is not proved" };
-  } catch {
-    if (stages[active].state !== "verified") stages[active] = { state: "inconclusive", detail: options.signal?.aborted ? "User cancelled" : "Missing evidence, transport failure, or request/usage budget stopped probing" };
+  } catch (error) {
+    // Only explicit structured protocol rejection is evidence of unsupported capability.
+    if (error && typeof error === "object" && "status" in error && [400, 422].includes(Number(error.status)) && "code" in error && ["unsupported_parameter", "unsupported_feature"].includes(String(error.code)) && "param" in error) {
+      const rejected: DiagnosticStage[] = error.param === "tools" || error.param === "tool_choice" ? ["single_tool", "continuous_tools"] : error.param === "reasoning" || error.param === "reasoning.effort" ? ["reasoning"] : error.param === "stream" ? [active] : [];
+      for (const stage of rejected) if (stages[stage].state !== "verified") stages[stage] = { state: "unsupported", detail: "Endpoint explicitly rejected this protocol capability" };
+    }
+    if (stages[active].state !== "verified" && stages[active].state !== "unsupported") stages[active] = { state: "inconclusive", detail: options.signal?.aborted ? "User cancelled" : "Missing evidence, transport failure, or request/usage budget stopped probing" };
   }
   const settled = ledger.snapshot();
-  stages.reasoning = { state: observedReasoning ? "verified" : model.responses_profile ? "configured" : "not_tested", detail: observedReasoning ? "Reasoning field or event observed; content not retained" : "No reasoning evidence; configured profile is only an assumption" };
+  if (stages.reasoning.state !== "unsupported" || observedReasoning) stages.reasoning = { state: observedReasoning ? "verified" : model.responses_profile ? "configured" : "not_tested", detail: observedReasoning ? "Reasoning field or event observed; content not retained" : "No reasoning evidence; configured profile is only an assumption" };
   const beforeCancel = settled.attempts.filter((attempt) => attempt.id < (stages.cancellation.state === "verified" ? settled.attempts.length : Infinity));
   stages.usage = { state: beforeCancel.length && beforeCancel.every((attempt) => attempt.usage !== null) ? "verified" : "inconclusive", detail: "Per-request usage checked; cancelled request usage may be unknown" };
   return { schema: 1, identity: diagnosticIdentity(model), testedAt: (options.now?.() ?? new Date()).toISOString(), model: model.model_name, endpoint: diagnosticEndpoint(model), stages, requests, inputTokens: settled.inputTokens, outputTokens: settled.outputTokens, usageComplete: settled.complete };

@@ -34,7 +34,7 @@ Bing、DuckDuckGo 使用 htmlparser2 + css-select + DOM 文本提取，不执行
 
 `/doctor` 不请求模型。`/doctor --live` 默认 Cancel，先展示端点、阶段、请求和预算再启动：最多八次、请求预算 20,000 token、单次输出 1,024、单次三十秒、零自动重试。检查流式文本、单工具、连续工具轮次、推理字段、Usage 和最后的取消。未知 Usage 停止后续阶段；认证失败、超时和缺失证据是 inconclusive，不是 unsupported。取消仅证明本地流/资源关闭，不保证供应商停止计费。
 
-结果使用 verified/configured/unsupported/not_tested/inconclusive，绑定注册、端点、profile、有效设置和时间；设置改变失效、七天过期，不自动修改能力配置。[协议回归](../../tests/unit/providers/doctor.test.ts) 穿过真实 SDK 的离线 SSE fixture，不访问付费端点。
+结果使用 verified/configured/unsupported/not_tested/inconclusive；只有端点结构化拒绝具体协议能力才记 unsupported，认证错误和无效模型不能伪装成不支持。结果绑定注册、端点、profile、有效设置和时间；设置改变失效、七天过期，不自动修改能力配置。[协议回归](../../tests/unit/providers/doctor.test.ts) 穿过真实 SDK 的离线 SSE fixture，不访问付费端点。
 
 `/cost` 的单价由用户填写，默认未配置，无自动价格抓取、汇率或账单保证。按已结算请求派生估算，涵盖失败/重试、压缩、辅助请求及团队成员，reasoning 不重复计费；按币种分别汇总。缺 Usage、价格或必要缓存字段为 unknown/partial。单价随请求快照，不改写旧费用；请求 UUID 去重，冲突记录拒绝。阈值每任务每币种预警一次，不保证中断在途计费。Session、SDK/CLI JSONL 使用可选 estimate 事件，旧 Session 不推断金额或完整性。
 

@@ -49,6 +49,16 @@ test("authentication and timeout failures are inconclusive and do not initiate s
     assert.equal(requests, 1); assert.equal(result.stages.streaming_text.state, "inconclusive"); assert.equal(result.stages.cancellation.state, "not_tested");
   }
 });
+test("only explicit capability rejections are unsupported; authentication and invalid model remain inconclusive", async () => {
+  for (const [status, param, stage] of [[400, "tools", "single_tool"], [422, "reasoning", "reasoning"], [400, "stream", "streaming_text"], [401, "tools", null], [400, "model", null]] as const) {
+    const fixture = runtime(); let requests = 0;
+    fixture.runtime.responses.stream = async () => { requests++; throw Object.assign(new Error("No sensitive transport details retained"), { status, code: "unsupported_parameter", param }); };
+    const result = await runLiveDiagnostics(model, fixture.runtime);
+    assert.equal(requests, 1);
+    if (stage) assert.equal(result.stages[stage].state, "unsupported");
+    else { assert.equal(result.stages.streaming_text.state, "inconclusive"); assert.equal(Object.values(result.stages).some((value) => value.state === "unsupported"), false); }
+  }
+});
 test("doctor stages traverse real SDK streaming and cleanup for official, configured relay and generic profiles", async (t) => {
   for (const [base_url, responses_profile] of [["https://api.deepseek.com", "deepseek"], ["https://relay.invalid/v1", "deepseek"], ["https://relay.invalid/v1", "generic"]] as const) {
     const candidate = { ...model, base_url, responses_profile };
