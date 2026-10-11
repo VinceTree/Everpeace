@@ -28,6 +28,21 @@ test("TUI and Agent leases share ownership until every owner closes safely", asy
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("Windows export accepts case aliases while rejecting linked destinations", { skip: process.platform !== "win32" }, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "everpeace-export-alias-"));
+  const store = new SessionStore({ directory: path.join(root, "sessions") });
+  const privacy = new SessionPrivacy(store, path.join(root, "privacy.json"));
+  try {
+    const session = await store.create({ title: "fixture", titlePending: false, workspacePath: root, model: { id: "fixture", model_name: "fixture", base_url: "https://fixture.invalid" } });
+    await privacy.export(session.id, path.join(root.toUpperCase(), "summary.json"));
+    assert.equal(JSON.parse(await readFile(path.join(root, "summary.json"), "utf8")).kind, "diagnostic_summary");
+    const linked = path.join(root, "linked");
+    const { symlink } = await import("node:fs/promises");
+    await symlink(path.join(root, "sessions"), linked, "junction");
+    await assert.rejects(privacy.export(session.id, path.join(linked, "unsafe.json")), /symbolic links/u);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("cleanup excludes live/unknown sessions, refuses changed previews and removes only owned history", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "everpeace-privacy-"));
   let now = new Date("2026-01-01T00:00:00Z");

@@ -121,8 +121,16 @@ export class SessionPrivacy {
       ...(loaded.summary.workflow ? { verification: loaded.summary.workflow.last_verification_suite?.evidence ? { ...loaded.summary.workflow.last_verification_suite.evidence, workspaceRevision: undefined, reportDigests: [] } : { state: "unknown" } } : {}),
       ...(includeConversation ? { conversation: loaded.timeline.filter((entry) => entry.kind === "user" || entry.kind === "assistant").flatMap((entry) => "text" in entry ? [{ kind: entry.kind, text: redactSecretsPreservingLayout(stripVTControlCharacters(entry.text)) }] : []), notice: "Redaction cannot identify all business data. Attachments and reasoning are excluded." } : {}),
     };
-    const target = path.resolve(targetPath); const parent = await fs.realpath(path.dirname(target));
-    if (parent !== path.dirname(target)) throw new Error("Export destination must not traverse symbolic links");
+    const requested = path.resolve(targetPath);
+    let current = path.parse(requested).root;
+    for (const part of path.relative(current, path.dirname(requested)).split(path.sep).filter(Boolean)) {
+      current = path.join(current, part);
+      const stat = await fs.lstat(current);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Export destination must not traverse symbolic links");
+    }
+    // Windows short names and casing can differ without being a link.
+    const parent = await fs.realpath(path.dirname(requested));
+    const target = path.join(parent, path.basename(requested));
     const temporary = path.join(parent, `.everpeace-export-${randomUUID()}.tmp`);
     try {
       await fs.writeFile(temporary, JSON.stringify(value, null, 2) + "\n", { flag: "wx", mode: 0o600 });

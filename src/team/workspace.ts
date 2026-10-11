@@ -185,7 +185,17 @@ export async function workspaceOperations(record: TeamWorkspaceRecord, allowedPa
 export async function removeTeamWorkspace(record: TeamWorkspaceRecord): Promise<void> {
   await loadTeamWorkspace(record.workspace, record.source, true);
   const worktree = record.workspaceRoot ?? record.workspace;
-  const registered = (await git(record.source, ["worktree", "list", "--porcelain", "-z"])).split("\0").some((entry) => entry.startsWith("worktree ") && path.resolve(entry.slice(9)) === path.resolve(worktree));
+  const canonical = await fs.realpath(worktree).catch(async (error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+    return path.join(await fs.realpath(path.dirname(worktree)), path.basename(worktree));
+  });
+  let registered = false;
+  for (const entry of (await git(record.source, ["worktree", "list", "--porcelain", "-z"])).split("\0")) {
+    if (!entry.startsWith("worktree ")) continue;
+    const location = path.resolve(entry.slice(9));
+    const resolved = await fs.realpath(location).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; return location; });
+    if (path.relative(canonical, resolved) === "") { registered = true; break; }
+  }
   if (registered) await git(record.source, ["worktree", "remove", "--force", worktree]);
   const owner = await fs.realpath(record.owner);
   const root = await fs.realpath(teamWorkspaceRoot());
