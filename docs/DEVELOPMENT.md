@@ -41,7 +41,7 @@ Windows TUI 手工验收仍需真实 Windows Terminal。通过 WSL 调用 Node �
 
 [pnpm-workspace.yaml](../pnpm-workspace.yaml) 指定 [node-pty 补丁](../patches/node-pty@1.1.0.patch)，修复 Windows 控制台取消竞态及 socket/worker 清理；pnpm 安装构建准入只允许 `node-pty`。不要删除补丁或放开全部依赖安装脚本来规避安装问题。使用仓库与 pnpm 安装才能应用这些补丁；作为其他项目的 npm 依赖安装不会自动继承它们。
 
-独立产物改用 `pnpm build` 后的 `pnpm pack:release --output <空目录>`。打包器按 [原生依赖固定身份](../scripts/release/native-packages.json) 下载并校验上游 tarball，在独占 staging 应用补丁，将 node-pty 与精确 node-addon-api、平台 prebuild、源码和 MIT 许可证一并 bundle。没有消费者补丁 hook，不复制开发机 build/Release；正式候选要求 Ubuntu 24.04 x64 打包，在已校验 staging 通过上游构建脚本编译 Linux PTY/helper，并按摘要记录和封装 prebuild，保留 Windows/macOS 上游 prebuild。构建机需要 Python/make/C++，其他 Linux 环境尚未验收；Windows 本地包仅作开发。普通 npm/pnpm pack 的 prepack 明确拒绝未准备的产物，使用专用入口。收据绑定候选/脏状态、源码及 lockfile 摘要、补丁与 tarball 摘要；正式候选要求干净且准确提交匹配。
+独立产物改用 `pnpm build` 后的 `pnpm pack:release --output <空目录>`。打包器按 [原生依赖固定身份](../scripts/release/native-packages.json) 下载并校验上游 tarball，在独占 staging 应用补丁，将 node-pty 与精确 node-addon-api、平台 prebuild、源码和 MIT 许可证一并 bundle。没有消费者补丁 hook，不复制开发机 build/Release；正式候选要求 Ubuntu 24.04 x64 打包，在已校验 staging 通过上游构建脚本编译 Linux PTY，并按摘要记录和封装 prebuild，保留 Windows/macOS 上游 prebuild。构建机需要 Python/make/C++，其他 Linux 环境尚未验收；Windows 本地包仅作开发。普通 npm/pnpm pack 的 prepack 明确拒绝未准备的产物，使用专用入口。收据绑定候选/脏状态、源码及 lockfile 摘要、补丁与 tarball 摘要；正式候选要求干净且准确提交匹配。
 
 ## 开发与检查命令
 

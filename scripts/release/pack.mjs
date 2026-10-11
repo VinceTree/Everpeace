@@ -70,7 +70,8 @@ try {
     const prebuild = path.join(nativeRoot, "prebuilds/linux-x64");
     await fs.mkdir(prebuild);
     const files = {};
-    for (const file of ["pty.node", "spawn-helper"]) {
+    // The pinned gyp definition builds spawn-helper only on macOS; Linux forks directly.
+    for (const file of ["pty.node"]) {
       await fs.copyFile(path.join(nativeRoot, "build/Release", file), path.join(prebuild, file));
       await fs.chmod(path.join(prebuild, file), file === "spawn-helper" ? 0o755 : 0o644);
       files[file] = digest(path.join(prebuild, file));
