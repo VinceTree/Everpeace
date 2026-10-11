@@ -1,0 +1,9 @@
+[
+  {
+    "name": "spdx-exceptions",
+    "version": "2.5.0",
+    "license": "CC-BY-3.0",
+    "reason": "SPDX license exception identifier data used by the expression parser. Upstream attribution and license travel with the dependency; no application source is relicensed.",
+    "review": "Reviewed published 2.5.0 package.json and README attribution to the Linux Foundation/SPDX. Registry evidence: https://registry.npmjs.org/spdx-exceptions/2.5.0 . Re-review upgrades and retain the published README attribution."
+  }
+]

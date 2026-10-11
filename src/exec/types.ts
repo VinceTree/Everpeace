@@ -25,6 +25,7 @@ export type ExecClassification =
 export type ExecStopReason = LoopStopReason | "aborted" | "output_closed";
 
 export type ExecEvent =
+  | { type: "cost_estimated"; estimate: import("../status/cost.js").CostEstimate }
   | TeamEvent
   | {
       type: "session_started";

@@ -19,6 +19,7 @@ import { BoundedOutputBuffer } from "../tools/command-record.js";
 import { observeProcessCompletion, ProcessCleanupError } from "../tools/process-completion.js";
 import { captureWorkspaceSnapshot } from "./workspace.js";
 import { RequestAttemptLedger } from "../agent/request-attempt-ledger.js";
+import { BenchmarkPreparationError } from "./preparation-failure.js";
 
 const DEFAULT_TASK_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_VERIFICATION_TIMEOUT_MS = 2 * 60 * 1000;
@@ -489,6 +490,7 @@ export async function runBenchmarkSuite(
           unsafeActions: 0,
           error: `Benchmark preparation failed: ${message}`,
           preparationError: message,
+          preparationOutcome: error instanceof BenchmarkPreparationError ? error.outcome : "preparation_failed",
           ...(error instanceof ProcessCleanupError ? { cleanupFailed: true } : {}),
           ...(repetitions === 1 ? {} : { repetition }),
         };

@@ -37,6 +37,8 @@ test("installed CLI, public SDK and bundled patch are present", async () => {
   const windows = await fs.readFile(path.join(native, "lib/windowsPtyAgent.js"), "utf8");
   assert.ok(windows.includes("this._inSocket.destroy()") && windows.includes("this._conoutSocketWorker.dispose()"));
   assert.ok((await fs.readFile(path.join(native, "lib/conpty_console_list_agent.js"), "utf8")).includes("var consoleProcessList = [];"));
+  const worker = await fs.readFile(path.join(native, "lib/worker/conoutSocketWorker.js"), "utf8");
+  assert.ok(worker.includes("conoutSocket.unpipe(workerSocket)") && worker.includes("conoutSocket.resume()") && worker.includes("error.code !== 'EPIPE' && error.code !== 'ECONNRESET'"));
 });
 
 test("installed PTY accepts input and resize, exits, and can restart", { timeout: 30_000 }, async () => {

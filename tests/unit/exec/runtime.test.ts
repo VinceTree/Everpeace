@@ -71,8 +71,10 @@ function fakeProvider(
     responses: {
       async create() { throw new Error("The buffered provider path must not run"); },
       async stream(params, options) {
-        runtime.calls += 1;
         const signal = options?.signal instanceof AbortSignal ? options.signal : undefined;
+        // Match the SDK: an abort may already have fired during async admission/storage.
+        signal?.throwIfAborted();
+        runtime.calls += 1;
         const completed = await next(params, signal, runtime.calls);
         return (async function* () {
           yield { type: "response.completed", response: completed };

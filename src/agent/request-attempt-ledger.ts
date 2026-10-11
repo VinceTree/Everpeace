@@ -53,6 +53,7 @@ export class RequestAttemptLedger {
   async admit(_purpose: RequestPurpose, _reservation: number, signal?: AbortSignal): Promise<void> { signal?.throwIfAborted(); }
   async flush(): Promise<void> {}
   get usageComplete(): boolean { return this.#complete; }
+  get openRequests(): number { return this.#open.size; }
 
   /** Start a new host task while retaining the configured budget contract. */
   reset(): void {

@@ -36,7 +36,7 @@ Web page reads retain a bounded list of source links, so the agent can follow an
 Explain the request budget flow and propose a focused regression fix.
 ```
 
-Review or revise the submitted plan, approve it, then explicitly start execution. `/diff` reviews changes; `/status` shows request settings and usage; `/resume` restores a Session. `/doctor` runs local diagnostics. `/doctor --live` makes a model request and can incur cost.
+Review or revise the submitted plan, approve it, then explicitly start execution. `/diff` reviews changes; `/status` shows request settings and usage; `/resume` restores a Session. `/doctor` runs local diagnostics. `/doctor --live` previews bounded probes; starting them explicitly can incur cost.
 
 For the built CLI:
 
@@ -50,17 +50,23 @@ Current source version: **0.5.3**.
 
 ## Real tools, checked changes
 
-![Everpeace live tool acceptance: 37 tool entries and 14 scenario groups have verified closure evidence](assets/features.webp)
+| Historical plan | Success / planned | Failed | Timeout / error / cancelled / skipped | Unknown Usage |
+| --- | --- | --- | --- | --- |
+| Initial tool acceptance | 7 / 13 | 6 | 0 / 0 / 0 / 0 | 5 |
+| Later tool acceptance | 5 / 7 | 2 | 0 / 0 / 0 / 0 | 2 |
+| Separate retry plan | 1 / 2 | 1 | 0 / 0 / 0 / 0 | 1 |
 
-[Open the full-size chart](assets/features.webp).
-
-These isolated Windows scenarios use the production runner, a native sandbox and `grok-4.6` through a relay. **PASS means at least one verified closure per group on the same tested source and build, across two independent stages.** Plan revision and source-grounded web answers are included. The first stage stopped on unknown usage; its failed and skipped runs remain recorded locally. This is not a campaign success rate, a DeepSeek result or a cost comparison.
+These are historical `grok-4.6` relay runs. Different source/build candidates remain separate; missing evaluation or intervention evidence is marked **insufficient**. Three additional plans lack summaries and have unknown outcomes. This is not a result for the current candidate or DeepSeek. [Per-run evidence and missing records](docs/benchmark/PUBLIC_REPORT.md). The nine new task categories have offline scorer proofs and zero new model runs.
 
 Root-to-directory rules, `@` attachments and an on-demand project map help the agent understand your code. Edits use current file observations, permission-bound previews and conflict-aware undo. Sessions, forks and context checkpoints preserve work and verification debt across recovery.
 
 Configured MCP tools, resources and prompts and local Skills extend the agent. Learned Memory can retain preferences and verified lessons. Public web tools check redirects and network boundaries. Search falls back to Bing China and DuckDuckGo when the first provider is unavailable. See the [usage guide](docs/USAGE.md) for setup and limits.
 
 MCP stdio programs require separate startup trust. Use `/mcp trust <server>` to review and save approval for the current workspace and exact configuration, `/mcp reconnect` to start or reload, and `/mcp revoke <server>` to cancel access. Approval allows the program to run with your host user permissions; MCP tool-call approval does not sandbox it. Remote MCP requires HTTPS. Loopback HTTP requires its own explicit exception; redirects are blocked. Headless CLI/SDK runs return `interaction_required` (exit 5) before model requests when startup approval is missing.
+
+Search uses DOM selectors by default. `/web` can explicitly select Brave LLM Context; its key stays in the system credential store, and saving sends no request. `/doctor --live` previews bounded streaming/tool/usage/cancellation probes and defaults to Cancel. `/cost` records user-priced estimates, unknown/partial metering and task warnings; request token budgets are not spending caps. [Security and diagnostic contracts](docs/architecture/SECURITY_AND_DIAGNOSTICS.md).
+
+Report vulnerabilities privately through [GitHub Security](https://github.com/VinceTree/Everpeace/security/advisories/new). See [SECURITY.md](SECURITY.md) for supported releases and coordinated disclosure. Dependency audit, redacted secret scans, license policy and candidate-bound SBOM evidence are required before merging and publishing.
 
 ## Automate the same workflow
 

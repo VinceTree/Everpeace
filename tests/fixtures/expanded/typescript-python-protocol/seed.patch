@@ -1,0 +1,20 @@
+diff --git a/client.ts b/client.ts
+--- a/client.ts
++++ b/client.ts
+@@ -1,2 +1,2 @@
+-import {spawn} from 'node:child_process';
+-export function runWorker(script:string,input:Record<string,unknown>,signal?:AbortSignal):Promise<Record<string,unknown>>{return new Promise((resolve,reject)=>{const child=spawn(process.platform==='win32'?'python':'python3',[script],{stdio:['pipe','pipe','pipe'],windowsHide:true});let output='';let cancelled=false;const abort=()=>{cancelled=true;child.kill();};signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();child.stdout.on('data',chunk=>{output+=chunk;if(output.length>100000)child.kill();});child.stderr.resume();child.once('error',reject);child.once('close',code=>{signal?.removeEventListener('abort',abort);if(cancelled){reject(Object.assign(new Error('cancelled'),{name:'AbortError'}));return;}if(code!==0){reject(new Error('worker failed'));return;}try{resolve(JSON.parse(output));}catch(error){reject(error);}});child.stdin.end(JSON.stringify(input)+String.fromCharCode(10));});}
++import {spawn} from 'node:child_process';
++export function runWorker(script:string,input:Record<string,unknown>,signal?:AbortSignal):Promise<Record<string,unknown>>{return new Promise((resolve,reject)=>{const child=spawn(process.platform==='win32'?'python':'python3',[script],{stdio:['pipe','pipe','pipe'],windowsHide:true});let output='';let cancelled=false;const abort=()=>{cancelled=true;};signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();child.stdout.on('data',chunk=>{output+=chunk;if(output.length>100000)child.kill();});child.stderr.resume();child.once('error',reject);child.once('close',code=>{signal?.removeEventListener('abort',abort);if(cancelled){reject(Object.assign(new Error('cancelled'),{name:'AbortError'}));return;}if(code!==0){reject(new Error('worker failed'));return;}try{resolve(JSON.parse(output));}catch(error){reject(error);}});child.stdin.end(JSON.stringify(input)+String.fromCharCode(10));});}
+diff --git a/worker.py b/worker.py
+--- a/worker.py
++++ b/worker.py
+@@ -1,4 +1,4 @@
+-import json,sys,time
+-request=json.loads(sys.stdin.readline())
+-time.sleep(request.get('delay',0))
+-print(json.dumps({'requestId':request['requestId'],'total':sum(request['values'])}),flush=True)
++import json,sys,time
++request=json.loads(sys.stdin.readline())
++time.sleep(request.get('delay',0))
++print(json.dumps({'requestId':request['request_id'],'total':sum(request['values'])}),flush=True)

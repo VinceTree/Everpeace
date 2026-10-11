@@ -63,6 +63,7 @@ export interface ExecInteractionRequiredEvent {
 }
 
 export type ExecProgressEvent =
+  | { type: "cost_estimated"; estimate: import("../status/cost.js").CostEstimate }
   | TeamEvent
   | ExecSessionStartedEvent
   | ExecAssistantMessageEvent
@@ -173,6 +174,8 @@ function payload(event: ExecJsonlEvent, truncation: PayloadTruncation): Record<s
   };
   const identifier = (value: string) => clipped(value, MAX_IDENTIFIER_BYTES);
   switch (event.type) {
+    case "cost_estimated":
+      return { estimate: { ...event.estimate, modelId: identifier(event.estimate.modelId) }, notice: "User-configured estimate, not a bill or hard spending limit" };
     case "team_updated": case "agent_updated": case "team_usage": case "agent_integrated":
       return { team_id: identifier(event.teamId), agent_id: identifier(event.agentId), task_id: identifier(event.taskId), ...(event.state ? { state: identifier(event.state) } : {}), ...(event.role ? { role: identifier(event.role) } : {}), ...(event.modelId ? { model_id: identifier(event.modelId) } : {}), ...(event.summary ? { summary: clipped(event.summary, MAX_TOOL_OUTPUT_BYTES) } : {}), ...(event.changedPaths ? { changed_paths: event.changedPaths.slice(0, MAX_CHANGED_PATHS).map(identifier), changed_paths_total: event.changedPaths.length, changed_paths_returned: Math.min(event.changedPaths.length, MAX_CHANGED_PATHS) } : {}), ...(event.inputTokens !== undefined ? { input_tokens: optionalCount(event.inputTokens) } : {}), ...(event.outputTokens !== undefined ? { output_tokens: optionalCount(event.outputTokens) } : {}), ...(event.usageComplete !== undefined ? { usage_complete: event.usageComplete } : {}) };
     case "session_started":

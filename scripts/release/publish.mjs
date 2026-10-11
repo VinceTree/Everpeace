@@ -2,16 +2,18 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { candidateSha, requireSuccess, verifyPackage } from "./policy.mjs";
+import { candidateSha, requireSuccess, verifyPackage, digest } from "./policy.mjs";
 import { github, repository } from "./github.mjs";
+import { verifySupplyChain } from "../security/policy.mjs";
 
 export async function publish({ directory, sha, packageDigest, checks, repo, api = github }) {
-  requireSuccess(checks, ["candidate", "package", "consumers", "native", "gate"]);
+  requireSuccess(checks, ["candidate", "package", "consumers", "security", "evidence", "native", "gate"]);
   candidateSha(sha);
   const receipt = JSON.parse(readFileSync(path.join(directory, "receipt.json"), "utf8"));
   assert.match(receipt.filename, /^everpeace-[0-9A-Za-z.+-]+\.tgz$/u);
   const archive = path.join(directory, receipt.filename);
   verifyPackage(receipt, archive, sha, packageDigest);
+  const supplyChain = verifySupplyChain(directory, sha, packageDigest);
   assert.match(receipt.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u);
   const tag = `v${receipt.version}`;
   const base = `repos/${repo}`;
@@ -30,6 +32,10 @@ export async function publish({ directory, sha, packageDigest, checks, repo, api
     if (asset) assert.equal(asset.digest, `sha256:${packageDigest}`, "Existing release asset differs");
     if (!release.draft) {
       assert.ok(asset, "Published release is missing the verified package; refusing to modify it");
+      for (const name of ["supply-chain.json", ...Object.keys(supplyChain.files)]) {
+        const evidence = release.assets.find((entry) => entry.name === name);
+        assert.equal(evidence?.digest, `sha256:${digest(path.join(directory, name))}`, `Published evidence missing or different: ${name}`);
+      }
       console.log(`Verified existing ${tag}; no changes needed.`);
       return;
     }
@@ -39,7 +45,7 @@ export async function publish({ directory, sha, packageDigest, checks, repo, api
     await api(`${base}/git/refs`, { method: "POST", body: JSON.stringify({ ref: `refs/tags/${tag}`, sha: object.sha }) });
   }
   if (!release) release = await api(`${base}/releases`, { method: "POST", body: JSON.stringify({ tag_name: tag, target_commitish: sha, name: tag, draft: true, prerelease: receipt.version.includes("-"), generate_release_notes: true }) });
-  const files = [[receipt.filename, archive], ["receipt.json", path.join(directory, "receipt.json")]];
+  const files = [receipt.filename, "supply-chain.json", ...Object.keys(supplyChain.files)].map((name) => [name, path.join(directory, name)]);
   for (const [name, file] of files) {
     const asset = release.assets.find((entry) => entry.name === name);
     if (asset) {

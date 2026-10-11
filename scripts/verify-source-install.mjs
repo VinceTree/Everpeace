@@ -12,6 +12,7 @@ assert.equal(packageJson.dependencies["node-pty"], "1.1.0", "The patched native 
 for (const [file, evidence] of [
   ["lib/windowsPtyAgent.js", ["this._inSocket.destroy()", "this._conoutSocketWorker.dispose()"]],
   ["lib/conpty_console_list_agent.js", ["var consoleProcessList = [];", "consoleProcessList = getConsoleProcessList(shellPid);", "A closed console has no remaining attached processes to report."]],
+  ["lib/worker/conoutSocketWorker.js", ["conoutSocket.unpipe(workerSocket)", "conoutSocket.resume()", "error.code !== 'EPIPE' && error.code !== 'ECONNRESET'"]],
 ]) {
   const source = readFileSync(join(root, file), "utf8");
   for (const expected of evidence) assert.ok(source.includes(expected), `Repository patch missing from ${file}: ${expected}`);

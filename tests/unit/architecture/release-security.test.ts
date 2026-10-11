@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { windowsNativeSkip } from "../../fixtures/native-mode.js";
+import { writeSupplyChain } from "../../fixtures/supply-chain.js";
 
 const policy = await import(new URL("../../../scripts/release/policy.mjs", import.meta.url).href);
 const workflows = await import(new URL("../../../scripts/release/check-workflows.mjs", import.meta.url).href);
@@ -81,7 +82,7 @@ test("publishing performs zero mutations for failed gates, mismatched packages o
   const bytes = Buffer.from("fixture package");
   const hash = createHash("sha256").update(bytes).digest("hex");
   const receipt = { schema: 1, commit: sha, dirty: false, version: "1.2.3", filename: "everpeace-1.2.3.tgz", sha256: hash };
-  const checks = Object.fromEntries(["candidate", "package", "consumers", "native", "gate"].map((name) => [name, "success"]));
+  const checks = Object.fromEntries(["candidate", "package", "consumers", "security", "evidence", "native", "gate"].map((name) => [name, "success"]));
   const mutations: string[] = [];
   const api = async (endpoint: string, options: { method?: string } = {}) => {
     if (options.method) mutations.push(endpoint);
@@ -92,6 +93,7 @@ test("publishing performs zero mutations for failed gates, mismatched packages o
   try {
     await fs.writeFile(path.join(directory, receipt.filename), bytes);
     await fs.writeFile(path.join(directory, "receipt.json"), JSON.stringify(receipt));
+    await writeSupplyChain(directory, sha, hash);
     const arguments_ = { directory, sha, packageDigest: hash, checks, repo: "fixture/repository", api };
     await assert.rejects(publishing.publish({ ...arguments_, checks: { ...checks, native: "skipped" } }));
     await assert.rejects(publishing.publish({ ...arguments_, sha: "b".repeat(40) }));

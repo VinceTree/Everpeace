@@ -1,5 +1,7 @@
 # 历史归档
 
+- [分发与 CI 补丁交接](HANDOFF-2026-10-11-distribution.md)：问题 5–10 的既有交付及尚未准备的专用 Windows Runner，不替代当前候选证据。
+
 - [MCP 安全补丁交接](HANDOFF-2026-10-11-mcp-security.md)：独立启动信任、传输安全、网络回归及前次补丁发布证据。
 
 - [Memory 串行读取交付](HANDOFF_MEMORY_SERIALIZED_READ_DELIVERY.md)：本轮开始前的完整交接、CI 修正与远端验收。

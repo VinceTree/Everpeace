@@ -60,3 +60,51 @@ index d7054449516f0c9a62af351c2caa17331206d530..31958af764e518ec72263a245b92b1f3
 +    this._conoutSocketWorker.dispose();
    }
  }
+diff --git a/lib/worker/conoutSocketWorker.js b/lib/worker/conoutSocketWorker.js
+--- a/lib/worker/conoutSocketWorker.js
++++ b/lib/worker/conoutSocketWorker.js
+@@ -12,5 +12,20 @@ conoutSocket.setEncoding('utf8');
+ conoutSocket.connect(conoutPipeName, function () {
+     var server = net_1.createServer(function (workerSocket) {
++        // The parent can close its proxy while Conpty still flushes output.
++        // Keep draining Conpty so ClosePseudoConsole cannot deadlock.
++        var detachAndDrain = function () {
++            conoutSocket.unpipe(workerSocket);
++            conoutSocket.resume();
++        };
++        workerSocket.on('error', function (error) {
++            if (error.code !== 'EPIPE' && error.code !== 'ECONNRESET') {
++                throw error;
++            }
++            detachAndDrain();
++            workerSocket.destroy();
++        });
++        workerSocket.once('end', detachAndDrain);
++        workerSocket.once('close', detachAndDrain);
+         conoutSocket.pipe(workerSocket);
+     });
+     server.listen(conout_1.getWorkerPipeName(conoutPipeName));
+diff --git a/src/worker/conoutSocketWorker.ts b/src/worker/conoutSocketWorker.ts
+--- a/src/worker/conoutSocketWorker.ts
++++ b/src/worker/conoutSocketWorker.ts
+@@ -13,5 +13,20 @@ conoutSocket.setEncoding('utf8');
+ conoutSocket.connect(conoutPipeName, () => {
+   const server = createServer(workerSocket => {
++    // The parent can close its proxy while Conpty still flushes output.
++    // Keep draining Conpty so ClosePseudoConsole cannot deadlock.
++    const detachAndDrain = () => {
++      conoutSocket.unpipe(workerSocket);
++      conoutSocket.resume();
++    };
++    workerSocket.on('error', (error: NodeJS.ErrnoException) => {
++      if (error.code !== 'EPIPE' && error.code !== 'ECONNRESET') {
++        throw error;
++      }
++      detachAndDrain();
++      workerSocket.destroy();
++    });
++    workerSocket.once('end', detachAndDrain);
++    workerSocket.once('close', detachAndDrain);
+     conoutSocket.pipe(workerSocket);
+   });
+   server.listen(getWorkerPipeName(conoutPipeName));

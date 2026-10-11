@@ -1,0 +1,6 @@
+diff --git a/profile.mjs b/profile.mjs
+--- a/profile.mjs
++++ b/profile.mjs
+@@ -1,1 +1,1 @@
+-export function Profile({React,response}){return React.createElement('span',null,response.profile.displayName);}
++export function Profile({React,response}){return React.createElement('span',null,response.user.name);}

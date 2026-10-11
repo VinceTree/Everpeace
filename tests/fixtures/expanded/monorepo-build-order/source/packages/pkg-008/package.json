@@ -1,0 +1,1 @@
+{"name":"pkg-008","version":"1.0.0","type":"module","dependencies":{"pkg-007":"workspace:*"}}

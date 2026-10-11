@@ -81,6 +81,9 @@ export interface TuiModelRegistry {
 }
 
 export interface TuiDependencies {
+  configureWeb?(provider: "html" | "brave", key?: string): Promise<void>;
+  configureCost?(modelId: string, price: import("../../status/cost.js").ModelPrice): Promise<void>;
+  getCostStatus?(modelId: string): Promise<string>;
   inputHistory?: InputHistoryStore;
   registry: TuiModelRegistry;
   version: string;

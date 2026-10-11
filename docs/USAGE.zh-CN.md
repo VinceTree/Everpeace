@@ -209,7 +209,9 @@ TUI 命令：
 - `/goal <目标> [--tokens N]`：创建、查看、暂停、恢复并自动持续执行当前 Session 目标。收到 usage 后达到预算或无法可靠计量时，会停止后续工具、模型请求和自动验证修复，并显示原因；正在进行的单次请求可能超过剩余额度。
 - `/compact`：压缩模型 context，同时保留完整可见 transcript。官方 OpenAI 使用原生 Responses 压缩；DeepSeek 和保守的兼容端点使用最多 8K token 的摘要，并保留最近两个完整交互单元及未闭合工具链。手动压缩计入当前 active Goal；预算耗尽或 usage 不完整时说明原因并停止后续压缩请求。压缩期间保持独占，退出会取消并等待活动模型请求。自动压缩会预留输出预算与安全余量；确认 context 超限后最多恢复一次，且不会重放工具。
 - `/reasoning off|low|high|max`：设置下一项任务捕获的推理档位，默认 `high`；官方 DeepSeek 会原样接收 `max`。
-- `/doctor [--live]`：检查 Node、平台、实际 shell、sandbox 后端/profile、网络模式、Git/随包 ripgrep、可选 TypeScript LSP 配置，并实际执行一次 sandbox 探针。默认只做本地检查；只有 `--live` 会发送一次有界模型请求。
+- `/doctor [--live]`：本地运行时与 sandbox 诊断不发模型请求。`--live` 先预览流式文本、单次与连续工具调用、推理、用量和取消，默认选中 Cancel。显式开始后最多八次请求、20,000 token 请求预算、单次输出 1,024 token、单次三十秒；未知 Usage 停止后续阶段。结果区分实测、配置假设、不支持、未测和无法确定，七天或配置变化后失效。
+- `/web`：选择 DOM HTML 搜索或 Brave LLM Context。Brave Key 只保存在系统凭据库，保存不发请求；错误不会触发额外付费重试或提供方切换。
+- `/cost`：填写模型单价、币种和任务预警阈值，确认后保存。估算包含已结算的 coding、重试、压缩、辅助及成员请求；币种分开，缺价格或 Usage 保留 unknown/partial。请求 Token 预算和金额预警均不是费用上限。
 - `/outputs`：分页浏览保留输出、已高亮的命令及 unified diff。
 - `/history`：浏览或明确确认后清空全局输入历史，不删除 Session。
 - `/terminal-setup`：预览并可选配置稳定版 Windows Terminal 的 Shift+Enter；确认后先备份设置，再新增全局按键绑定。

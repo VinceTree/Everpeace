@@ -14,7 +14,7 @@ export function GoalConfirmationSurface({ objective, tokenBudget, onConfirm, onC
     <CommandSurface title="/goal · Confirm goal" onBack={onCancel}>
       <Text bold>Objective</Text>
       <Text>{objective}</Text>
-      <Box marginTop={1}><Text>Token budget: {tokenBudget?.toLocaleString() ?? "None"}</Text></Box>
+      <Box marginTop={1}><Text>Request token budget: {tokenBudget?.toLocaleString() ?? "None"} (not a spending cap)</Text></Box>
       <Select options={[{ label: "Create and start", value: "start" }, { label: "Cancel", value: "cancel" }]} onChange={(value) => value === "start" ? onConfirm() : onCancel()} />
     </CommandSurface>
   );

@@ -18,9 +18,12 @@
     "third_party/codex",
     "README.md",
     "README.zh-CN.md",
-    "LICENSE"
+    "LICENSE",
+    "SECURITY.md"
   ],
-  "bundleDependencies": ["node-pty"],
+  "bundleDependencies": [
+    "node-pty"
+  ],
   "scripts": {
     "dev": "tsx src/cli/index.ts",
     "clean": "node --eval \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
@@ -37,7 +40,9 @@
     "pack:release": "node scripts/release/pack.mjs",
     "install:consumer": "node scripts/release/consumer-install.mjs",
     "native:verify": "node scripts/release/native-verify.mjs",
-    "ci:verify": "node scripts/release/check-workflows.mjs"
+    "ci:verify": "node scripts/release/check-workflows.mjs",
+    "security:scan": "node scripts/security/scan.mjs",
+    "benchmark:prove-expanded": "tsx tests/fixtures/prove-expanded.ts"
   },
   "engines": {
     "node": ">=22"
@@ -50,7 +55,10 @@
     "@openai/codex": "0.162.0",
     "@vscode/ripgrep": "1.18.0",
     "@xterm/headless": "^6.0.0",
+    "css-select": "7.0.0",
+    "domutils": "4.0.2",
     "fflate": "^0.8.2",
+    "htmlparser2": "12.0.0",
     "ink": "^7.1.1",
     "jsonc-parser": "^3.3.1",
     "lowlight": "^3.3.0",
@@ -59,6 +67,7 @@
     "openai": "^7.15.0",
     "proper-lockfile": "^4.1.2",
     "react": "^19.3.0",
+    "spdx-expression-parse": "5.0.0",
     "undici": "7.30.0",
     "yaml": "^2.9.1"
   },
@@ -68,7 +77,9 @@
     "@types/react": "^19.3.0",
     "ink-testing-library": "^4.0.0",
     "oxlint": "1.87.0",
+    "react-test-renderer": "19.3.0",
     "tsx": "^4.23.13",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "typescript-evaluator": "npm:typescript@5.9.3"
   }
 }

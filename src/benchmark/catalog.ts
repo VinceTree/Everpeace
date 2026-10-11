@@ -23,10 +23,13 @@ function parseSource(value: unknown): BenchmarkTaskSource {
     throw new Error("source.repositoryUrl must be an absolute HTTPS URL without credentials or query parameters");
   }
   const commit = nonEmpty(source.commit, "source.commit");
-  if (!/^[0-9a-f]{7,64}$/iu.test(commit)) throw new Error("source.commit must be a pinned Git commit SHA");
+  const synthetic = source.sourceType === "synthetic";
+  if (synthetic ? commit !== "synthetic" : !/^[0-9a-f]{7,64}$/iu.test(commit)) throw new Error("source.commit must be a pinned Git commit SHA (or synthetic for a frozen local fixture)");
+  if (synthetic && (typeof source.fixtureDirectory !== "string" || source.fixtureDirectory.includes("\\") || source.fixtureDirectory.startsWith("/") || source.fixtureDirectory.split("/").some((part) => !part || part === "..") || typeof source.fixtureDigest !== "string" || !/^[a-f0-9]{64}$/u.test(source.fixtureDigest))) throw new Error("Synthetic source requires a normalized fixture directory and SHA-256 digest");
   const issue = nonEmpty(source.issue, "source.issue");
   const license = source.license === undefined ? undefined : nonEmpty(source.license, "source.license");
-  return { repositoryUrl, commit, issue, ...(license === undefined ? {} : { license }) };
+  if (source.sourceType !== undefined && !["synthetic", "seeded_upstream", "upstream_issue"].includes(String(source.sourceType))) throw new Error("Invalid benchmark source type");
+  return { repositoryUrl, commit, issue, ...(license === undefined ? {} : { license }), ...(source.sourceType === undefined ? {} : { sourceType: source.sourceType as NonNullable<BenchmarkTaskSource["sourceType"]> }), ...(synthetic ? { fixtureDirectory: source.fixtureDirectory as string, fixtureDigest: source.fixtureDigest as string } : {}) };
 }
 
 function parseVerification(value: unknown, field: string): BenchmarkVerification {

@@ -1,0 +1,6 @@
+diff --git a/profile.mjs b/profile.mjs
+--- a/profile.mjs
++++ b/profile.mjs
+@@ -1,1 +1,1 @@
+-export function useProfile(React,load,id){const [value,setValue]=React.useState(null);React.useEffect(()=>{let active=true;load(id).then(result=>{if(active)setValue(result);});return()=>{active=false;};},[load,id]);return value;}
++export function useProfile(React,load,id){const [value,setValue]=React.useState(null);React.useEffect(()=>{let active=true;load(id).then(result=>{setValue(result);});return()=>{active=false;};},[load,id]);return value;}

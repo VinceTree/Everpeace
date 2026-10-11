@@ -16,6 +16,7 @@
 | [NETWORK](architecture/NETWORK.md) | 公共 DNS/IP 连接、HTTP/HTTPS 代理、Git Skill 转发器 | 修改网页或远程 Skill 网络 |
 | [TOOLS](architecture/TOOLS.md) | 文件观察、编辑、规则、搜索、后台命令、LSP | 修改编码工具 |
 | [STATE_AND_UI](architecture/STATE_AND_UI.md) | Session/凭据/usage/恢复与终端不变量 | 修改状态或 UI |
+| [SECURITY_AND_DIAGNOSTICS](architecture/SECURITY_AND_DIAGNOSTICS.md) | 私密报告、供应链、来源、搜索、doctor、估算和公开成绩 | 修改问题 11–20 |
 | [DEVELOPMENT](DEVELOPMENT.md) | 工具链、命令、测试、CI、交付 | 开始修改及交付前 |
 | [WINDOWS_RUNNER](WINDOWS_RUNNER.md) | 专用 Windows 原生验收部署、发布门禁与失败演练 | 接入 Runner 与交付候选 |
 | [PLAN](PLAN.md) | 当前里程碑、剩余证据、后续顺序 | 规划工作 |

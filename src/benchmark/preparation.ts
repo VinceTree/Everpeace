@@ -1,10 +1,12 @@
 import { spawn } from "node:child_process";
-import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rm, writeFile, cp } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import type { BenchmarkTask, BenchmarkVerificationResult } from "./types.js";
 import { resolveBenchmarkProcess, runBenchmarkVerification } from "./runner.js";
 import { observeProcessCompletion, ProcessCleanupError } from "../tools/process-completion.js";
 import { BoundedOutputBuffer } from "../tools/command-record.js";
+import { captureFixtureTreeDigest } from "./evaluation-identity.js";
+import { BenchmarkPreparationError } from "./preparation-failure.js";
 
 interface CommandResult {
   exitCode: number | null;
@@ -124,11 +126,17 @@ export async function prepareBenchmarkFixture(
   await mustNotExist(destination);
   await mkdir(dirname(destination), { recursive: true });
   try {
-    await checkedGit(["clone", "--quiet", "--no-checkout", "--filter=blob:none", "-c", "core.autocrlf=false", "--", task.source.repositoryUrl, destination], undefined, options.signal);
-    await checkedGit(["checkout", "--quiet", "--detach", task.source.commit], destination, options.signal);
-    const head = (await checkedGit(["rev-parse", "HEAD"], destination, options.signal)).trim().toLowerCase();
-    if (!head.startsWith(task.source.commit.toLowerCase())) {
-      throw new Error(`Pinned source mismatch for ${task.id}: expected ${task.source.commit}, received ${head}`);
+    if (task.source.sourceType === "synthetic") {
+      const source = fixturePath(options.fixtureRoot, task.source.fixtureDirectory!);
+      if (await captureFixtureTreeDigest(source) !== task.source.fixtureDigest) throw new Error(`Frozen synthetic source changed: ${task.id}`);
+      await cp(source, destination, { recursive: true, errorOnExist: true, force: false });
+      if (await captureFixtureTreeDigest(destination) !== task.source.fixtureDigest) throw new Error(`Synthetic copy identity mismatch: ${task.id}`);
+      await checkedGit(["init", "--quiet"], destination, options.signal);
+    } else {
+      await checkedGit(["clone", "--quiet", "--no-checkout", "--filter=blob:none", "-c", "core.autocrlf=false", "--", task.source.repositoryUrl, destination], undefined, options.signal);
+      await checkedGit(["checkout", "--quiet", "--detach", task.source.commit], destination, options.signal);
+      const head = (await checkedGit(["rev-parse", "HEAD"], destination, options.signal)).trim().toLowerCase();
+      if (!head.startsWith(task.source.commit.toLowerCase())) throw new Error(`Pinned source mismatch for ${task.id}: expected ${task.source.commit}, received ${head}`);
     }
     const preparedTask = bindTask(task, destination, options.fixtureRoot);
     const preparationSignal = options.signal ?? new AbortController().signal;
@@ -140,7 +148,8 @@ export async function prepareBenchmarkFixture(
       const setup = await runBenchmarkVerification(preparedTask.fixture.setup, destination, preparationSignal);
       if (setup.cleanupFailed) throw new ProcessCleanupError(setup.error);
       if (!setup.passed) {
-        throw new Error(`Benchmark ${task.id} setup failed${setup.error ? `: ${setup.error}` : ` with exit ${setup.exitCode ?? "unknown"}`}`);
+        const outcome = /ENOENT|MODULE_NOT_FOUND|ERR_UNKNOWN_BUILTIN_MODULE|not found|not recognized|MISSING_TOOLCHAIN/iu.test(`${setup.error ?? ""} ${setup.stderr} ${setup.stdout}`) ? "missing_toolchain" : "preparation_failed";
+        throw new BenchmarkPreparationError(outcome, `Benchmark ${task.id} setup failed (${outcome}); inspect isolated preparation evidence`);
       }
     }
     if (preparedTask.fixture?.pristineVerification) {

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { candidateSha, digest, requirePortableBuild } from "./policy.mjs";
 import { packageManager } from "./commands.mjs";
 import { sourceIdentity } from "./source-identity.mjs";
+import { sbom } from "../security/tools.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const args = process.argv.slice(2);
@@ -47,7 +48,7 @@ try {
     await fs.rename(path.join(download, "package"), target);
     if (name === "node-pty") {
       // Match pnpm patch context, including npm's missing compiled-JS EOF newline.
-      for (const file of ["lib/conpty_console_list_agent.js", "lib/windowsPtyAgent.js", "src/conpty_console_list_agent.ts", "src/windowsPtyAgent.ts"]) {
+      for (const file of ["lib/conpty_console_list_agent.js", "lib/windowsPtyAgent.js", "src/conpty_console_list_agent.ts", "src/windowsPtyAgent.ts", "lib/worker/conoutSocketWorker.js", "src/worker/conoutSocketWorker.ts"]) {
         const location = path.join(target, file);
         await fs.writeFile(location, (await fs.readFile(location, "utf8")).replaceAll("\r\n", "\n").replace(/\n?$/u, "\n"));
       }
@@ -80,6 +81,18 @@ try {
     assert.ok(nativeRoot.startsWith(staging + path.sep));
     await fs.rm(path.join(nativeRoot, "build"), { recursive: true, force: true });
   }
+  const binaryFiles = {};
+  const visitNative = async (directory) => {
+    for (const item of await fs.readdir(directory, { withFileTypes: true })) {
+      const location = path.join(directory, item.name);
+      if (item.isDirectory()) await visitNative(location);
+      else if (item.isFile() && /\.(?:node|dll|exe|so|dylib)$/iu.test(item.name)) binaryFiles[path.relative(staging, location).replaceAll("\\", "/")] = digest(location);
+    }
+  };
+  await visitNative(path.join(staging, "node_modules/node-pty"));
+  assert.ok(Object.keys(binaryFiles).length, "Native binary inventory missing");
+  native.binaryFiles = binaryFiles;
+  native.coverageLimit = "Binary digests identify delivered native components; statically linked internal dependency versions may not be identifiable.";
   await fs.writeFile(path.join(staging, "native-provenance.json"), JSON.stringify(native, null, 2) + "\n");
   manifest.files.push("native-provenance.json");
   await fs.writeFile(path.join(staging, "package.json"), JSON.stringify(manifest, null, 2) + "\n");
@@ -89,6 +102,7 @@ try {
   assert.deepEqual(sourceIdentity(root), identity, "Source changed while packing");
   const receipt = { schema: 1, commit, ...identity, version: manifest.version, filename: packed.filename, sha256: digest(path.join(output, packed.filename)), lockSha256: digest(path.join(root, "pnpm-lock.yaml")), native, node: process.version, platform: process.platform, runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT };
   await fs.writeFile(path.join(output, "receipt.json"), JSON.stringify(receipt, null, 2) + "\n");
+  await sbom(staging, path.join(output, "package.cdx.json"), ["node-pty", "node-addon-api"]);
   if (process.env.GITHUB_OUTPUT) await fs.appendFile(process.env.GITHUB_OUTPUT, `sha256=${receipt.sha256}\n`);
   console.log(`Verified package: ${path.join(output, packed.filename)} (${receipt.sha256})`);
 } catch (error) { cleanupFailed = error.cleanupFailed === true; throw error; }

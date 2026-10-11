@@ -21,6 +21,9 @@ import { createEffectiveSandboxPolicy } from "../../tools/sandbox-policy.js";
 import { runTerminalCommand } from "../../tools/terminal.js";
 import type { TuiDependencies, TuiModelRegistry } from "./types.js";
 import { truncateEnd } from "../rendering/text-width.js";
+import { SearchSettingsStore } from "../../tools/search-provider.js";
+import { DiagnosticStore, diagnosticFreshness, runLiveDiagnostics } from "../../providers/doctor.js";
+import { CostSettingsStore, CostWarningTracker, summarizeCosts, type RequestCostContext } from "../../status/cost.js";
 import {
   defaultPermissions,
   loadPermissionPolicy,
@@ -126,6 +129,17 @@ export function createDefaultTuiDependencies(
   let teamModels: RegisteredModel[] = [];
   let activeTeam: TeamRuntime | undefined;
   const version = packageVersion();
+  const webSettings = new SearchSettingsStore();
+  const costSettings = new CostSettingsStore();
+  const costTracker = new CostWarningTracker();
+  let activeLedger: RequestAttemptLedger | undefined;
+  let costSessionId: () => string | undefined = () => undefined;
+  let auxiliaryCostEvent: ((estimate: import("../../status/cost.js").CostEstimate) => void) | undefined;
+  const auxiliaryCosts: import("../../status/cost.js").CostEstimate[] = [];
+  const costContext = (model: RegisteredModel): RequestCostContext => {
+    const id = costSessionId(), onEstimate = auxiliaryCostEvent;
+    return { modelId: model.id, price: () => costSettings.price(model.id), tracker: costTracker, async settled(estimate) { auxiliaryCosts.push(estimate); if (id) await sessionStore.appendCost(id, estimate); onEstimate?.(estimate); } };
+  };
   const skills = new SkillCatalog(process.cwd());
   const skillManager = new SkillManager({ workspacePath: process.cwd(), catalog: skills });
   const mcp = new McpRuntime({ workspacePath: process.cwd(), version });
@@ -150,10 +164,21 @@ export function createDefaultTuiDependencies(
     run: (signal: AbortSignal) => Promise<T>,
     scopeSignal?: AbortSignal,
     signal = scopeSignal,
+    model?: RegisteredModel,
   ): Promise<T> => {
-    return auxiliaryExecutor.execute(purpose, run, scopeSignal, signal);
+    return auxiliaryExecutor.execute(purpose, run, scopeSignal, signal, undefined, model ? costContext(model) : undefined);
   };
   return {
+    configureWeb: (provider, key) => webSettings.configure(provider, key),
+    configureCost: (modelId, price) => costSettings.configure(modelId, price),
+    async getCostStatus(modelId) {
+      const pricing = await costSettings.price(modelId);
+      const id = costSessionId();
+      const records = id ? (await sessionStore.load(id)).costs ?? [] : auxiliaryCosts;
+      const summary = summarizeCosts(records);
+      const accounting = activeLedger?.snapshot();
+      return [`Active model pricing: ${pricing ? JSON.stringify(pricing) + " per million tokens" : "not configured"}`, `Request token budget: ${accounting?.tokenBudget ?? "no ledger limit (Goal may impose admission limits)"}; known task consumption: ${accounting ? accounting.inputTokens + accounting.outputTokens : "unknown"}; in-flight requests: ${activeLedger?.openRequests ?? "unknown"}; metering: ${accounting ? accounting.complete ? "complete so far" : "incomplete" : "unknown"}`, `Recorded request estimates: ${summary.requests}; unknown/partial usage or price: ${summary.unknownRequests}`, ...summary.currencies.map((entry) => `${entry.currency}: ${entry.knownAmount.toFixed(6)} estimated ${entry.partial ? "(partial)" : ""}`), "Older sessions may lack request price snapshots; absent estimates are unknown, never zero."].join("\n");
+    },
     registry,
     version,
     workspacePath: process.cwd(),
@@ -167,6 +192,9 @@ export function createDefaultTuiDependencies(
       finally { await disposeProviderClient(client); }
     },
     createAgent(model: RegisteredModel, io: AgentIO, restore) {
+      costSessionId = () => io.getSessionId?.();
+      auxiliaryCostEvent = (estimate) => restore?.onEvent?.({ type: "cost_estimated", estimate });
+      activeLedger = new RequestAttemptLedger();
       if (disposed) throw new Error("TUI services have been disposed");
       cancelManualMemory(new Error("Active model changed"));
       let codeNavigation;
@@ -178,6 +206,8 @@ export function createDefaultTuiDependencies(
       catch { codeNavigation = undefined; }
       const handle = createProductionAgent({
         model,
+        costSettingsStore: costSettings,
+        costWarningTracker: costTracker,
         ...(restore?.team ? { team: restore.team, teamModels, teamStore, onTeamEvent: async (event) => { if (event.type === "agent_updated" || event.type === "agent_integrated") io.writeTool?.(`[Team ${event.agentId.slice(0, 8)}] ${event.role ?? "member"} · ${event.state ?? "updated"} · ${event.modelId ?? ""}`); } } : {}),
         workspacePath: process.cwd(),
         io,
@@ -189,8 +219,8 @@ export function createDefaultTuiDependencies(
         learnedMemoryStore,
         memoryIdleDelayMs: 5 * 60 * 1000,
         memoryMinTranscriptChars: 200,
-        runMemoryRequest: (run, context) => auxiliaryExecutor.execute("memory", (signal) => run(signal), context.signal, context.signal, context),
-        requestAttemptLedger: new RequestAttemptLedger(),
+        runMemoryRequest: (run, context) => auxiliaryExecutor.execute("memory", (signal) => run(signal), context.signal, context.signal, context, costContext(model)),
+        requestAttemptLedger: activeLedger,
         ...(codeNavigation ? { codeNavigation } : {}),
         restore: {
           ...(restore?.initialContext === undefined ? {} : { initialHistory: restore.initialContext }),
@@ -254,7 +284,7 @@ export function createDefaultTuiDependencies(
         },
         model: model.model_name,
         policy: { captureFuture: false },
-        runRequest: (run, context) => auxiliaryExecutor.execute("memory", (signal) => run(signal), context.signal, context.signal, context),
+        runRequest: (run, context) => auxiliaryExecutor.execute("memory", (signal) => run(signal), context.signal, context.signal, context, costContext(model)),
       });
       manualMemoryControllers.add(controller);
       const operation = (async () => {
@@ -286,7 +316,7 @@ export function createDefaultTuiDependencies(
             ...(request.reasoning ? { reasoning: request.reasoning } : {}),
           },
           { signal: requestSignal, timeout: request.timeoutMs, maxRetries: 0 },
-        ), undefined, signal);
+        ), undefined, signal, model);
         assertCompletedModelResponse(response, "title");
         const title = sanitizeSessionTitle(response.output_text);
         if (!title) throw new Error("The model returned an empty session title");
@@ -367,6 +397,11 @@ export function createDefaultTuiDependencies(
       }
       if (!live) {
         lines.push("Model request: not run (use /doctor --live)");
+        if (model) {
+          const reports = await new DiagnosticStore().read();
+          const report = [...reports.reports].reverse().find((entry) => entry.model === model.model_name && entry.endpoint === new URL(model.base_url).origin + new URL(model.base_url).pathname);
+          if (report) lines.push(`Previous capability evidence: ${diagnosticFreshness(report, model)} (${report.testedAt})`, ...Object.entries(report.stages).map(([stage, result]) => `${stage}: ${result.state} · ${result.detail}`));
+        }
         return lines.join("\n");
       }
       if (!model) {
@@ -375,16 +410,10 @@ export function createDefaultTuiDependencies(
       }
       const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name, model.responses_profile);
       try {
-        const request = purposeRequest(model, "doctor");
-        const response = await runAuxiliary("doctor", (requestSignal) => runtime.responses.create({
-          model: model.model_name,
-          instructions: "This is a bounded connectivity check. Reply with OK only.",
-          input: "OK",
-          max_output_tokens: request.max_output_tokens,
-          ...(request.reasoning ? { reasoning: request.reasoning } : {}),
-        }, { maxRetries: 0, timeout: request.timeoutMs, signal: requestSignal }), undefined, signal);
-        assertCompletedModelResponse(response, "doctor");
-        lines.push("Model request: completed with text");
+        const result = await runLiveDiagnostics(model, runtime, { ...(signal ? { signal } : {}), observe: (run, requestSignal) => runAuxiliary("doctor", run, undefined, requestSignal, model) });
+        await new DiagnosticStore().save(result);
+        lines.push(`Diagnostic requests: ${result.requests}/8; request token budget: 20000; known usage: ${result.inputTokens + result.outputTokens}; metering: ${result.usageComplete ? "complete" : "incomplete"}`);
+        lines.push(...Object.entries(result.stages).map(([stage, evidence]) => `${stage}: ${evidence.state} · ${evidence.detail}`));
       } catch (error) {
         lines.push(`Model request: failed\n${modelErrorGuidance(error)}`);
       } finally { await runtime.dispose?.(); }
@@ -449,7 +478,7 @@ export function createDefaultTuiDependencies(
         model,
         "Create one concise Codex SKILL.md for the requested workflow. Return only the complete SKILL.md, without a Markdown code fence or commentary. It must begin with YAML frontmatter containing a lowercase hyphenated name (maximum 64 characters) and a discriminating description that states what the skill does and when it applies. The body should contain only task-specific workflow, non-obvious constraints, and useful decision criteria. Do not create or refer to extra files, scripts, assets, or placeholders.",
         description,
-        (run) => runAuxiliary("skill", run, undefined, signal),
+        (run) => runAuxiliary("skill", run, undefined, signal, model),
       );
     },
     reviseSkillDraft(model, skillMarkdown, signal) {
@@ -457,7 +486,7 @@ export function createDefaultTuiDependencies(
         model,
         "Validate and improve the supplied Codex SKILL.md. Correct invalid frontmatter, vague routing, generic advice, contradictions, and unnecessary verbosity while preserving the intended workflow. Return only the complete revised SKILL.md, without a Markdown code fence or commentary. Keep it self-contained and do not add references to files, scripts, or assets.",
         skillMarkdown,
-        (run) => runAuxiliary("skill", run, undefined, signal),
+        (run) => runAuxiliary("skill", run, undefined, signal, model),
       );
     },
     runTerminalCommand(command, onOutput, signal, onInputReady) {

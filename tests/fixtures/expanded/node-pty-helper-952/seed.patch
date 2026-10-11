@@ -1,0 +1,6 @@
+diff --git a/benchmark-helper-marker.txt b/benchmark-helper-marker.txt
+new file mode 100644
+--- /dev/null
++++ b/benchmark-helper-marker.txt
+@@ -0,0 +1 @@
++Upstream issue #952: deterministic helper AttachConsole failure; production source is not seeded.

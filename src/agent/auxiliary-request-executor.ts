@@ -26,6 +26,7 @@ export class AuxiliaryRequestExecutor {
     scopeSignal?: AbortSignal,
     signal = scopeSignal,
     accounting?: RequestAccountingScope,
+    cost?: import("../status/cost.js").RequestCostContext,
   ): Promise<T> {
     if (this.#cleanupFailure) throw this.#cleanupFailure;
     if (this.#disposed) throw new Error("Auxiliary requests have been disposed");
@@ -47,7 +48,7 @@ export class AuxiliaryRequestExecutor {
       if (this.#cleanupFailure) throw this.#cleanupFailure;
       ownedSignal.throwIfAborted();
       try {
-        const result = await scope.executor.execute(purpose, () => run(ownedSignal));
+        const result = await scope.executor.execute(purpose, () => run(ownedSignal), undefined, cost);
         ownedSignal.throwIfAborted();
         return result;
       }

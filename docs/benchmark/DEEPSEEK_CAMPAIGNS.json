@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "executionAuthorized": false,
+  "realModelRuns": 0,
+  "campaigns": [
+    { "id": "official-deepseek", "endpoint": "https://api.deepseek.com", "modelRegistration": null, "originalModelId": null, "profile": "deepseek", "taskTokenBudget": null, "campaignTokenBudget": null },
+    { "id": "target-relay", "endpoint": null, "modelRegistration": null, "originalModelId": null, "profile": null, "taskTokenBudget": null, "campaignTokenBudget": null }
+  ],
+  "requiredStages": ["confirmed capability probe", "independent smoke campaign", "fixed coding tasks with real file changes and complete host checks", "long context and continuous tool rounds"],
+  "catalogs": ["DEEPSEEK_NODE_TASKS.json", "EXPANDED_TASKS.json"],
+  "offlineFaultEvidence": ["stream-lifecycle", "deepseek-contract", "doctor protocol fixtures", "request executor and coding runner cancellation/retry tests"],
+  "admission": "This preparation record is not executable campaign authorization. Resolve endpoints, original model IDs, AuthStorage references and explicit numeric task/campaign budgets, then freeze separate code/build/evaluation identities before any paid request. Unknown usage stops subsequent requests; in-flight charges are not a hard budget cap."
+}
