@@ -18,7 +18,7 @@
 
 ## 当前验证状态
 
-本机 Windows 候选串行 typecheck → lint → test → build 全部 exit 0。全量 1,164 项：1,161 通过、3 项平台跳过、0 失败；本机不能创建的 symlink、临时目录 alias 及 Unix 子进程超时不算通过。发布安全回归 7 项通过；install:verify 与 install:smoke 通过，真实 PTY 7 项零跳过。Workflow 固定身份扫描、actionlint（显式声明专用标签）及变更文档链接检查通过。
+初版本机 Windows 候选串行 typecheck → lint → test → build 全部 exit 0。全量 1,164 项：1,161 通过、3 项平台跳过、0 失败；本机不能创建的 symlink、临时目录 alias 及 Unix 子进程超时不算通过。发布安全回归 7 项通过；install:verify 与 install:smoke 通过，真实 PTY 7 项零跳过。Workflow 固定身份扫描、actionlint（显式声明专用标签）及变更文档链接检查通过。
 
 独立 patched tarball `everpeace-0.5.3.tgz` 的 SHA-256 为 `0964b548d0dba5a2e03eb942feeb14dd9c944f8e4350df6549f329b62e9afafa`。Windows 干净 npm/pnpm/global 三种安装全部成功，各自三项 CLI/SDK/PTY 实际行为检查零跳过，全局 cmd shim 也实际启动成功。required native 五项必需用例全部真实执行且通过，事件日志与包收据绑定同一开发源码摘要；这些收据标记 dirty，只能算开发证据。正式远端验证需重新构建并绑定干净提交。
 
@@ -28,4 +28,8 @@
 
 ## 交付与未完成事项
 
-当前尚未提交本轮代码。仓库 Runner API 核查为零，main 分支保护尚未设置。工作流部署后须激活 Required checks 并 API 回读，执行 failure_drill 并确认没有新 tag/Release，再对准确候选运行正式流程。专用 Windows 基础设施未接入，不能将本机开发验收或 hosted skip 当作候选原生 CI 成功；正式 Release 必须保持阻塞，直到该必需任务成功。
+初版源码 `152a791d5db905ea1e7623380d595b0035cd1f32` 已推送 main，[Test](https://github.com/VinceTree/Everpeace/actions/runs/38113445355) 的 Windows/Linux 和 Required checks 均成功。Windows 全量 1,164 项、1,157 通过、7 跳过；Ubuntu 全量 1,164 项、1,156 通过、8 跳过，均零失败。main 已启用 strict Required checks、绑定 GitHub Actions app 且包含管理员，API 回读收据保存在外置证据根。
+
+[失败演练](https://github.com/VinceTree/Everpeace/actions/runs/38113460361) 实际执行 Windows 失败 fixture，validate/gate 失败，drill 成功、publish skipped；远端核对没有 v0.5.3 tag/Release。[正常流程初验](https://github.com/VinceTree/Everpeace/actions/runs/38113775671) 暴露 Linux pnpm 不执行 bundled 子依赖构建脚本、缺少 pty.node，不能将 Windows 包开发成功扩大成 Linux 分发成功。已修订打包器：正式 Ubuntu x64 候选在校验过的 staging 编译并封装 Linux PTY/helper，同时保留上游 Windows prebuild；Windows 本地打包仅作开发。初验 Windows npm 的实际 CLI/SDK/PTY 均通过，但其后 pnpm launcher 在 Runner 的 node_modules/.bin 布局下定位失败；已改用标准模块解析，并由 pnpm 脚本入口保留所选工具链的 npm_execpath。新候选门禁与两平台消费者正在重新验收。
+
+仓库 Runner API 核查为零，RUNNER_READ_TOKEN 尚未配置，专用 Windows 基础设施未接入。不能将本机开发验收或 hosted skip 当作候选原生 CI 成功；正式 Release 保持阻塞，直到该必需任务成功。候选版本已更新但尚未发布，不创建绕过门禁的 tag 或 draft Release。

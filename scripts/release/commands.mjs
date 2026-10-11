@@ -2,6 +2,16 @@ import { execFileSync, spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 
+export function findManagerLauncher(name, locations) {
+  for (const location of locations) {
+    const require = createRequire(path.join(path.dirname(location), "manager-launcher.cjs"));
+    for (const directory of require.resolve.paths(name) ?? []) {
+      try { return require.resolve(path.join(directory, name, "bin", name === "npm" ? "npm-cli.js" : "pnpm.cjs")); }
+      catch { /* Absolute entry paths support CLI packages with closed exports. */ }
+    }
+  }
+}
+
 // Launch JS entry points without a Windows .cmd shell or command interpolation.
 export async function packageManager(name, args, options = {}) {
   const executable = process.platform === "win32" ? `${name}.cmd` : name;
@@ -13,9 +23,7 @@ export async function packageManager(name, args, options = {}) {
     catch {
       const locations = execFileSync(process.platform === "win32" ? "where.exe" : "which", [executable], { encoding: "utf8", windowsHide: true }).trim().split(/\r?\n/u);
       if (process.platform === "win32") {
-        for (const location of locations) {
-          try { launcher = require.resolve(path.join(path.dirname(location), "node_modules", name, "bin", name === "npm" ? "npm-cli.js" : "pnpm.cjs")); break; } catch { /* Try the next installation. */ }
-        }
+        launcher = findManagerLauncher(name, locations);
       }
     }
   }
