@@ -79,6 +79,8 @@ The duplex transport exposes the same retained cleanup failure after repeated te
 
 ## Native smoke evidence and limits
 
+Required Windows release acceptance uses the dedicated Runner described in [WINDOWS_RUNNER](../WINDOWS_RUNNER.md). Hosted mode is explicit; `GITHUB_ACTIONS` alone no longer skips native tests. Required mode rejects missing/skipped/TODO native cases and records the exact source identity. Local successful probes do not establish dedicated Runner availability. macOS remains experimental without complete CI/Seatbelt/Keychain acceptance.
+
 Windows Node with the installed pinned backend was exercised using disposable directories and fixed fixture commands, without model/API requests. The built-in profile allowed `.everpeace`, confirming the original gap. The new complete child profile then allowed an ordinary workspace write while rejecting `.everpeace` file creation, rename and delete attempts; the automated native regression covers ordinary write plus protected write. Non-temp sibling writes, read-only workspace writes and `.git` writes also failed. A sibling inside the system temp directory was writable, as a temporary-directory grant permits; this is not a workspace escape test.
 
 The [native Windows ownership fixture](../../tests/unit/tools/sandbox-boundaries.test.ts) cancels a payload that starts a detached child and verifies that both reported PIDs have exited. Buffered and duplex modes run through the pinned backend; a natural self-expiry cannot satisfy the assertions. This verifies the controlled fixture, not all possible descendants. Hosted Windows CI and non-Windows explicitly skip this native integration; those skips are not containment evidence.

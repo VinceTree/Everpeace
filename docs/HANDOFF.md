@@ -1,41 +1,31 @@
 # 当前交接
 
-更新日期：2026-10-11。本轮入口为 [AGENTS](../AGENTS.md)，专题为 [集成能力](architecture/CODEX_CAPABILITIES.md#启动信任与-http-边界)、[公共网络](architecture/NETWORK.md) 与 [开发验收](DEVELOPMENT.md#mcp-启动信任专项终端验收)。前轮网络、安装、团队准备及补丁交付记录保存于 [历史交接](archive/HANDOFF-2026-10-10-network-readiness.md)，不能作为本轮验证或发布授权。
+更新日期：2026-10-11。入口为 [AGENTS](../AGENTS.md)，当前专题是 [开发验收](DEVELOPMENT.md)、[专用 Windows Runner](WINDOWS_RUNNER.md)。前次 MCP 安全补丁、完整测试及已发布产物的证据移至 [历史交接](archive/HANDOFF-2026-10-11-mcp-security.md)，不作为本轮验证结果。
 
-## 范围与工作区
+## 范围与授权
 
-用户明确授权实施 MCP 独立启动信任、工作区持久保存、HTTP 限制、TUI/headless 接入和回归，并随后授权按补丁更新版本、提交、推送及 GitHub Release。展示版本由 **0.5.1** 更新为 **0.5.2**，同步 package.json 与双语 README。保留所有既有 untracked `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`；开始时没有 tracked 改动。没有付费模型请求或 npm publish。
+实施问题 5–10 的发布、原生依赖分发和平台验收补丁。第 7 项独立 Oxlint 已存在，继续保留；macOS 按用户选择标注实验性支持。用户明确授权实施、补丁版本更新、提交、推送及 GitHub Release。用户另确认专用 Windows 机器尚未准备，先完成代码和部署说明；原生发布门禁不能因此跳过。展示版本由 0.5.2 调整为候选 0.5.3。
 
-## 实现
+起点为 `796f75be499794eab66f6fcdd238badd6921785d`，main 与 origin/main 一致。保留既有 untracked `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`。没有付费模型请求或 npm registry 发布。
 
-- stdio 在冻结的 command/args/cwd/env 下启动；workspace/server/transport 的 HMAC 配置授权保存在平台用户配置目录，密钥由 AuthStorage/keyring 管理。文件带 schema/revision，跨进程锁与原子替换；坏存储/缺钥不能放行。审批提交及落盘前核对当前配置、preview、store revision 和 generation。
-- `/mcp trust <server>` 默认 Cancel，批准只保存权限；`/mcp reconnect` 显式启动或重载，`/mcp revoke <server>` 先取消 callable/binding、计时器、初始化和在途调用，再关闭服务并撤销持久授权。其他进程在下次授权检查时观察撤销，已运行宿主程序并非跨进程即时终止。
-- 非回环 HTTP 全拒绝。回环 HTTP 需要单独授权，localhost 固定回环连接；HTTPS 保留内网兼容和证书校验。SDK 所有请求（含不继承 requestInit 的 SSE GET）通过受控 fetch 拒绝全部重定向，dispatcher 归 transport 管理。认证与环境冻结，预览、状态、日志和 Session 不存原始凭据。
-- CLI/SDK enabled 未信任服务在模型请求前返回 interaction_required/exit 5，区分 mcp_start/mcp_http；full-access 与工具审批均不能授予启动信任。Session schema 不变，授权不由历史恢复。
-- Web 原有 DNS 绑定保持；补充独立 IANA 端点/邻接/格式回归，发现并拒绝此前会被允许的公网 scoped IPv6。
+## 实现与边界
 
-## 验证状态
+- Test/Release 共用 Windows/Linux Node 22 四项门禁；PR/main 增加稳定 Required checks。Release 只接受 main 上完整候选 SHA，冻结后只构建一个 tarball，同一 artifact ID 与摘要用于两平台 npm/pnpm/global 消费者验收。汇总必需 job 成功后才创建 tag/Release；冲突 tag/资产不覆盖。故障演练执行真实失败 Windows 测试且始终禁用 publish。
+- 所有远程 Actions 固定完整 SHA，核对上游版本及 Node 24 runtime，应用仍使用 Node 22；Dependabot 提供升级 PR。只有 publish 有 contents 写权限。调用原生 reusable job 授予的 Actions 取消权限仅用于 hosted 排队 watchdog，专用 native job 明确收紧为 contents read。
+- 维护者 staging 从完整性锁定的 node-pty/node-addon-api 原包生成 patched bundle，包含源码、许可证和平台 prebuild；不复制开发机编译结果，不让消费者继承仓库 pnpm 补丁，不增加消费者补丁 hook。普通 prepack 拒绝未准备产物，使用 pack:release。Linux 安装需要 Python/make/C++；pnpm 原生脚本明确准入。
+- 实际 Windows 回归发现 PTY 先 Ctrl+C 会失去 detached 后代清理机会，改为先严格终止进程树再关闭控制台，结果等待清理，清理错误保留失败。消费者测试检查真实 PID 退出、原生 resize、输入、重启及取消，不能用补丁文本代替行为。
+- Windows native required 模式覆盖五项真实 sandbox/team 用例；GITHUB_ACTIONS 不再直接跳过。缺少/重复/skip/TODO/失败拒绝，收据绑定 commit、源码和日志摘要。专用机器需注册指定标签并配置 Administration read 的 RUNNER_READ_TOKEN；不可用时失败关闭，排队超时由 hosted watchdog 取消。部署要求见专用说明。
 
-当前候选最终串行 `pnpm typecheck → pnpm lint → pnpm test → pnpm build` 全部 exit 0；`git diff --check` 与新增文件空白检查通过。全量共 1,156 项：1,153 通过、0 失败、3 跳过。跳过分别为本机文件 symlink 权限、Windows 临时目录 alias（由 clean-checkout CI 覆盖）和 Unix 子进程超时场景；不算平台实测通过。本机门禁在 Windows 执行，补丁候选另通过下面的 Ubuntu CI。
+## 当前验证状态
 
-MCP 安全回归 15 项全部通过、无跳过，覆盖真实 stdio 零启动/批准/重启/工作区隔离、审批提交期间配置变化与取消、跨进程锁/撤销、活动调用与迟到初始化、坏存储/keyring、HTTP 拒绝/本机例外、凭据脱敏、所有请求方法与重定向、真实 SDK SSE、受信 HTTPS 降级拒绝、localhost 固定回环和 TLS 失败。既有协议、stdio 恢复、Web DNS 绑定、独立 IANA 地址、headless Plan/full-access 和 TUI 回归包含在最终全量结果中。
+本机 Windows 候选串行 typecheck → lint → test → build 全部 exit 0。全量 1,164 项：1,161 通过、3 项平台跳过、0 失败；本机不能创建的 symlink、临时目录 alias 及 Unix 子进程超时不算通过。发布安全回归 7 项通过；install:verify 与 install:smoke 通过，真实 PTY 7 项零跳过。Workflow 固定身份扫描、actionlint（显式声明专用标签）及变更文档链接检查通过。
 
-首次全量有 3 项 Agent 快照回归失败：新增 preflight 重复读取首步目录。已改为首步复用该快照，3 项定向回归与最终完整门禁通过；失败原始日志保存在外置 `initial-test.log`，不覆盖为成功记录。
+独立 patched tarball `everpeace-0.5.3.tgz` 的 SHA-256 为 `0964b548d0dba5a2e03eb942feeb14dd9c944f8e4350df6549f329b62e9afafa`。Windows 干净 npm/pnpm/global 三种安装全部成功，各自三项 CLI/SDK/PTY 实际行为检查零跳过，全局 cmd shim 也实际启动成功。required native 五项必需用例全部真实执行且通过，事件日志与包收据绑定同一开发源码摘要；这些收据标记 dirty，只能算开发证据。正式远端验证需重新构建并绑定干净提交。
 
-真实 Windows Terminal 已以 owned 离线 fixture 验证：未批准、默认 Cancel、Esc 和 Ctrl+C 均零启动；resize 保留预览；取消后返回同一 Session 且单 prompt。批准仅落盘，重连 ready/6 tools、marker 恰好 1 次；撤销后 grant 删除、工具归零、stdio 退出，再重连没有新增启动。测试使用软件按键与实际窗口截图，未冒称人工按键；owned 终端和 fixture 均已退出。之后仅补诊断脱敏，相关路径由最终自动回归验证。
+此前消费者开发日志保留了配置路径、resize 判据和全局 cmd quoting 的失败，均已按实际原因修订。WSL 原生构建工具安装因发行版 DNS 解析失败，未获得 Linux 消费者成功证据，将由准确提交的 GitHub Ubuntu 任务验证。
 
-本轮外置证据根：`C:\Users\39850\AppData\Local\Temp\everpeace-mcp-security-fd060153a5e34e7ab5315d8ef5666f3b`，包含 `gates.json`、`final-*.log`、`terminal-receipt.json`、`terminal-evidence/actions.jsonl` 和窗口截图。真实终端使用 owned fixture、合成 HMAC 与 marker；没有修改用户 MCP 配置或 keyring。
+外置证据根：`C:\Users\39850\AppData\Local\Temp\everpeace-distribution-30b46b1685c1497ba90539e9cd829a02`。初版包与开发收据为 dirty 工作区，不是可发布候选；最终远端验证必须重新绑定干净提交。
 
-## 补丁交付
+## 交付与未完成事项
 
-用户随后明确授权将上述修复作为补丁提交、推送、更新展示版本和 GitHub Release。补丁起点为 `5665724b64e86431af2fc481e572dc5ba3454162`；源码提交 `4b3f4d1a06f1eab48075e647770b6dc351c33001` 已推送 main，tag `v0.5.2` 与 manifest 一致且解析到该提交。标题 `fix: require MCP startup trust and secure transports [skip publish]` 暂缓分支自动发布、保留 Test workflow；对应 [Windows/Ubuntu CI](https://github.com/VinceTree/Everpeace/actions/runs/38109776300) 两项 job 均成功后才推送 tag。
-
-对应 [Release workflow](https://github.com/VinceTree/Everpeace/actions/runs/38110024777) 已成功，[v0.5.2 Release](https://github.com/VinceTree/Everpeace/releases/tag/v0.5.2) 已发布并设为 Latest，非 draft/prerelease。实际正文与审阅的双语安全补丁说明逐字核对，保留既有配置需独立启动批准、MCP 仍有宿主用户权限和不提供进程沙箱/依赖完整性验证的升级边界。随后仅追加这份交付记录，不移动已经通过验证的 tag。
-
-补丁交付根为 `C:\Users\39850\AppData\Local\Temp\everpeace-patch-20261011-501d21521426410e85fb0d5f07a6e78d`。更新展示版本后重新执行串行门禁，准确结果保存为 `local-gates.json`、`final-*.log`；`delivery-receipt.json` 绑定源码 commit/tree、构建文件摘要、远端 CI、tag 和 Release，`ci.log`、`ci.json`、`release-run.json` 保留实际远端结果。此前实现证据继续保留，不冒充新候选身份。
-
-补丁候选四项门禁全部 exit 0，完整测试仍为 1,156 项、1,153 通过、3 项平台跳过、0 失败。`pnpm install:verify` 核对固定原生依赖及实际补丁通过；`pnpm install:smoke` 的构建 CLI、SDK 导入与 6 项真实 PTY 生命周期检查通过、无跳过。差异空白检查通过。源码、构建及提交身份由交付收据绑定。
-
-## 保留边界
-
-MCP 启动批准仍意味着宿主用户权限，未新增原生进程沙箱或程序/依赖完整性验证。受信任程序仍可能产生自主副作用；工具审批不约束其宿主权限。生产不支持 OAuth/header helper。独立 npm 消费者补丁分发、真实付费团队评测等前轮事项仅作为未完成历史保留，未获本轮新授权。
+当前尚未提交本轮代码。仓库 Runner API 核查为零，main 分支保护尚未设置。工作流部署后须激活 Required checks 并 API 回读，执行 failure_drill 并确认没有新 tag/Release，再对准确候选运行正式流程。专用 Windows 基础设施未接入，不能将本机开发验收或 hosted skip 当作候选原生 CI 成功；正式 Release 必须保持阻塞，直到该必需任务成功。

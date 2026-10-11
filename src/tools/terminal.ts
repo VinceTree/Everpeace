@@ -1,7 +1,7 @@
 import { spawn as spawnPty } from "node-pty";
 import xtermHeadless from "@xterm/headless";
 import type { BashResult } from "./bash.js";
-import { stopProcessTree } from "./process-cancel.js";
+import { terminateProcessTree } from "./process-completion.js";
 import { retainOutput } from "./command-record.js";
 
 const MAX_CAPTURED_OUTPUT = 2 * 1024 * 1024;
@@ -91,6 +91,8 @@ export function runTerminalCommand(
     if (options.signal?.aborted) { previewTerminal?.dispose(); resolve({ stdout: "", stderr: "", exitCode: null, signal: null, cancelled: true }); return; }
     let captured = "";
     let truncated = false;
+    let cleanup: Promise<void> | undefined;
+    let cleanupError: unknown;
     let previewTimer: ReturnType<typeof setTimeout> | undefined;
     let lastPreview = "";
 
@@ -132,6 +134,7 @@ export function runTerminalCommand(
           signal: null,
           cancelled: options.signal?.aborted ?? false,
           truncated,
+          ...(cleanupError ? { cleanupFailed: true, error: `PTY process-tree cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}` } : {}),
         });
       };
 
@@ -172,12 +175,20 @@ export function runTerminalCommand(
     };
     options.onInputReady?.((input) => { if (!options.signal?.aborted) child.write(input); });
     let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const terminate = () => {
+      if (cleanup) return;
+      cleanup = Promise.resolve().then(() => terminateProcessTree(child.pid, platform)).catch((error: unknown) => {
+        cleanupError = error;
+      }).then(() => {
+        // Close the pseudoconsole after tree termination; native helpers may otherwise race the console teardown.
+        try { child.kill(); } catch (error) { cleanupError ??= error; }
+      });
+    };
     const cancel = () => {
+      // Killing the console shell first loses Windows descendant ownership, including detached processes.
+      if (platform === "win32") { terminate(); return; }
       child.write("\u0003");
-      killTimer = setTimeout(() => {
-        if (platform !== "win32") stopProcessTree(child.pid);
-        child.kill();
-      }, 500);
+      killTimer = setTimeout(terminate, 500);
     };
     options.signal?.addEventListener("abort", cancel, { once: true });
     if (options.signal?.aborted) cancel();
@@ -205,7 +216,7 @@ export function runTerminalCommand(
       }
     });
 
-    child.onExit(({ exitCode }) => {
+    child.onExit(async ({ exitCode }) => {
       if (killTimer) clearTimeout(killTimer);
       options.signal?.removeEventListener("abort", cancel);
       dataSubscription.dispose();
@@ -223,6 +234,7 @@ export function runTerminalCommand(
       // Only a raw stream can change modes on the parent terminal. Captured
       // output is interpreted by the headless emulator instead.
       if (streamOutput) resetTerminalModes(stdout, platform);
+      await cleanup;
       finish(exitCode);
     });
   });

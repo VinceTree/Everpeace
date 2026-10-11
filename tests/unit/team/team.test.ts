@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { windowsNativeSkip } from "../../fixtures/native-mode.js";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -134,7 +135,7 @@ test("CLI team role selectors and schema v2 coexist with unchanged single-Agent 
 });
 
 test("native team sandbox proves root/state/Git denial before coding, or fails closed", {
-  skip: process.env.GITHUB_ACTIONS === "true" && process.platform === "win32" ? "Hosted Windows cannot initialize nested sandbox" : false,
+  skip: process.platform === "win32" ? windowsNativeSkip() : false,
 }, async () => temporary(async (directory) => {
   await repository(directory); const workspace = await createTeamWorkspace(directory);
   try { await verifyTeamIsolation(workspace, defaultPermissions()); }
@@ -259,7 +260,7 @@ test("member usage changes total consumption without changing root context estim
   const loaded = await store.load(session.id); assert.equal(loaded.usage.context_tokens, 50); assert.equal(loaded.usage.input_tokens + loaded.usage.output_tokens, 550);
 }));
 
-test("two production workers integrate independently and only the root native check determines success", { skip: process.env.GITHUB_ACTIONS === "true" && process.platform === "win32" ? "Hosted Windows cannot initialize nested sandbox" : false }, async () => {
+test("two production workers integrate independently and only the root native check determines success", { skip: process.platform === "win32" ? windowsNativeSkip() : false }, async () => {
   const report = await runOfflineComparison(true); assert.equal(report.score, 1, JSON.stringify(report)); assert.equal(report.members.length, 2); assert.ok(report.members.every((member) => member.verification?.startsWith("verified") && member.state === "integrated"));
   const failed = await runOfflineComparison(true, true); assert.equal(failed.score, 0); assert.equal(failed.classification, "verification_failed"); assert.ok(failed.members.every((member) => member.verification?.startsWith("verified")));
 });

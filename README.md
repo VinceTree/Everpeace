@@ -46,7 +46,7 @@ pnpm link --global
 everpeace
 ```
 
-Current source version: **0.5.2**.
+Current source version: **0.5.3**.
 
 ## Real tools, checked changes
 
@@ -123,4 +123,6 @@ Licensed under [Apache 2.0](LICENSE). Maintained by [VinceTree](https://github.c
 
 Public web and remote Skill requests bind validated DNS addresses to the actual connection, including HTTP/HTTPS proxy CONNECT. Configure host HTTP_PROXY, HTTPS_PROXY and NO_PROXY (lowercase variants are supported). Proxy infrastructure is trusted; SOCKS/PAC are unsupported and failures do not fall back to a direct connection. HTTPS certificate verification remains enabled. [Network boundary](docs/architecture/NETWORK.md).
 
-Install from the repository with pnpm; node-pty is pinned to the patched dependency. Run `pnpm install:verify`, build, then `pnpm install:smoke`; maintainers can run `pnpm install:clean` for an isolated clean source installation. `pnpm pack` does not demonstrate patch delivery to consumers. Portable packages/npm distribution remain pending. Development gates are `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` in order, stopping on failure, plus `git diff --check`. [Current team evaluation preparation](docs/benchmark/TEAM_READINESS.md) uses offline evidence and requires separate numerical authorization for paid tests.
+Source installation uses pnpm and the pinned node-pty patch. Run `pnpm install:verify`, build, then `pnpm install:smoke`; maintainers can run `pnpm install:clean` for a clean source installation. To produce a portable tarball, run `pnpm build` then `pnpm pack:release --output <empty-directory>`. It bundles the patched native dependency and its license; plain npm/pnpm pack is rejected. `pnpm install:consumer <package-directory> --local` checks clean npm, pnpm and global installation without model credentials. Linux native builds require Python, make and a C++ compiler; pnpm consumers explicitly allow the node-pty build script. npm registry publication remains pending.
+
+Windows/Linux have Node 22 CI. **macOS support is experimental**, with no complete CI or native sandbox acceptance. Release requires an exact main commit, all platform and package checks, and dedicated Windows native acceptance; an absent runner or skipped required test blocks publishing. Maintainer setup and failure-drill instructions: [Windows runner](docs/WINDOWS_RUNNER.md). Development gates are `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` in order, stopping on failure, plus `git diff --check`. [Current team evaluation preparation](docs/benchmark/TEAM_READINESS.md) uses offline evidence and requires separate numerical authorization for paid tests.

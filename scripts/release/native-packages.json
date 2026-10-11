@@ -1,0 +1,12 @@
+{
+  "node-pty": {
+    "version": "1.1.0",
+    "upstreamCommit": "1def5774632305246fe21f0f69e23a664d6c5910",
+    "integrity": "sha512-20JqtutY6JPXTUnL0ij1uad7Qe1baT46lyolh2sSENDd4sTzKZ4nmAFkeAARDKwmlLjPx6XKRlwRUxwjOy+lUg=="
+  },
+  "node-addon-api": {
+    "version": "7.1.1",
+    "upstreamCommit": "5e96a5460f2538a06f87e592d6aa349a7f08b04a",
+    "integrity": "sha512-5m3bsyrjFWE1xf7nz7YXdN4udnVtXK6/Yfgn5qnahL6bCkf2yKt4k3nuTKAtT4r3IG8JNR2ncsIMdZuAzJjHQQ=="
+  }
+}

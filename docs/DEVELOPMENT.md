@@ -41,6 +41,8 @@ Windows TUI 手工验收仍需真实 Windows Terminal。通过 WSL 调用 Node �
 
 [pnpm-workspace.yaml](../pnpm-workspace.yaml) 指定 [node-pty 补丁](../patches/node-pty@1.1.0.patch)，修复 Windows 控制台取消竞态及 socket/worker 清理；pnpm 安装构建准入只允许 `node-pty`。不要删除补丁或放开全部依赖安装脚本来规避安装问题。使用仓库与 pnpm 安装才能应用这些补丁；作为其他项目的 npm 依赖安装不会自动继承它们。
 
+独立产物改用 `pnpm build` 后的 `pnpm pack:release --output <空目录>`。打包器按 [原生依赖固定身份](../scripts/release/native-packages.json) 下载并校验上游 tarball，在独占 staging 应用补丁，将 node-pty 与精确 node-addon-api、平台 prebuild、源码和 MIT 许可证一并 bundle。没有消费者补丁 hook，不复制本机 build/Release；Linux 按包内源码执行原生构建，需要 Python/make/C++。普通 npm/pnpm pack 的 prepack 明确拒绝未准备的产物，使用专用入口。收据绑定候选/脏状态、源码及 lockfile 摘要、补丁与 tarball 摘要；正式候选要求干净且准确提交匹配。
+
 ## 开发与检查命令
 
 双语 README 的汇总图统一引用 `assets/features.webp`；图片使用无损 WebP，并随 package 的 `files` 清单包含的 assets 目录打包，避免安装产物中的相对引用缺图。原始测试日志与详细结果不属于公开资源，不纳入仓库或 npm 包。替换结果图时需检查 GitHub 显示宽度下的可读性，并同步图旁的验收范围说明。
@@ -54,6 +56,10 @@ Windows TUI 手工验收仍需真实 Windows Terminal。通过 WSL 调用 Node �
 | `pnpm install:verify` | 核对固定 node-pty 与实际 pnpm 补丁 |
 | `pnpm install:smoke` | 构建后 CLI、SDK 与原生 PTY 生命周期 |
 | `pnpm install:clean` | 在独占临时目录复制候选源码并冻结安装，验证补丁及启动 |
+| `pnpm pack:release --output <空目录>` | 构建后生成携带原生补丁的 tarball 与收据 |
+| `pnpm install:consumer <目录> --local` | 本地未提交候选的 npm/pnpm/全局消费者安装；CI 禁止 local 模式 |
+| `pnpm native:verify` | Windows required 模式原生 suite 与准确源码身份收据 |
+| `pnpm ci:verify` | 校验 workflow 完整 SHA、容器身份及发布门禁结构 |
 | `pnpm test` | 执行全部测试，文件并发度固定为 4 |
 | `pnpm build` | 清理并重新生成构建产物 |
 | `pnpm start` | 运行已经构建的 CLI |
@@ -98,9 +104,11 @@ pnpm exec tsx --test --test-name-pattern="cancel" tests/unit/agent/react-agent.t
 
 ## 独立测试 CI 与证据范围
 
-[Test workflow](../.github/workflows/test.yml) 在 pull request 和 main push 上分别运行 Windows/Linux 的 Node 22 门禁：安装 pnpm、通过冻结 lockfile 安装平台 ripgrep optional package、补丁验证、类型检查、lint、完整测试、构建、CLI/SDK/PTY 启动及差异检查。job 最多 20 分钟，测试 step 最多 10 分钟，进程或管道清理回归不能无限挂起 runner。CI 不再显式安装系统 `rg`，应用始终通过包内绝对路径运行平台二进制；缺少匹配 optional package 的行为由 resolver fixture 单独覆盖。它独立于 Release workflow，不能为避免发布而跳过测试 CI。
+Test 与 Release 共用 [Validate](../.github/workflows/validate.yml)。PR/main 的稳定 Required checks 汇总完整 Windows/Linux 结果；分支保护仍须在远端配置，不能从 YAML 推断已启用。Release 只接受 main 上的显式完整候选 SHA，强制平台门禁、单个安装包的两平台消费者安装与专用 Windows 原生任务成功；缺失、失败、取消、skipped 均阻止创建 tag/Release。只有最后 publish job 拥有 contents 写权限。所有远程 Action 固定完整 SHA，Dependabot 提交升级 PR；Action 使用 Node 24 runtime，应用测试仍为 Node 22。
 
-[sandbox-boundaries.test.ts](../tests/unit/tools/sandbox-boundaries.test.ts) 的真实 Windows native sandbox 测试在非 Windows 跳过；在 Windows 且 `GITHUB_ACTIONS=true` 时也明确跳过，因为 hosted runner 无法初始化所需嵌套 sandbox。策略、审批与启动失败关闭仍有单测；跳过结果不能当作真实隔离验收通过。
+[Test workflow](../.github/workflows/test.yml) 在 PR/main push 调用共享 Windows/Linux Node 22 门禁：冻结安装、平台 optional dependency、补丁验证、workflow 静态检查、类型检查、lint、完整测试、构建、CLI/SDK/PTY 启动及差异检查。平台 image 固定为 ubuntu-24.04/windows-2025，job 最多 20 分钟，测试 step 最多 10 分钟。CI 不安装系统 rg，应用使用包内绝对路径。macOS 为实验性支持，尚未纳入完整验收。
+
+[native-mode fixture](../tests/fixtures/native-mode.ts) 只在明确 hosted 模式跳过 Windows 原生用例，不按 GITHUB_ACTIONS 一刀切。专用 required 模式强制 Windows、真实 backend 与五项原生/团队测试执行，skip/TODO/缺失均失败。部署、只读 Runner API 凭据、五分钟排队 watchdog、镜像清理、branch required-check 设置和真实 Windows 失败演练见 [WINDOWS_RUNNER](WINDOWS_RUNNER.md)。本机原生成功不等于专用 Runner 已注册；远端验收状态见 HANDOFF。
 
 完整测试入口同时覆盖 [MCP 协议 fixture](../tests/unit/mcp/protocol.test.ts)、[stdio 恢复 fixture](../tests/unit/mcp/stdio-recovery.test.ts) 与 [exec 子进程 fixture](../tests/unit/cli/exec-process.test.ts)：MCP 测试实际启动 SDK stdio server 和本地 Streamable HTTP endpoint，并检查中断调用不重放、初始化失败的旧进程退出后才重连；exec 测试使用 fake provider 与真实 stdout/stderr 管道检验慢读、关闭、停滞和清理。这些测试在 Windows/Linux 都运行，不需要 keyring、模型网络调用或额外服务。Linux 使用真实 OS 信号；Windows fixture 通过 IPC 触发已注册的 SIGINT/SIGTERM handler，不能代替真实 Windows Terminal 的 Ctrl+C 验收。现有测试 glob 已纳入这些文件，无需再并行重复整套门禁。
 
@@ -190,7 +198,7 @@ pnpm benchmark:campaign -- --config .\campaign.json --prove-fixtures
 
 只有用户明确要求才提交、推送、更新展示版本、打 tag 或创建 Release。提交标题按实际变化命名，禁止产品名及 `release`、`version`、“发布”、“版本”等措辞。
 
-用户要求提交推送但禁止 Release 时，使用 `[skip publish]` 提交标记，并核对 [Release workflow](../.github/workflows/release.yml) 的实际结果；不要使用会跳过测试的 `[skip ci]`。该标记只阻止分支 push 的发布 job，tag push 仍可触发发布，所以禁止 Release 的交付也不能推送 tag。
+Release 不再由分支或 tag push 自动触发，只能在 main 显式 dispatch 完整候选 SHA。Test 继续在 PR/main push 执行，不使用 `[skip ci]`。历史 `[skip publish]` 标记不再是发布安全机制；发布授权仍须明确，标签不能代替完整门禁。部署后先运行 failure_drill，Windows 故意失败时必须观察 gate 失败、publish skipped 且零远端发布写入。
 
 展示版本调整若被授权，应同步 package.json 与中英文 README。正常发布另需确认 tag 和 GitHub Release 实际成功；只看到 Git push 成功不足以证明发布完成。以上操作规则不构成本次开发任务的提交或付费授权。
 
@@ -200,7 +208,7 @@ pnpm benchmark:campaign -- --config .\campaign.json --prove-fixtures
 
 Oxlint JSON 配置见 [.oxlintrc.json](../.oxlintrc.json)，[官方配置说明](https://oxc.rs/docs/guide/usage/linter/config.html)。只启用 correctness，不做格式化与类型感知 lint。门禁串行 typecheck → lint → test → build，首败停止；lint 通过 Git 清单检查 src/tests/scripts 的 tracked 及非 ignored 待管理新文件，用户其他未跟踪目录、third_party 与生成 dist 不扫描。局部清理/控制字符例外说明必要性，没有全仓旧代码豁免。
 
-`pnpm install:clean` 不复制现有 node_modules、不改用户 index/HEAD，也不包含用户 benchmark 目录；它检验未提交候选的干净源码安装，不证明独立消费者安装。脱离仓库的补丁交付与干净安装包验收仍是分发阻塞项。
+`pnpm install:clean` 只证明源码安装。独立消费者检查从同一 tarball 在隔离的 npm/pnpm/全局 prefix 安装，不读取用户 npm 配置/授权、不需要仓库或 tsx；使用已安装 CLI、SDK 和真实 PTY 验证输入、resize、重复启动、取消和后代清理。日志、失败尝试、平台差异与远端证据分别保存于 HANDOFF，不把源码或 Windows 通过推断为 Linux 安装成功。
 
 ## MCP 启动信任专项终端验收
 

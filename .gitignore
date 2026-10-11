@@ -141,3 +141,6 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Owned native acceptance output (publish evidence is uploaded by CI)
+native-evidence/

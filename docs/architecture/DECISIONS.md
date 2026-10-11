@@ -1,5 +1,11 @@
 # Architecture Decisions
 
+## 发布与平台验收
+
+问题 5–10 采用准确候选 SHA、共享 CI 和必需结果汇总作为发布前置条件；两平台安装包消费者检查与专用 Windows 原生检查均须通过，缺失/取消/skip 不视为成功。Release 仅从 main 显式 dispatch，只有最终 publish job 可写仓库；故障演练始终禁止发布。远程 Action 固定完整 SHA，由 Dependabot 提供升级 PR。用户选择专用 Windows 机器，macOS 定位实验性支持，保留 Oxlint 门禁。
+
+维护者打包器下载完整性校验过的上游 node-pty，在独占 staging 应用补丁并以标准 npm bundle 纳入 tarball，包含锁定构建依赖、平台 prebuild、源码和许可证。普通 prepack 拒绝未准备包，指向专用 pack:release；不增加消费者补丁 hook。收据绑定源码、lockfile、补丁、包摘要和候选。Windows PTY 取消先终止进程树再关闭控制台，避免 Ctrl+C 使 detached 后代脱离清理；返回结果等待清理，失败保持失败。专用机器部署与失败关闭策略见 [WINDOWS_RUNNER](../WINDOWS_RUNNER.md)，验收缺口见 HANDOFF。
+
 ## MCP 启动信任与传输安全
 
 stdio 在宿主权限下运行，独立于工具调用审批。以工作区、服务名和冻结启动配置的 HMAC 指纹保存独立信任，密钥在系统 keyring；用户确认、配置/存储 revision 和 runtime generation 共同约束提交。授权不进入 Session，项目配置不能提升信任。撤销使 binding 失效并关闭当前服务；其他进程在下一次启动/派发检查撤销。本轮不实现 MCP 原生沙箱或依赖完整性验证。
@@ -288,7 +294,7 @@ Responses usage 中的 `input_tokens_details.cached_tokens` 与 `cache_write_tok
 - Agent 构造及每轮开始时修复不完整 function call/output 配对：在后续用户消息前补 interrupted/结果未知，不重新执行工具，不伪造成功。修复仅用于内存请求上下文，不重写旧 JSONL；再次恢复会幂等修复。工具执行异常转为错误 output，取消仍停止整轮。
 
 - Ctrl+C 优先取消活动任务（含审批和子进程）；空闲有草稿时清空，否则退出。模型取消时为剩余 function calls 追加取消结果后停止，不留下未匹配调用。
-- Ink 独占 TUI stdin，通过 writer 将输入转发给直接 `!` PTY；模型 Bash 使用非交互管道。Windows Bash 取消使用 taskkill 进程树；PTY 先发送 ETX，500ms 后通过 node-pty 关闭。Unix Bash 当前使用进程组强制终止，PTY 先 ETX 后强制终止。
+- Ink 独占 TUI stdin，通过 writer 将输入转发给直接 `!` PTY；模型 Bash 使用非交互管道。Windows Bash/PTY 取消使用严格进程树终止，PTY 在清理后关闭控制台；Unix Bash 使用进程组强制终止，PTY 先 ETX 后强制终止。
 - 输入历史独立于 Session 和模型 context，保存于 state 目录 input-history.json；保留最近 1,000 条、4 MiB，临时文件原子替换及跨进程文件锁。只记录主输入区提交，不记录登录向导字段；用户手输机密不自动脱敏。
 - output timeline 增加可选 command 元数据而不新增事件类型，兼容旧无元数据输出。模型 Bash 的实时回调使用独立 1 MiB 有界缓冲，按到达顺序保留真实首五行、尾五行和省略行数；正常终端展示 5+5，矮终端按可用高度首尾缩减。该缓冲只服务当前 UI，不改变最终 `BashResult`、模型 context 或 JSONL。用户直接 `!` 继续显示最近五行；完成超过六行时展示前二后四；`/outputs` 在独立窗口分页查看保留输出，不能找回超限截断内容。
 - /terminal-setup 仅支持已识别的稳定版 Windows Terminal 设置路径。用户确认后备份并追加 Shift+Enter sendInput LF，不覆盖已有绑定；提示全局影响。Preview/其他安装布局暂不自动配置。
@@ -389,7 +395,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 - 项目地图是按需、每次新生成的工作区观察，不是规则、写观察或持久索引。随包 rg 有界枚举并遵守 ignore、不跟随链接；只解析受限 Node manifest 元数据，入口声明和文件名候选分开，其他语言只标记 manifest。共享 coding/Plan 工具无需每轮扫描或注入地图。
 - 非 TTY exec 输出在 Windows/Linux 统一隔离到宿主管理的 writer 子进程；每块流写入完成才 ACK，父进程控制停滞/取消，等待 pending write、代理 close 与进程退出后才移除监听器。TTY 保持现有路径，半条 JSONL 不补终态，不以强制宿主退出或放宽回归超时掩盖资源泄漏。
 - benchmark campaign 先持久化带 seed 的完整计划，再发出 live request。fixture 必须有 pinned source、setup、pristine assertion、reviewed seed/reference 和 evaluator-owned acceptance；评分在隔离材料上执行。baseline/candidate 使用命名 checkout、revision 与 source/build digest，并由同一个 fresh-process worker 动态导入 production adapter；请求准入固定 raw model ID、high reasoning 和 32,768 output tokens。`--preflight`、`--prove-fixtures`、`--live` 互斥，preflight 不读取 credential storage、不产生 scored result。外部 harness 必须在 LLM boundary 提供结构化 usage 与配置确认，不能从最终文本推断。真实请求仍需要独立显式授权和数值预算。
-- 不创建远程 tag/Release 的版本交付使用 Release workflow 专用 `[skip publish]` 提交标记；Test workflow 不读取该标记，仍在 `main` push 上执行 Windows/Linux 门禁。tag push 始终允许 Release workflow 运行。
+- Release 仅允许 main 显式 dispatch 完整候选 SHA；分支与 tag push 不会发布。Test 在 PR/main push 执行完整 Windows/Linux 门禁。历史 `[skip publish]` 标记不再承担发布控制，不能用 `[skip ci]` 停止测试。
 
 - coding/summary 的 Goal 计量绑定每次实际 provider attempt，先结算再判断恢复、重试和能力降级准入。Session coding 用量即时保存，压缩保持最终 context_compacted 增量与失败 usage 样本，不新增 schema、不重复收费；未知用量保持未知，prepareStep 的预算停止保留明确原因。
 - 手动压缩绑定 active/已受限 Goal 的请求准入，和 turn、task reset、设置变更互斥；预取消不发请求。Agent 关闭先拒绝准入，再取消并等待 turn/压缩及持久化，保留 typed 清理/存储故障；Goal 的 usage 缺口不能由后续样本或 runtime 重建清除。
@@ -409,6 +415,6 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 团队总账集中准入、在途预留、sticky unknown 和 request ID 持久化；恢复不重建旧授权或推断成功。独占持久 ownership 拒绝并行宿主认领。模型绑定冻结并在显式恢复时重新核对。默认仍关闭，观察重复调用与离线评分先于任何性能宣称；付费实测另取预算授权。完整约束与入口见 [TEAMS](TEAMS.md)。
 
 - 公共网页与 Skill 传输按请求冻结全部 DNS 答案，把批准 IP 交给自有 Undici connector；HTTP Host、TLS SNI 和证书身份保留域名。HTTP/HTTPS 宿主代理 CONNECT 到批准 IP，Git 通过仅批准目标的临时本地代理使用同一逻辑。模型 API/MCP 不混入公共资源信任边界，失败不得关闭 TLS 或改用直连。
-- 本轮只保障仓库源码安装。固定受补丁约束的 node-pty，冻结安装后检查实际补丁并运行 CLI/SDK/原生 PTY；tarball 成功不证明消费者获得 pnpm 补丁，不新增消费者 postinstall 修改依赖。独立补丁交付及干净消费者安装仍阻塞分发。
+- 源码安装仍用冻结 pnpm 补丁。独立分发使用维护者准备的 patched bundle，消费者不继承根 pnpm 配置；同一 tarball 的 npm/pnpm/global 安装与实际 CLI/SDK/PTY 生命周期是必需证据，不新增消费者 postinstall 修改依赖。尚未通过的消费者或原生检查阻塞分发。
 - Oxlint 只提供 correctness 门禁，不引入格式化或额外类型检查引擎。维护的源码、测试、脚本及待纳入管理的新文件均检查，警告使门禁失败；第三方、生成物及用户其他目录不扫描。资源清理优先于成功返回的 finally 例外逐处解释。
 - benchmark 可选 team 配置贯穿配置、fresh worker 和 production adapter。团队总账负责准入；评测仅幂等导入已结算请求证据。当前候选单/团队对照冻结同一模型与请求参数，旧候选/合成证据不提升为本轮真实质量结果；没有新的数值授权不执行付费调用。

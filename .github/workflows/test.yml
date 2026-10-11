@@ -1,84 +1,20 @@
 name: Test
-
 on:
   pull_request:
   push:
-    branches:
-      - main
-
+    branches: [main]
 permissions:
   contents: read
-
 jobs:
-  test:
-    name: ${{ matrix.os }} · Node 22
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+  validate:
+    uses: ./.github/workflows/validate.yml
+  required:
+    name: Required checks
+    if: always()
+    needs: [validate]
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.22.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm install:verify
-      - run: pnpm typecheck
-      - run: pnpm lint
-      - name: Inspect Linux namespace availability
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          sysctl kernel.unprivileged_userns_clone kernel.apparmor_restrict_unprivileged_userns
-          if unshare --user --map-root-user true; then
-            echo "Unprivileged user namespace probe passed"
-          else
-            echo "Unprivileged user namespace probe failed; native sandbox tests remain required"
-          fi
-      - name: Permit pinned Linux sandbox namespaces
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          # Ubuntu requires an explicit application profile for user namespaces.
-          # Keep the system restriction enabled; only the pinned native helper is allowed.
-          node --input-type=module <<'NODE' > "$RUNNER_TEMP/everpeace-codex.apparmor"
-          import { createRequire } from 'node:module';
-          import { readFileSync, realpathSync } from 'node:fs';
-          import path from 'node:path';
-          const require = createRequire(import.meta.url);
-          const launcher = createRequire(require.resolve('@openai/codex/bin/codex.js'));
-          const manifest = launcher.resolve('@openai/codex-linux-x64/package.json');
-          const version = JSON.parse(readFileSync(manifest, 'utf8')).version;
-          if (version !== '0.162.0-linux-x64') throw new Error('Re-audit the namespace profile for this native backend');
-          const binary = realpathSync(path.join(path.dirname(manifest), 'vendor/x86_64-unknown-linux-musl/bin/codex'));
-          console.log(`abi <abi/4.0>,\ninclude <tunables/global>\nprofile everpeace-ci-codex ${JSON.stringify(binary)} flags=(unconfined) {\n  userns,\n}`);
-          NODE
-          sudo apparmor_parser -r "$RUNNER_TEMP/everpeace-codex.apparmor"
-          test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = 1
-      - name: Run tests
-        timeout-minutes: 10
-        shell: bash
-        run: |
-          set +e
-          set -o pipefail
-          pnpm test 2>&1 | tee test-output.log
-          status=${PIPESTATUS[0]}
-          if [[ "$status" -ne 0 ]]; then
-            excerpt="$(grep --after-context=35 --max-count=3 '^not ok' test-output.log || true)"
-            excerpt="${excerpt//'%'/'%25'}"
-            excerpt="${excerpt//$'\r'/'%0D'}"
-            excerpt="${excerpt//$'\n'/'%0A'}"
-            echo "::error title=Test failure::${excerpt:-pnpm test failed without a TAP failure block}"
-          fi
-          exit "$status"
-      - run: pnpm build
-      - run: pnpm install:smoke
-      - name: Check whitespace
-        shell: bash
-        run: git diff --check
+      - name: Require the entire platform matrix
+        env:
+          RESULT: ${{ needs.validate.result }}
+        run: test "$RESULT" = success

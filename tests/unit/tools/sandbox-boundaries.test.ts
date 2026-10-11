@@ -4,6 +4,7 @@ import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { windowsNativeSkip } from "../../fixtures/native-mode.js";
 import { runCodexProcess, startCodexDuplexProcess } from "../../../src/codex/cli.js";
 import { resolveBashLaunch, runBash } from "../../../src/tools/bash.js";
 import { CodeNavigationRuntime } from "../../../src/tools/code-navigation.js";
@@ -134,11 +135,7 @@ test("sandbox preparation rejects a redirected .everpeace control path", async (
 });
 
 test("native workspace profile blocks model shell writes to .everpeace", {
-  skip: process.platform !== "win32"
-    ? "Windows-only native sandbox integration"
-    : process.env.GITHUB_ACTIONS === "true"
-      ? "GitHub-hosted Windows cannot initialize the nested native sandbox"
-      : false,
+  skip: windowsNativeSkip(),
   timeout: 20_000,
 }, async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-native-policy-"));
@@ -169,8 +166,7 @@ test("native workspace profile blocks model shell writes to .everpeace", {
 });
 
 test("native Windows sandbox cancellation stops a detached payload descendant", {
-  skip: process.platform !== "win32" ? "Windows-only native process ownership integration"
-    : process.env.GITHUB_ACTIONS === "true" ? "GitHub-hosted Windows cannot initialize the nested native sandbox" : false,
+  skip: windowsNativeSkip(),
   timeout: 30_000,
 }, async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-native-process-"));
@@ -212,11 +208,7 @@ test("native Windows sandbox cancellation stops a detached payload descendant", 
 });
 
 test("native LSP profile denies writes, state reads and direct networking", {
-  skip: process.platform !== "win32"
-    ? "Windows-only native LSP sandbox integration"
-    : process.env.GITHUB_ACTIONS === "true"
-      ? "GitHub-hosted Windows cannot initialize the nested native sandbox"
-      : false,
+  skip: windowsNativeSkip(),
   timeout: 30_000,
 }, async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-native-lsp-"));

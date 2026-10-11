@@ -1,6 +1,6 @@
 {
   "name": "everpeace",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "A sandboxed terminal ReAct agent with persistent sessions, MCP, skills, and web access.",
   "type": "module",
   "bin": {
@@ -20,6 +20,7 @@
     "README.zh-CN.md",
     "LICENSE"
   ],
+  "bundleDependencies": ["node-pty"],
   "scripts": {
     "dev": "tsx src/cli/index.ts",
     "clean": "node --eval \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
@@ -31,7 +32,12 @@
     "lint": "node scripts/lint.mjs",
     "install:verify": "node scripts/verify-source-install.mjs",
     "install:smoke": "node scripts/source-install-smoke.mjs",
-    "install:clean": "node scripts/verify-clean-install.mjs"
+    "install:clean": "node scripts/verify-clean-install.mjs",
+    "prepack": "node scripts/release/require-bundle.mjs",
+    "pack:release": "node scripts/release/pack.mjs",
+    "install:consumer": "node scripts/release/consumer-install.mjs",
+    "native:verify": "node scripts/release/native-verify.mjs",
+    "ci:verify": "node scripts/release/check-workflows.mjs"
   },
   "engines": {
     "node": ">=22"

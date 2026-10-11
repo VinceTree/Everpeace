@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   DISABLE_FOCUS_REPORTING,
   DISABLE_WIN32_INPUT_MODE,
@@ -17,6 +20,31 @@ test("PTY cancellation terminates a long command without closing the parent", { 
   const pid = Number(/pid:(\d+)/.exec(result.stdout)?.[1]);
   assert.ok(pid > 0);
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+});
+
+test("Windows PTY cancellation waits for a detached uncooperative descendant", { skip: process.platform !== "win32", timeout: 20_000 }, async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-pty-tree-"));
+  const script = path.join(root, "child.cjs");
+  const source = "const {spawn}=require('node:child_process');process.on('SIGINT',()=>{});const child=spawn(process.execPath,['-e',\"process.on('SIGINT',()=>{});console.log('ready');setInterval(()=>{},1000)\"],{detached:true,windowsHide:true,stdio:['ignore','pipe','inherit']});child.stdout.once('data',()=>console.log('fixture-pids:'+process.pid+':'+child.pid));setInterval(()=>{},1000);";
+  const controller = new AbortController();
+  const pids: number[] = [];
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    await fs.writeFile(script, source);
+    const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
+    const result = await runTerminalCommand(`& ${quote(process.execPath)} ${quote(script)}`, { cwd: root, streamOutput: false, signal: controller.signal, onInputReady() {}, onOutput(text) {
+      const match = /fixture-pids:(\d+):(\d+)/u.exec(text);
+      if (match && !pids.length) { pids.push(Number(match[1]), Number(match[2])); controller.abort(); }
+    } });
+    assert.equal(pids.length, 2);
+    assert.equal(result.cancelled, true);
+    assert.equal(result.cleanupFailed, undefined);
+    for (const pid of pids) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  } finally {
+    clearTimeout(timer);
+    for (const pid of pids) { try { process.kill(pid, "SIGKILL"); } catch { /* Owned fixture already gone. */ } }
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
 });
 
 test("interactive PTY accepts routed input and cleans up its input owner", { timeout: 15000 }, async () => {
