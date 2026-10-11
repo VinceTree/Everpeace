@@ -16,7 +16,7 @@
 
 ## 验证状态
 
-当前候选最终串行 `pnpm typecheck → pnpm lint → pnpm test → pnpm build` 全部 exit 0；`git diff --check` 与新增文件空白检查通过。全量共 1,156 项：1,153 通过、0 失败、3 跳过。跳过分别为本机文件 symlink 权限、Windows 临时目录 alias（由 clean-checkout CI 覆盖）和 Unix 子进程超时场景；不算平台实测通过，本轮没有执行 Linux 门禁。
+当前候选最终串行 `pnpm typecheck → pnpm lint → pnpm test → pnpm build` 全部 exit 0；`git diff --check` 与新增文件空白检查通过。全量共 1,156 项：1,153 通过、0 失败、3 跳过。跳过分别为本机文件 symlink 权限、Windows 临时目录 alias（由 clean-checkout CI 覆盖）和 Unix 子进程超时场景；不算平台实测通过。本机门禁在 Windows 执行，补丁候选另通过下面的 Ubuntu CI。
 
 MCP 安全回归 15 项全部通过、无跳过，覆盖真实 stdio 零启动/批准/重启/工作区隔离、审批提交期间配置变化与取消、跨进程锁/撤销、活动调用与迟到初始化、坏存储/keyring、HTTP 拒绝/本机例外、凭据脱敏、所有请求方法与重定向、真实 SDK SSE、受信 HTTPS 降级拒绝、localhost 固定回环和 TLS 失败。既有协议、stdio 恢复、Web DNS 绑定、独立 IANA 地址、headless Plan/full-access 和 TUI 回归包含在最终全量结果中。
 
@@ -28,9 +28,11 @@ MCP 安全回归 15 项全部通过、无跳过，覆盖真实 stdio 零启动/�
 
 ## 补丁交付
 
-用户随后明确授权将上述修复作为补丁提交、推送、更新展示版本和 GitHub Release。补丁起点为 `5665724b64e86431af2fc481e572dc5ba3454162`，tag 与 manifest 对应 `v0.5.2`。提交标题按 MCP 启动信任与网络修复命名，携带 `[skip publish]` 暂缓分支自动发布，Test workflow 保持启用；Windows/Ubuntu CI 通过后才推送 tag、运行现有 Release workflow 并核对双语说明、tag commit 与 latest 标记。
+用户随后明确授权将上述修复作为补丁提交、推送、更新展示版本和 GitHub Release。补丁起点为 `5665724b64e86431af2fc481e572dc5ba3454162`；源码提交 `4b3f4d1a06f1eab48075e647770b6dc351c33001` 已推送 main，tag `v0.5.2` 与 manifest 一致且解析到该提交。标题 `fix: require MCP startup trust and secure transports [skip publish]` 暂缓分支自动发布、保留 Test workflow；对应 [Windows/Ubuntu CI](https://github.com/VinceTree/Everpeace/actions/runs/38109776300) 两项 job 均成功后才推送 tag。
 
-补丁交付根为 `C:\Users\39850\AppData\Local\Temp\everpeace-patch-20261011-501d21521426410e85fb0d5f07a6e78d`。更新展示版本后重新执行串行门禁，准确结果保存为 `local-gates.json`、`final-*.log`；实际 commit、远端 CI、tag 和 Release 由最终 `delivery-receipt.json` 记录，不提前把尚未执行的步骤写成成功。此前实现证据继续保留，不冒充新候选身份。
+对应 [Release workflow](https://github.com/VinceTree/Everpeace/actions/runs/38110024777) 已成功，[v0.5.2 Release](https://github.com/VinceTree/Everpeace/releases/tag/v0.5.2) 已发布并设为 Latest，非 draft/prerelease。实际正文与审阅的双语安全补丁说明逐字核对，保留既有配置需独立启动批准、MCP 仍有宿主用户权限和不提供进程沙箱/依赖完整性验证的升级边界。随后仅追加这份交付记录，不移动已经通过验证的 tag。
+
+补丁交付根为 `C:\Users\39850\AppData\Local\Temp\everpeace-patch-20261011-501d21521426410e85fb0d5f07a6e78d`。更新展示版本后重新执行串行门禁，准确结果保存为 `local-gates.json`、`final-*.log`；`delivery-receipt.json` 绑定源码 commit/tree、构建文件摘要、远端 CI、tag 和 Release，`ci.log`、`ci.json`、`release-run.json` 保留实际远端结果。此前实现证据继续保留，不冒充新候选身份。
 
 补丁候选四项门禁全部 exit 0，完整测试仍为 1,156 项、1,153 通过、3 项平台跳过、0 失败。`pnpm install:verify` 核对固定原生依赖及实际补丁通过；`pnpm install:smoke` 的构建 CLI、SDK 导入与 6 项真实 PTY 生命周期检查通过、无跳过。差异空白检查通过。源码、构建及提交身份由交付收据绑定。
 
