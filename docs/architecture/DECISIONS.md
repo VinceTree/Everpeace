@@ -4,7 +4,7 @@
 
 问题 5–10 采用准确候选 SHA、共享 CI 和必需结果汇总作为发布前置条件；两平台安装包消费者检查与专用 Windows 原生检查均须通过，缺失/取消/skip 不视为成功。Release 仅从 main 显式 dispatch，只有最终 publish job 可写仓库；故障演练始终禁止发布。远程 Action 固定完整 SHA，由 Dependabot 提供升级 PR。用户选择专用 Windows 机器，macOS 定位实验性支持，保留 Oxlint 门禁。
 
-维护者打包器下载完整性校验过的上游 node-pty，在独占 staging 应用补丁并以标准 npm bundle 纳入 tarball，包含锁定构建依赖、平台 prebuild、源码和许可证。Linux pnpm 不执行 bundled 子包安装脚本，正式包在 Ubuntu x64 的已校验 staging 构建 PTY/helper 并封装，记录二进制摘要；拒绝未经该构建的正式候选，Windows 本地包仅作开发。普通 prepack 拒绝未准备包，指向专用 pack:release；不增加消费者补丁 hook。收据绑定源码、lockfile、补丁、包摘要和候选。Windows PTY 取消先终止进程树再关闭控制台，避免 Ctrl+C 使 detached 后代脱离清理；返回结果等待清理，失败保持失败。专用机器部署与失败关闭策略见 [WINDOWS_RUNNER](../WINDOWS_RUNNER.md)，验收缺口见 HANDOFF。
+维护者打包器下载完整性校验过的上游 node-pty，在独占 staging 应用补丁并以标准 npm bundle 纳入 tarball，包含锁定构建依赖、平台 prebuild、源码和许可证。Linux pnpm 不执行 bundled 子包安装脚本，正式包在 Ubuntu x64 的已校验 staging 构建 Linux PTY 并封装，记录二进制摘要；拒绝未经该构建的正式候选，Windows 本地包仅作开发。普通 prepack 拒绝未准备包，指向专用 pack:release；不增加消费者补丁 hook。收据绑定源码、lockfile、补丁、包摘要和候选。Windows PTY 取消先终止进程树再关闭控制台，避免 Ctrl+C 使 detached 后代脱离清理；返回结果等待清理，失败保持失败。专用机器部署与失败关闭策略见 [WINDOWS_RUNNER](../WINDOWS_RUNNER.md)，验收缺口见 HANDOFF。
 
 ## MCP 启动信任与传输安全
 

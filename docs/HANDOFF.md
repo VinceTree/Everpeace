@@ -30,6 +30,8 @@
 
 初版源码 `152a791d5db905ea1e7623380d595b0035cd1f32` 已推送 main，[Test](https://github.com/VinceTree/Everpeace/actions/runs/38113445355) 的 Windows/Linux 和 Required checks 均成功。Windows 全量 1,164 项、1,157 通过、7 跳过；Ubuntu 全量 1,164 项、1,156 通过、8 跳过，均零失败。main 已启用 strict Required checks、绑定 GitHub Actions app 且包含管理员，API 回读收据保存在外置证据根。
 
-[失败演练](https://github.com/VinceTree/Everpeace/actions/runs/38113460361) 实际执行 Windows 失败 fixture，validate/gate 失败，drill 成功、publish skipped；远端核对没有 v0.5.3 tag/Release。[正常流程初验](https://github.com/VinceTree/Everpeace/actions/runs/38113775671) 暴露 Linux pnpm 不执行 bundled 子依赖构建脚本、缺少 pty.node，不能将 Windows 包开发成功扩大成 Linux 分发成功。已修订打包器：正式 Ubuntu x64 候选在校验过的 staging 编译并封装 Linux PTY/helper，同时保留上游 Windows prebuild；Windows 本地打包仅作开发。初验 Windows npm 的实际 CLI/SDK/PTY 均通过，但其后 pnpm launcher 在 Runner 的 node_modules/.bin 布局下定位失败；已改用标准模块解析，并由 pnpm 脚本入口保留所选工具链的 npm_execpath。新候选门禁与两平台消费者正在重新验收。
+[失败演练](https://github.com/VinceTree/Everpeace/actions/runs/38113460361) 实际执行 Windows 失败 fixture，validate/gate 失败，drill 成功、publish skipped；远端核对没有 v0.5.3 tag/Release。[正常流程初验](https://github.com/VinceTree/Everpeace/actions/runs/38113775671) 暴露 Linux pnpm 不执行 bundled 子依赖构建脚本、缺少 pty.node，不能将 Windows 包开发成功扩大成 Linux 分发成功。已修订打包器：正式 Ubuntu x64 候选在校验过的 staging 编译并封装 Linux PTY，同时保留上游 Windows prebuild；Windows 本地打包仅作开发。初验 Windows npm 的实际 CLI/SDK/PTY 均通过，但其后 pnpm launcher 在 Runner 的 node_modules/.bin 布局下定位失败；已改用标准模块解析，并由 pnpm 脚本入口保留所选工具链的 npm_execpath。新候选门禁与两平台消费者正在重新验收。
 
 仓库 Runner API 核查为零，RUNNER_READ_TOKEN 尚未配置，专用 Windows 基础设施未接入。不能将本机开发验收或 hosted skip 当作候选原生 CI 成功；正式 Release 保持阻塞，直到该必需任务成功。候选版本已更新但尚未发布，不创建绕过门禁的 tag 或 draft Release。
+
+后续源码 79bcc32f751af4e0e6031d977a24ddb614d7fe85 经保护分支 PR 合入，准确候选的本机四项门禁 1,166 项、1,163 通过、3 跳过、零失败；required native 五项真实用例通过。新候选 Test 与再次失败演练均达到预期。[Linux 生产打包](https://github.com/VinceTree/Everpeace/actions/runs/38114719881) 已编译 pty.node，但因错误要求仅 macOS 才构建的 spawn-helper 而拒绝产物；已按固定上游 binding.gyp 的条件修正清单，保留 producer-failure 日志，不将此轮算作消费者验收成功。
