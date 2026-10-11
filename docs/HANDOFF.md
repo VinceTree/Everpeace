@@ -35,3 +35,5 @@
 仓库 Runner API 核查为零，RUNNER_READ_TOKEN 尚未配置，专用 Windows 基础设施未接入。不能将本机开发验收或 hosted skip 当作候选原生 CI 成功；正式 Release 保持阻塞，直到该必需任务成功。候选版本已更新但尚未发布，不创建绕过门禁的 tag 或 draft Release。
 
 后续源码 79bcc32f751af4e0e6031d977a24ddb614d7fe85 经保护分支 PR 合入，准确候选的本机四项门禁 1,166 项、1,163 通过、3 跳过、零失败；required native 五项真实用例通过。新候选 Test 与再次失败演练均达到预期。[Linux 生产打包](https://github.com/VinceTree/Everpeace/actions/runs/38114719881) 已编译 pty.node，但因错误要求仅 macOS 才构建的 spawn-helper 而拒绝产物；已按固定上游 binding.gyp 的条件修正清单，保留 producer-failure 日志，不将此轮算作消费者验收成功。
+
+打包清单修正已通过保护分支合入 257a97c2ab5b8065eed0447331fc8b299e31a93a。[消费者验收](https://github.com/VinceTree/Everpeace/actions/runs/38115570776) 的 Linux npm/pnpm/global 安装及九项 CLI/SDK/PTY 检查均通过；额外的真实全局 bin 调用发现 CLI entry guard 只比较字面路径，无法识别 npm 的符号链接，静默退出。已同时接受入口 realpath 和字面路径，不改变模块导入或保留 symlink 的直接入口语义；正在重验全局安装。

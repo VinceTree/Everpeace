@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
 import { parseArgs, type CliCommand } from "./args.js";
 import type { CommandHandler } from "./commands/types.js";
 import { HELP } from "./help.js";
@@ -102,7 +103,10 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
 }
 
 const entrypoint = process.argv[1];
-if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
+let canonicalEntrypoint: string | undefined;
+try { canonicalEntrypoint = entrypoint ? pathToFileURL(realpathSync(entrypoint)).href : undefined; }
+catch { /* Imported CLI modules may have a virtual or missing argv entry. */ }
+if (entrypoint && (import.meta.url === pathToFileURL(entrypoint).href || import.meta.url === canonicalEntrypoint)) {
   void main().then((exitCode) => {
     process.exitCode = exitCode;
   });
