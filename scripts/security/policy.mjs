@@ -35,15 +35,16 @@ export function checkLicenses(groups, exceptions = []) {
 }
 
 export function checkAudit(report) {
-  assert.ok(report?.metadata?.vulnerabilities && (Number.isInteger(report.metadata.totalDependencies) || Number.isInteger(report.metadata.dependencies?.total)), "Audit report missing or service failed");
-  for (const severity of ["info", "low", "moderate", "high", "critical"]) assert.ok(Number.isInteger(report.metadata.vulnerabilities[severity]), "Audit severity missing");
+  const total = report?.metadata?.totalDependencies ?? report?.metadata?.dependencies?.total;
+  assert.ok(report?.metadata?.vulnerabilities && Number.isSafeInteger(total) && total >= 0, "Audit report missing or service failed");
+  for (const severity of ["info", "low", "moderate", "high", "critical"]) assert.ok(Number.isSafeInteger(report.metadata.vulnerabilities[severity]) && report.metadata.vulnerabilities[severity] >= 0, "Audit severity missing or invalid");
   assert.equal(report.metadata.vulnerabilities.high + report.metadata.vulnerabilities.critical, 0, "High/Critical dependency vulnerabilities require remediation");
 }
 
 export function checkSbom(report, required = []) {
   assert.equal(report?.bomFormat, "CycloneDX", "SBOM missing or invalid");
   assert.ok(Array.isArray(report.components) && report.components.length, "Empty SBOM");
-  for (const name of required) assert.ok(report.components.some((entry) => (entry.group ? `${entry.group}/${entry.name}` : entry.name) === name && entry.version && !/[~^*><= ]/u.test(entry.version)), `Missing resolved SBOM component: ${name}`);
+  for (const name of required) assert.ok(report.components.some((entry) => (entry.group ? `${entry.group}/${entry.name}` : entry.name) === name && typeof entry.version === "string" && /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(entry.version)), `Missing resolved SBOM component: ${name}`);
 }
 export function installedLicenses(report, exceptions = []) {
   const groups = {};

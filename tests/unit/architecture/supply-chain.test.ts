@@ -12,6 +12,8 @@ const { digest } = await import(new URL("../../../scripts/release/policy.mjs", i
 test("audit and SPDX policies reject severe findings, outages, incomplete reports and unreviewed licenses", () => {
   const clean = { metadata: { totalDependencies: 1, vulnerabilities: { info: 0, low: 1, moderate: 0, high: 0, critical: 0 } } };
   policy.checkAudit(clean);
+  assert.throws(() => policy.checkAudit({ metadata: { ...clean.metadata, vulnerabilities: { ...clean.metadata.vulnerabilities, high: 1, critical: -1 } } }));
+  for (const version of ["UNKNOWN", "^1.0.0", "1.0.0 - 2.0.0", ""]) assert.throws(() => policy.checkSbom({ bomFormat: "CycloneDX", components: [{ name: "fixture", version }] }, ["fixture"]));
   for (const report of [{}, { error: "unavailable" }, { metadata: { vulnerabilities: {} } }, ...["high", "critical"].map((level) => ({ metadata: { ...clean.metadata, vulnerabilities: { ...clean.metadata.vulnerabilities, [level]: 1 } } }))]) assert.throws(() => policy.checkAudit(report));
   for (const license of ["MIT", "MIT AND Apache-2.0", "GPL-3.0-only OR MIT"]) assert.equal(policy.allowedLicense(license), true);
   for (const license of ["UNKNOWN", "MIT AND GPL-3.0-only", "GPL-3.0-only", "MIT WITH LLVM-exception"]) assert.equal(policy.allowedLicense(license), false);

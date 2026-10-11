@@ -19,7 +19,7 @@
 
 实现阶段：Web 独立 GC 压力预热后十批、每批百次、并发八，批末连接/租约归零，heap/external 增长各在 32 MiB 上限内。九项评分器基线/缺陷/修复证明通过，真实模型运行零次。生产 coding runner 六入口 × 六攻击通过；Ink 和真实 PTY 的新面板确认、取消、Esc、resize 通过。doctor 穿过真实 SDK 的官方/配置型中转/通用布局离线 SSE；旧 ReactAgent/恢复/MCP/Memory/TUI dependencies 兼容回归通过。
 
-最终本地串行 `typecheck → lint → test → build` 全部通过：1193 tests，1190 pass、3 skip、0 fail；`git diff --check` 通过。跳过不作为原生沙箱验收。门禁收据 `local-gates-5.json` 及 `final-5-*` 记录实际命令和退出码。实际安装目录 Syft 与 192 个组件许可证检查通过，包含 Codex、MCP SDK、patched node-pty、node-addon-api 和 Windows 平台组件；工作证明不冒充发布候选收据。候选两平台 CI、同包安装及新供应链门禁待远端准确 commit 验证。工作证据根：`C:\Users\39850\AppData\Local\Temp\everpeace-security-2e61f0e7347246339d51bc14e24b8f50`。失败调试日志保留，仅供诊断；最终以本轮实际门禁与准确候选收据为准。
+最终本地串行 `typecheck → lint → test → build` 全部通过：1193 tests，1190 pass、3 skip、0 fail；`git diff --check` 通过。跳过不作为原生沙箱验收。门禁收据 `local-gates-8.json` 及 `final-8-*` 记录实际命令和退出码。实际安装目录 Syft 与 192 个组件许可证检查通过，包含 Codex、MCP SDK、patched node-pty、node-addon-api 和 Windows 平台组件；工作证明不冒充发布候选收据。初次远端 CI 的安全扫描成功，终端 fixture 因 CI 默认非交互及固定等待而失败，Required checks 正确拒绝；已显式启用真实 PTY 交互、等待字段画面并拒绝空密钥，`CI=true` 定向和最终本地回归通过。[PR #5](https://github.com/VinceTree/Everpeace/pull/5) 待新的两平台检查，再冻结准确 main 候选并验收同包消费者。工作证据根：`C:\Users\39850\AppData\Local\Temp\everpeace-security-2e61f0e7347246339d51bc14e24b8f50`。失败调试日志保留，仅供诊断；最终以本轮实际门禁与准确候选收据为准。
 
 ## 发布与外部依赖
 

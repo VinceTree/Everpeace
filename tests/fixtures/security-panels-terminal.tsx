@@ -10,4 +10,5 @@ function Fixture() {
   function back() { setDone(true); setTimeout(() => handle.unmount(), 150); }
   return <Box flexDirection="column"><Text>Fixture session history</Text>{done ? <Text>{`SESSION_RESTORED requests=${requests} configured=${configured}`}</Text> : panel === "doctor" ? <ActionConfirmation text="Live diagnostic preview: endpoint offline; maximum 8 requests; budget 20000" start={() => { requests++; back(); }} cancel={back} /> : panel === "web" ? <WebSurface configure={async () => { configured++; }} onBack={back} /> : <CostSurface modelId="offline" status={async () => "Unknown prices and usage"} configure={async () => { configured++; }} onBack={back} />}</Box>;
 }
-const handle = render(<Fixture />);
+// The fixture owns a real PTY even when the parent is a CI process.
+const handle = render(<Fixture />, { interactive: true });

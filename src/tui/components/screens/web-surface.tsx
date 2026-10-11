@@ -20,7 +20,7 @@ export function WebSurface({ configure, onBack }: { configure?: ((provider: "htm
     <Text>Keys are stored in the system credential store. No test request is sent when configuring.</Text>
     {error && <Text color="red">{error}</Text>}
     {step === "select" && <Select options={[{ label: "HTML search", value: "html" }, { label: "Brave LLM Context", value: "brave" }]} onChange={(value) => { setProvider(value === "brave" ? "brave" : "html"); setStep(value === "brave" ? "key" : "confirm"); }} />}
-    {step === "key" && <PasswordInput placeholder="Brave API key" onSubmit={(value) => { secret.current = value; setStep("confirm"); }} />}
+    {step === "key" && <PasswordInput placeholder="Brave API key" onSubmit={(value) => { if (!value.trim()) { setError("A Brave API key is required."); return; } secret.current = value; setError(undefined); setStep("confirm"); }} />}
     {step === "confirm" && <Select options={[{ label: `Save ${provider} provider`, value: "save" }, { label: "Cancel", value: "cancel" }]} onChange={(value) => { if (value === "save") void save(); else { secret.current = ""; onBack(); } }} />}
     {step === "saving" && <Spinner label="Saving web settings" />}
     <Text dimColor>Esc: return to the same session</Text>
