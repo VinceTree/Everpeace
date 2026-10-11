@@ -8,6 +8,7 @@ export interface ActivityLease { (clean?: boolean): Promise<void>; assertValid()
 /** A process-held lease protects idle sessions as well as running requests. */
 export class SessionActivity {
   readonly #leases = new Map<string, { refs: number; clean: boolean; pending: Promise<ActivityLease>; closing?: Promise<void> }>();
+  readonly #retentions = new Map<string, Promise<void>>();
   constructor(readonly directory: string) {}
   #path(id: string): string {
     if (!/^[a-zA-Z0-9_-]{1,100}$/u.test(id)) throw new Error("Invalid Session identity");
@@ -77,6 +78,15 @@ export class SessionActivity {
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
   }
   async retainTeam(id: string): Promise<void> {
+    let pending = this.#retentions.get(id);
+    if (!pending) {
+      pending = Promise.resolve().then(() => this.#retainTeamOwned(id));
+      this.#retentions.set(id, pending);
+    }
+    try { await pending; }
+    finally { if (this.#retentions.get(id) === pending) this.#retentions.delete(id); }
+  }
+  async #retainTeamOwned(id: string): Promise<void> {
     if (await this.hasRetainedTeam(id)) return;
     // First ownership is persisted before team publication. Automatic cleanup
     // holds this same lease, so it cannot race with acquiring membership.

@@ -133,7 +133,7 @@ test("retained members remain excluded even when their own Session has no team s
     const input = { title: "fixture", titlePending: false, model: { id: "fixture", model_name: "fixture", base_url: "https://provider.invalid" }, workspacePath: root };
     const owner = await store.create(input), member = await store.create(input);
     const close = await store.activity.acquire(member.id); await close();
-    await store.setTeam(owner.id, { teamId: "fixture", state: "stopped", members: [{ agentId: "worker", taskId: "task", sessionId: member.id, state: "done" }] });
+    await Promise.all(Array.from({ length: 16 }, () => store.setTeam(owner.id, { teamId: "fixture", state: "stopped", members: [{ agentId: "worker", taskId: "task", sessionId: member.id, state: "done" }] })));
     const preview = await privacy.preview(30);
     assert.equal(preview.candidates.length, 0); assert.equal(preview.excluded.find((v) => v.id === member.id)?.reason, "retained_team_ownership");
     await assert.rejects(store.deleteMany([member.id], { [member.id]: "old-preview" }), /retained team/u);

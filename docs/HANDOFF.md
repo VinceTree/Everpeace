@@ -20,7 +20,7 @@
 
 ## 验证记录
 
-本轮证据根：`C:\Users\39850\AppData\Local\Temp\everpeace-observability-a5fd694c54a64dcaae58b25d28bc184a`。最终本地串行 `typecheck → lint → test → build` 全部通过：1235 tests，1232 pass、3 skip、0 fail；`gate-6.json` 与 `gate-6-*.log` 保存命令、退出码及实际输出，`git diff --check` 和改动文档链接检查通过。跳过不作为原生验收成功；不将旧候选收据迁移为最终成功。
+本轮证据根：`C:\Users\39850\AppData\Local\Temp\everpeace-observability-a5fd694c54a64dcaae58b25d28bc184a`。最终本地串行 `typecheck → lint → test → build` 全部通过：1235 tests，1232 pass、3 skip、0 fail；`gate-7.json` 与 `gate-7-*.log` 保存命令、退出码及实际输出，`git diff --check` 和改动文档链接检查通过。跳过不作为原生验收成功；不将旧候选收据迁移为最终成功。
 
 已完成的定向证明包括真实原生团队子目录与 linked worktree、跨进程 Session 租约/隐私、Memory 到期和请求重试失效、流恢复与新状态子系统、TUI/真实 PTY 确认取消 Esc resize、脱敏 JSONL、DOM 对照与安全日检。日检八个属性测试全部完成规定次数，无 skip；纯属性每项一万例、状态序列每项一千例，报告保存 seed 与重放信息。锁文件审计、Secret/许可证/SBOM 本地共享安全检查通过。十二份网页正文块新版 F1 为 1，八个标准代码块逐字保留；这只证明固定语料。中间两次完整门禁均通过，最终冻结重新执行，实际数量以最终收据为准。
 
@@ -28,6 +28,6 @@
 
 ## 交付与外部依赖
 
-实现和三个状态子系统分批提交，已推送 [PR #8](https://github.com/VinceTree/Everpeace/pull/8)。首轮 CI Linux/安全成功、Windows 失败，日志保留。修正 CRLF 快照摘要、Windows 短路径别名导出与 Worktree 注销；打包使用规范化的补丁副本，不修改补丁语义。新版两平台 CI、安全门禁、冻结 main 候选和同包消费者验收继续绑定新 commit。专用 Windows 机器未准备，GitHub Runner 回读数量零，RUNNER_READ_TOKEN 未配置。用户选择先完成代码和 [部署说明](WINDOWS_RUNNER.md)；该环境及其真实 native 验收未通过前禁止创建 tag/Release，不以本机测试、hosted skip 或旧候选成功代替。
+实现和三个状态子系统分批提交，已推送 [PR #8](https://github.com/VinceTree/Everpeace/pull/8)。首轮 CI Linux/安全成功、Windows 失败，日志保留。修正 CRLF 快照摘要、Windows 短路径别名导出与 Worktree 注销；打包使用规范化的补丁副本，不修改补丁语义。第二轮两平台捕获相同成员归属写入竞态，修正同进程重复操作的等待，十六次并发发布及生产 preflight 回归通过。新版两平台 CI、安全门禁、冻结 main 候选和同包消费者验收继续绑定新 commit。专用 Windows 机器未准备，GitHub Runner 回读数量零，RUNNER_READ_TOKEN 未配置。用户选择先完成代码和 [部署说明](WINDOWS_RUNNER.md)；该环境及其真实 native 验收未通过前禁止创建 tag/Release，不以本机测试、hosted skip 或旧候选成功代替。
 
 保留原有 untracked `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`。没有付费模型/Brave 请求，没有 npm registry 发布。后续真实模型实验另需端点、供应商原始模型 ID、凭据及 task/campaign 数值预算。
