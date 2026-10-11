@@ -16,7 +16,7 @@ $env:EVERPEACE_NATIVE_MODE = 'required'
 pnpm native:verify
 ```
 
-All five required native tests must execute and pass. A zero-test result, skipped/TODO test, unavailable backend, failed network denial or surviving fixture process is a failure. `native-evidence/receipt.json` records the commit, platform/backend and event-log digest; inspect `success`, not just file presence. An uncommitted local run is development evidence, not release evidence.
+All required native tests listed in [nativeTests](../scripts/release/policy.mjs) must execute and pass, including authorized subdirectory and existing linked-worktree isolation. A zero-test result, skipped/TODO test, unavailable backend, failed network denial or surviving fixture process is a failure. `native-evidence/receipt.json` records the commit, platform/backend and event-log digest; inspect `success`, not just file presence. An uncommitted local run is development evidence, not release evidence.
 
 ## Registration and access
 
