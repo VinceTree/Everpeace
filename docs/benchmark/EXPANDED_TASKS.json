@@ -44,7 +44,7 @@
             "${FIXTURE_ROOT}/setup.mjs",
             "monorepo-build-order"
           ],
-          "timeoutMs": 10000
+          "timeoutMs": 60000
         },
         "pristineVerification": {
           "command": "node",
@@ -105,7 +105,7 @@
             "${FIXTURE_ROOT}/setup.mjs",
             "fullstack-contract"
           ],
-          "timeoutMs": 10000
+          "timeoutMs": 60000
         },
         "pristineVerification": {
           "command": "node",
@@ -166,7 +166,7 @@
             "${FIXTURE_ROOT}/setup.mjs",
             "typescript-generics"
           ],
-          "timeoutMs": 10000
+          "timeoutMs": 60000
         },
         "pristineVerification": {
           "command": "node",
@@ -227,7 +227,7 @@
             "${FIXTURE_ROOT}/setup.mjs",
             "react-state-race"
           ],
-          "timeoutMs": 10000
+          "timeoutMs": 60000
         },
         "pristineVerification": {
           "command": "node",
@@ -288,7 +288,7 @@
             "${FIXTURE_ROOT}/setup.mjs",
             "sqlite-migration"
           ],
-          "timeoutMs": 10000
+          "timeoutMs": 60000
         },
         "pristineVerification": {
           "command": "node",
@@ -349,7 +349,7 @@
             "${FIXTURE_ROOT}/setup.mjs",
             "cross-file-interface"
           ],
-          "timeoutMs": 10000
+          "timeoutMs": 60000
         },
         "pristineVerification": {
           "command": "node",
@@ -410,7 +410,7 @@
             "${FIXTURE_ROOT}/setup.mjs",
             "windows-path-boundary"
           ],
-          "timeoutMs": 10000
+          "timeoutMs": 60000
         },
         "pristineVerification": {
           "command": "node",
@@ -471,7 +471,7 @@
             "${FIXTURE_ROOT}/setup.mjs",
             "typescript-python-protocol"
           ],
-          "timeoutMs": 10000
+          "timeoutMs": 60000
         },
         "pristineVerification": {
           "command": "node",
@@ -530,7 +530,7 @@
             "${FIXTURE_ROOT}/setup.mjs",
             "node-pty-helper-952"
           ],
-          "timeoutMs": 10000
+          "timeoutMs": 60000
         },
         "pristineVerification": {
           "command": "node",

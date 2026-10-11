@@ -423,6 +423,8 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 
 ## 安全、诊断与评测补丁决策
 
+完整门禁暴露的 Windows 输出代理关闭竞态一并修复在既有 node-pty 分发补丁中：仅接管 EPIPE/ECONNRESET，detach 后继续排空 Conpty 防止关闭死锁；其他错误不屏蔽。源码安装与消费者产物都验证此补丁，更新锁文件及外置评分器的冻结锁，不用重跑掩盖失败。流生命周期语义参考 [Node stream 文档](https://nodejs.org/api/stream.html)；安装目录回归使用真实 stream 的错误回调与尾部输出。
+
 - GitHub 私密报告与原生 Secret Scanning/Push Protection 配合固定 Gitleaks、本地完整 pnpm audit、SPDX 解析和 Syft 多层 SBOM；扫描服务失败、缺报告和摘要不符拒绝必需门禁。例外绑定准确组件或公开测试文件完整摘要。
 - 外部说明采用低信任来源记录，保留既有宿主权限体验；不把项目规则、Skill/MCP、Memory 摘要变成批准或验证证据。不同 Responses 布局共同投影，离线恶意模型验证生产宿主边界。
 - 搜索改 DOM，Brave 由用户明确选择、Keyring 保存；固定 LLM Context HTTPS、零自动付费重试、全部重定向拒绝。响应清理保留原租约实现，仅以压力验收验证。

@@ -19,12 +19,12 @@
 
 实现阶段：Web 独立 GC 压力预热后十批、每批百次、并发八，批末连接/租约归零，heap/external 增长各在 32 MiB 上限内。九项评分器基线/缺陷/修复证明通过，真实模型运行零次。生产 coding runner 六入口 × 六攻击通过；Ink 和真实 PTY 的新面板确认、取消、Esc、resize 通过。doctor 穿过真实 SDK 的官方/配置型中转/通用布局离线 SSE；旧 ReactAgent/恢复/MCP/Memory/TUI dependencies 兼容回归通过。
 
-最终本地串行 `typecheck → lint → test → build` 全部通过：1194 tests，1191 pass、3 skip、0 fail；`git diff --check` 通过。跳过不作为原生沙箱验收。门禁收据 `local-gates-10.json` 及 `final-10-*` 记录实际命令和退出码。实际安装目录 Syft 与 192 个组件许可证检查通过，包含 Codex、MCP SDK、patched node-pty、node-addon-api 和 Windows 平台组件；工作证明不冒充发布候选收据。初次远端 CI 的终端 fixture 因 CI 默认非交互及固定等待而失败，Required checks 正确拒绝；修正后 `0a6828ec5ee707e980f35ce81ed9cb9b91154c42` 的两平台、安全扫描及 Required checks 全通过。最后补充结构化能力拒绝与认证/无效模型的区分及严格 echo 参数验证，本地通过后等待新 commit 的两平台检查。[PR #5](https://github.com/VinceTree/Everpeace/pull/5) 成功后冻结准确 main 候选并验收同包消费者。工作证据根：`C:\Users\39850\AppData\Local\Temp\everpeace-security-2e61f0e7347246339d51bc14e24b8f50`。失败调试日志保留，仅供诊断；最终以本轮实际门禁与准确候选收据为准。
+最终本地串行 `typecheck → lint → test → build` 全部通过：1196 tests，1193 pass、3 skip、0 fail；`git diff --check` 通过。跳过不作为原生沙箱验收。门禁收据 `local-gates-14.json` 及 `final-14-*` 记录实际命令和退出码。九项完整评分器证明见 `expanded-drain-final/expanded-proof.json`，evaluation digest `d19c65dd1f592cec824bb7e5c67067e0d8170f846817f8505b60409ad5fc875a`，真实模型运行零次。工作证据根：`C:\Users\39850\AppData\Local\Temp\everpeace-security-2e61f0e7347246339d51bc14e24b8f50`。工作证明不冒充发布候选收据；安装目录许可证检查包含关键组件，最终仍须验收新锁、新补丁和准确候选的消费者产物。
+
+远端 CI 的失败均保持 Required checks 拒绝：新面板改为等待实际画面与交互输入；正常 Web 连接期限与故意超时分开；取消模拟器在异步准入后检查已取消状态；CI 显式固定 Python 3.12，并保留严格取消验收。本地全量复验另发现真实 Windows Conpty worker 的 EPIPE 关闭竞态，修复到既有分发补丁，真实 stream 回归验证关闭后停止写入、继续排空，其他错误仍报告；冻结锁与评分器依赖同步更新。失败日志仅供诊断，不重用旧 commit 的成功证据。[PR #5](https://github.com/VinceTree/Everpeace/pull/5) 等待最终提交的两平台、安全扫描和 Required checks 全成功，然后冻结准确 main 候选验收同包消费者。
 
 ## 发布与外部依赖
 
 专用 Windows 机器未准备、Runner 未注册、RUNNER_READ_TOKEN 未配置。用户选择先完成代码与 [部署说明](WINDOWS_RUNNER.md)。新安全门禁、两平台同包消费者和准确 commit 的 required native 全成功前禁止创建 tag/Release；不手工绕过，不复用旧候选证据。付费评测另需明确端点、原始模型 ID、凭据及 task/campaign 数值预算。
 
 保留原有 untracked `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`；没有付费请求、上游投稿或 npm registry 发布。授权允许提交推送及补丁交付，Release 仍受真实门禁约束。
-
-补充 CI 诊断：最终诊断提交的 Linux、安全扫描成功；Windows 的压力 fixture 正常请求在 250 ms 冷连接期限偶发超时。正常路径改为 5 s，故意超时仍 250 ms，十批/百次/并发八、零连接和内存阈值未放宽；本地四门禁重新通过，等待新 commit 的完整 CI。

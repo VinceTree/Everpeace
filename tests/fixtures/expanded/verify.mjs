@@ -56,7 +56,7 @@ try {
     for(const target of [base+"-other\\a.ts",base+"\\..\\other", "D:\\Users\\Fixture 文件\\project space\\a.ts"])assert.equal(within(base,target),false,target);
     assert.equal(within("\\\\host\\share\\repo","\\\\HOST\\share\\repo\\a"),true);assert.equal(within("\\\\host\\share\\repo","\\\\host\\share\\repo-other\\a"),false);
   } else if(id==="typescript-python-protocol") {
-    await promisify(execFile)(process.platform==="win32"?"python":"python3",["--version"],{timeout:5000,windowsHide:true});
+    await promisify(execFile)(process.platform==="win32"?"python":"python3",["--version"],{timeout:30_000,windowsHide:true});
     const compiled=path.join(temporary,"client.cjs");await writeFile(compiled,transpile(await readFile(path.join(root,"client.ts"),"utf8")));
     const {runWorker}=createRequire(import.meta.url)(compiled);let result;try{result=await runWorker(path.join(root,"worker.py"),{requestId:"fixture",values:[1,2,4]});}catch{assert.fail("Subprocess JSON contract mismatch");}assert.deepEqual(result,{requestId:"fixture",total:7});
     const controller=new AbortController();const start=Date.now();const pending=runWorker(path.join(root,"worker.py"),{requestId:"cancel",values:[],delay:5},controller.signal);const timer=setTimeout(()=>controller.abort(),30);

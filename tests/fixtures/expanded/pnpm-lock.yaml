@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   node-pty@1.1.0:
-    hash: 3047d8f70b86b81e18bb91f7dca38042822ab14c9ac7530867ff14e33b41554c
+    hash: f100f0202f6f42e4246d8a911b6c42e0988175cbb00aae12e23688cf2985965e
     path: patches/node-pty@1.1.0.patch
 
 importers:
@@ -57,7 +57,7 @@ importers:
         version: 18.0.13
       node-pty:
         specifier: 1.1.0
-        version: 1.1.0(patch_hash=3047d8f70b86b81e18bb91f7dca38042822ab14c9ac7530867ff14e33b41554c)
+        version: 1.1.0(patch_hash=f100f0202f6f42e4246d8a911b6c42e0988175cbb00aae12e23688cf2985965e)
       openai:
         specifier: ^7.15.0
         version: 7.15.0(undici@7.30.0)(ws@8.21.3)(zod@4.6.5)
@@ -2270,7 +2270,7 @@ snapshots:
 
   node-addon-api@7.1.1: {}
 
-  node-pty@1.1.0(patch_hash=3047d8f70b86b81e18bb91f7dca38042822ab14c9ac7530867ff14e33b41554c):
+  node-pty@1.1.0(patch_hash=f100f0202f6f42e4246d8a911b6c42e0988175cbb00aae12e23688cf2985965e):
     dependencies:
       node-addon-api: 7.1.1
 

@@ -48,7 +48,7 @@ try {
     await fs.rename(path.join(download, "package"), target);
     if (name === "node-pty") {
       // Match pnpm patch context, including npm's missing compiled-JS EOF newline.
-      for (const file of ["lib/conpty_console_list_agent.js", "lib/windowsPtyAgent.js", "src/conpty_console_list_agent.ts", "src/windowsPtyAgent.ts"]) {
+      for (const file of ["lib/conpty_console_list_agent.js", "lib/windowsPtyAgent.js", "src/conpty_console_list_agent.ts", "src/windowsPtyAgent.ts", "lib/worker/conoutSocketWorker.js", "src/worker/conoutSocketWorker.ts"]) {
         const location = path.join(target, file);
         await fs.writeFile(location, (await fs.readFile(location, "utf8")).replaceAll("\r\n", "\n").replace(/\n?$/u, "\n"));
       }
