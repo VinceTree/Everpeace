@@ -1,0 +1,8 @@
+{
+  "name": "typescript-python-protocol",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node check.mjs"
+  }
+}

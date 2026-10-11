@@ -5,6 +5,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { verifyPackage } from "./policy.mjs";
 import { packageManager, runCommand } from "./commands.mjs";
+import { sbom } from "../security/tools.mjs";
+import { nativeInventory } from "../security/native-inventory.mjs";
+import { installedLicenses } from "../security/policy.mjs";
 
 const directory = path.resolve(process.argv[2] ?? "candidate-package");
 const local = process.argv[3] === "--local";
@@ -41,7 +44,14 @@ try {
       const help = process.platform === "win32" ? await runCommand("cmd.exe", ["/d", "/s", "/c", "everpeace.cmd --help"], { cwd: prefix, env, windowsVerbatimArguments: true, timeout: 20_000 }) : await runCommand(bin, ["--help"], { env, timeout: 20_000 });
       assert.match(help, /--team/u);
     }
-    checks.push({ mode, success: true });
+    const snapshot = `consumer-${process.platform}-${mode}.cdx.json`;
+    await sbom(mode === "global" ? prefix : path.join(consumer, "node_modules"), path.join(directory, snapshot), ["@openai/codex", "@modelcontextprotocol/sdk", "node-pty", "node-addon-api"]);
+    const { digest } = await import("./policy.mjs");
+    const nativeSnapshot = `consumer-${process.platform}-${mode}-native.json`;
+    const licenses = `consumer-${process.platform}-${mode}-licenses.json`;
+    await fs.writeFile(path.join(directory, licenses), JSON.stringify(installedLicenses(JSON.parse(await fs.readFile(path.join(directory, snapshot), "utf8")), JSON.parse(await fs.readFile(new URL("../security/license-exceptions.json", import.meta.url), "utf8"))), null, 2) + "\n");
+    await fs.writeFile(path.join(directory, nativeSnapshot), JSON.stringify(await nativeInventory(consumer), null, 2) + "\n");
+    checks.push({ mode, success: true, sbom: snapshot, sha256: digest(path.join(directory, snapshot)), nativeSnapshot, nativeSha256: digest(path.join(directory, nativeSnapshot)), licenses, licenseSha256: digest(path.join(directory, licenses)) });
   }
 } catch (error) { cleanupFailed = error.cleanupFailed === true; throw error; }
 finally {

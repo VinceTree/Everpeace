@@ -1,0 +1,5 @@
+title = "Full history and working tree secret scan"
+[extend]
+useDefault = true
+# Public fixture keys require an exact path AND exact content exception, reviewed here.
+# No directory-wide exclusions are permitted.

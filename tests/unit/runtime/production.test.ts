@@ -11,6 +11,8 @@ import { SessionStore } from "../../../src/storage/session-store.js";
 import { CodingWorkflowRuntime } from "../../../src/workflow/runtime.js";
 import type { BashResult } from "../../../src/tools/bash.js";
 import { ProcessCleanupError } from "../../../src/tools/process-completion.js";
+import { CostSettingsStore } from "../../../src/status/cost.js";
+import { RequestAttemptLedger } from "../../../src/agent/request-attempt-ledger.js";
 
 function fakeProvider(text = "done"): ProviderRuntime {
   const capabilities = resolveProviderCapabilities("https://compatible.invalid/v1", "offline");
@@ -43,6 +45,24 @@ const io: AgentIO = {
   async runBash() { return { stdout: "", stderr: "", exitCode: 0, signal: null }; },
   writeAssistant() {},
 };
+test("late request cost retains its admitted Session and price snapshot", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-cost-owner-")); t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = new SessionStore({ directory: path.join(root, "sessions") }), prices = new CostSettingsStore(path.join(root, "cost.json"));
+  await prices.configure("offline", { currency: "USD", input: 1, cachedInput: 1, output: 1 });
+  const metadata = { title: "fixture", titlePending: false, workspacePath: root, model: { id: "offline", model_name: "offline", base_url: "https://compatible.invalid/v1" } };
+  const first = await store.create(metadata), second = await store.create(metadata); let sessionId = first.id;
+  let entered!: () => void, release!: () => void;
+  const ready = new Promise<void>((resolve) => { entered = resolve; }), gate = new Promise<void>((resolve) => { release = resolve; });
+  const provider = fakeProvider(); const stream = provider.responses.stream!;
+  provider.responses.stream = async (params, options) => { entered(); await gate; return stream(params, options); };
+  const handle = createProductionAgent({ model: { ...metadata.model, api_key: "offline-test-value" }, workspacePath: root, io, sessionStore: store, sessionId: () => sessionId, providerRuntime: provider, requestAttemptLedger: new RequestAttemptLedger(), costSettingsStore: prices, skills: null, mcp: null, learnedMemoryStore: null, codeNavigation: null });
+  try {
+    const task = handle.agent.runTurn("fixture"); await ready;
+    sessionId = second.id; await prices.configure("offline", { currency: "EUR", input: 2, cachedInput: 2, output: 2 }); release(); await task;
+    const original = await store.load(first.id), changed = await store.load(second.id);
+    assert.equal(original.costs?.length, 1); assert.equal(original.costs?.[0]?.pricing?.currency, "USD"); assert.equal(changed.costs?.length ?? 0, 0);
+  } finally { release(); await handle.dispose(); }
+});
 
 test("restoring opaque history rejects incompatible profiles before creating provider resources", () => {
   for (const profile of ["generic", "deepseek"] as const) {

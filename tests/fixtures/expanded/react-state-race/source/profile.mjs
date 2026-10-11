@@ -1,0 +1,1 @@
+export function useProfile(React,load,id){const [value,setValue]=React.useState(null);React.useEffect(()=>{let active=true;load(id).then(result=>{if(active)setValue(result);});return()=>{active=false;};},[load,id]);return value;}

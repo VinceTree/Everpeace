@@ -1,0 +1,457 @@
+{
+  "schema": 1,
+  "kind": "historical_import",
+  "reports": [
+    {
+      "campaignId": "everpeace-live-tools-b92b3c47bdc747938a068b1b13727e2c",
+      "revision": "7a366caab3ff6e4e59a26de6559d903df92288bc",
+      "planned": 13,
+      "outcomes": {
+        "passed": 7,
+        "failed": 6,
+        "timedOut": 0,
+        "error": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "unknown": 0
+      },
+      "unknownUsage": 5,
+      "evidence": "insufficient",
+      "records": [
+        {
+          "taskId": "files-search",
+          "runId": "everpeace-live-tools-b92b3c47bdc747938a068b1b13727e2c:files-search",
+          "outcome": "passed",
+          "usage": "known",
+          "requests": 5,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "8c623182cfa8bfb5744939e1e7dc053e452b60522bd25fdec3da3e298f2f8002",
+          "buildDigest": "c7b9123baa4cb0dd08b809359b008c06b56c5e8e318bd0db84fa0b4c4f1d28c9",
+          "evaluationDigest": null,
+          "manualInterventions": null
+        },
+        {
+          "taskId": "editing-review",
+          "runId": "everpeace-live-tools-b92b3c47bdc747938a068b1b13727e2c:editing-review",
+          "outcome": "failed",
+          "usage": "unknown",
+          "requests": 5,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "8c623182cfa8bfb5744939e1e7dc053e452b60522bd25fdec3da3e298f2f8002",
+          "buildDigest": "c7b9123baa4cb0dd08b809359b008c06b56c5e8e318bd0db84fa0b4c4f1d28c9",
+          "evaluationDigest": null,
+          "manualInterventions": null
+        },
+        {
+          "taskId": "foreground",
+          "runId": "everpeace-live-tools-b92b3c47bdc747938a068b1b13727e2c:foreground",
+          "outcome": "passed",
+          "usage": "known",
+          "requests": 4,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "8c623182cfa8bfb5744939e1e7dc053e452b60522bd25fdec3da3e298f2f8002",
+          "buildDigest": "c7b9123baa4cb0dd08b809359b008c06b56c5e8e318bd0db84fa0b4c4f1d28c9",
+          "evaluationDigest": null,
+          "manualInterventions": null
+        },
+        {
+          "taskId": "background",
+          "runId": "everpeace-live-tools-b92b3c47bdc747938a068b1b13727e2c:background",
+          "outcome": "failed",
+          "usage": "unknown",
+          "requests": 6,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "8c623182cfa8bfb5744939e1e7dc053e452b60522bd25fdec3da3e298f2f8002",
+          "buildDigest": "c7b9123baa4cb0dd08b809359b008c06b56c5e8e318bd0db84fa0b4c4f1d28c9",
+          "evaluationDigest": "b5c72ae720e30c45ba4b35be16cd7a1edb234cfd2f308239e58009f0f9a09b27",
+          "manualInterventions": null
+        },
+        {
+          "taskId": "output-paging",
+          "runId": "everpeace-live-tools-b92b3c47bdc747938a068b1b13727e2c:output-paging",
+          "outcome": "passed",
+          "usage": "known",
+          "requests": 3,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "8c623182cfa8bfb5744939e1e7dc053e452b60522bd25fdec3da3e298f2f8002",
+          "buildDigest": "c7b9123baa4cb0dd08b809359b008c06b56c5e8e318bd0db84fa0b4c4f1d28c9",
+          "evaluationDigest": "88fd37eee4068617e471dbcb4d1222e6500d1b9de4b5f2af0716bbd11dd894b3",
+          "manualInterventions": null
+        },
+        {
+          "taskId": "history",
+          "runId": "everpeace-live-tools-b92b3c47bdc747938a068b1b13727e2c:history",
+          "outcome": "failed",
+          "usage": "known",
+          "requests": 17,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "8c623182cfa8bfb5744939e1e7dc053e452b60522bd25fdec3da3e298f2f8002",
+          "buildDigest": "c7b9123baa4cb0dd08b809359b008c06b56c5e8e318bd0db84fa0b4c4f1d28c9",
+          "evaluationDigest": "88fd37eee4068617e471dbcb4d1222e6500d1b9de4b5f2af0716bbd11dd894b3",
+          "manualInterventions": null
+        },
+        {
+          "taskId": "question-progress",
+          "runId": "everpeace-live-tools-b92b3c47bdc747938a068b1b13727e2c:question-progress",
+          "outcome": "passed",
+          "usage": "known",
+          "requests": 3,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "8c623182cfa8bfb5744939e1e7dc053e452b60522bd25fdec3da3e298f2f8002",
+          "buildDigest": "c7b9123baa4cb0dd08b809359b008c06b56c5e8e318bd0db84fa0b4c4f1d28c9",
+          "evaluationDigest": "24425d8227651e479d3ae28c0ae46d22a13722867f82edcdfccf13bfa955bc55",
+          "manualInterventions": null
+        },
+        {
+          "taskId": "plan-review",
+          "runId": "everpeace-live-tools-b92b3c47bdc747938a068b1b13727e2c:plan-review",
+          "outcome": "failed",
+          "usage": "unknown",
+          "requests": 1,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "8c623182cfa8bfb5744939e1e7dc053e452b60522bd25fdec3da3e298f2f8002",
+          "buildDigest": "c7b9123baa4cb0dd08b809359b008c06b56c5e8e318bd0db84fa0b4c4f1d28c9",
+          "evaluationDigest": "24425d8227651e479d3ae28c0ae46d22a13722867f82edcdfccf13bfa955bc55",
+          "manualInterventions": null
+        },
+        {
+          "taskId": "goal",
+          "runId": "everpeace-live-tools-b92b3c47bdc747938a068b1b13727e2c:goal",
+          "outcome": "failed",
+          "usage": "unknown",
+          "requests": 5,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "8c623182cfa8bfb5744939e1e7dc053e452b60522bd25fdec3da3e298f2f8002",
+          "buildDigest": "c7b9123baa4cb0dd08b809359b008c06b56c5e8e318bd0db84fa0b4c4f1d28c9",
+          "evaluationDigest": "24425d8227651e479d3ae28c0ae46d22a13722867f82edcdfccf13bfa955bc55",
+          "manualInterventions": null
+        },
+        {
+          "taskId": "memory-skill",
+          "runId": "everpeace-live-tools-b92b3c47bdc747938a068b1b13727e2c:memory-skill",
+          "outcome": "passed",
+          "usage": "known",
+          "requests": 3,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "8c623182cfa8bfb5744939e1e7dc053e452b60522bd25fdec3da3e298f2f8002",
+          "buildDigest": "c7b9123baa4cb0dd08b809359b008c06b56c5e8e318bd0db84fa0b4c4f1d28c9",
+          "evaluationDigest": "24425d8227651e479d3ae28c0ae46d22a13722867f82edcdfccf13bfa955bc55",
+          "manualInterventions": null
+        },
+        {
+          "taskId": "web",
+          "runId": "everpeace-live-tools-b92b3c47bdc747938a068b1b13727e2c:web",
+          "outcome": "failed",
+          "usage": "unknown",
+          "requests": 2,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "8c623182cfa8bfb5744939e1e7dc053e452b60522bd25fdec3da3e298f2f8002",
+          "buildDigest": "c7b9123baa4cb0dd08b809359b008c06b56c5e8e318bd0db84fa0b4c4f1d28c9",
+          "evaluationDigest": "f3cb91c4abe99f0e9cf15d7d1c592f3d6036a4ed39d3588f5b49943134c10789",
+          "manualInterventions": null
+        },
+        {
+          "taskId": "mcp",
+          "runId": "everpeace-live-tools-b92b3c47bdc747938a068b1b13727e2c:mcp",
+          "outcome": "passed",
+          "usage": "known",
+          "requests": 2,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "8c623182cfa8bfb5744939e1e7dc053e452b60522bd25fdec3da3e298f2f8002",
+          "buildDigest": "c7b9123baa4cb0dd08b809359b008c06b56c5e8e318bd0db84fa0b4c4f1d28c9",
+          "evaluationDigest": "f3cb91c4abe99f0e9cf15d7d1c592f3d6036a4ed39d3588f5b49943134c10789",
+          "manualInterventions": null
+        },
+        {
+          "taskId": "navigation",
+          "runId": "everpeace-live-tools-b92b3c47bdc747938a068b1b13727e2c:navigation",
+          "outcome": "passed",
+          "usage": "known",
+          "requests": 4,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "8c623182cfa8bfb5744939e1e7dc053e452b60522bd25fdec3da3e298f2f8002",
+          "buildDigest": "c7b9123baa4cb0dd08b809359b008c06b56c5e8e318bd0db84fa0b4c4f1d28c9",
+          "evaluationDigest": "f3cb91c4abe99f0e9cf15d7d1c592f3d6036a4ed39d3588f5b49943134c10789",
+          "manualInterventions": null
+        }
+      ],
+      "evidenceDigests": {
+        "plan": "5161dbc3c436b918847e0a71f00257469226e5c570b39cdcf5f8513401fdc7ca",
+        "candidate": "82a86fac6cfa19c649793e01bf20d147d1c80ad2d8f8b5d841b087546cdfb338",
+        "summary": "63a786629b8d206084139c68090c16a423555e5993d027680e39c1062d7d2edc"
+      },
+      "notes": [
+        "Imported historical evidence, not a run of the current candidate.",
+        "Missing evaluation digests, manual-intervention records or missing summaries are not inferred.",
+        "Different source/build candidates remain separate. No combined success rate is reported."
+      ]
+    },
+    {
+      "campaignId": "everpeace-live-tools-040-99490a7150a54e729dbaadff6ba83474",
+      "revision": "7a366caab3ff6e4e59a26de6559d903df92288bc",
+      "planned": 7,
+      "outcomes": {
+        "passed": 5,
+        "failed": 2,
+        "timedOut": 0,
+        "error": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "unknown": 0
+      },
+      "unknownUsage": 2,
+      "evidence": "insufficient",
+      "records": [
+        {
+          "taskId": "editing-review",
+          "runId": "everpeace-live-tools-040-99490a7150a54e729dbaadff6ba83474:editing-review",
+          "outcome": "passed",
+          "usage": "known",
+          "requests": 5,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "f74901f7aca56cd7d0d96683c42bf6f17fe58e043093d31c082104a9ff32611e",
+          "buildDigest": "cdce4ba85c344c7ece597ac82faa064f926033a0b169a52f71b947a490738fa0",
+          "evaluationDigest": "f3cb91c4abe99f0e9cf15d7d1c592f3d6036a4ed39d3588f5b49943134c10789",
+          "manualInterventions": null
+        },
+        {
+          "taskId": "background",
+          "runId": "everpeace-live-tools-040-99490a7150a54e729dbaadff6ba83474:background",
+          "outcome": "failed",
+          "usage": "unknown",
+          "requests": 2,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "f74901f7aca56cd7d0d96683c42bf6f17fe58e043093d31c082104a9ff32611e",
+          "buildDigest": "cdce4ba85c344c7ece597ac82faa064f926033a0b169a52f71b947a490738fa0",
+          "evaluationDigest": "f3cb91c4abe99f0e9cf15d7d1c592f3d6036a4ed39d3588f5b49943134c10789",
+          "manualInterventions": null
+        },
+        {
+          "taskId": "history",
+          "runId": "everpeace-live-tools-040-99490a7150a54e729dbaadff6ba83474:history",
+          "outcome": "passed",
+          "usage": "known",
+          "requests": 4,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "f74901f7aca56cd7d0d96683c42bf6f17fe58e043093d31c082104a9ff32611e",
+          "buildDigest": "cdce4ba85c344c7ece597ac82faa064f926033a0b169a52f71b947a490738fa0",
+          "evaluationDigest": "f3cb91c4abe99f0e9cf15d7d1c592f3d6036a4ed39d3588f5b49943134c10789",
+          "manualInterventions": null
+        },
+        {
+          "taskId": "plan-review",
+          "runId": "everpeace-live-tools-040-99490a7150a54e729dbaadff6ba83474:plan-review",
+          "outcome": "failed",
+          "usage": "unknown",
+          "requests": 4,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "f74901f7aca56cd7d0d96683c42bf6f17fe58e043093d31c082104a9ff32611e",
+          "buildDigest": "cdce4ba85c344c7ece597ac82faa064f926033a0b169a52f71b947a490738fa0",
+          "evaluationDigest": "f3cb91c4abe99f0e9cf15d7d1c592f3d6036a4ed39d3588f5b49943134c10789",
+          "manualInterventions": null
+        },
+        {
+          "taskId": "goal",
+          "runId": "everpeace-live-tools-040-99490a7150a54e729dbaadff6ba83474:goal",
+          "outcome": "passed",
+          "usage": "known",
+          "requests": 4,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "f74901f7aca56cd7d0d96683c42bf6f17fe58e043093d31c082104a9ff32611e",
+          "buildDigest": "cdce4ba85c344c7ece597ac82faa064f926033a0b169a52f71b947a490738fa0",
+          "evaluationDigest": "f3cb91c4abe99f0e9cf15d7d1c592f3d6036a4ed39d3588f5b49943134c10789",
+          "manualInterventions": null
+        },
+        {
+          "taskId": "web",
+          "runId": "everpeace-live-tools-040-99490a7150a54e729dbaadff6ba83474:web",
+          "outcome": "passed",
+          "usage": "known",
+          "requests": 2,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "f74901f7aca56cd7d0d96683c42bf6f17fe58e043093d31c082104a9ff32611e",
+          "buildDigest": "cdce4ba85c344c7ece597ac82faa064f926033a0b169a52f71b947a490738fa0",
+          "evaluationDigest": "f3cb91c4abe99f0e9cf15d7d1c592f3d6036a4ed39d3588f5b49943134c10789",
+          "manualInterventions": null
+        },
+        {
+          "taskId": "repair-cycle",
+          "runId": "everpeace-live-tools-040-99490a7150a54e729dbaadff6ba83474:repair-cycle",
+          "outcome": "passed",
+          "usage": "known",
+          "requests": 8,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "f74901f7aca56cd7d0d96683c42bf6f17fe58e043093d31c082104a9ff32611e",
+          "buildDigest": "cdce4ba85c344c7ece597ac82faa064f926033a0b169a52f71b947a490738fa0",
+          "evaluationDigest": "f3cb91c4abe99f0e9cf15d7d1c592f3d6036a4ed39d3588f5b49943134c10789",
+          "manualInterventions": null
+        }
+      ],
+      "evidenceDigests": {
+        "plan": "c2e4b2bea9660cb31af4e965a2a727e19d4124d5b21ae4fbafd285d69e411706",
+        "candidate": "1c7af96a9caced2f136956ba33cddd7b483dbaf9be65f016302c033d45508a05",
+        "summary": "7fc4496377b1731a6dc4aa51f5d7c344fb00b94be0cb5cb27b025d3a3f788421"
+      },
+      "notes": [
+        "Imported historical evidence, not a run of the current candidate.",
+        "Missing evaluation digests, manual-intervention records or missing summaries are not inferred.",
+        "Different source/build candidates remain separate. No combined success rate is reported."
+      ]
+    },
+    {
+      "campaignId": "everpeace-live-tools-retry-d54460b0d29d48f997bb9f960f4fef01",
+      "revision": "7a366caab3ff6e4e59a26de6559d903df92288bc",
+      "planned": 2,
+      "outcomes": {
+        "passed": 1,
+        "failed": 1,
+        "timedOut": 0,
+        "error": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "unknown": 0
+      },
+      "unknownUsage": 1,
+      "evidence": "insufficient",
+      "records": [
+        {
+          "taskId": "background",
+          "runId": "everpeace-live-tools-retry-d54460b0d29d48f997bb9f960f4fef01:background",
+          "outcome": "passed",
+          "usage": "known",
+          "requests": 5,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "f74901f7aca56cd7d0d96683c42bf6f17fe58e043093d31c082104a9ff32611e",
+          "buildDigest": "cdce4ba85c344c7ece597ac82faa064f926033a0b169a52f71b947a490738fa0",
+          "evaluationDigest": "f07962868ee9eace97bf008471afd3013ce36f8a4577d6b9109139f99a46f912",
+          "manualInterventions": null
+        },
+        {
+          "taskId": "plan-review",
+          "runId": "everpeace-live-tools-retry-d54460b0d29d48f997bb9f960f4fef01:plan-review",
+          "outcome": "failed",
+          "usage": "unknown",
+          "requests": 2,
+          "model": "grok-4.6",
+          "endpointId": "26e9a3ebfd2d157f9ffe9b4dd5cecce6a17f640ffa618f3a628d3dc48ec7417c",
+          "codeDigest": "f74901f7aca56cd7d0d96683c42bf6f17fe58e043093d31c082104a9ff32611e",
+          "buildDigest": "cdce4ba85c344c7ece597ac82faa064f926033a0b169a52f71b947a490738fa0",
+          "evaluationDigest": "f07962868ee9eace97bf008471afd3013ce36f8a4577d6b9109139f99a46f912",
+          "manualInterventions": null
+        }
+      ],
+      "evidenceDigests": {
+        "plan": "9f5d8a9e3c4065796141ca0004f2faf5b4610113de0dcc6861857f5756e2dbc3",
+        "candidate": "1c7af96a9caced2f136956ba33cddd7b483dbaf9be65f016302c033d45508a05",
+        "summary": "dbadfc648e1d38a3717cf92698f15550dd34be661e176500f7943292c4b41131"
+      },
+      "notes": [
+        "Imported historical evidence, not a run of the current candidate.",
+        "Missing evaluation digests, manual-intervention records or missing summaries are not inferred.",
+        "Different source/build candidates remain separate. No combined success rate is reported."
+      ]
+    },
+    {
+      "campaignId": "everpeace-live-tools-final-7a96e71207a247259335099033533126",
+      "revision": "7a366caab3ff6e4e59a26de6559d903df92288bc",
+      "planned": 7,
+      "outcomes": {
+        "passed": 0,
+        "failed": 0,
+        "timedOut": 0,
+        "error": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "unknown": 7
+      },
+      "unknownUsage": null,
+      "evidence": "insufficient",
+      "records": [],
+      "evidenceDigests": {
+        "plan": "52e48e319c03b19667e2f0e819ef3a8e1693edc4a2d8e2ad66fb7939b51c6c79",
+        "candidate": "d68d4414d9e9c2f11c22b8e865489b4d69977f98d03f6a79742b1b73a13d75e5",
+        "summary": null
+      },
+      "notes": [
+        "Imported historical evidence, not a run of the current candidate.",
+        "Missing evaluation digests, manual-intervention records or missing summaries are not inferred.",
+        "Different source/build candidates remain separate. No combined success rate is reported."
+      ]
+    },
+    {
+      "campaignId": "everpeace-live-tools-recheck-a908d3980f8945b1af64c811a028f86e",
+      "revision": "7a366caab3ff6e4e59a26de6559d903df92288bc",
+      "planned": 3,
+      "outcomes": {
+        "passed": 0,
+        "failed": 0,
+        "timedOut": 0,
+        "error": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "unknown": 3
+      },
+      "unknownUsage": null,
+      "evidence": "insufficient",
+      "records": [],
+      "evidenceDigests": {
+        "plan": "5d9a8d0a4701b2322334b0ca89fc95ea57a363244ed3d04fb4ad99e7a7e12998",
+        "candidate": "82a86fac6cfa19c649793e01bf20d147d1c80ad2d8f8b5d841b087546cdfb338",
+        "summary": null
+      },
+      "notes": [
+        "Imported historical evidence, not a run of the current candidate.",
+        "Missing evaluation digests, manual-intervention records or missing summaries are not inferred.",
+        "Different source/build candidates remain separate. No combined success rate is reported."
+      ]
+    },
+    {
+      "campaignId": "everpeace-live-tools-plan-bfe82a3b656d4b44b2186b883f85c12b",
+      "revision": "7a366caab3ff6e4e59a26de6559d903df92288bc",
+      "planned": 1,
+      "outcomes": {
+        "passed": 0,
+        "failed": 0,
+        "timedOut": 0,
+        "error": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "unknown": 1
+      },
+      "unknownUsage": null,
+      "evidence": "insufficient",
+      "records": [],
+      "evidenceDigests": {
+        "plan": "dcfaeb9f6c33a19866c565ec91dee73e253323c81c2d0f7395480eb90bb8a23e",
+        "candidate": "1c7af96a9caced2f136956ba33cddd7b483dbaf9be65f016302c033d45508a05",
+        "summary": null
+      },
+      "notes": [
+        "Imported historical evidence, not a run of the current candidate.",
+        "Missing evaluation digests, manual-intervention records or missing summaries are not inferred.",
+        "Different source/build candidates remain separate. No combined success rate is reported."
+      ]
+    }
+  ]
+}

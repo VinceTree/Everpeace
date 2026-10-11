@@ -33,6 +33,7 @@ export type SamplingErrorCategory =
   | "permanent";
 
 export type LoopEvent =
+  | { type: "cost_estimated"; estimate: import("../status/cost.js").CostEstimate }
   | { type: "sampling_started" }
   | { type: "reasoning_started" }
   | { type: "reasoning_finished" }

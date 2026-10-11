@@ -202,3 +202,7 @@ incomplete、空白、缺少／重复／乱序章节、空章节、没有缩短�
 ## 团队编码闭环
 
 默认单 Agent 不变，可选 TeamRuntime 由 production 建立，成员沿用 ReactAgent/CodingTaskRunner，根负责唯一最终验证、Goal 与 Memory。共享 ledger scope 禁止成员 reset，真实请求先持久化准入。完整调度、预算和恢复契约见 [TEAMS](TEAMS.md)。
+
+## 来源、能力与费用
+
+[安全与诊断契约](SECURITY_AND_DIAGNOSTICS.md) 约束 source_context 投影、持久工具 `_source`、压缩/Memory/团队来源保留；外部说明不进入宿主指令层。RequestExecutor 按已结算尝试派生单价快照与 estimate 事件，包含失败、重试、压缩和辅助/成员请求；request token budget 仍是准入而非硬性账单限制。doctor 使用同一计量边界和真实 SDK 离线 SSE 验收，未知 Usage 阻止后续探测。

@@ -1,0 +1,553 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "monorepo-build-order",
+      "prompt": "Repair the 100-package synthetic pnpm workspace dependency and build-order regressions. Keep all packages and build each dependency before its consumer.",
+      "workspacePath": ".everpeace-benchmark/monorepo-build-order",
+      "tags": [
+        "expanded",
+        "synthetic",
+        "monorepo-build-order"
+      ],
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "monorepo-build-order",
+        "sourceType": "synthetic",
+        "license": "Apache-2.0",
+        "fixtureDirectory": "monorepo-build-order/source",
+        "fixtureDigest": "507ab01e0a7ecd6cb82413cfb8ac3038634b48bad22f0cfd11d550a766797588"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "monorepo-build-order",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "monorepo-build-order",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "fixture": {
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "monorepo-build-order"
+          ],
+          "timeoutMs": 10000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "monorepo-build-order",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 60000
+        },
+        "seedPatch": "monorepo-build-order/seed.patch",
+        "referencePatch": "monorepo-build-order/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      }
+    },
+    {
+      "id": "fullstack-contract",
+      "prompt": "Fix the React frontend/Node HTTP API profile contract mismatch. Preserve the API's profile.displayName contract and render the real returned value.",
+      "workspacePath": ".everpeace-benchmark/fullstack-contract",
+      "tags": [
+        "expanded",
+        "synthetic",
+        "fullstack-contract"
+      ],
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "fullstack-contract",
+        "sourceType": "synthetic",
+        "license": "Apache-2.0",
+        "fixtureDirectory": "fullstack-contract/source",
+        "fixtureDigest": "c9c4fd5b531091a572f036fa7a503283b189b89b2f68f524c56258922a0b79d6"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "fullstack-contract",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "fullstack-contract",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "fixture": {
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "fullstack-contract"
+          ],
+          "timeoutMs": 10000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "fullstack-contract",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 60000
+        },
+        "seedPatch": "fullstack-contract/seed.patch",
+        "referencePatch": "fullstack-contract/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      }
+    },
+    {
+      "id": "typescript-generics",
+      "prompt": "Fix readonly array flattening, distributive union wrapping, and number overload inference without any or assertions that hide type errors.",
+      "workspacePath": ".everpeace-benchmark/typescript-generics",
+      "tags": [
+        "expanded",
+        "synthetic",
+        "typescript-generics"
+      ],
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "typescript-generics",
+        "sourceType": "synthetic",
+        "license": "Apache-2.0",
+        "fixtureDirectory": "typescript-generics/source",
+        "fixtureDigest": "4f2e4223b7babd0640dfeede91ab38e62cc86d672dc09b1b26849dc7d23b1349"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "typescript-generics",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "typescript-generics",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "fixture": {
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "typescript-generics"
+          ],
+          "timeoutMs": 10000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "typescript-generics",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 60000
+        },
+        "seedPatch": "typescript-generics/seed.patch",
+        "referencePatch": "typescript-generics/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      }
+    },
+    {
+      "id": "react-state-race",
+      "prompt": "Fix stale asynchronous React profile updates across changing IDs and unmount. The most recent active request must win without dropping valid updates.",
+      "workspacePath": ".everpeace-benchmark/react-state-race",
+      "tags": [
+        "expanded",
+        "synthetic",
+        "react-state-race"
+      ],
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "react-state-race",
+        "sourceType": "synthetic",
+        "license": "Apache-2.0",
+        "fixtureDirectory": "react-state-race/source",
+        "fixtureDigest": "221250244d4727b82c8149ab406a41d004facd8f0cf50fdf3b01187e357c0ab4"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "react-state-race",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "react-state-race",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "fixture": {
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "react-state-race"
+          ],
+          "timeoutMs": 10000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "react-state-race",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 60000
+        },
+        "seedPatch": "react-state-race/seed.patch",
+        "referencePatch": "react-state-race/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      }
+    },
+    {
+      "id": "sqlite-migration",
+      "prompt": "Fix the SQLite migration so user data survives up/down, repeated runs are idempotent, and failed migration steps roll back schema and version changes.",
+      "workspacePath": ".everpeace-benchmark/sqlite-migration",
+      "tags": [
+        "expanded",
+        "synthetic",
+        "sqlite-migration"
+      ],
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "sqlite-migration",
+        "sourceType": "synthetic",
+        "license": "Apache-2.0",
+        "fixtureDirectory": "sqlite-migration/source",
+        "fixtureDigest": "45d51b800ef93d4fa6d5fcecec4cbb7b2dfa75345463b2e7696d6560c772ad00"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "sqlite-migration",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "sqlite-migration",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "fixture": {
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "sqlite-migration"
+          ],
+          "timeoutMs": 10000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "sqlite-migration",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 60000
+        },
+        "seedPatch": "sqlite-migration/seed.patch",
+        "referencePatch": "sqlite-migration/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      }
+    },
+    {
+      "id": "cross-file-interface",
+      "prompt": "Finish the calculateInvoice public interface refactor across consumers and public declarations. Return {total,currency}, keep quantity calculation, and remove stale calculateTotal references.",
+      "workspacePath": ".everpeace-benchmark/cross-file-interface",
+      "tags": [
+        "expanded",
+        "synthetic",
+        "cross-file-interface"
+      ],
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "cross-file-interface",
+        "sourceType": "synthetic",
+        "license": "Apache-2.0",
+        "fixtureDirectory": "cross-file-interface/source",
+        "fixtureDigest": "2c24fa70d947b1a5082b89029b4879af09cebdcecadc257989c366df5cfce3a8"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "cross-file-interface",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "cross-file-interface",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "fixture": {
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "cross-file-interface"
+          ],
+          "timeoutMs": 10000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "cross-file-interface",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 60000
+        },
+        "seedPatch": "cross-file-interface/seed.patch",
+        "referencePatch": "cross-file-interface/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      }
+    },
+    {
+      "id": "windows-path-boundary",
+      "prompt": "Fix Windows path containment with Unicode, spaces, case-insensitive drive paths, UNC paths, traversal and sibling-prefix escapes. Cross-drive targets must remain outside.",
+      "workspacePath": ".everpeace-benchmark/windows-path-boundary",
+      "tags": [
+        "expanded",
+        "synthetic",
+        "windows-path-boundary"
+      ],
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "windows-path-boundary",
+        "sourceType": "synthetic",
+        "license": "Apache-2.0",
+        "fixtureDirectory": "windows-path-boundary/source",
+        "fixtureDigest": "32634fe703cf4f367c9556df6a6bb83bf44916b0ebd3838664e81319ce8cf0ba"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "windows-path-boundary",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "windows-path-boundary",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "fixture": {
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "windows-path-boundary"
+          ],
+          "timeoutMs": 10000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "windows-path-boundary",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 60000
+        },
+        "seedPatch": "windows-path-boundary/seed.patch",
+        "referencePatch": "windows-path-boundary/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      }
+    },
+    {
+      "id": "typescript-python-protocol",
+      "prompt": "Repair the TypeScript/Python JSON subprocess protocol and cancellation. Preserve requestId and total, await process closure, and reject cancellation without leaving a child running.",
+      "workspacePath": ".everpeace-benchmark/typescript-python-protocol",
+      "tags": [
+        "expanded",
+        "synthetic",
+        "typescript-python-protocol"
+      ],
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "typescript-python-protocol",
+        "sourceType": "synthetic",
+        "license": "Apache-2.0",
+        "fixtureDirectory": "typescript-python-protocol/source",
+        "fixtureDigest": "79e95d1ce7800fd666dff4a997ddc5a492660d0ff1992c3904229d34b65152fa"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "typescript-python-protocol",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "typescript-python-protocol",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "fixture": {
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "typescript-python-protocol"
+          ],
+          "timeoutMs": 10000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "typescript-python-protocol",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 60000
+        },
+        "seedPatch": "typescript-python-protocol/seed.patch",
+        "referencePatch": "typescript-python-protocol/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      }
+    },
+    {
+      "id": "node-pty-helper-952",
+      "prompt": "Fix node-pty #952's console-list helper exception path at the pinned revision. A lost AttachConsole race must send an empty list and exit cleanly; preserve normal results. This task only scores the helper exception path, not the complete detached-process sweep.",
+      "workspacePath": ".everpeace-benchmark/node-pty-helper-952",
+      "tags": [
+        "expanded",
+        "upstream_issue",
+        "windows"
+      ],
+      "source": {
+        "repositoryUrl": "https://github.com/microsoft/node-pty",
+        "commit": "1def5774632305246fe21f0f69e23a664d6c5910",
+        "issue": "https://github.com/microsoft/node-pty/issues/952",
+        "sourceType": "upstream_issue",
+        "license": "MIT"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "node-pty-helper-952",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "node-pty-helper-952",
+          "${WORKSPACE}"
+        ],
+        "timeoutMs": 60000
+      },
+      "fixture": {
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "node-pty-helper-952"
+          ],
+          "timeoutMs": 10000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "node-pty-helper-952",
+            "${WORKSPACE}",
+            "normal"
+          ],
+          "timeoutMs": 60000
+        },
+        "seedPatch": "node-pty-helper-952/seed.patch",
+        "referencePatch": "node-pty-helper-952/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      }
+    }
+  ]
+}

@@ -576,7 +576,7 @@ test("permissions are checked at execution time and changing policy retains agen
       ] };
       const history = params.input as Array<Record<string, unknown>>;
       outputs.push(...history.filter((item) => item.type === "function_call_output").map((item) => String(item.output)));
-      if (requests === 4) assert.equal(history.filter((item) => item.role === "user").length, 2);
+      if (requests === 4) assert.equal(history.filter((item) => item.role === "user" && !String(item.content).includes('"kind":"source_context"')).length, 2);
       return { id: "done", output_text: "done", output: [] };
     } } },
     io: {
@@ -1163,7 +1163,8 @@ test("agent refreshes learned memory per step and captures only after verificati
   await agent.finishMemoryTurn("verified");
   assert.equal(loadCount, 3);
   assert.equal(captures.length, 2);
-  assert.match(instructions[0]!, /Prefer the existing test style/u);
+  assert.match(prompts[0]!, /Prefer the existing test style/u);
+  assert.doesNotMatch(instructions[0]!, /Prefer the existing test style/u);
   assert.match(prompts[1]!, /README\.md/u);
   assert.equal((captures[0] as { toolCallCount: number }).toolCallCount, 1);
 });
@@ -1426,7 +1427,8 @@ test("agent exposes MCP tools, keeps approval separate, and returns MCP output",
   assert.equal(approvals.length, 1);
   assert.match(approvals[0]!, /calendar\/list/u);
   assert.deepEqual(calls, ['mcp__calendar__list:{"day":"today"}']);
-  assert.match(String(requests[0]?.instructions), /Calendar MCP instructions/u);
+  assert.match(JSON.stringify(requests[0]?.input), /Calendar MCP instructions/u);
+  assert.doesNotMatch(String(requests[0]?.instructions), /Calendar MCP instructions/u);
   const tools = requests[0]?.tools as Array<{ name: string }>;
   assert.ok(tools.some((tool) => tool.name === "mcp__calendar__list"));
   assert.match(JSON.stringify(requests[1]?.input), /meeting/u);
@@ -1453,17 +1455,17 @@ test("agent freezes MCP definitions and bindings across sampling retries and ref
       assert.ok(advertised);
       if (requests === 1) {
         assert.equal(advertised.description, "Calendar v1");
-        assert.match(String(params.instructions), /Calendar instructions v1/u);
+        assert.match(JSON.stringify(params.input), /Calendar instructions v1/u);
         catalogVersion = 2;
         throw Object.assign(new Error("temporary network failure"), { status: 503 });
       }
       if (requests === 2) {
         assert.equal(advertised.description, "Calendar v1");
-        assert.match(String(params.instructions), /Calendar instructions v1/u);
+        assert.match(JSON.stringify(params.input), /Calendar instructions v1/u);
         return { id: "retry-complete", output_text: "", output: [{ type: "function_call", name, arguments: "{}", call_id: "mcp-retry" }] };
       }
       assert.equal(advertised.description, "Calendar v2");
-      assert.match(String(params.instructions), /Calendar instructions v2/u);
+      assert.match(JSON.stringify(params.input), /Calendar instructions v2/u);
       return { id: "done", output_text: "done", output: [] };
     } } },
     mcp: {
@@ -1597,7 +1599,8 @@ test("agent progressively loads matching skills and injects explicit skill instr
   await agent.runTurn("use $demo");
 
   assert.deepEqual(reads, ['{"name":"demo"}']);
-  assert.match(String(requests[0]?.instructions), /Full explicit demo instructions/u);
+  assert.match(JSON.stringify(requests[0]?.input), /Full explicit demo instructions/u);
+  assert.doesNotMatch(String(requests[0]?.instructions), /Full explicit demo instructions/u);
   assert.ok((requests[0]!.tools as Array<{ name: string }>).some((tool) => tool.name === "read_skill"));
   assert.match(JSON.stringify(requests[1]?.input), /skill body/u);
 });
@@ -1802,7 +1805,7 @@ test("agent keeps the final response as context for the next turn", async () => 
   const history = requests[1]?.input as Array<Record<string, unknown>>;
   assert.equal(history[0]?.content, "first");
   assert.equal(history.some((item) => item.role === "assistant"), true);
-  assert.equal(history.at(-1)?.content, "second");
+  assert.equal(history.filter((item) => !String(item.content).includes('"kind":"source_context"')).at(-1)?.content, "second");
 });
 
 test("agent forwards an AbortSignal to every model request", async () => {
@@ -1887,8 +1890,8 @@ test("agent restores prior context and persists each new context batch", async (
     item.role === "developer"
     && String(item.content).startsWith("Host-maintained project rule snapshot revision ");
   const isCurrentRuleContext = (item: Record<string, unknown>): boolean =>
-    item.role === "developer"
-    && String(item.content).includes("Current host-maintained project rule snapshot (");
+    item.role === "user"
+    && String(item.content).includes('"kind":"source_context"');
   const requestInput = requests[0]?.input as Array<Record<string, unknown>>;
   assert.deepEqual(requestInput.filter((item) => !isPersistedRuleSnapshot(item) && !isCurrentRuleContext(item)), [
     { role: "user", content: "before restart" },

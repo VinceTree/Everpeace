@@ -40,3 +40,7 @@ Git 子进程移除继承 GIT_*、代理及 askpass 注入，禁用 system/globa
 网络回归使用真实本地 HTTP、TLS、IPv6、HTTP/HTTPS 代理、Git http-backend 与实际 socket 记录。测试通过 Node mock 把校验过的公网 IP 映射到本地监听器，并只在测试 TLS 入口添加公开 fixture CA；生产接口没有本地地址映射或关闭 TLS 的设置。测试证书与私钥是公开的测试身份，仅用于这些本地 fixture。
 
 特殊用途表的来源：[IANA IPv4](https://www.iana.org/assignments/iana-ipv4-special-registry)、[IANA IPv6](https://www.iana.org/assignments/iana-ipv6-special-registry)。Git 取消先拒绝新 CONNECT，保持已建立隧道直到进程树终止得到证据，再统一关闭转发器，避免断流使 Git 提前退出而与 Windows taskkill 竞态。dispatcher 清理失败仍关闭全部直属 socket，并只报告固定诊断。
+
+## 搜索与生命周期验收
+
+搜索 DOM 选择器、Brave 固定 HTTPS LLM Context 端点与统一响应租约见 [安全与诊断契约](SECURITY_AND_DIAGNOSTICS.md#搜索与响应生命周期)。HTML 默认保留提供方回退；明确选择 Brave 后不付费重试、不静默回退，Key 仅 AuthStorage。真实脱敏结构快照在 tests/fixtures/search-html；压力进程记录连接、租约、heap/external 和 RSS，清理失败不算成功。

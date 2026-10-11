@@ -12,6 +12,8 @@ export const SLASH_COMMANDS = [
   "/undo",
   "/permissions",
   "/mcp",
+  "/web",
+  "/cost",
   "/skills",
   "/memory",
   "/plan",
@@ -85,13 +87,15 @@ export const TUI_HELP = `Slash commands
   /undo    Undo the latest Agent turn when its files are unchanged
   /permissions  Select read-only, ask, workspace-write, or full-access tools
   /mcp     Inspect MCP servers; trust/revoke <server>; reconnect without replay
+  /web     Configure HTML search or your Brave LLM Context API subscription
+  /cost    View estimates and configure model prices; token budgets are not spending caps
   /skills  Create, install, inspect, and use local skills
   /memory  View and manage learned experience
   /plan    Plan a request; show, execute an approved plan, or exit
   /goal    Create, inspect, pause, or resume a session goal
   /compact Compact the model context
   /reasoning Set off, low, high, or max for the next turn
-  /doctor  Check the local runtime; add --live for one bounded model request
+  /doctor  Check local runtime; --live previews bounded protocol probes before approval
   /new     Create and enter a new session
   /fork    Fork the current idle session, optionally with a new title
   /resume  Find, resume, or permanently batch-delete local sessions

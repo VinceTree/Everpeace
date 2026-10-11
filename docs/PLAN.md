@@ -1,6 +1,12 @@
 # 当前开发计划
 
-## 当前实施：发布、分发与平台验收补丁（问题 5–10）
+## 当前实施：安全、诊断与评测补丁（11–20）
+
+按用户已批准方案完成私密报告、持续供应链门禁、多层 SBOM 与发布收据、外部来源/宿主注入验收、Web 压力/DOM 与 Brave、分阶段 doctor、九类固定评分器、逐候选成绩与请求费用估算。实现契约与入口统一在 [安全与诊断专题](architecture/SECURITY_AND_DIAGNOSTICS.md)，进度和实际证据只在 HANDOFF。
+
+本轮零付费模型/Brave 请求，第 16 项正式 DeepSeek 与中转 coding 闭环保持未完成。保持 macOS 实验性；专用 Windows Runner 未准备，不能以本机或 hosted skip 代替。本地串行四门禁通过后提交推送，PR 两平台 CI 与新安全门禁成功后合并；冻结 main 候选，再验证同包消费者及准确 commit 的 required native，全部成功前不得创建 tag/Release。未发布候选号沿用，已发布则重新递增并冻结。
+
+## 已实施边界：发布、分发与平台验收补丁（问题 5–10）
 
 共享门禁、准确 SHA 发布 DAG、原生依赖 bundle、独立消费者验收、专用 Windows 必测模式与 Action SHA 固定已实现，保留第 7 项 Oxlint，并按用户选择将 macOS 标为实验性支持。用户授权实施及补丁版本、提交、推送与 GitHub Release；专用 Windows 机器尚未准备，先交付代码和部署说明。远端激活、消费者完整证据与失败演练按下列验收执行，实际进度只在 HANDOFF 维护；原生任务未通过不能发布。
 

@@ -1377,7 +1377,7 @@ test("/reasoning applies on the next turn and persists with the session model", 
   view.unmount();
 });
 
-test("/doctor is local by default and sends a model check only with --live", async () => {
+test("/doctor is local by default and starts live requests only after preview confirmation", async () => {
   const model: RegisteredModel = { id: "doctor-model", model_name: "deepseek-flash", base_url: "https://api.deepseek.com", api_key: "secret" };
   const fixture = createFixture({ initial: [model] });
   const calls: boolean[] = [];
@@ -1397,6 +1397,9 @@ test("/doctor is local by default and sends a model check only with --live", asy
   liveView.stdin.write("/doctor --live");
   await tick();
   liveView.stdin.write("\r");
+  await waitFor(() => (liveView.lastFrame() ?? "").includes("Start diagnostic requests"));
+  assert.deepEqual(calls, [false]);
+  liveView.stdin.write("\u001b[B"); await tick(); liveView.stdin.write("\r");
   await waitFor(() => (liveView.lastFrame() ?? "").includes("Model request: completed"));
   assert.deepEqual(calls, [false, true]);
   liveView.unmount();

@@ -136,3 +136,11 @@ CLI → model registry + keyring → TUI dependencies → App
 团队源码、回归与产品边界集中在 [TEAMS](TEAMS.md)。`src/team/` 是共享调度／预算／持久化／隔离整合；`team-surface` 是命令窗口，CLI/SDK 复用 production。项目理解的 `project-insights` 缓存仅存带当前字节指纹的受限 import 解析，不能充当编辑观察。
 
 公共资源传输与代理边界见 [NETWORK](NETWORK.md)，入口是 `src/network/`、`src/tools/web.ts`、`src/skills/manager.ts`，回归是 `tests/unit/network/public-http.test.ts`。lint 与源码安装验证在 `scripts/`，对应 [DEVELOPMENT](../DEVELOPMENT.md)；当前团队评测准备见 [TEAM_READINESS](../benchmark/TEAM_READINESS.md)。
+
+## 安全与诊断入口
+
+- 安全：SECURITY.md、scripts/security、.github/workflows/security.yml；策略和发布失败回归在 tests/unit/architecture。
+- 搜索：src/tools/search-provider.ts、web.ts，tests/fixtures/search-html 与 web-lifecycle-stress；UI /web。
+- 诊断/价格：src/providers/doctor.ts、src/status/cost.ts、src/storage/user-settings.ts，Session/SDK 可选 estimate 事件；UI /doctor --live、/cost。
+- 来源：src/agent/source-context.ts、providers/request-projection.ts，生产 runner injection-boundaries 矩阵。
+- 评测：src/benchmark/report.ts、scripts/benchmark、tests/fixtures/expanded、docs/benchmark/EXPANDED_TASKS.json 与 PUBLIC_REPORT。稳定契约见 [专题](SECURITY_AND_DIAGNOSTICS.md)。

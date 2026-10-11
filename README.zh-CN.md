@@ -36,7 +36,7 @@ pnpm dev
 解释请求预算的执行路径，并提出一个聚焦的回归修复计划。
 ```
 
-审阅或修订计划，批准后显式开始执行。`/diff` 审阅改动，`/status` 查看请求设置和用量，`/resume` 恢复 Session。`/doctor` 进行本地诊断；`/doctor --live` 会发起模型请求，可能产生费用。宿主 TUI 界面使用英文。
+审阅或修订计划，批准后显式开始执行。`/diff` 审阅改动，`/status` 查看请求设置和用量，`/resume` 恢复 Session。`/doctor` 进行本地诊断；`/doctor --live` 先预览有界探测，显式开始后可能产生费用。宿主 TUI 界面使用英文。
 
 使用构建后的 CLI：
 
@@ -50,17 +50,23 @@ everpeace
 
 ## 真实调用，验证改动
 
-![Everpeace 真实工具验收：37 个工具入口、14 组场景均取得闭环证据](assets/features.webp)
+| 独立历史计划 | 成功／计划 | 失败 | 超时／错误／取消／跳过 | Unknown Usage |
+| --- | --- | --- | --- | --- |
+| 初始工具验收 | 7 / 13 | 6 | 0 / 0 / 0 / 0 | 5 |
+| 后续工具验收 | 5 / 7 | 2 | 0 / 0 / 0 / 0 | 2 |
+| 独立重试计划 | 1 / 2 | 1 | 0 / 0 / 0 / 0 | 1 |
 
-[查看完整尺寸图表](assets/features.webp)。
-
-这组隔离 Windows 场景通过中转的 `grok-4.6`，使用生产 runner 与原生 sandbox。**PASS 表示同一实测源码与构建的两个独立阶段中，每组至少取得一次闭环证据。** 包含 Plan 修订审批与基于实际来源的网页问答。首阶段因未知用量停止，失败和跳过项继续保留在本地。这不是整轮成功率、DeepSeek 实测结果或成本对比。
+这些是既有 `grok-4.6` 中转运行。不同源码／构建候选分别展示；缺评测摘要或人工介入记录均标为**证据不足**。另三份计划缺少汇总，结果未知。这不是当前候选或 DeepSeek 的成绩。[逐次证据与缺失记录](docs/benchmark/PUBLIC_REPORT.md)。新增九类任务已有离线评分器证明，本轮真实模型运行次数为零。
 
 根到目标目录的规则、`@` 文件附件和按需项目地图帮助 Agent 理解代码。编辑基于当前文件观察，提供绑定权限的预览和拒绝并发覆盖的 undo。Session、fork 和上下文检查点在恢复时保留工作与验证债务。
 
 配置 MCP 的工具、资源和 prompts，以及本地 Skills，可以扩展 Agent。Learned Memory 保存偏好与经过验证的经验；公共网页访问检查重定向与网络边界。搜索的首选服务不可用时，会依次尝试中国区 Bing 和 DuckDuckGo。配置和完整限制见 [使用指南](docs/USAGE.zh-CN.md)。
 
 MCP stdio 程序需要独立的启动信任：使用 `/mcp trust <server>` 审阅并保存当前工作区及准确配置的授权，`/mcp reconnect` 启动或重载，`/mcp revoke <server>` 撤销并取消访问。批准意味着允许程序以宿主用户权限运行；工具调用审批不提供进程沙箱。远程 MCP 必须使用 HTTPS，本机回环 HTTP 需要单独批准，所有重定向均拒绝。缺少启动批准时，非交互 CLI/SDK 在模型请求前返回 `interaction_required`（退出码 5）。
+
+默认搜索使用 DOM 选择器；`/web` 可明确选择 Brave LLM Context，密钥只保存在系统凭据库，保存不发请求。`/doctor --live` 先预览有界流式、工具、用量与取消诊断，默认 Cancel。`/cost` 显示用户定价的估算、未知／不完整计量和任务预警；请求 Token 预算不是费用上限。[安全与诊断契约](docs/architecture/SECURITY_AND_DIAGNOSTICS.md)。
+
+漏洞请通过 [GitHub 私密报告](https://github.com/VinceTree/Everpeace/security/advisories/new) 提交，支持范围与协调披露见 [SECURITY.md](SECURITY.md)。依赖审计、脱敏秘密扫描、许可证策略及绑定候选的 SBOM 证据是合并和发布必需检查。
 
 ## 自动执行同一工作流
 

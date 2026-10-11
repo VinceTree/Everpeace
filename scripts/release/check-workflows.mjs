@@ -30,7 +30,10 @@ export function checkWorkflows(root) {
   assert.deepEqual(Object.keys(release.on), ["workflow_dispatch"], "Release must only accept explicit dispatch");
   assert.equal(release.permissions.contents, "read");
   const publish = release.jobs.publish;
-  assert.deepEqual(publish.needs, ["candidate", "package", "consumers", "native", "gate"]);
+  assert.deepEqual(publish.needs, ["candidate", "package", "consumers", "security", "evidence", "native", "gate"]);
+  const test = parse(readFileSync(path.join(directory, "test.yml"), "utf8"));
+  assert.deepEqual(test.jobs.required.needs, ["validate", "security"]);
+  for (const job of ["security", "evidence"]) assert.ok(release.jobs.gate.needs.includes(job));
   assert.equal(publish.permissions.contents, "write");
   assert.equal(publish.if, "github.event.inputs.failure_drill != 'true'");
   assert.equal(release.jobs.native.permissions.actions, "write", "The reusable queue watchdog needs caller cancellation permission");

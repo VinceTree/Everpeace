@@ -14,6 +14,7 @@ import {
   type ResponsesClientLike,
 } from "../agent/react-agent.js";
 import type { RequestAttemptLedger } from "../agent/request-attempt-ledger.js";
+import { CostSettingsStore, CostWarningTracker, type CostEstimate } from "../status/cost.js";
 import { ProcessCleanupError } from "../tools/process-completion.js";
 import { GoalRuntime } from "../goal/runtime.js";
 import { McpRuntime, type McpRuntimeLike } from "../mcp/runtime.js";
@@ -51,6 +52,8 @@ import type { TaskProgress } from "../workflow/task-progress.js";
 import { projectWorkflowContext } from "../workflow/model-context.js";
 import { POLICY_DENIED_REMEDY } from "../tools/tool-feedback.js";
 import { hasOpaqueProviderContext, resolveProviderCapabilities } from "../providers/capabilities.js";
+import { SearchSettingsStore } from "../tools/search-provider.js";
+import { createWebToolExecutor } from "../tools/web.js";
 
 export type ProductionAgentRestore = Pick<
   ReactAgentOptions,
@@ -89,6 +92,11 @@ export interface ProductionAgentOptions {
   learnedMemory?: LearnedMemoryRuntimeLike;
   learnedMemoryPolicy?: Partial<LearnedMemoryPolicy>;
   requestAttemptLedger?: RequestAttemptLedger;
+  costSettingsStore?: CostSettingsStore | null;
+  costWarningTracker?: CostWarningTracker;
+  costResetOnTask?: boolean;
+  web?: import("../tools/web.js").WebToolExecutor;
+  onCostEstimate?(estimate: CostEstimate): Promise<void> | void;
   restore?: ProductionAgentRestore;
   providerRuntime?: ProviderRuntime;
   runMemoryRequest?: MemoryRequestRunner;
@@ -144,6 +152,8 @@ function providerClient(provider: ProviderRuntime): ResponsesClientLike {
  * request-budget behavior here.
  */
 export function createProductionAgent(options: ProductionAgentOptions): ProductionAgentHandle {
+  const costSettings = options.costSettingsStore === undefined ? new CostSettingsStore() : options.costSettingsStore;
+  const costTracker = options.costWarningTracker ?? new CostWarningTracker();
   const capabilities = options.providerRuntime?.capabilities ?? resolveProviderCapabilities(options.model.base_url, options.model.model_name, options.model.responses_profile);
   if (hasOpaqueProviderContext(options.restore?.initialHistory ?? []) && !capabilities.encryptedReasoning) {
     throw new Error("Saved opaque provider context is incompatible with this Responses profile. Restore the original profile or start a new Session.");
@@ -216,6 +226,7 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     confirmGoal: (prompt, signal) => confirmMember(() => options.io.confirmGoal?.(prompt, signal ?? team?.signal()) ?? Promise.resolve(false)),
   } : options.io;
   const executeMember = async (execution: MemberExecution) => {
+    const rootCostSessionId = options.sessionId();
     const workspacePath = execution.workspace?.workspace ?? options.workspacePath;
     const worker = execution.member.task.role === "worker";
     const getPolicy = (): PermissionPolicy => {
@@ -259,6 +270,8 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     });
     try {
       memberHandle = createProductionAgent({ model, workspacePath, io, sessionStore: options.sessionStore, sessionId: () => session.id, mcp: null, learnedMemoryStore: null, codeNavigation: null, requestAttemptLedger: execution.ledger,
+        costSettingsStore: costSettings, costWarningTracker: costTracker, costResetOnTask: false,
+        onCostEstimate: async (estimate) => { if (rootCostSessionId) await options.sessionStore.appendCost(rootCostSessionId, estimate); await options.onCostEstimate?.(estimate); options.restore?.onEvent?.({ type: "cost_estimated", estimate }); },
         restore: {
           onHistoryAppend: (items) => options.sessionStore.appendContext(session.id, items),
           onContextCompacted: (items, automatic, usage) => options.sessionStore.compactContext(session.id, items, automatic, usage),
@@ -285,6 +298,26 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     });
   }
   const agent = new ReactAgent({
+    ...(costSettings && (team || options.requestAttemptLedger) ? { requestCost: {
+      modelId: options.model.id,
+      price: () => costSettings.price(options.model.id),
+      tracker: costTracker,
+      resetOnTask: options.costResetOnTask ?? true,
+      forRequest() {
+        const id = options.sessionId();
+        return { modelId: options.model.id, price: () => costSettings.price(options.model.id), tracker: costTracker, async settled(estimate) {
+          if (id) await options.sessionStore.appendCost(id, estimate);
+          await options.onCostEstimate?.(estimate);
+          restore?.onEvent?.({ type: "cost_estimated", estimate });
+        } };
+      },
+      async settled(estimate) {
+        const id = options.sessionId(); if (id) await options.sessionStore.appendCost(id, estimate);
+        await options.onCostEstimate?.(estimate);
+        restore?.onEvent?.({ type: "cost_estimated", estimate });
+      },
+    } } : {}),
+    web: options.web ?? createWebToolExecutor({ searchProvider: new SearchSettingsStore().provider() }),
     workspacePath: options.workspacePath,
     client,
     model: options.model.model_name,

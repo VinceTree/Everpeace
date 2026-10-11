@@ -127,6 +127,7 @@ export function createProcessExecCommandHost(options: { outputStallMs?: number }
 
 function progressEvent(event: ExecEvent): ExecProgressEvent {
   switch (event.type) {
+    case "cost_estimated": return { ...event };
     case "team_updated": case "agent_updated": case "team_usage": case "agent_integrated":
     case "session_started":
       return { ...event };
@@ -160,6 +161,7 @@ function jsonUsage(result: ExecResult): ExecJsonlUsage | undefined {
 
 function humanProgress(event: ExecEvent): string | undefined {
   switch (event.type) {
+    case "cost_estimated": return event.estimate.warning ? "Estimated cost warning threshold reached; in-flight billing may continue.\n" : undefined;
     case "session_started":
       return `Session ${event.sessionId} · ${event.modelName}${event.parentSessionId ? ` · continued from ${event.parentSessionId}` : ""}\n`;
     case "agent_updated": case "agent_integrated":

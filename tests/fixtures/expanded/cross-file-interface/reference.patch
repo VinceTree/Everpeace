@@ -1,0 +1,14 @@
+diff --git a/client.mjs b/client.mjs
+--- a/client.mjs
++++ b/client.mjs
+@@ -1,2 +1,2 @@
+-import {calculateTotal} from './pricing.mjs';
+-export function checkout(items){return calculateTotal(items);}
++import {calculateInvoice} from './pricing.mjs';
++export function checkout(items){return calculateInvoice(items);}
+diff --git a/index.d.ts b/index.d.ts
+--- a/index.d.ts
++++ b/index.d.ts
+@@ -1,1 +1,1 @@
+-export function calculateTotal(items:{price:number;quantity:number}[]):{total:number;currency:string};
++export function calculateInvoice(items:{price:number;quantity:number}[]):{total:number;currency:string};

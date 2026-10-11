@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "records": [
+    {
+      "provider": "bing",
+      "source": "https://www.bing.com/search?q=typescript",
+      "capturedAt": "2026-10-11",
+      "originalSha256": "12ed0ee74024ee36ad5ded426872e522355832bc889226869e008e9ecf9d2a10",
+      "minimizedSha256": "a51bd148d87cbefab1595e2b365f61b0d9d84ebee87fae4881c4a27875d94e81",
+      "transform": "Two actual result structures; text and URLs replaced with fixtures, non-class attributes and resource/script elements removed. No original query results retained."
+    },
+    {
+      "provider": "duckduckgo",
+      "source": "https://html.duckduckgo.com/html/?q=typescript",
+      "capturedAt": "2026-10-11",
+      "originalSha256": "32e38b0e59d3ab7637b12c72104bdb2ac4e1b5c5df032fab577021162acb5876",
+      "minimizedSha256": "1c065160567e95f389d13085b1eedd83a1a1f871b90f7f6d849aa0046d5f7b4f",
+      "transform": "Two actual result structures; text and URLs replaced with fixtures, non-class attributes and resource/script elements removed. No original query results retained."
+    }
+  ]
+}

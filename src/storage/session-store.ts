@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { isCostEstimate, type CostEstimate } from "../status/cost.js";
 import { createReadStream, promises as fs } from "node:fs";
 import { createInterface } from "node:readline";
 import os from "node:os";
@@ -146,6 +147,7 @@ export interface SessionLineage {
 }
 
 export interface LoadedSession {
+  costs?: import("../status/cost.js").CostEstimate[];
   summary: SessionSummary;
   timeline: StoredTimelineEntry[];
   context: Array<Record<string, unknown>>;
@@ -345,6 +347,7 @@ interface ForkResumeUpdatedEvent extends EventBase {
 interface TeamUpdatedEvent extends EventBase { type: "team_updated"; team: SessionTeamReference; }
 
 type SessionEvent =
+  | (EventBase & { type: "cost_estimated"; estimate: import("../status/cost.js").CostEstimate })
   | TeamUpdatedEvent
   | SessionCreatedEvent
   | TitleUpdatedEvent
@@ -455,6 +458,10 @@ function parseEvent(value: unknown): SessionEvent {
   }
 
   const base = { version: SESSION_FORMAT_VERSION, at: value.at } as const;
+  if (value.type === "cost_estimated") {
+    if (!isCostEstimate(value.estimate)) throw new Error("Session cost estimate is invalid");
+    return { ...base, type: "cost_estimated", estimate: structuredClone(value.estimate) };
+  }
   if (value.type === "session_created") {
     if (
       !isNonEmptyString(value.session_id) ||
@@ -781,6 +788,7 @@ async function readSession(filePath: string, trace: PerformanceTrace, summaryOnl
   const timeline: StoredTimelineEntry[] = [];
   let context: Array<Record<string, unknown>> = [];
   let usage = createEmptySessionUsage();
+  const costs: CostEstimate[] = [];
 
   let goal: SessionGoal | undefined;
   let workflow: WorkflowState | undefined;
@@ -811,6 +819,7 @@ async function readSession(filePath: string, trace: PerformanceTrace, summaryOnl
       continue;
     }
     updatedAt = event.at;
+    if (event.type === "cost_estimated" && !summaryOnly) costs.push(event.estimate);
     if (event.type === "title_updated") {
       title = event.title;
       titlePending = false;
@@ -879,6 +888,7 @@ async function readSession(filePath: string, trace: PerformanceTrace, summaryOnl
     timeline,
     context,
     usage,
+    ...(costs.length ? { costs } : {}),
     ...(goal ? { goal } : {}),
     ...(workflow ? { workflow } : {}),
     ...(taskProgress ? { taskProgress: cloneTaskProgress(taskProgress) } : {}),
@@ -1370,6 +1380,11 @@ export class SessionStore implements SessionStoreLike {
       items: items.map((item) => ({ ...item })),
       ...metadata,
     });
+  }
+
+  appendCost(sessionId: string, estimate: CostEstimate): Promise<void> {
+    if (!isCostEstimate(estimate)) throw new Error("Invalid cost estimate");
+    return this.#append(sessionId, { version: SESSION_FORMAT_VERSION, type: "cost_estimated", at: this.#now().toISOString(), estimate: structuredClone(estimate) });
   }
 
   appendUsage(

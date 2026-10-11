@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 import { SystemAuthStorage } from "../storage/auth-storage.js";
 import { ModelRegistry } from "../storage/model-registry.js";
 import { createFileBenchmarkArtifactSink } from "./artifacts.js";
@@ -11,13 +11,14 @@ import { parseReproducibleBenchmarkTaskCatalog } from "./catalog.js";
 import { prepareBenchmarkFixture, proveBenchmarkFixture } from "./preparation.js";
 import { createProductionBenchmarkAdapter } from "./production.js";
 import { createInstrumentedDshAdapter, PINNED_DSH_REVISION } from "./dsh.js";
-import { createCheckoutBenchmarkAdapter, preflightBenchmarkCheckout } from "./checkout.js";
+import { createCheckoutBenchmarkAdapter, preflightBenchmarkCheckout, captureBenchmarkCheckoutIdentity } from "./checkout.js";
 import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult, BenchmarkTask } from "./types.js";
 import { isResponsesProfile, type ResponsesProfile } from "../providers/capabilities.js";
 import { normalizeBaseUrl } from "../providers/openai-compatible.js";
 import { compareAgentStrategies } from "./strategy-comparison.js";
 import { normalizeTeamOptions, type TeamOptions } from "../team/types.js";
 import { captureBenchmarkEvaluationDigest } from "./evaluation-identity.js";
+import { publicBenchmarkReport, benchmarkMarkdown } from "./report.js";
 
 interface ExternalHarnessConfig {
   kind: "instrumented-process";
@@ -397,6 +398,15 @@ async function live(config: CampaignConfig): Promise<void> {
   });
   const tasks = await loadTasks(config);
   const plan = createBenchmarkCampaignPlan(tasks, harnesses, config.repetitions, config.seed);
+  const identities: Record<string, { codeDigest: string; buildDigest: string }> = {};
+  for (const harness of config.harnesses) {
+    if (harness.kind === "instrumented-process") continue;
+    const identity = harness.kind === "everpeace"
+      ? await captureBenchmarkCheckoutIdentity(resolve(dirname(fileURLToPath(import.meta.url)), "../.."), fileURLToPath(import.meta.url))
+      : await captureBenchmarkCheckoutIdentity(harness.sourceRoot, harness.entryPath);
+    identities[harness.name ?? "everpeace"] = { codeDigest: identity.sourceDigest, buildDigest: identity.buildDigest };
+  }
+  const evaluationDigest = await captureBenchmarkEvaluationDigest(config.catalogPath, config.fixtureRoot);
   await mkdir(config.artifactsRoot, { recursive: true });
   await writeFile(resolve(config.artifactsRoot, "campaign-plan.json"), JSON.stringify({
     campaignId: config.campaignId,
@@ -423,6 +433,18 @@ async function live(config: CampaignConfig): Promise<void> {
     },
   });
   await writeFile(resolve(config.artifactsRoot, "campaign-result.json"), JSON.stringify(result, null, 2), "utf8");
+  if (await captureBenchmarkEvaluationDigest(config.catalogPath, config.fixtureRoot) !== evaluationDigest) throw new Error("Evaluation changed during the campaign; results cannot be published as frozen evidence");
+  for (const harness of config.harnesses) {
+    if (harness.kind === "instrumented-process") continue;
+    const current = harness.kind === "everpeace"
+      ? await captureBenchmarkCheckoutIdentity(resolve(dirname(fileURLToPath(import.meta.url)), "../.."), fileURLToPath(import.meta.url))
+      : await captureBenchmarkCheckoutIdentity(harness.sourceRoot, harness.entryPath);
+    const frozen = identities[harness.name ?? "everpeace"]!;
+    if (current.sourceDigest !== frozen.codeDigest || current.buildDigest !== frozen.buildDigest) throw new Error("Harness changed during the campaign; results cannot be published as frozen evidence");
+  }
+  const publicReport = publicBenchmarkReport(result, { realModelRuns: true, evaluationDigest, byAdapter: identities, sourceTypes: Object.fromEntries(tasks.map((task) => [task.id, task.source?.sourceType ?? "seeded_upstream"])) });
+  await writeFile(resolve(config.artifactsRoot, "public-report.json"), JSON.stringify(publicReport, null, 2) + "\n", "utf8");
+  await writeFile(resolve(config.artifactsRoot, "public-report.md"), benchmarkMarkdown(publicReport), "utf8");
   const baseline = config.harnesses.find((harness) => harness.kind === "everpeace-checkout" && harness.loopStrategy === "baseline");
   const candidate = config.harnesses.find((harness) => harness.kind === "everpeace-checkout" && harness.loopStrategy === "candidate");
   if (baseline && candidate && baseline.kind === "everpeace-checkout" && candidate.kind === "everpeace-checkout") {

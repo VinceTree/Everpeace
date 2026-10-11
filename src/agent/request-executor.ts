@@ -2,6 +2,7 @@ import { normalizeTokenUsageSample } from "../status/model-status.js";
 import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 import { ModelStreamCleanupError } from "./response-errors.js";
 import { RequestAttemptLedger, type RequestAttemptStatus, type RequestPurpose } from "./request-attempt-ledger.js";
+import { recordRequestCost, type RequestCostContext, type ModelPrice } from "../status/cost.js";
 
 export interface RequestAccountingScope {
   readonly ledger: RequestAttemptLedger;
@@ -13,14 +14,17 @@ export class RequestExecutor {
   readonly #ledger: RequestAttemptLedger;
   #cleanupFailure: ResourceCleanupError | undefined;
 
-  constructor(ledger: RequestAttemptLedger) {
+  constructor(ledger: RequestAttemptLedger, readonly cost?: RequestCostContext) {
     this.#ledger = ledger;
   }
 
-  async execute<T extends { usage?: unknown; status?: unknown }>(purpose: RequestPurpose, run: () => Promise<T>, admission?: { reservation: number; signal?: AbortSignal }): Promise<T> {
+  async execute<T extends { usage?: unknown; status?: unknown }>(purpose: RequestPurpose, run: () => Promise<T>, admission?: { reservation: number; signal?: AbortSignal }, cost = this.cost): Promise<T> {
     let attempt: number;
+    let pricing: ModelPrice | null = null;
     try {
       if (this.#cleanupFailure) throw this.#cleanupFailure;
+      cost = cost?.forRequest?.() ?? cost;
+      pricing = await cost?.price() ?? null;
       await this.#ledger.admit(purpose, admission?.reservation ?? 0, admission?.signal);
       attempt = this.#ledger.begin(purpose);
     } catch (error) {
@@ -39,14 +43,18 @@ export class RequestExecutor {
       this.#ledger.settle(attempt, status, normalizeTokenUsageSample(result.usage));
       settled = true;
       await this.#ledger.flush();
+      if (cost) await recordRequestCost(cost, attempt, purpose, status, normalizeTokenUsageSample(result.usage), pricing);
       return result;
     } catch (error) {
       if (error instanceof ResourceCleanupError) this.#cleanupFailure ??= error;
       if (!settled) {
         const record = error && typeof error === "object" ? error as { name?: unknown; code?: unknown } : undefined;
         const cancelled = record?.name === "AbortError" || record?.code === "ABORT_ERR";
-        this.#ledger.settle(attempt, started ? cancelled ? "cancelled" : "failed" : "rejected", !started ? { input_tokens: 0, output_tokens: 0, total_tokens: 0 } : error instanceof ModelStreamCleanupError ? error.usage : null);
+        const status = started ? cancelled ? "cancelled" : "failed" : "rejected";
+        const usage = !started ? { input_tokens: 0, output_tokens: 0, total_tokens: 0 } : error instanceof ModelStreamCleanupError ? error.usage : null;
+        this.#ledger.settle(attempt, status, usage);
         await this.#ledger.flush();
+        if (started && cost) await recordRequestCost(cost, attempt, purpose, status, usage, pricing);
       }
       throw error;
     }

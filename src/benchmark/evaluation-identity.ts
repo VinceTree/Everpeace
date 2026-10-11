@@ -24,3 +24,17 @@ export async function captureBenchmarkEvaluationDigest(catalogPath: string, fixt
   await visit(fixtureRoot);
   return hash.digest("hex");
 }
+
+export async function captureFixtureTreeDigest(directory: string): Promise<string> {
+  const hash = createHash("sha256");
+  async function visit(current: string): Promise<void> {
+    const metadata = await lstat(current);
+    if (metadata.isSymbolicLink()) throw new Error("Fixture source cannot contain symbolic links");
+    if (metadata.isDirectory()) { for (const name of (await readdir(current)).sort()) await visit(path.join(current, name)); }
+    else if (metadata.isFile()) {
+      const name = path.relative(directory, current).split(path.sep).join("/"); const bytes = await readFile(current);
+      hash.update(name).update("\0").update(String(bytes.byteLength)).update("\0").update(bytes);
+    } else throw new Error("Fixture source must contain only ordinary files");
+  }
+  await visit(directory); return hash.digest("hex");
+}

@@ -45,6 +45,9 @@ export interface BenchmarkTaskFixture {
 }
 
 export interface BenchmarkTaskSource {
+  sourceType?: "synthetic" | "seeded_upstream" | "upstream_issue";
+  fixtureDirectory?: string;
+  fixtureDigest?: string;
   repositoryUrl: string;
   commit: string;
   issue: string;
@@ -207,6 +210,7 @@ export interface BenchmarkRunResult {
   diagnosticRounds?: number;
   firstVerificationSuiteStatus?: BenchmarkHarnessResult["firstVerificationSuiteStatus"];
   preparationError?: string;
+  preparationOutcome?: import("./preparation-failure.js").PreparationOutcome;
 }
 
 export interface BenchmarkSuiteSummary {
@@ -241,5 +245,5 @@ export interface BenchmarkSkippedRun {
   adapter?: string;
   taskId: string;
   repetition: number;
-  reason: "budget_exhausted" | "usage_unknown" | "cancelled" | "cleanup_failed" | "isolation_failed";
+  reason: "budget_exhausted" | "usage_unknown" | "cancelled" | "cleanup_failed" | "isolation_failed" | "unsupported_platform" | "missing_toolchain" | "preparation_failed";
 }

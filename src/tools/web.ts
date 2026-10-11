@@ -1,5 +1,8 @@
 import { withPublicResponse } from "../network/public-http.js";
 import type { FetchLike, HostLookup } from "../network/public-address.js";
+import { parseDocument } from "htmlparser2";
+import { selectAll, selectOne } from "css-select";
+import { textContent, getAttributeValue } from "domutils";
 export { isPublicIpAddress, validatePublicUrl, type FetchLike, type HostLookup } from "../network/public-address.js";
 
 const BING_SEARCH_ENDPOINTS = [
@@ -43,9 +46,16 @@ export interface WebToolExecutor {
 }
 
 export interface WebToolOptions {
+  env?: NodeJS.ProcessEnv;
   fetch?: FetchLike;
   lookup?: HostLookup;
   timeoutMs?: number;
+  searchProvider?: SearchProvider;
+}
+
+export interface SearchProvider {
+  readonly name: "html" | "brave";
+  search(query: string, options: WebToolOptions & { signal?: AbortSignal }): Promise<WebSearchResult>;
 }
 
 export const WEB_SEARCH_TOOL_DEFINITION = {
@@ -176,59 +186,35 @@ function normalizeSearchUrl(value: string): string | undefined {
     }
   }
 
-  return url.protocol === "http:" || url.protocol === "https:"
+  return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password && url.href.length <= 2048
     ? url.toString()
     : undefined;
 }
 
 export function parseDuckDuckGoResults(html: string): WebSearchItem[] {
-  const results: WebSearchItem[] = [];
-  const blocks = html.split(/<div class="result results_links[^"]*">/giu);
-
-  for (const block of blocks.slice(1)) {
-    const titleMatch = block.match(
-      /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/iu,
-    );
-    if (!titleMatch) continue;
-    const url = normalizeSearchUrl(titleMatch[1] ?? "");
-    const title = htmlFragmentToText(titleMatch[2] ?? "");
-    if (!url || !title) continue;
-
-    const snippetMatch = block.match(
-      /<(?:a|div)[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/(?:a|div)>/iu,
-    );
-    results.push({
-      title,
-      url,
-      snippet: htmlFragmentToText(snippetMatch?.[1] ?? ""),
-    });
-    if (results.length >= SEARCH_RESULT_LIMIT) break;
-  }
-
-  return results;
+  return parseSearchDom(html, ".result.results_links", "a.result__a", ".result__snippet");
 }
 
 export function parseBingResults(html: string): WebSearchItem[] {
+  return parseSearchDom(html, "li.b_algo", "h2 a", ".b_caption p");
+}
+
+function parseSearchDom(html: string, blockSelector: string, titleSelector: string, snippetSelector: string): WebSearchItem[] {
   const results: WebSearchItem[] = [];
-  const blocks = html.split(/<li class="b_algo"[^>]*>/giu);
-
-  for (const block of blocks.slice(1)) {
-    const titleMatch = block.match(
-      /<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*<\/h2>/iu,
-    );
-    if (!titleMatch) continue;
-    const url = normalizeSearchUrl(titleMatch[1] ?? "");
-    const title = htmlFragmentToText(titleMatch[2] ?? "");
-    if (!url || !title) continue;
-
-    const snippetMatch = block.match(
-      /<div[^>]*class="b_caption"[^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/iu,
-    );
-    results.push({
-      title,
-      url,
-      snippet: htmlFragmentToText(snippetMatch?.[1] ?? ""),
-    });
+  const seen = new Set<string>();
+  const document = parseDocument(html);
+  for (const node of selectAll("script, style, template, noscript", document.children)) node.parent?.children.splice(node.parent.children.indexOf(node), 1);
+  for (const block of selectAll(blockSelector, document.children)) {
+    const anchor = selectOne(titleSelector, block);
+    if (!anchor || anchor.type !== "tag") continue;
+    const href = getAttributeValue(anchor, "href");
+    if (!href?.trim()) continue;
+    const url = normalizeSearchUrl(href);
+    const title = textContent(anchor).replace(/\s+/gu, " ").trim().slice(0, 500);
+    if (!url || !title || seen.has(url)) continue;
+    seen.add(url);
+    const snippet = selectOne(snippetSelector, block);
+    results.push({ title, url, snippet: snippet ? textContent(snippet).replace(/\s+/gu, " ").trim().slice(0, 2000) : "" });
     if (results.length >= SEARCH_RESULT_LIMIT) break;
   }
 
@@ -289,6 +275,7 @@ export async function searchWeb(
   query: string,
   options: WebToolOptions & { signal?: AbortSignal } = {},
 ): Promise<WebSearchResult> {
+  if (options.searchProvider) return options.searchProvider.search(query, options);
   const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
   const signal = requestSignal(options.signal, timeoutMs);
   // Reserve time for fallback providers instead of spending the whole deadline
@@ -309,7 +296,7 @@ export async function searchWeb(
       const text = await fetchPublicSearch(url, options, headers, providerSignal());
       const results = parseBingResults(text);
       if (results.length > 0) return { query, results };
-      throw new Error("no results");
+      throw new Error("search structure was not recognized; results are inconclusive");
     } catch (error) {
       if (signal.aborted) throw error;
       failures.push(`${endpoint.name}: ${error instanceof Error ? error.message : String(error)}`);
@@ -331,7 +318,7 @@ export async function searchWeb(
     });
     const results = parseDuckDuckGoResults(text);
     if (results.length > 0) return { query, results };
-    throw new Error("no results");
+    throw new Error("search structure was not recognized; results are inconclusive");
   } catch (error) {
     if (signal.aborted) throw error;
     failures.push(

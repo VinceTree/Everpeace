@@ -67,6 +67,10 @@ import { MemorySurface } from "../components/screens/memory-surface.js";
 import { ApprovedPlanSurface, PlanQuestionsSurface, PlanReviewSurface } from "../components/screens/plan-surface.js";
 import { GoalConfirmationSurface, GoalStatusSurface } from "../components/screens/goal-surface.js";
 import { McpTrustSurface } from "../components/screens/mcp-trust-surface.js";
+import { WebSurface } from "../components/screens/web-surface.js";
+import { CostSurface } from "../components/screens/cost-surface.js";
+import { ActionConfirmation } from "../components/screens/action-confirmation.js";
+import { diagnosticEndpoint } from "../../providers/doctor.js";
 import type { McpTrustPreview } from "../../mcp/trust.js";
 import { WorkspaceDiffSurface } from "../components/screens/workspace-diff-surface.js";
 import { ContextSurface } from "../components/screens/context-surface.js";
@@ -104,6 +108,9 @@ import {
 import { cloneTaskProgress, type TaskProgress } from "../../workflow/task-progress.js";
 
 type View =
+  | { kind: "cost" }
+  | { kind: "action-confirm"; text: string; start(): void; cancel(): void }
+  | { kind: "web" }
   | { kind: "outputs" }
   | { kind: "input-history" }
   | { kind: "terminal-setup" }
@@ -908,6 +915,7 @@ export function EverpeaceApp({
               setAgentPhase(phase);
             },
             onEvent(event) {
+              if (event.type === "cost_estimated" && event.estimate.warning) appendTransient("system", "Estimated cost warning threshold reached. In-flight billing may continue; this is not a hard spending limit.");
               if (event.type === "sampling_started") {
                 clearLiveAssistant();
                 setLiveToolStatus(undefined);
@@ -1923,9 +1931,10 @@ export function EverpeaceApp({
       openInfo("/doctor · Unavailable", "Runtime diagnostics are unavailable in this host.", "error");
       return;
     }
-    const controller = new AbortController();
-    const operation = startCommandLoad(
-      "/doctor · Runtime diagnostics",
+    const execute = () => {
+      const controller = new AbortController();
+      const operation = startCommandLoad(
+        "/doctor · Runtime diagnostics",
       normalized === "--live" ? "Checking runtime and model connectivity" : "Checking local runtime",
       true,
       normalized === "--live",
@@ -1934,7 +1943,7 @@ export function EverpeaceApp({
         returnToChat();
       },
     );
-    void dependencies.doctor(activeModel, permissions.current, normalized === "--live", controller.signal)
+      void dependencies.doctor!(activeModel, permissions.current, normalized === "--live", controller.signal)
       .then((result) => {
         if (!isCurrentCommandOperation(operation)) return;
         replaceCommandView(infoView("/doctor · Runtime diagnostics", result));
@@ -1943,7 +1952,12 @@ export function EverpeaceApp({
         if (!isCurrentCommandOperation(operation) || controller.signal.aborted) return;
         replaceCommandView(infoView("/doctor · Diagnostics failed", modelErrorGuidance(error), "error"));
       });
-  }, [activeModel, dependencies, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad]);
+    };
+    if (normalized === "--live") {
+      if (!activeModel) { openInfo("/doctor · Model required", "Select a model before live diagnostics.", "error"); return; }
+      enterCommandView({ kind: "action-confirm", text: `Live diagnostic: ${activeModel.model_name}\nEndpoint: ${diagnosticEndpoint(activeModel)}\nStages: streaming text, tool call, continuous tool rounds, reasoning, usage, cancellation (last).\nAt most 8 requests, Request token budget 20000, output at most 1024/request, timeout 30 seconds/request.\nThese requests may incur charges. Unknown usage stops later stages. Results do not change the configured profile.`, start: execute, cancel: returnToChat });
+    } else execute();
+  }, [activeModel, dependencies, enterCommandView, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad]);
 
   const runCompact = useCallback((args: string) => {
     if (args.trim()) {
@@ -2392,6 +2406,8 @@ export function EverpeaceApp({
         if (parsed.command === "/compact") runCompact(parsed.args ?? "");
         if (parsed.command === "/reasoning") setReasoning(parsed.args ?? "");
         if (parsed.command === "/doctor") runDoctor(parsed.args ?? "");
+        if (parsed.command === "/web") enterCommandView({ kind: "web" });
+        if (parsed.command === "/cost") enterCommandView({ kind: "cost" });
         if (parsed.command === "/permissions") enterCommandView({ kind: "permissions" });
         if (parsed.command === "/mcp") {
           const args = parsed.args?.trim() ?? "";
@@ -2735,6 +2751,12 @@ export function EverpeaceApp({
             onConfirm={view.confirm}
             onCancel={view.cancel}
           />
+        ) : view.kind === "action-confirm" ? (
+          <ActionConfirmation text={view.text} start={view.start} cancel={view.cancel} />
+        ) : view.kind === "web" ? (
+          <WebSurface configure={dependencies.configureWeb} onBack={returnToChat} />
+        ) : view.kind === "cost" ? (
+          <CostSurface modelId={activeModel?.id} configure={dependencies.configureCost} status={dependencies.getCostStatus} onBack={returnToChat} />
         ) : view.kind === "mcp-trust" ? (
           <McpTrustSurface preview={view.preview} onApprove={view.approve} onCancel={view.cancel} />
         ) : view.kind === "goal-status" ? (

@@ -425,6 +425,7 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
     };
     handle = createAgent({
       model: selected.model,
+      onCostEstimate: (estimate) => emit({ type: "cost_estimated", estimate }),
       ...(options.team ? { team: { ...options.team, maxAttempts: Math.min(options.maxSteps ?? Infinity, options.team.maxAttempts ?? 96) }, teamModels: resolved.available, onTeamEvent: async (event: import("../team/types.js").TeamEvent) => { await emit(event); } } : {}),
       workspacePath,
       io,

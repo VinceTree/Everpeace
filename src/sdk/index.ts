@@ -10,6 +10,11 @@ import { SystemAuthStorage } from "../storage/auth-storage.js";
 import { ModelRegistry } from "../storage/model-registry.js";
 import type { ExecDependencies, ExecOptions, ExecResult } from "../exec/types.js";
 import { runExec } from "../exec/runtime.js";
+export { CostSettingsStore, estimateRequestCost, summarizeCosts } from "../status/cost.js";
+export type { CostEstimate, ModelPrice } from "../status/cost.js";
+export { SearchSettingsStore } from "../tools/search-provider.js";
+export { DiagnosticStore, diagnosticFreshness, diagnosticIdentity, runLiveDiagnostics, DOCTOR_LIMITS } from "../providers/doctor.js";
+export type { DiagnosticResult, DiagnosticStage, DiagnosticState } from "../providers/doctor.js";
 
 export type {
   ExecClassification,

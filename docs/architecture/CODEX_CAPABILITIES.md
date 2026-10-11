@@ -110,3 +110,7 @@ Session JSONL 现以兼容方式追加 `workflow_updated` 事件，保存当前 
 SkillManager 安装来源与文件指纹写入 .everpeace-managed.json；受管理安装支持更新预览、确认提交和卸载。更新展示差异、来源，检测本地修改与重名，提交前重新核对，取消不写源目录。/skills 窗口默认 Cancel。MCP 增加空闲时 /mcp reconnect，关闭旧连接后显式刷新，不重放中断调用。成员不直接获得 MCP。OAuth、私有 Skill 安装与完整插件市场仍不在本轮范围。
 
 远程 Skill HTTP 下载与 Git 克隆采用统一的受控公共连接；Git 经本次批准目标的临时认证 CONNECT 转发器，隔离继承的 Git config、URL 重写、额外代理与凭据 helper。代理配置只来自宿主，失败不直连回退；完整边界及源码见 [NETWORK](NETWORK.md)。原有下载/解压限额、shallow/sparse 及预览确认保留。
+
+## 外部服务说明
+
+MCP 服务 instructions 进入带来源的 external_data 记录，不能作为 developer/system 动态指令；调用返回保留 `_source`。Skill 的用户调用身份与普通返回数据分别表示，但均不能授予权限或制造批准。压缩、恢复与转交不得提升这些来源，见 [安全与诊断契约](SECURITY_AND_DIAGNOSTICS.md)。

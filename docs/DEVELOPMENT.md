@@ -213,3 +213,9 @@ Oxlint JSON 配置见 [.oxlintrc.json](../.oxlintrc.json)，[官方配置说明]
 ## MCP 启动信任专项终端验收
 
 在真实 Windows Terminal 中运行 `pnpm exec tsx tests/fixtures/tui-offline.ts --root <新绝对目录> --mcp-trust`。fixture 使用 root 内 trust store 和合成 HMAC key，不读取用户授权、keyring 或模型凭据。先 `/mcp` 核对 trust_required 且没有 mcp-started.txt；再 `/mcp trust offline`，检查宿主权限提示、Cancel 默认选择、Esc/Cancel/Ctrl+C 与 resize。取消后没有 grant 或进程；批准保存后 `/mcp reconnect` 应 ready 且只有一次启动记录。`/mcp revoke offline` 后 callable 清空、stdio 已退出、持久 grant 删除，重连不能再次启动。离开窗口回同一 Session、只保留一个 prompt。软件按键、窗口截图与人工操作分开记录；失败或无法取得焦点不能记为验收通过。
+
+## 持续安全与扩展验收
+
+`pnpm security:scan <新绝对证据目录>` 运行完整锁文件审计、固定摘要 Gitleaks 和 Syft、SPDX 许可证检查；失败或缺失报告拒绝。共享 security workflow 进入 PR Required checks、候选 Release 和每日主分支扫描。公开测试秘密只用精确文件/摘要例外。Release 聚合候选、锁、包、消费者 SBOM 和许可证报告，不复用旧候选。
+
+`pnpm benchmark:prove-expanded <新绝对证据目录>` 对九项固定目录逐项证明正常基线、缺陷和参考修复，零模型请求；上游任务需首次只读克隆。全量 test 中使用已绑定源码的离线 helper 控制场景，TypeScript 旧编译器 API 仅用于外置评分器。真实终端回归通过 owned PTY 对 Web/cost/doctor 执行确认、取消和 resize，不访问付费服务。详见 [安全与诊断契约](architecture/SECURITY_AND_DIAGNOSTICS.md)。

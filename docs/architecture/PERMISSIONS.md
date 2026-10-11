@@ -54,3 +54,7 @@ Everpeace now opts into backend managed requirements for shell launch, but does 
 ## 团队权限与审批
 
 成员权限不高于根，worker 最高 workspace-write，调查／审查只读。子 Agent 不持有 MCP 外部副作用工具；需要用户回答交给根汇总。根与成员审批共用队列，明确来源、动作、目录，权限 revision 改变收束整个团队。整合依然走现有预览、版本与回滚保护，详见 [TEAMS](TEAMS.md)。
+
+## Prompt Injection 验收范围
+
+普通 README、网页、搜索、MCP 返回与终端输出不能提升权限或覆盖当前用户决定。生产 coding runner 的六入口 × 六攻击矩阵断言零越界/凭据/禁止网络副作用及拒绝后的替代调用仍被宿主拒绝。来源标签不代替 revision 绑定审批、文件边界或 native sandbox；已授予 full-access 的宿主能力不宣称受到原生隔离限制。见 [安全与诊断契约](SECURITY_AND_DIAGNOSTICS.md#外部内容与授权)。

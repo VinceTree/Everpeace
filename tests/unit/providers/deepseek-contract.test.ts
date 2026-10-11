@@ -194,12 +194,15 @@ test("wire prefix stays byte-identical when only DeepSeek host state changes", a
   await f.agent.runTurn("first user input");
   mode = "workspace-write";
   await f.agent.runTurn("second user input");
-  const boundary = requests[0]!.indexOf('{"type":"message","role":"system"');
+  // Conversation and sourced records grow between turns; only the stable
+  // instruction/tool prefix before input is eligible for byte identity.
+  const boundary = requests[0]!.indexOf('"input":');
   assert.ok(boundary > 0);
   const byteBoundary = Buffer.byteLength(requests[0]!.slice(0, boundary), "utf8");
   assert.ok(Buffer.from(requests[0]!).subarray(0, byteBoundary).equals(Buffer.from(requests[1]!).subarray(0, byteBoundary)));
   const first = JSON.parse(requests[0]!);
   const second = JSON.parse(requests[1]!);
   assert.deepEqual(first.tools, second.tools);
+  assert.equal(first.instructions, second.instructions);
   assert.notEqual(first.input.at(-1).content, second.input.at(-1).content);
 });
