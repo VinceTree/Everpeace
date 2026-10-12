@@ -1,3 +1,4 @@
+import {uiText} from '../localization/messages.js';
 import { stdin, stdout } from "node:process";
 import { createInterface, type Interface } from "node:readline/promises";
 import { Writable } from "node:stream";
@@ -47,12 +48,13 @@ export class TerminalPrompter implements Prompter {
   }
 
   ask(prompt: string): Promise<string> {
+    if (!stdin.isTTY || !stdout.isTTY) return Promise.reject(new Error(uiText('accessible.nonTTY')));
     return this.#readline.question(prompt);
   }
 
   async askSecret(prompt: string): Promise<string> {
     if (!stdin.isTTY || !stdout.isTTY) {
-      throw new Error("API Key input requires an interactive terminal");
+      throw new Error(uiText('m8fe829639f07'));
     }
 
     stdout.write(prompt);

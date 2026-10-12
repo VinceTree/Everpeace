@@ -1,3 +1,4 @@
+import {uiText} from '../../../localization/messages.js';
 import { Box, Text, useWindowSize } from "ink";
 import React from "react";
 import {
@@ -51,12 +52,12 @@ export function createSessionCard(
     availableWidth - 4,
     SESSION_CARD_MAX_INNER_WIDTH,
   );
-  const model = modelName ?? "not selected";
+  const model = modelName ?? uiText('m5ad0f897690e');
   const modelLine = truncateEnd(
-    `model:     ${model}   /model to change`,
+    uiText('m40f950d1147b', {p0: model}),
     innerWidth,
   );
-  const directoryPrefix = "directory: ";
+  const directoryPrefix = uiText('m29e0c248ad68');
   const directoryWidth = Math.max(0, innerWidth - directoryPrefix.length);
   const directoryLine = `${directoryPrefix}${truncateMiddle(
     workspacePath,
@@ -96,14 +97,14 @@ export function Banner({ version, modelName, workspacePath }: BannerProps) {
         </Box>
       ) : (
         <Text bold color={CYAN}>
-          EVERPEACE <Text color={GOLD}>· 長安 · 司矩</Text>
+          {uiText('m89cab576407f')}<Text color={GOLD}>· 長安 · 司矩</Text>
         </Text>
       )}
 
       <Box marginTop={1}>
         <Text color={JADE}>✦ </Text>
-        <Text bold>Everpeace Agent </Text>
-        <Text dimColor>(v{version})</Text>
+        <Text bold>{uiText('m1d9ab417c54f')}</Text>
+        <Text dimColor>{uiText('me01f7632e56c')}{version})</Text>
         <Text color={GOLD}> · </Text>
         <Text dimColor>天下长平，以规司矩</Text>
       </Box>

@@ -1,3 +1,4 @@
+import {uiText} from '../../localization/messages.js';
 import { Box, Text, useInput, usePaste, useStdout } from "ink";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -196,8 +197,8 @@ export function Prompt({
     };
   }, []);
   const placeholder = placeholderOverride ?? (activeModelName
-    ? "Ask Everpeace to do anything"
-    : "Enter /login to get started");
+    ? uiText('m7083c2087d57')
+    : uiText('m03d5daf8e826'));
   const updateState = (operation: (current: ComposerState) => ComposerState) => {
     const current = stateRef.current;
     const next = operation(current);
@@ -559,7 +560,7 @@ export function Prompt({
       ) : null}
       {attachmentLabels.length > 0 ? (
         <Text dimColor wrap="truncate-end">
-          Attached once: {attachmentLabels.slice(0, 8).map((reference) => `${reference.path}${reference.startLine ? `:${reference.startLine}-${reference.endLine}` : ""}`).join(" · ")}
+          {uiText('m6418093875a0')}{attachmentLabels.slice(0, 8).map((reference) => `${reference.path}${reference.startLine ? `:${reference.startLine}-${reference.endLine}` : ""}`).join(" · ")}
         </Text>
       ) : null}
     </Box>

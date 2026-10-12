@@ -32,6 +32,9 @@ import type { ContextInspectionSnapshot } from "../../agent/context-inspection.j
 import type { TaskProgress } from "../../workflow/task-progress.js";
 
 export interface AgentSession {
+  getPerformanceReport?(): import('../../performance/task-report.js').TaskPerformanceReport | undefined;
+  getLivePerformanceReport?(): import('../../performance/task-report.js').TaskPerformanceReport | undefined;
+  getRequestBudgetSnapshot?(): {limit:number|null;used:number;complete:boolean;inFlight:boolean}|undefined;
   recordPerformanceTiming?(operation: string, ms: number): void;
   ensureSessionActivity?(): Promise<void>;
   getTeamSnapshot?(): TeamSnapshot | undefined;

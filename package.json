@@ -43,7 +43,8 @@
     "benchmark:campaign": "tsx src/benchmark/campaign-cli.ts",
     "benchmark:prove-expanded": "tsx tests/fixtures/prove-expanded.ts",
     "benchmark:optimization": "tsx scripts/benchmark/run-optimization.ts",
-    "benchmark:memory": "tsx scripts/benchmark/evaluate-memory.ts"
+    "benchmark:memory": "tsx scripts/benchmark/evaluate-memory.ts",
+    "ui:verify": "node scripts/check-localization.mjs"
   },
   "dependencies": {
     "@inkjs/ui": "2.0.0",

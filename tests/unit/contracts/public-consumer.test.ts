@@ -22,6 +22,10 @@ test('frozen consumers read both original versions and the built public CLI/SDK'
     await run(process.execPath,[compiler,'-p','tsconfig.build.json','--outDir',path.join(root,'dist')],{windowsHide:true,timeout:60000});
     const isolation=path.join(root,'home');await fs.mkdir(isolation);
     const env={...process.env,APPDATA:isolation,LOCALAPPDATA:isolation,USERPROFILE:isolation,HOME:isolation,XDG_CONFIG_HOME:isolation,XDG_STATE_HOME:isolation,CODEX_HOME:path.join(root,'codex'),EVERPEACE_CONSUMER_WORKSPACE:workspace,EVERPEACE_LANG:'en'};
+    const chineseHelp=await run(process.execPath,[path.join(root,'dist/cli/index.js'),'--lang','zh-CN','--help'],{env,windowsHide:true,timeout:20000});
+    assert.match(chineseHelp.stdout,/用法|使用/);assert.match(chineseHelp.stdout,/--accessible/);assert.equal(chineseHelp.stdout.includes('\u001b'),false);
+    const nonTty=await run(process.execPath,[path.join(root,'dist/cli/index.js'),'--lang','zh-CN','--accessible'],{env,windowsHide:true,timeout:20000}).catch(error=>error as {stdout:string;stderr:string;code:number});
+    assert.equal('code'in nonTty?nonTty.code:0,1);assert.match(nonTty.stderr,/exec --json/);assert.equal(nonTty.stdout.includes('\u001b')||nonTty.stderr.includes('\u001b'),false);
     for(const version of [1,2]){
       const command=run(process.execPath,[path.join(root,'dist/cli/index.js'),'exec','fixture','--json',...(version===2?['--team']:[])],{env,windowsHide:true,timeout:20000});
       command.child.stdin?.end();

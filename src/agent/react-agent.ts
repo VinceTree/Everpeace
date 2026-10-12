@@ -726,6 +726,12 @@ export class ReactAgent {
   async ensureSessionActivity(): Promise<void> { await this.#beforeTask?.(); }
 
   getPerformanceReport(): TaskPerformanceReport | undefined { return this.#lastPerformance ? structuredClone(this.#lastPerformance) : undefined; }
+  getLivePerformanceReport(): TaskPerformanceReport | undefined { return this.performance.snapshot(); }
+  getRequestBudgetSnapshot(): {limit:number|null;used:number;complete:boolean;inFlight:boolean}|undefined {
+    const ledger=this.#requestAttemptLedger;if(!ledger)return undefined;
+    const snapshot=ledger.snapshot();
+    return {limit:snapshot.tokenBudget??null,used:snapshot.inputTokens+snapshot.outputTokens,complete:snapshot.complete,inFlight:ledger.openRequests>0};
+  }
   recordPerformanceTiming(operation: string, ms: number): void { this.performance.timing(operation, ms); }
   recordRepairRound(): void { this.performance.repaired(); }
   getInFlightRequests(): number { return this.#requestAttemptLedger?.openRequests ?? this.#activeProviderRequests; }

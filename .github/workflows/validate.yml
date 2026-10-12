@@ -42,6 +42,7 @@ jobs:
       - run: node scripts/release/check-workflows.mjs
       - run: pnpm typecheck
       - run: pnpm lint
+      - run: pnpm ui:verify
       - name: Permit pinned Linux sandbox namespaces
         if: runner.os == 'Linux'
         shell: bash

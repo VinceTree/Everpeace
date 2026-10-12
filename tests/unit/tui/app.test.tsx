@@ -41,6 +41,10 @@ import {
 import { textWidth } from "../../../src/tui/rendering/text-width.js";
 import { cloneTaskProgress, type TaskProgress } from "../../../src/workflow/task-progress.js";
 import { normalizePlanReview } from "../../../src/plan/runtime.js";
+import {setUiLanguage} from "../../../src/localization/language.js";
+import {uiText} from "../../../src/localization/messages.js";
+import {defaultPermissions,permissionPolicyRevision} from "../../../src/permissions/policy.js";
+import {ProcessCleanupError} from "../../../src/tools/process-completion.js";
 
 const renderedViews = new Set<ReturnType<typeof renderInk>>();
 
@@ -51,6 +55,7 @@ function render(tree: Parameters<typeof renderInk>[0]): ReturnType<typeof render
 }
 
 afterEach(() => {
+  setUiLanguage('en');
   for (const view of renderedViews) {
     view.cleanup();
     // The testing library retains its renderers after unmount; release captured
@@ -439,6 +444,38 @@ function createFixture(options?: {
 }
 
 const planModel: RegisteredModel = { id: "plan-test", model_name: "offline", base_url: "https://example.com/v1", api_key: "fixture" };
+
+test('language switching preserves pending approval, request bytes, revision and draft',async()=>{
+ let decision:boolean|undefined;
+ const command='echo user_payload_中文';
+ const fixture=createFixture({initial:[planModel],createAgent:(_model,io)=>({async runTurn(_text,signal){decision=await io.confirmBash?.(command,signal);return {};}})});
+ const revision=permissionPolicyRevision(defaultPermissions());
+ const view=render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{available:[planModel],missing:[]}} onReplayOutput={update=>update()}/>);
+ try{
+  await tick();view.stdin.write('Request permission');await tick();view.stdin.write('\r');
+  await waitFor(()=> (view.lastFrame()??'').includes(command));
+  view.stdin.write('draft_组合é🙂');await tick();
+  setUiLanguage('zh-CN');
+  await waitFor(()=> (view.lastFrame()??'').includes(uiText('task.blocker',{p0:'等待审批'}))||(view.lastFrame()??'').includes('审批'));
+  assert.equal(decision,undefined);assert.equal(permissionPolicyRevision(defaultPermissions()),revision);
+  assert.ok((view.lastFrame()??'').includes(command));assert.ok((view.lastFrame()??'').includes('draft_组合é🙂'));
+  setUiLanguage('en');await tick();assert.equal(decision,undefined);assert.ok((view.lastFrame()??'').includes('draft_组合é🙂'));
+  view.stdin.write('\u0003');await waitFor(()=>decision===false);
+ }finally{view.unmount();setUiLanguage('en');}
+});
+
+test('cleanup failure remains visible and blocks another task',async()=>{
+ let turns=0;
+ const fixture=createFixture({initial:[planModel],createAgent:()=>({async runTurn(){turns++;throw new ProcessCleanupError('fixture unresolved tree');}})});
+ const view=render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{available:[planModel],missing:[]}} onReplayOutput={update=>update()}/>);
+ try{
+  await tick();view.stdin.write('first');await tick();view.stdin.write('\r');
+  await waitFor(()=> (view.lastFrame()??'').includes(uiText('task.cleanupFailed')));
+  assert.match(view.lastFrame()??'',/inspect_cleanup|cleanup|Cleanup/);
+  view.stdin.write('second');await tick();view.stdin.write('\r');await tick();assert.equal(turns,1);
+  assert.ok((view.lastFrame()??'').includes(uiText('task.cleanupFailed')));
+ }finally{view.unmount();}
+});
 const approvedBody = "Inspect src/value.ts\n\nKeep the user's changes.\nUse exact replacement and run all checks.\n\nEND_OF_APPROVED_PLAN";
 
 function createPlanFixture(options: { endTask?: () => Promise<void>; coding?: (signal?: AbortSignal) => Promise<void> } = {}) {

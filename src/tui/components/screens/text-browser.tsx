@@ -1,3 +1,4 @@
+import {uiText} from '../../../localization/messages.js';
 import { Select, ConfirmInput } from "@inkjs/ui";
 import { Text, useInput, useWindowSize } from "ink";
 import React, { useEffect, useMemo, useState } from "react";
@@ -47,21 +48,21 @@ export function TextBrowser({ title, entries, onBack, onClear }: {
     else onBack();
   }}>
     {error ? <Text color="red">{error}</Text> : null}
-    {clearing ? <><Text>Clear all global input history? Session records will remain.</Text><ConfirmInput defaultChoice="cancel" onCancel={() => setClearing(false)} onConfirm={() => {
+    {clearing ? <><Text>{uiText('md232ddd19ad9')}</Text><ConfirmInput defaultChoice="cancel" onCancel={() => setClearing(false)} onConfirm={() => {
       void onClear?.().then(onBack).catch((e: unknown) => { setError(String(e)); setClearing(false); });
     }} /></> : selected !== undefined ? <>
       <Text>{`${offset + 1}-${Math.min(lines.length, offset + page)} / ${lines.length}`}</Text>
       {selectedCommand ? <>
-        <Text dimColor>{selectedCommand.shell} · {selectedCommand.status} · {selectedCommand.durationMs}ms{selectedCommand.truncated ? " · truncated" : ""}</Text>
+        <Text dimColor>{selectedCommand.shell} · {selectedCommand.status} · {selectedCommand.durationMs}ms{selectedCommand.truncated ? uiText('m533b274522ec') : ""}</Text>
         <HighlightedCommand command={selectedCommand.command} shell={selectedCommand.shell} />
       </> : null}
       {selectedCommand ? <RichOutput text={selectedText} range={{ start: offset, count: page }} /> : lines.slice(offset, offset + page).map((line, index) => <Text key={index} wrap="wrap">{line || " "}</Text>)}
     </> : entries.length || onClear ? <Select visibleOptionCount={Math.min(8, page)} options={[
       ...entries.map((entry, index) => ({ label: entry.label.replace(/\s+/g, " ").slice(0, Math.max(1, Math.floor((width - 3) / 2))), value: String(index) })),
-      ...(onClear ? [{ label: "Clear history...", value: "clear" }] : []),
+      ...(onClear ? [{ label: uiText('mfdbdedb38e2e'), value: "clear" }] : []),
     ]} onChange={(value) => {
       if (value === "clear") setClearing(true);
       else { setSelected(Number(value)); setOffset(0); }
-    }} /> : <Text>No entries</Text>}
+    }} /> : <Text>{uiText('m02ee725b145e')}</Text>}
   </CommandSurface>;
 }

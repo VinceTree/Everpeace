@@ -42,7 +42,7 @@
 - 编码完成由宿主验证判定。最终重新发现并串行执行实际存在的 `typecheck → lint → test → build`，首败停止；三轮诊断按真实启动计数。缺少检查、验证过期、跟踪受限、取消或预算停止不能记为成功。恢复不得清空未验证债务，`/verify <command>` 只是补充证据。
 - Goal 完成与成功 Memory 捕获必须经过 coding runner 的验证结算。usage unknown 不得被后续成功掩盖；有界任务不得继续发请求，reasoning 不与 output 重复计入预算。
 - Session 的 timeline 与模型 context 分开，JSONL 按 Session 串行追加，schema 增量兼容；缺失字段不得推断成功。权限、凭据、文件检查点、验证输出正文和 Memory 内容不作为 workflow 元数据保存。
-- 保持 inline TUI、原生 scrollback、同步历史重放，禁止 alternate screen 和原始 PTY 控制序列直写 Ink。宿主 UI 使用英文；resize 不丢历史、只保留一个 prompt。命令独立窗口与聊天互斥，Esc 恢复同一 Session，迟到结果不得污染历史。
+- 保持 inline TUI、原生 scrollback、同步历史重放，禁止 alternate screen 和原始 PTY 控制序列直写 Ink。宿主 UI 文案集中管理，支持英文与简体中文自动选择和切换；resize 不丢历史、只保留一个 prompt。命令独立窗口与聊天互斥，Esc 恢复同一 Session，迟到结果不得污染历史。
 - Ctrl+C 取消活动任务；空闲先清草稿，再退出。Ink 是 PTY stdin 唯一转发入口；直接 `!` 独占输入。保留运行中 guidance、安全边界 steering、滚轮/缩放及 slash 菜单键盘语义。
 
 ## 验证与交付

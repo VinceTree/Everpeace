@@ -1,3 +1,4 @@
+import {uiText} from '../../../localization/messages.js';
 import { ConfirmInput, MultiSelect, Spinner } from "@inkjs/ui";
 import { Box, Text, useInput, usePaste, useWindowSize } from "ink";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -126,12 +127,12 @@ export function SessionPicker({
     else if (mode !== "deleting") setMode("resume");
   };
 
-  return <CommandSurface title={mode === "resume" ? "/resume · Resume session" : "/resume · Delete sessions"} onBack={back}>
-    {result.skipped > 0 ? <Text color="yellow">Skipped {result.skipped} damaged session file{result.skipped === 1 ? "" : "s"}.</Text> : null}
+  return <CommandSurface title={mode === "resume" ? uiText('mfe2ee5028847') : uiText('m4dd049c3bd20')} onBack={back}>
+    {result.skipped > 0 ? <Text color="yellow">{uiText('mf10de79d9f19')}{result.skipped}{uiText('mb1e382b71f56')}{result.skipped === 1 ? "" : "s"}.</Text> : null}
     {error ? <Text color="red">{error}</Text> : null}
     {mode === "resume" ? <Box flexDirection="column">
-      <Text>Search: <Text color="#D4AF37">{query || " "}</Text><Text inverse> </Text></Text>
-      <Text dimColor>Scope: {allWorkspaces ? "All workspaces" : "This workspace"} · page {page}/{pages}{searching ? " · searching" : ""}</Text>
+      <Text>{uiText('m3363e5f143b7')}<Text color="#D4AF37">{query || " "}</Text><Text inverse> </Text></Text>
+      <Text dimColor>{uiText('mb8417b265b19')}{allWorkspaces ? uiText('m415c8e38f8c6') : uiText('m3dd128ad70f4')}{uiText('mcace86a57daa')}{page}/{pages}{searching ? uiText('mbc81d72afe7d') : ""}</Text>
       {visible.length > 0 ? visible.map((match, index) => {
         const absolute = visibleStart + index;
         const selected = absolute === selectedIndex;
@@ -142,28 +143,28 @@ export function SessionPicker({
           {selected && match.match ? <Text dimColor wrap="truncate-end">  {match.match.kind}: {match.match.snippet}</Text> : null}
           {selected && match.preview ? match.preview.map((item, previewIndex) => (
             <Text key={`${match.summary.id}:preview:${previewIndex}`} dimColor wrap="truncate-end">
-              {previewIndex === 0 ? "  Preview · " : "            "}{item.kind}: {item.snippet}
+              {previewIndex === 0 ? uiText('mfec71f206db7') : "            "}{item.kind}: {item.snippet}
             </Text>
           )) : null}
         </Box>;
-      }) : <Text>{searching ? "Searching…" : query ? "No matching sessions" : allWorkspaces ? "No sessions are available to resume" : "No sessions are available to resume in this workspace · Enter searches all workspaces"}</Text>}
-      <Text dimColor>Type to search · ↑↓ select · Enter resume · Tab/←→ scope · PgUp/PgDn page · Ctrl+U clear</Text>
-      <Text dimColor>Delete sessions... (Ctrl+D) · Esc return</Text>
+      }) : <Text>{searching ? uiText('mc31723ab3302') : query ? uiText('m2732406e3be5') : allWorkspaces ? uiText('m7dd89577d048') : uiText('m9c55d17589b4')}</Text>}
+      <Text dimColor>{uiText('m60646d998475')}</Text>
+      <Text dimColor>{uiText('m7ae58d302972')}</Text>
     </Box> : null}
     {mode === "delete" ? <>
       {options.length > 0 ? <MultiSelect options={options} visibleOptionCount={Math.min(8, options.length)} onSubmit={(ids) => {
         if (ids.length === 0) {
-          setError("Select at least one session");
+          setError(uiText('mc24c96870978'));
           return;
         }
         setSelectedIds(ids);
         setError(undefined);
         setMode("confirm");
-      }} /> : <Text>No sessions on this result page.</Text>}
-      <Text dimColor>↑↓ move · Space select · Enter continue · Esc results</Text>
+      }} /> : <Text>{uiText('mda0336f3f412')}</Text>}
+      <Text dimColor>{uiText('m5baa76d64374')}</Text>
     </> : null}
     {mode === "confirm" ? <Box flexDirection="column">
-      <Text color="yellow">Permanently delete {selectedIds.length} session{selectedIds.length === 1 ? "" : "s"}? This cannot be undone.</Text>
+      <Text color="yellow">{uiText('m194d867366dc')}{selectedIds.length}{uiText('me916532afff9')}{selectedIds.length === 1 ? "" : "s"}{uiText('m7f5d26a5b27f')}</Text>
       <ConfirmInput defaultChoice="cancel" onConfirm={() => {
         setMode("deleting");
         void onDelete(selectedIds)
@@ -179,6 +180,6 @@ export function SessionPicker({
           });
       }} onCancel={() => setMode("delete")} />
     </Box> : null}
-    {mode === "deleting" ? <Spinner label="Deleting sessions" /> : null}
+    {mode === "deleting" ? <Spinner label={uiText('mc916160b6431')} /> : null}
   </CommandSurface>;
 }

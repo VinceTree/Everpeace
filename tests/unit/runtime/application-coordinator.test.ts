@@ -42,6 +42,21 @@ test("cancellation retains admission until runner cleanup is finished", () => {
   assert.equal(next.signal.aborted, false);
 });
 
+test("unresolved cleanup retains admission across session and Agent replacement", () => {
+  const {agent,coordinator}=fixture();
+  const task=start(coordinator,agent);
+  coordinator.markCleanupFailed({...task});
+  assert.equal(coordinator.cleanupBlocked,false);
+  coordinator.cancelTask();
+  coordinator.markCleanupFailed(task);
+  assert.equal(coordinator.cleanupBlocked,true);
+  assert.equal(coordinator.finishTask(task),false);
+  coordinator.replaceSession("another-session");
+  const replacement={id:"replacement"};coordinator.setAgent(replacement);
+  assert.equal(coordinator.beginTask(replacement,"default").status,"busy");
+  assert.equal(coordinator.activeTask,task);
+});
+
 test("approval waits in Plan mode and explicit execution consumes the exact body once", () => {
   const { agent, coordinator } = fixture();
   approve(coordinator, agent);

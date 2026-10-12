@@ -17,6 +17,7 @@ export class ApplicationCoordinator<Agent> {
   private currentMode: AgentMode = "default";
   private contextRevision = 0;
   private commandOperation = 0;
+  private cleanupDebt = false;
   private task: {
     handle: ApplicationTask<Agent>;
     controller: AbortController;
@@ -28,6 +29,8 @@ export class ApplicationCoordinator<Agent> {
   get sessionId(): string | undefined { return this.currentSessionId; }
   get mode(): AgentMode { return this.currentMode; }
   get activeTask(): ApplicationTask<Agent> | undefined { return this.task?.handle; }
+  get cleanupBlocked(): boolean { return this.cleanupDebt; }
+  markCleanupFailed(handle:ApplicationTask<Agent>):void{if(this.task?.handle===handle)this.cleanupDebt=true;}
 
   setMode(mode: AgentMode): void {
     this.currentMode = mode;
@@ -103,7 +106,7 @@ export class ApplicationCoordinator<Agent> {
   }
 
   finishTask(handle: ApplicationTask<Agent>): boolean {
-    if (this.task?.handle !== handle) return false;
+    if (this.task?.handle !== handle || this.cleanupDebt) return false;
     this.task = undefined;
     return true;
   }
