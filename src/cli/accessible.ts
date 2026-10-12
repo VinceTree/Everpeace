@@ -26,6 +26,10 @@ export interface AccessibleHost {
     onInterrupt(handler: () => void): () => void;
     close(): void;
 }
+export function sanitizeAccessibleOutput(text:string):string {
+    const plain=stripVTControlCharacters(redactSecretsPreservingLayout(text)).replace(/\r\n?/gu,'\n');
+    return Array.from(plain).filter(character=>{const code=character.codePointAt(0)!;return character==='\n'||character==='\t'||(code>=32&&code!==127&&(code<128||code>159));}).join('');
+}
 export function accessibleProcessHost(): AccessibleHost {
     const interactive = stdin.isTTY === true && stdout.isTTY === true;
     const reader = createInterface({ input: stdin, output: stdout, terminal: false });
@@ -38,7 +42,7 @@ export async function runAccessible(registry: Pick<ModelRegistry, 'resolveAll'>,
         host.close();
         return 1;
     }
-    const write = (text: string) => host.write(stripVTControlCharacters(redactSecretsPreservingLayout(text)));
+    const write = (text: string) => host.write(sanitizeAccessibleOutput(text));
     let closing = false, active: AbortController | undefined, asking: AbortController | undefined, handle: ProductionAgentHandle | undefined, sessionId: string | undefined, exitCode = 0;
     const coordinator = new ApplicationCoordinator<ProductionAgentHandle>();
     const interrupt = () => { if (active) {

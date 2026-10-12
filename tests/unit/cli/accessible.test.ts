@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runAccessible, type AccessibleHost } from '../../../src/cli/accessible.js';
+import { runAccessible,sanitizeAccessibleOutput, type AccessibleHost } from '../../../src/cli/accessible.js';
 import { setUiLanguage } from '../../../src/localization/language.js';
+
+test('append-only output preserves code indentation and Unicode while removing overwrite controls',()=>{
+ assert.equal(sanitizeAccessibleOutput('\u001b[31m中文 é🙂\r\n\tconst value = 1;\b\rnext\u0007\u001b[0m'),'中文 é🙂\n\tconst value = 1;\nnext');
+});
 test('accessible non-TTY refusal avoids credentials, model requests and terminal controls', async () => {
     let reads = 0, closed = false;
     let text = '';
