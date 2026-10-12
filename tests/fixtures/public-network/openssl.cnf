@@ -1,0 +1,4 @@
+# Public, disposable test identity. Never use this key outside local network fixtures.
+[req]
+distinguished_name = dn
+[dn]

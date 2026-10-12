@@ -1,0 +1,88 @@
+<!doctype html><html><head><title>Coding Task Benchmarking</title><base href="https://invalid.example/"></head><body><nav>Navigation account subscription portal</nav><article><h1>Coding Task Benchmarking</h1>
+<p>Everpeace 的 benchmark 层比较 harness、模型策略和恢复策略在真实 coding task 上的表现。主指标是固定请求预算内，由独立断言确认的任务通过率。该层不改变 Agent 的权限、验证和 Session JSONL 语义，也不会自动 reset 或清理日常工作区。</p>
+<p>当前 <a href="benchmark/DEEPSEEK_NODE_TASKS.json">十项 Node 清单</a> 已包含固定 revision、setup、pristine assertion、reviewed seed/reference patch 与 evaluator-owned acceptance；正式 parser 缺少任一项都会在模型请求前拒绝。十项 Chalk、Commander 和 Day.js fixture 已逐项离线证明 pristine pass → seeded assertion failure → reference pass。Commander 与 Day.js 使用上游 lockfile；Chalk 固定 revision 原本用 <code>.npmrc</code> 禁用 lockfile，因此评测材料保存 evaluator-owned <code>chalk-package-lock.json</code>，准备器在 setup 前排他复制。三组统一用显式 npmjs registry 执行 <code>npm ci --ignore-scripts</code>，避免本机 registry 配置改变依赖来源。</p>
+<h2>DeepSeek loop A/B acceptance</h2>
+<p>开发 fixture <a href="../tests/fixtures/deepseek-loop-acceptance.ts">deepseek-loop-acceptance</a> 显式提供 <code>prepare|offline|live</code>，不从常规测试发请求。准备根必须位于仓库外且不存在；Session、结果与凭据目录不共享。prepare/offline 不读取个人凭据、不访问模型服务。以下命令中的 <code>$root</code> 应是新的本地报告子目录：</p>
+<pre><code class="language-powershell">pnpm exec tsx tests/fixtures/deepseek-loop-acceptance.ts prepare $root
+pnpm exec tsx tests/fixtures/deepseek-loop-acceptance.ts offline $root
+pnpm benchmark:campaign -- --config &quot;$root/comparison.json&quot; --prove-fixtures
+pnpm benchmark:campaign -- --config &quot;$root/smoke.json&quot; --preflight
+</code></pre>
+<p>prepare 冻结兼容提示、harness 摘要、候选 revision/source/build digest，以及任务目录和全部 fixture 文件的 evaluationDigest；任务提示、依赖锁、seed/reference 或独立断言变化均阻止运行。代码、构建或提交变化后使用新根重新准备，保留旧证据。原始源码基准单独保存；A 为协议修正后的 baseline，B 仅显式开启 candidate 调度提示和反馈，两组使用同一生产 runner。配置随机交错，同一任务不提示工具名称或操作顺序。</p>
+<table>
+<thead>
+<tr>
+<th>待单独授权的阶段</th>
+<th>固定范围</th>
+<th>task / campaign token 草案</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>兼容</td>
+<td>文本终态及 usage；携带完整 reasoning 的两轮文件读取</td>
+<td>10,000 / 20,000</td>
+</tr>
+<tr>
+<td>smoke</td>
+<td>目录前三任务，A/B 各一次，共六次</td>
+<td>100,000 / 600,000</td>
+</tr>
+<tr>
+<td>正式</td>
+<td>十项 Chalk/Commander/Day.js，A/B 各三次，共六十次</td>
+<td>100,000 / 6,000,000</td>
+</tr>
+</tbody></table>
+<p>固定中转 <code>https://cc2.caaa.tech/v1</code>、原始 ID <code>deepseek-flash</code>、显式 deepseek profile 和 high；兼容输出最多 1,024，编码对比最多 32,768。每任务十五分钟，最多三轮实际启动的修复。预算不是预计要用满或严格账单上限，准备配置不构成授权。分别取得明确数值授权后，才可运行 fixture 的 <code>live $root --token-budget 20000</code> 或相应 campaign 的 <code>--live</code>。unknown usage、隔离或资源清理失败停止阶段，started 标记和旧账本不能清除重跑；失败和跳过留在计划分母。只证明该中转路径，不外推官方直连。</p>
+<p>campaign 在本地生成 <code>strategy-comparison.json</code>：总体及逐任务通过数不能低于基线，人工介入不能增加，成功必须同时通过宿主验证和独立验收，安全结算无回退。质量通过且完整计量后，比较成功任务总消耗、包括失败消耗的每成功任务成本、共同成功任务 token 中位数、请求次数、耗时、工具批次/等待/重复失败、reasoning/cache 及请求字节比例。reasoning 已包含在 output，不重复相加；缺失缓存为 null，JSON 字节比例不冒充 token。共同成功任务 token 中位数下降至少 10% 才报告该端点和样本中观察到节省；候选默认关闭，无有效 live 证据不改默认行为。</p>
+<h2>Task and fixture contract</h2>
+<p>每个任务包含唯一 <code>id</code>、自然语言 <code>prompt</code>、隔离工作区、固定源码和有界命令。<code>verification</code> 可向 harness 提供开发反馈，最终评分优先使用模型无法通过改写项目脚本替代的 <code>acceptance</code>。</p>
+<pre><code class="language-ts">import type { BenchmarkTask } from &quot;../src/benchmark/index.js&quot;;
+
+export const task: BenchmarkTask = {
+  id: &quot;fix-parser-regression&quot;,
+  prompt: &quot;Fix the parser regression and keep existing behavior passing.&quot;,
+  workspacePath: &quot;unused-before-preparation&quot;,
+  source: {
+    repositoryUrl: &quot;https://github.com/example/project&quot;,
+    commit: &quot;0123456789abcdef0123456789abcdef01234567&quot;,
+    issue: &quot;42&quot;,
+    license: &quot;MIT&quot;,
+  },
+  fixture: {
+    setup: { command: &quot;pnpm&quot;, args: [&quot;install&quot;, &quot;--frozen-lockfile&quot;] },
+    pristineVerification: { command: process.execPath, args: [&quot;reviewed-acceptance.mjs&quot;] },
+    seedPatch: &quot;fix-parser-regression/seed.patch&quot;,
+    referencePatch: &quot;fix-parser-regression/reference.patch&quot;,
+  },
+  verification: { command: &quot;pnpm&quot;, args: [&quot;test&quot;], timeoutMs: 120_000 },
+  acceptance: { command: process.execPath, args: [&quot;reviewed-acceptance.mjs&quot;], timeoutMs: 120_000 },
+  timeoutMs: 15 * 60_000,
+  maxRepairAttempts: 3,
+};
+</code></pre>
+<p><code>prepareBenchmarkFixture()</code> 只克隆到已确认不存在的目标，校验 pinned HEAD，执行有界 setup 和 pristine assertion，再应用 seed。<code>proveBenchmarkFixture()</code> 必须证明：</p>
+<ol>
+<li>pinned source 的独立断言通过；</li>
+<li>seed 应用后，同一 assertion 因预期缺陷失败；</li>
+<li>reference repair 应用后，同一 assertion 再次通过。</li>
+</ol>
+<p>超时、缺少依赖、命令启动失败和 <code>exitCode: null</code> 都是基础设施失败，不算有效 seed。验证结果把 <code>timedOut</code> 与 <code>cancelled</code> 分开记录；任务或 campaign 取消不能伪装成验证超时。重复运行使用 <code>createIsolatedBenchmarkPreparer()</code> 创建 <code>campaign/harness/task/repetition</code> 目录，避免 harness 和 repetition 相互覆盖。</p>
+<p>准备、验证、外部 harness、checkout worker、dsh 与工作区快照的取消会等待进程 close 和进程树终止请求。清理失败保留 <code>cleanupFailed</code>，suite/campaign 停止后续任务并以 <code>cleanup_failed</code> 记录 skipped，统计完整性为 false；准备器保留清理失败的工作目录。预取消验证不启动进程，<code>attempted</code> 为 false。并发快照命令全部结算后才返回。</p>
+<h2>Production and external adapters</h2>
+<p>TUI、公开 <code>everpeace exec</code> 与 benchmark 通过 <code>src/runtime/production.ts</code> 共用生产 Agent/命令 factory 和 <code>CodingTaskRunner</code>。<code>createProductionBenchmarkAdapter()</code> 在无 Ink 环境中显式覆盖评测参数与批准策略，并构造 Session、权限、原生 sandbox、workflow 和 runner；同一个 Agent/Session 内完成工具循环、最多三轮诊断、完整最终验证、Goal 及 Memory 结算。adapter 标记 <code>managesRepairs</code>，因此 evaluator 只运行独立 acceptance，不会叠加另一套自动修复循环。公开 exec 使用正常模型注册/keyring 和交互停止语义，不直接暴露此 benchmark adapter 或 evaluator contract。</p>
+<pre><code class="language-ts">import {
+  createProductionBenchmarkAdapter,
+  runBenchmarkSuite,
+} from &quot;../src/benchmark/index.js&quot;;
+
+const adapter = createProductionBenchmarkAdapter({ model, sessionsRoot });
+
+const summary = await runBenchmarkSuite(tasks, adapter, {
+  prepareRun,
+  repetitions: 3,
+});
+</code></pre>
+<p><code>createCheckoutBenchmarkAdapter()</code> 为 baseline 与 candidate 提供同一条 fresh-process worker 路径。每次运行都从指定 checkout 动态导入 production adapter，并重新核对完整 Git revision、runtime source digest 和已构建 entry digest；source digest 覆盖 <code>src</code> 中 tracked、deleted 与未忽略 untracked 内容，以及 manifest、lockfile 和 TypeScript 配置，因此候选新增文件会改变身份，而仓库外或无关根目录文件不会。worker 强制使用配置中的原始模型 ID、<code>high</code> reasoning 和 32,768 output tokens，不继承个人保存的 request settings。基线和候选可以共享 revision，例如基线为干净 <code>b226bfc</code> checkout、候选为该 revision 上的明确工作树内容；digest 才区分两者。preflight 失败会在错误中给出实际 digest，供 reviewed 配置更新。</p>
+<p><code>createProcessHarnessAdapter()</code> 参数化启动固定外部程序，不使用 shell 拼接；通用外部 wrapper 必须在自己的 LLM 边界输出一行 <code>EVERPEACE_BENCHMARK_RESULT &lt;JSON&gt;</code>，launcher 不从最终回答猜测 usage。固定 dsh 使用 <code>createInstrumentedDshAdapter()</code>：它要求源码 checkout 的完整 HEAD 为 <code>639ed015397290b3745d163aafe02ffee4aa3f84</code>，直接通过 Node 启动该 checkout 内的 built <code>apps/cli/lib/bin.js</code>，并创建内容锁定的专用 headless profile。profile 在 dsh 的 <code>llm/stream</code> waterfall 记录每次 coding、重试、摘要和标题请求，校验模型原始 ID、主编码请求的 <code>high</code> reasoning 与 32K 输出上限，在每个 provider 请求前检查剩余预算，并把 cache/unknown usage 交回 campaign。缺失或非法 token 字段会永久把该任务 usage 标为 incomplete 并阻止后续请求；cache 字段缺失时 denominator 保持未观察。取消或失败时仍在清理临时目录前保存脱敏 ledger。Windows 不经过 <code>.cmd</code> 或 shell。</p>
+</article><form>Credentials input</form><footer>Footer advertising tracking</footer><script>throw new Error('never executed')</script></body></html>

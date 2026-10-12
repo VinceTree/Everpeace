@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/microsoft/node-pty",
+  "commit": "1def5774632305246fe21f0f69e23a664d6c5910",
+  "path": "src/conpty_console_list_agent.ts",
+  "sha256": "9ebb0d2c188d0408987ecfcdcd68a3751ea6bb5886d631267055664c65357d45",
+  "license": "MIT",
+  "scope": "Helper exception path only; does not prove full Windows detached-process cleanup."
+}

@@ -1,0 +1,11 @@
+diff --git a/src/conpty_console_list_agent.ts b/src/conpty_console_list_agent.ts
+--- a/src/conpty_console_list_agent.ts
++++ b/src/conpty_console_list_agent.ts
+@@ -13,1 +13,6 @@
+-const consoleProcessList = getConsoleProcessList(shellPid);
++let consoleProcessList: number[] = [];
++try {
++  consoleProcessList = getConsoleProcessList(shellPid);
++} catch {
++  // The console may have closed before the helper attached.
++}

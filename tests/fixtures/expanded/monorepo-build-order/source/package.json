@@ -1,0 +1,8 @@
+{
+  "name": "monorepo-build-order",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node check.mjs"
+  }
+}

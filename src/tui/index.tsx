@@ -1,0 +1,96 @@
+import { render } from "ink";
+import React from "react";
+import { resetTerminalModes } from "../tools/terminal.js";
+import { EverpeaceApp } from "./app/app.js";
+import { createDefaultTuiDependencies } from "./app/dependencies.js";
+import type { TuiDependencies, TuiModelRegistry } from "./app/types.js";
+
+export interface RunTuiOptions {
+  registry: TuiModelRegistry;
+  dependencies?: TuiDependencies;
+}
+
+export const TUI_RENDER_OPTIONS = {
+  exitOnCtrlC: false,
+  alternateScreen: false,
+  incrementalRendering: false,
+  kittyKeyboard: { mode: "auto" },
+} as const;
+
+interface TerminalOutput {
+  write(chunk: string): unknown;
+}
+
+export const TERMINAL_RESET_SEQUENCE = "\u001B[2J\u001B[3J\u001B[H";
+export const SYNCHRONIZED_OUTPUT_START = "\u001B[?2026h";
+export const SYNCHRONIZED_OUTPUT_END = "\u001B[?2026l";
+
+export function clearTerminal(output: TerminalOutput = process.stdout): void {
+  output.write(TERMINAL_RESET_SEQUENCE);
+}
+
+/** Keep workspace services and terminal restoration paired on every exit path. */
+export async function settleTuiLifecycle<T>(
+  dependencies: Pick<TuiDependencies, "dispose">,
+  run: () => Promise<T>,
+  reset: () => void = resetTerminalModes,
+): Promise<T> {
+  try {
+    return await run();
+  } finally {
+    try {
+      await dependencies.dispose?.();
+    } finally {
+      reset();
+    }
+  }
+}
+
+export async function runTui({ registry, dependencies }: RunTuiOptions): Promise<number> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error("Everpeace TUI requires an interactive terminal");
+  }
+
+  // Recover from a previous child process or interrupted session that left
+  // terminal focus reporting enabled before Ink starts reading input.
+  resetTerminalModes();
+
+  const resolvedDependencies =
+    dependencies ?? createDefaultTuiDependencies(registry);
+
+  return settleTuiLifecycle(resolvedDependencies, async () => {
+    const initialModels = await resolvedDependencies.registry.resolveAll();
+    let replayOutput: (update: () => void) => void = (update) => update();
+    const instance = render(
+      <EverpeaceApp
+        dependencies={resolvedDependencies}
+        initialModels={initialModels}
+        onReplayOutput={(update) => replayOutput(update)}
+      />,
+      TUI_RENDER_OPTIONS,
+    );
+    replayOutput = (update) => {
+      // Keep the scrollback reset and the following synchronous Ink commit in
+      // one terminal update. Windows Terminal therefore never exposes the
+      // empty intermediate frame while a resize replay is taking place.
+      process.stdout.write(SYNCHRONIZED_OUTPUT_START);
+      instance.clear();
+      clearTerminal();
+      try {
+        update();
+      } catch (error) {
+        process.stdout.write(SYNCHRONIZED_OUTPUT_END);
+        throw error;
+      }
+      const finishSynchronizedOutput = () => {
+        process.stdout.write(SYNCHRONIZED_OUTPUT_END);
+      };
+      void instance
+        .waitUntilRenderFlush()
+        .then(finishSynchronizedOutput, finishSynchronizedOutput);
+    };
+
+    const result = await instance.waitUntilExit();
+    return typeof result === "number" ? result : 0;
+  });
+}

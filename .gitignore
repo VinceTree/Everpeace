@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.cache/
+artifacts/
+reports/
+NUL
+test-me/
+question/
+*.tsbuildinfo

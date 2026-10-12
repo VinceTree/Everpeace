@@ -1,0 +1,188 @@
+export type ProviderKind = "deepseek" | "openai" | "compatible";
+export type CapabilitySource = "official" | "configured" | "observed";
+export type ProviderProtocol = "responses";
+export type CompactionStrategy = "native" | "summary";
+export type ReasoningEffort = "off" | "low" | "high" | "max";
+export type ResponsesProfile = "auto" | "generic" | "deepseek";
+
+export function isResponsesProfile(value: unknown): value is ResponsesProfile {
+  return value === "auto" || value === "generic" || value === "deepseek";
+}
+
+export interface ProviderCapabilities {
+  provider: ProviderKind;
+  source: CapabilitySource;
+  protocol: ProviderProtocol;
+  compaction: CompactionStrategy;
+  reasoningEffort: boolean;
+  encryptedReasoning: boolean;
+  promptCacheOptions: boolean;
+  serverSessions: boolean;
+  maxOutputTokens: number | null;
+  responsesProfile?: "generic" | "deepseek" | "openai";
+}
+
+export interface ModelRequestSettings {
+  reasoningEffort: ReasoningEffort;
+  maxOutputTokens: number;
+}
+
+export type ModelRequestPurpose = "coding" | "summary" | "title" | "skill" | "memory" | "doctor";
+
+export interface ModelRequestPurposeSettings {
+  reasoningEffort: ReasoningEffort;
+  maxOutputTokens: number;
+  timeoutMs: number;
+}
+
+const OPENAI_BASE_URL = "https://api.openai.com/v1";
+const DEEPSEEK_BASE_URLS = new Set([
+  "https://api.deepseek.com",
+  "https://api.deepseek.com/v1",
+]);
+
+export function canonicalBaseUrl(value: string): string {
+  try {
+    const url = new URL(value.trim());
+    const path = url.pathname.replace(/\/+$/u, "");
+    return `${url.protocol}//${url.host.toLowerCase()}${path}`;
+  } catch {
+    return value.trim().replace(/\/+$/u, "");
+  }
+}
+
+export function providerKind(baseUrl: string): ProviderKind {
+  const canonical = canonicalBaseUrl(baseUrl);
+  if (canonical === OPENAI_BASE_URL) return "openai";
+  if (DEEPSEEK_BASE_URLS.has(canonical)) return "deepseek";
+  return "compatible";
+}
+
+export function canReuseOpaqueProviderContext(
+  sourceBaseUrl: string,
+  targetBaseUrl: string,
+): boolean {
+  const source = providerKind(sourceBaseUrl);
+  const target = providerKind(targetBaseUrl);
+  if (source !== target) return false;
+  return source !== "compatible" || canonicalBaseUrl(sourceBaseUrl) === canonicalBaseUrl(targetBaseUrl);
+}
+
+export function resolveProviderCapabilities(baseUrl: string, modelName?: string, profile: ResponsesProfile = "auto"): ProviderCapabilities {
+  if (!isResponsesProfile(profile)) throw new Error("Invalid Responses profile");
+  const provider = providerKind(baseUrl);
+  if (profile === "deepseek" || profile === "auto" && provider === "deepseek") {
+    return {
+      provider,
+      source: provider === "deepseek" && profile === "auto" ? "official" : "configured",
+      responsesProfile: "deepseek",
+      protocol: "responses",
+      compaction: "summary",
+      reasoningEffort: true,
+      encryptedReasoning: false,
+      promptCacheOptions: false,
+      serverSessions: false,
+      maxOutputTokens: null,
+    };
+  }
+  if (profile === "auto" && provider === "openai") {
+    const reasoningEffort = modelName !== undefined &&
+      /^(?:gpt-[56](?:[.-]|$)|o[1-4](?:[.-]|$)|codex-)/u.test(modelName.trim().toLowerCase());
+    return {
+      provider,
+      source: "official",
+      responsesProfile: "openai",
+      protocol: "responses",
+      compaction: "native",
+      reasoningEffort,
+      encryptedReasoning: true,
+      promptCacheOptions: true,
+      serverSessions: false,
+      maxOutputTokens: 32_768,
+    };
+  }
+  return {
+    provider,
+    source: "configured",
+    responsesProfile: "generic",
+    protocol: "responses",
+    compaction: "summary",
+    reasoningEffort: false,
+    encryptedReasoning: false,
+    promptCacheOptions: false,
+    serverSessions: false,
+    maxOutputTokens: 32_768,
+  };
+}
+
+export function defaultModelRequestSettings(
+  capabilities: ProviderCapabilities,
+  stored?: Partial<ModelRequestSettings>,
+): ModelRequestSettings {
+  const configuredMax = stored?.maxOutputTokens;
+  const providerMax = capabilities.maxOutputTokens;
+  return {
+    reasoningEffort: stored?.reasoningEffort ?? (capabilities.reasoningEffort ? "high" : "off"),
+    maxOutputTokens:
+      Number.isSafeInteger(configuredMax) && configuredMax !== undefined && configuredMax > 0
+        ? providerMax === null ? configuredMax : Math.min(configuredMax, providerMax)
+        : Math.min(32_768, providerMax ?? 32_768),
+  };
+}
+
+export function requestSettingsForPurpose(
+  purpose: ModelRequestPurpose,
+  coding: ModelRequestSettings,
+): ModelRequestPurposeSettings {
+  if (purpose === "coding") return { ...coding, timeoutMs: 10 * 60_000 };
+  if (purpose === "summary") return { reasoningEffort: "off", maxOutputTokens: 8_192, timeoutMs: 120_000 };
+  if (purpose === "skill") return { reasoningEffort: "off", maxOutputTokens: 4_096, timeoutMs: 60_000 };
+  if (purpose === "memory") return { reasoningEffort: "off", maxOutputTokens: 800, timeoutMs: 60_000 };
+  if (purpose === "title") return { reasoningEffort: "off", maxOutputTokens: 64, timeoutMs: 30_000 };
+  return { reasoningEffort: "off", maxOutputTokens: 16, timeoutMs: 30_000 };
+}
+
+export function assertCompletedModelResponse(
+  response: { status?: string; output_text?: string; incomplete_details?: unknown; error?: unknown },
+  purpose: ModelRequestPurpose,
+  requireText = true,
+): void {
+  if (response.status && response.status !== "completed") {
+    throw new Error(`${purpose} model request ended with status ${response.status}`);
+  }
+  if (requireText && !response.output_text?.trim()) throw new Error(`${purpose} model request returned no text`);
+}
+
+export function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return value === "off" || value === "low" || value === "high" || value === "max";
+}
+
+export function isModelRequestSettings(value: unknown): value is ModelRequestSettings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return isReasoningEffort(record.reasoningEffort) &&
+    typeof record.maxOutputTokens === "number" &&
+    Number.isSafeInteger(record.maxOutputTokens) &&
+    record.maxOutputTokens > 0;
+}
+
+export function requestReasoningEffort(
+  capabilities: ProviderCapabilities,
+  effort: ReasoningEffort,
+): string | undefined {
+  if (!capabilities.reasoningEffort) return undefined;
+  if (effort === "off") return "none";
+  if (effort === "max") return capabilities.responsesProfile === "deepseek" || capabilities.provider === "deepseek" ? "max" : "xhigh";
+  return effort;
+}
+
+export function hasOpaqueProviderContext(items: readonly Record<string, unknown>[]): boolean {
+  return items.some((item) => {
+    if (item.type === "compaction" && typeof item.encrypted_content === "string") return true;
+    if (item.type !== "reasoning") return false;
+    if (typeof item.encrypted_content === "string") return true;
+    const content = item.content;
+    return Array.isArray(content) && content.some((part) =>
+      part && typeof part === "object" && typeof (part as Record<string, unknown>).encrypted_content === "string");
+  });
+}

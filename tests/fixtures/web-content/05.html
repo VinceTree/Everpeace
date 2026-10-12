@@ -1,0 +1,215 @@
+<!doctype html><html><head><title>状态、持久化与终端交互</title><base href="https://invalid.example/"></head><body><nav>Navigation account subscription portal</nav><article><h1>状态、持久化与终端交互</h1>
+<p>这份文档回答“状态归谁所有、哪些内容可以恢复、UI 修改必须守住什么”。先按 <a href="PROJECT_MAP.md">项目路由表</a> 找到入口；只有修改对应行为时才读取相关源码和测试。当前交付证据、环境限制和待办见 <a href="../HANDOFF.md">HANDOFF</a>。</p>
+<h2>状态所有权</h2>
+<table>
+<thead>
+<tr>
+<th>状态</th>
+<th>所有者与存储</th>
+<th>不得混入的内容</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>API Key</td>
+<td><a href="../../src/storage/auth-storage.ts">AuthStorage</a> 与系统 keyring</td>
+<td>models JSON、Session、日志、UI、测试快照</td>
+</tr>
+<tr>
+<td>模型注册</td>
+<td><a href="../../src/storage/model-registry.ts">ModelRegistry</a>，平台配置中的 <code>models.json</code></td>
+<td>明文 Key；只保存 <code>auth_ref</code></td>
+</tr>
+<tr>
+<td>对话、context、主请求 usage</td>
+<td><a href="../../src/storage/session-store.ts">SessionStore</a>，每 Session 一个 JSONL</td>
+<td>从历史恢复的权限授权</td>
+</tr>
+<tr>
+<td>当前视图、审批与运行显示</td>
+<td><a href="../../src/tui/app/app.tsx">TUI App</a> 及依赖；模式和活动任务显示是协调状态的投影</td>
+<td>临时命令窗口不能变为聊天历史</td>
+</tr>
+<tr>
+<td>当前 Session 身份、模式、模型任务准入／取消及命令操作身份</td>
+<td><a href="../../src/runtime/application-coordinator.ts">ApplicationCoordinator</a>，TUI 每次挂载一个实例</td>
+<td>持久事实、UI 组件、第二套 runner 或资源清理循环</td>
+</tr>
+<tr>
+<td>已批准待执行计划</td>
+<td>当前协调实例内，绑定 Session 与 Agent，正文按值返回</td>
+<td>JSONL、恢复后的执行授权、文件审批或验证成功</td>
+</tr>
+<tr>
+<td>coding 结果与验证债务</td>
+<td><a href="../../src/workflow/runtime.ts">workflow runtime</a>，Session 只保存元数据</td>
+<td>验证 stdout/stderr/error、文件检查点</td>
+</tr>
+<tr>
+<td>当前 coding 执行清单</td>
+<td><a href="../../src/workflow/task-progress.ts">TaskProgress</a>，Session 保存最新整体投影</td>
+<td>验证成功、Goal 完成或权限授权</td>
+</tr>
+<tr>
+<td>Goal</td>
+<td><a href="../../src/goal/runtime.ts">GoalRuntime</a>，Session 绑定</td>
+<td>无宿主验证的编码完成状态</td>
+</tr>
+<tr>
+<td>Learned memory</td>
+<td><a href="../../src/memory/learned-memory.ts">LearnedMemoryRuntime/Store</a>，独立平台目录</td>
+<td>原始凭据、未经验证的成功事实</td>
+</tr>
+<tr>
+<td>权限</td>
+<td><a href="../../src/permissions/policy.ts">PermissionPolicy</a>，当前用户策略与项目限制交集</td>
+<td>JSONL 中历史授权、项目自提权</td>
+</tr>
+<tr>
+<td>文件观察、undo、后台进程</td>
+<td>当前进程内工具与 workflow runtime</td>
+<td>恢复后凭历史文本重新获得写权限或假装进程仍活着</td>
+</tr>
+<tr>
+<td>大工具输出附件</td>
+<td><a href="../../src/storage/session-outputs.ts">SessionOutputStorage</a>，Session 目录内每会话的脱敏附件、opaque ID</td>
+<td>模型可见宿主路径、超出保留范围的正文、恢复写权限</td>
+</tr>
+<tr>
+<td>Session lineage / 分支待继续</td>
+<td><a href="../../src/storage/session-store.ts">SessionStore</a> 的 header 与 additive 事件</td>
+<td>父 Session 的运行中状态、旧 Goal、审批、undo、观察版本或验证成功证据</td>
+</tr>
+<tr>
+<td>Session 搜索投影、最近 coding 请求快照</td>
+<td><a href="../../src/storage/session-store.ts">SessionStore</a>、当前 <a href="../../src/agent/react-agent.ts">ReactAgent</a> 的进程内缓存</td>
+<td>持久索引、JSONL schema、重启后猜测请求快照</td>
+</tr>
+</tbody></table>
+<p>模型 <code>model_name</code> 保留服务端原始 ID；应用内部注册 <code>id</code> 不等于模型名称。可选 <code>request_settings</code> 同时存在于模型注册和 Session 模型引用中，旧记录使用供应商默认设置。切换设置在任务边界应用，不能在同一任务内悄悄改变请求预算。</p>
+<h2>存储位置与凭据</h2>
+<p>模型注册可增量保存 <code>responses_profile</code>，旧字段缺失等同 auto。<code>/model profile</code> 在空闲命令操作内更新，绑定原注册 ID/地址/原始模型 ID；清除旧请求设置、重建 Agent 并使批准失效，兼容 context 和累计 unknown 仍保留。opaque context 与目标协议不兼容时拒绝修改。Session 保存选择时的 profile；恢复时以当前注册为准，profile 不同时不重用旧 request settings。<code>/status</code> 显示实际 profile、official/configured 来源及 wire reasoning，不把用户配置记为实测能力。回归见 <a href="../../tests/unit/storage/model-registry.test.ts">注册</a> 与 <a href="../../tests/unit/tui/app.test.tsx">App</a>。</p>
+<ul>
+<li>Windows：配置、Session 等默认位于 <code>%APPDATA%/Everpeace/</code>，Session 子目录为 <code>sessions/</code>。</li>
+<li>macOS：默认位于 <code>~/Library/Application Support/Everpeace/</code>。</li>
+<li>Linux：模型配置使用 <code>$XDG_CONFIG_HOME/everpeace/</code>（默认 <code>~/.config/everpeace/</code>）；Session 使用 <code>$XDG_STATE_HOME/everpeace/sessions/</code>（默认 <code>~/.local/state/everpeace/sessions/</code>）。</li>
+<li>系统 keyring 不可用时报告故障，不降级为明文 Key 文件；注册表只用 <code>auth_ref</code> 关联凭据。</li>
+<li>普通输入历史由 <a href="../../src/storage/input-history.ts">InputHistory</a> 单独保存，不能记录登录向导的凭据字段。</li>
+</ul>
+<p>这些是默认路径，测试应注入临时目录与 AuthStorage 替身，不依赖真实用户的凭据或 Session。</p>
+<h2>JSONL 契约</h2>
+<p>每个 Session 使用带格式字段的逐行事件文件，同一文件追加通过本实例队列和 <code>proper-lockfile</code> 跨进程 Session 锁串行化；附件提交、续读、淘汰、启动清理与删除复用该事务锁，另一实例不能把尚未追加引用的附件清理为孤儿。<code>timeline</code> 是人看到的历史，<code>context</code> 是发给 Responses 的输入；两者独立恢复，不能互相推导。</p>
+<p><code>load</code>、<code>list</code> 与 <code>/resume</code> 搜索共用字节流记录读取器，在打开日志时固定 EOF，按 64 KiB 文件块逐条解析，不再同时保留整份原始文本、拆行数组和事件数组。<code>list</code> 只累积摘要所需状态；<code>load</code> 仍须保留最终 timeline 与有效 context，因此这不表示整个 Session 的内存恒定。重放不会新增拒绝超过 8 MiB 合法旧记录的限制；单条记录仍完整解析，旧 JSONL 与未终止末行的判定保持一致。模型历史工具自身的单行扫描上限保持独立。</p>
+<table>
+<thead>
+<tr>
+<th>事件</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>session_created</code></td>
+<td>Session ID、标题、工作目录、无凭据模型引用、标题待生成、usage 跟踪标记，以及分支时的可选 lineage</td>
+</tr>
+<tr>
+<td><code>title_updated</code></td>
+<td>修改标题并清除待生成标记</td>
+</tr>
+<tr>
+<td><code>timeline_entry</code></td>
+<td>用户/助手/工具/输出等可见记录；兼容旧 status 快照</td>
+</tr>
+<tr>
+<td><code>context_append</code></td>
+<td>追加模型交互项，保持工具调用与结果配对；大结果可附带可选 <code>tool_output_attachment</code> 引用</td>
+</tr>
+<tr>
+<td><code>context_compacted</code></td>
+<td>替换有效 context，保留是否自动压缩标记及 usage；不改写可见历史</td>
+</tr>
+<tr>
+<td><code>context_pruned</code></td>
+<td>在 provider 压缩前以可恢复引用替换早期工具正文；先落盘再替换有效 context，只把当前 <code>context_tokens</code> 设为 unknown，累计 usage 不变</td>
+</tr>
+<tr>
+<td><code>model_selected</code></td>
+<td>模型引用及是否保留 context</td>
+</tr>
+<tr>
+<td><code>usage_recorded</code></td>
+<td>主请求的 usage 或明确 unknown</td>
+</tr>
+<tr>
+<td><code>goal_updated</code></td>
+<td>Session Goal 状态、预算及已用量</td>
+</tr>
+<tr>
+<td><code>workflow_updated</code></td>
+<td>修改路径、任务来源、验证债务、检查状态与文件 revision 等元数据</td>
+</tr>
+<tr>
+<td><code>task_progress_updated</code></td>
+<td>model-authored coding 清单的完整替换投影；空列表表示明确清除</td>
+</tr>
+<tr>
+<td><code>memory_policy_updated</code></td>
+<td>当前聊天的 <code>readExisting</code> 与 <code>captureFuture</code></td>
+</tr>
+<tr>
+<td><code>fork_boundary</code></td>
+<td>新子 Session 的父 ID、固定源 EOF/header 摘要、继承后的 workflow/TaskProgress/Memory policy 与待继续状态</td>
+</tr>
+<tr>
+<td><code>fork_resume_updated</code></td>
+<td>持久更新子 Session 是否仍需用恢复语义继续 coding</td>
+</tr>
+</tbody></table>
+<p><code>workflow_updated</code> 序列化会清空验证输出并去掉错误正文；这不代表普通 <code>timeline/context</code> 不保存用户消息或工具交互。不要将新的请求正文、文件快照或凭据塞入诊断元数据。压缩内容继续使用既有 context 通道。</p>
+<p>旧记录缺少 <code>title_pending</code> 按 false；缺少 usage、workflow 或新字段不能补推“统计完整”“已验证”。只允许忽略损坏且没有换行终止的最后一行，其余 JSONL 错误按文件隔离，列表跳过坏文件而不是吞掉中间事件。追加及当前 step 捕获 EOF 前，在 Session 锁内有界恢复尾部：完整有效的旧无 LF 事件补换行并保留原字节，未完成或无效尾部截回上一完整行；超过 8 MiB 无法判定时保留原文件并停止写入。旧条目的字节位置及摘要保持不变。持久化失败走 <code>PersistenceError</code>，不能当网络错误重试模型或继续成功结算。</p>
+<h2>创建、切换与恢复</h2>
+<table>
+<thead>
+<tr>
+<th>操作</th>
+<th>固定语义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>第一条普通消息</td>
+<td>先创建 Session，再请求模型与追加记录</td>
+</tr>
+<tr>
+<td><code>/new</code></td>
+<td>必须已有模型；立即进入标题为 <code>New Session</code>、<code>title_pending: true</code> 的空 Session</td>
+</tr>
+<tr>
+<td>第一条新 Session 问题</td>
+<td>先生成可靠回退标题，再异步命名；不能阻塞回答</td>
+</tr>
+<tr>
+<td><code>/clear</code></td>
+<td>清屏并解除当前 Session，保留模型；下一条普通消息才创建新 Session</td>
+</tr>
+<tr>
+<td><code>/resume [query]</code></td>
+<td>默认搜索当前工作区，可明确切换全部工作区；预览后仍通过原恢复路径加载 timeline、context、模型、工作目录、Goal、workflow、TaskProgress 和聊天 Memory 策略，继续原文件</td>
+</tr>
+<tr>
+<td><code>/fork [title]</code></td>
+<td>仅当前本地 Session 完全空闲且源模型仍可用时固定已提交 EOF，生成独立子副本，成功发布后切换；失败或取消保持父会话</td>
+</tr>
+<tr>
+<td>模型切换</td>
+<td>保留累计 usage，重置或标记未知的新模型 context 占用</td>
+</tr>
+<tr>
+<td>Session 删除</td>
+<td>使用选择/确认流程，同时清理所属输出附件；任务或直接命令运行期间不得删除</td>
+</tr>
+</tbody></table>
+<p>恢复前先检查工作目录；目录不存在时保持当前会话不变。原模型缺失可选择替代，但含供应商专属加密/不透明 context 时不得跨供应商静默迁移。旧“新 Session”标题只在显示层翻译。</p>
+<p>恢复后重新读取项目规则与文件观察；权限读取当前配置，不从 JSONL 复活。<code>session_resume</code> 和 Goal 自动续跑必须保留修复计数与未验证债务，不能通过新的 <code>no_changes</code> 清除失败。后台命令和进程内 undo 检查点不可恢复。</p>
+<p><code>session_resume</code> 恢复最后一个有效 <code>task_progress_updated</code>；repair 与同一顶层任务里的 Goal continuation 复用投影，新的用户 coding task 则先持久化空清单。清单随每次请求重新提供，包括 context 压缩之后；它始终是进度说明，不能推导 workflow 或 Goal 结果。旧 Session 没有该事件时按“尚无清单”处理。</p>
+<p><code>SessionStore.search</code> 流式读取并校验 JSONL，只投影当前标题以及 user/assistant conversation message；tool output、模型 context 和 learned Memory 不参与匹配。匹配采用不区分大小写的字面量比较，每个 Session 只返回一项，按最新活动时间排序，并提供命中片段及最多三条本地对话预览。每页最多 50 项，界面显示八行；输入有 200ms debounce，新的 query/scope/page 会取消旧搜索并忽略迟到结果。</p>
+<p>搜索投影只存在进程内，采用 16 MiB LRU 上限；Session 追加和删除使对应条目失效，读取后再次核对文件元数据，避免缓存并发变化。冷读和缓存命中的返回 summary 都深度复制，调用方可以修改自己的快照，但不能改写缓存中的标题、模型设置、Goal、workflow 债务、TaskProgress、Memory policy 或 lineage。match 与 preview 按值生成；复制不增加日志扫描，后续搜索仍从内部投影匹配。搜索不创建持久索引或 schema migration；损坏 Session 单独跳过，未完成末行沿用现有兼容规则。删除仍使用原确认流程和 Session 写队列，搜索结果不改变恢复语义。</p>
+<h3>Session 分支</h3>
+</article><form>Credentials input</form><footer>Footer advertising tracking</footer><script>throw new Error('never executed')</script></body></html>

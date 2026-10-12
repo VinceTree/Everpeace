@@ -1,0 +1,84 @@
+<!doctype html><html><head><title>Codex Sandbox、MCP 与 Skill 接入</title><base href="https://invalid.example/"></head><body><nav>Navigation account subscription portal</nav><section><h1>Codex Sandbox、MCP 与 Skill 接入</h1>
+<h2>对标基线</h2>
+<p>本轮先读取 OpenAI 官方 <a href="https://developers.openai.com/es-419/docs/permissions">Permissions</a>、<a href="https://developers.openai.com/es-419/docs/extend/mcp?surface=cli">MCP</a> 和 <a href="https://developers.openai.com/es-419/docs/build-skills">Skills</a> 文档，再检查 <code>openai/codex</code> 源码提交 <a href="https://github.com/openai/codex/tree/78245b47af2a7aafcabe025828ceecca69db4df1"><code>78245b47af2a7aafcabe025828ceecca69db4df1</code></a>。重点映射如下：</p>
+<ul>
+<li>Sandbox：<code>codex-rs/core/src/sandboxing/mod.rs</code>、<code>codex-rs/core/src/tools/sandboxing.rs</code>、<code>codex-rs/cli/src/debug_sandbox.rs</code> 和 Windows sandbox wrapper。</li>
+<li>MCP：<code>codex-rs/core/src/mcp.rs</code>、<code>codex-rs/core/src/session/mcp_runtime.rs</code>、<code>codex-rs/core/src/tools/handlers/mcp.rs</code> 和 <code>codex-rs/core/src/mcp_tool_call.rs</code>。</li>
+<li>Skills：<code>codex-rs/skills/src/parser.rs</code>、<code>codex-rs/ext/skills/src/host_roots.rs</code>、<code>catalog_prompt.rs</code> 和 <code>tools/read.rs</code>。</li>
+</ul>
+<p>Everpeace 没有复制整套 Rust runtime；它固定依赖 <code>@openai/codex@0.162.0</code> 作为 sandbox 执行后端，Windows 启动时显式选择 MXC，使用官方 MCP TypeScript SDK，并在现有 Responses/ReAct 循环内实现 Codex 对齐的主机 Skill 发现与渐进读取。</p>
+<h2>Sandbox</h2>
+<p>模型发起的命令统一经 <code>codex sandbox</code> 启动并包含 <code>--include-managed-config</code>。read-only/full-access 选择内置 profile；ask/workspace-write 使用宿主按当前工作区生成的完整 <code>:workspace</code> 子 profile，保护控制目录和平台应用状态。每次调用前冻结有效策略并显式开启后端默认环境凭据排除；启动 Node wrapper 前也会过滤继承的凭据/启动注入变量，不会根据命令输出自动重放 payload。固定源码对比与后续统一策略计划见 <a href="./SANDBOX.md">SANDBOX.md</a>。profile 映射为：</p>
+<table>
+<thead>
+<tr>
+<th>Everpeace mode</th>
+<th>审批</th>
+<th>Codex profile</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>read-only</code></td>
+<td>每次模型 shell 请求审批</td>
+<td><code>:read-only</code></td>
+</tr>
+<tr>
+<td><code>ask</code></td>
+<td>每次模型 shell 请求审批</td>
+<td><code>:workspace</code></td>
+</tr>
+<tr>
+<td><code>workspace-write</code></td>
+<td>无逐条 shell 审批</td>
+<td><code>:workspace</code></td>
+</tr>
+<tr>
+<td><code>full-access</code></td>
+<td>二次确认后免工具审批</td>
+<td><code>:danger-full-access</code></td>
+</tr>
+</tbody></table>
+<p>Sandbox 和审批保持两层独立判断。CLI、平台二进制或 sandbox 初始化失败时，命令返回失败结果，不会退回宿主直接执行。Skill 目录以额外只读根传给 sandbox，允许被选中的 Skill 引用自己的脚本和资源。</p>
+<p>Windows 的 Codex restricted-token backend 可以运行系统 PowerShell，但 Git Bash/MSYS 在该令牌中会因自身服务初始化返回 <code>E_ACCESSDENIED</code>。因此 Windows 模型命令使用非交互 PowerShell；macOS/Linux 使用 Bash。用户亲自输入的 <code>!&lt;command&gt;</code> 仍走原有原生 PTY，不进入模型 sandbox，也不进入模型 context。</p>
+<p>这不是完整 Codex runtime：当前会把后端 managed requirements 纳入 profile 解析，但未把同一策略扩展到全部宿主工具，也未接入自动审批 reviewer、代理域名策略或额外可写根 UI。Everpeace 的用户 command rules 和独立 shell 网络开关持久化在平台配置目录；可选的项目策略只能收紧模式、关闭 web/shell 网络或追加 deny/ask 规则，不能通过仓库文件提升权限，也不替代原生 sandbox。复合命令逐段检查，嵌套解释器和含糊语法转为审批；<code>:workspace</code> 的实际文件与网络限制仍由固定版本后端执行。</p>
+<h2>MCP</h2>
+<p><code>McpRuntime</code> 通过同一固定版本的 <code>codex mcp list --json</code> 与 <code>codex mcp get &lt;name&gt; --json</code> 读取 Codex 用户/可信项目配置，不另造第二份 MCP 配置。它支持：</p>
+<ul>
+<li>stdio 和 Streamable HTTP transport；</li>
+<li>stdio <code>command</code>、<code>args</code>、显式环境、继承环境名和工作目录；</li>
+<li>HTTP 静态 header、环境变量 header 和 bearer-token 环境变量；</li>
+<li>启动/调用超时、enabled/disabled tool 过滤、单服务器失败隔离；</li>
+<li>server instructions、按初始化 capabilities 注册工具/资源/提示入口、受限分页工具发现与 <code>notifications/tools/list_changed</code> 热更新；</li>
+<li><code>mcp__&lt;server&gt;__&lt;tool&gt;</code> 命名空间、参数转发、有界结果和取消；</li>
+<li><code>/mcp</code> 查看状态和信任管理入口；<code>/mcp reconnect</code> 显式重载配置、重置重试状态，显示 disabled/connecting/reconnecting/ready/failed/trust_required 状态。</li>
+</ul>
+<h3>启动信任与 HTTP 边界</h3>
+<p>stdio 的宿主进程启动与 MCP tool-call 审批是独立权限边界。默认没有启动授权；<code>/mcp trust &lt;server&gt;</code> 读取有效 Codex 配置，展示工作区、解析后的程序、cwd、脱敏参数、环境名称和来源。CLI 不能证明配置文件来源时明确显示 unknown。确认默认 Cancel；批准只保存权限，<code>/mcp reconnect</code> 才显式启动。允许启动相当于允许运行该程序，其权限仍为宿主用户；本轮没有添加 MCP 原生沙箱，也不验证程序及依赖完整性。</p>
+<p><a href="../../src/mcp/trust.ts">信任存储</a>在平台用户配置目录保存 <code>mcp-trust.json</code> schema v1，记录规范化工作区、服务名、授权种类和 HMAC 指纹；密钥仅通过 AuthStorage/keyring 保存。fingerprint 包含 transport、实际解析的 command、args、cwd 和冻结的完整环境，HTTP 例外绑定完整 URL、header 来源和实际凭据。项目配置不能授予信任，Session 也不恢复授权。文件读写使用跨进程锁和原子替换；坏文件、丢失密钥、keyring 或写入异常均不能自动放行。审批提交及落盘前重读配置并核对预览指纹、存储 revision 与 runtime generation。确认取消不授予权限。</p>
+<p>启动、自动重连、目录准备及工具派发检查当前配置和授权；stdio 与本机 HTTP 未信任时是 <code>trust_required</code>，不进入自动重试。<code>/mcp revoke &lt;server&gt;</code> 先使当前 callable/binding 失效，取消初始化、计时器和活动调用，再等待关闭和持久撤销。其他进程的撤销在下一次检查时生效，不声称可以即时终止另一进程已经运行的程序。<code>full-access</code> 和普通 MCP tool-call 批准不能授予启动权限。非交互 CLI/SDK 在模型请求前以 <code>interaction_required</code>、<code>mcp_start</code>/<code>mcp_http</code> 返回；默认交互编码任务也暂停并提示使用 <code>/mcp</code>。</p>
+<p>非回环 HTTP 无论凭据是否存在均拒绝；HTTPS 保留证书校验，允许公网与内网端点。HTTP 只对字面 <code>127.0.0.0/8</code>、<code>::1</code> 和固定连接到回环的 <code>localhost</code> 提供单独批准，其他域名即使 DNS 返回回环也不获得例外。<a href="../../src/mcp/http.ts">MCP HTTP 客户端</a>使用 transport 自有 dispatcher，适配长期 SSE；SDK 初始化、POST、GET/SSE/恢复、DELETE 共用自定义 fetch，所有 3xx 都释放响应并拒绝下一跳。禁止 URL 内嵌凭据和 fragment。Header 和 stdio 环境在获准连接前冻结，参数、header 值、URL 路径/查询和内部异常不直接进入 UI 或诊断。生产仍不接入 OAuth。</p>
+<p>真实进程门禁、持久/跨进程授权、撤销与迟到初始化、HTTP 与 TLS、SDK SSE 重定向回归见 <a href="../../tests/unit/mcp/security.test.ts">security tests</a>。既有 MCP 协议 fixture 通过显式注入测试授权，不访问用户 keyring。TUI 确认/取消/resize 和 headless preflight 分别在 app 与 exec 回归中覆盖；实际终端验收状态只在 HANDOFF 记录。</p>
+<p>每个 server 有独立 supervisor。瞬时启动失败或断连使用 500 ms 起步、30 秒封顶的指数退避，最多重试十次；连接连续稳定 30 秒才清零计数。配置不支持、认证不可用、stdio executable 明确缺失等永久错误直接进入 failed。断连先从目录原子移除该 server 的全部 callable，再关闭旧 client；初始化未完成的 client 也由 supervisor 管理，关闭同时等待 SDK close 完成及 transport 的实际 close 事件。五秒内不能确认关闭时停止自动恢复，不能同时建立替代连接。退出、切换工作区、<code>/mcp reconnect</code> 主动刷新都会取消旧 generation 的连接和 timer，迟到 callback 不能复活它。默认 TUI 在正常退出和启动失败路径都等待共享 <code>TuiDependencies.dispose()</code>；它关闭活动 Memory runtime 与 <code>McpRuntime</code>，即使清理失败也继续恢复终端模式。</p>
+<p>恢复只影响后续调用。断连时正在进行的 tool call 不自动重放；普通业务错误、单次 tool timeout 和用户取消不会单独触发 reconnect。Streamable HTTP 已有 session ID 收到 404 时，宿主将该会话视为失效，通过同一关闭/重连流程建立后续连接；SDK 自身的 SSE 流恢复仍由 SDK 管理。<code>tools/list_changed</code> 通知以 50 ms 合并；每次先完整读取分页结果，再原子替换该 server 的工具定义和执行校验器。失败时保持上一份完整目录并在 status 中记录错误，真正断连则立即移除。发现最多 100 页、1,000 个工具和 2 MiB 定义，连接、发现及校验器编译共享配置的启动期限；重复 cursor、重复原始工具名及超限都明确失败。</p>
+<p><code>McpSnapshot</code> 在同一时刻复制 function definitions、annotations/审批所需 metadata 和 opaque binding。binding 摘要包含随机 connection ID、完整原始定义（包括 <code>outputSchema</code>、<code>execution</code> 和 annotations）及最终 callable name。Agent 为每个逻辑 step 冻结该快照，普通网络重试复用；dispatch 同时检查当前连接 generation 和冻结 binding，因此工具在审批等待或下一步前被删除、重连或改定义后，旧调用返回 stale/unavailable，不会转发到新能力。</p>
+<p>发现与调用使用 SDK 公共 <code>request</code> 和对应 result schema，不依赖其按页覆盖的工具 metadata cache。已发布定义分别编译 output validator，远端重复使用相同 <code>$id</code> 不会复用另一工具或旧定义的校验器。进行中的调用按派发时捕获的定义验证 <code>structuredContent</code>；刷新失败不改变旧校验器。无效或异步 output schema 拒绝整次目录更新。要求 task-based execution 的工具不向模型广告，<code>/mcp</code> 明确显示 unsupported；optional-task 工具仍可普通调用。</p>
+<p>除 <code>full-access</code> 外，每次 MCP tool call 都走独立审批；它不受内置 web 开关替代或放行。工具调用及结果和其他 function call 一样进入可恢复 Responses context；配置 header、bearer token 和 stdio 环境值只在连接时使用，不写入 session、transcript 或模型 instructions。</p>
+<p>除标准 tools 外，宿主按初始化 capabilities 注册受审批的 <code>list_resources</code>、<code>list_resource_templates</code>、<code>read_resource</code>、<code>list_prompts</code> 和 <code>get_prompt</code>。只有 resources、prompts 或 instructions 的 server 也能进入 ready，不需要成功发现标准 tools。三个 list 接口接收可选 <code>cursor</code>，每次实时读取一页，并原样返回服务器游标为 <code>next_cursor</code>；空页也保留续点，返回与请求相同的非空游标则拒绝。空字符串游标仍原样转发；若服务器持续返回相同空游标而不前进，应重新列举，宿主不猜测替代游标。单页最多 1,000 项且完整序列化结果最多 1 MiB；超限返回 <code>incomplete</code> 与 <code>range_error</code>，不返回会跳过遗漏条目的续点。read/get 同样按需读取，不缓存目录、不自动订阅资源更新。</p>
+<p>MCP 文本投影保留文本、URI 和 MIME；只处理协议明确的 tool <code>content[]</code>、prompt <code>messages[].content</code>、resource <code>contents[]</code> 及其中嵌入的 resource 内容块，将 image/audio/blob 的 base64 替换为类型与大小说明。<code>structuredContent</code>、各层 <code>_meta</code> 和列表 metadata 不递归改写，业务字段即使名为 <code>blob</code> 或形如 image 也保持原值。普通结果连同截断 envelope 保持有效 JSON 且最多 1 MiB。Client 声明 <code>roots: { listChanged: true }</code> 并应答 <code>roots/list</code>，把当前工作区作为唯一 root 提供给 server；<code>setWorkspace</code> 通过断开重连让新工作区生效。Codex OAuth 凭据复用、<code>http_headers_helper</code>、elicitation、sampling、tasks 和按工具持久审批策略尚未接入。OAuth/header-helper server 会以明确失败状态显示；不得声称与完整 Codex MCP runtime 等价。</p>
+<p>模型文件编辑通过兼容的 <code>apply_patch</code> function tool 接入，支持有界 unified diff；生产 update/delete 强制匹配宿主读版本，审批绑定 preview hash 与权限 revision。更新逐文件原子替换，创建排他执行；批量失败仅回滚仍匹配本次 post-image 的已写文件，冲突或回滚错误明确报告，不保证整个批次原子成功。详见 <a href="TOOLS.md">TOOLS</a>；它不是完整 Codex 原生 <code>apply_patch_call</code> wire protocol。</p>
+<p>MCP 的真实 stdio 恢复回归见 <a href="../../tests/unit/mcp/stdio-recovery.test.ts">stdio-recovery.test.ts</a>。fixture 启动期限覆盖 Node／tsx／SDK 冷启动，首代主动不回应初始化以触发超时；仍严格检查恰好两代、旧进程先退出、binding 失效和不重放。测试时间预算见 <a href="../DEVELOPMENT.md#%E7%8B%AC%E7%AB%8B%E6%B5%8B%E8%AF%95-ci-%E4%B8%8E%E8%AF%81%E6%8D%AE%E8%8C%83%E5%9B%B4">开发指南</a>，不会修改生产默认期限或恢复策略。</p>
+<p>MCP SDK 安全修复按 <a href="https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-6qxp-vccf-f47h">官方公告</a> 升级并同步 lock。实际 <code>src/mcp/runtime.ts</code> 的 StreamableHTTP transport 传冻结的 requestInit headers 和受控 fetch，不配置 OAuth authProvider；stdio 也没有 OAuth 调用路径。依赖告警需要处理，但不能据此声称当前应用已经泄漏 OAuth client 凭据。stdio、Streamable HTTP、断连不重放与资源关闭仍由真实协议回归验证，远端告警状态在最终交接记录。</p>
+<h2>Skills</h2>
+<p><code>SkillCatalog</code> 的开发/嵌入装配可显式提供发现根；传入时仅扫描这些根，不读取默认用户或系统目录。正常生产构造不传 roots，继续使用下面的完整发现规则。离线 TUI 用它加载本轮隔离 Skill，不修改用户环境或个人 Skill 库。</p>
+<p><code>SkillCatalog</code> 按 Codex 主机 Skill 规则发现：</p>
+<ul>
+<li>从当前工作目录向项目根查找每层 <code>.agents/skills</code>；</li>
+<li>项目根 <code>.codex/skills</code>；</li>
+<li><code>$CODEX_HOME/skills</code>（默认 <code>~/.codex/skills</code>，含系统 Skill cache）；</li>
+<li><code>~/.agents/skills</code>；</li>
+<li>非 Windows 的 <code>/etc/codex/skills</code>。</li>
+</ul>
+<p>目录 symlink 可以指向 Skill；读取引用资源时再次 realpath，并拒绝逃逸 Skill 根目录。<code>SKILL.md</code> 必须有 YAML frontmatter 和非空 <code>description</code>，管理器创建或安装的新 Skill 名称还必须使用小写字母、数字和连字符且最长 64 个字符；扫描深度、条目数、单文件大小和模型 catalog 均有限制。</p>
+<p>模型请求只预载名称、描述和路径。用户写 <code>$skill-name</code> 时，本轮在首次采样前完整注入对应 <code>SKILL.md</code>；隐式匹配由模型根据 catalog 判断，并通过 <code>read_skill</code> 分页读取完整说明或相对资源。Skill 不自动延续到下一轮。<code>/skills</code> 重新扫描并显示全部发现结果和错误数。</p>
+<p><code>/skills</code> 现为三入口管理向导：</p>
+</section><form>Credentials input</form><footer>Footer advertising tracking</footer><script>throw new Error('never executed')</script></body></html>

@@ -1,0 +1,21 @@
+[
+  {
+    "rule": "private-key",
+    "file": "tests/fixtures/public-network/key.pem",
+    "sha256": [
+      "2b92cfca477aad3736d9c105b78f46272660b6d23856779ef337878206763761",
+      "f3ab6db610c9c006cf44853d80734f0dca4679bb06cfbae8ae87c4aeceb3c6da"
+    ],
+    "reason": "Disposable public TLS fixture; never used outside isolated test servers.",
+    "review": "Reviewed exact file bytes during security boundary implementation; any changed content requires review."
+  },
+  {
+    "rule": "private-key",
+    "file": "tests/unit/util/redact-secrets.test.ts",
+    "sha256": [
+      "450bf3bef4a12b2909198949c2ed07734813e61b953e29397c0e3d957769d378"
+    ],
+    "reason": "Literal fake private-key markers used to test redaction; no usable credential.",
+    "review": "Reviewed exact file bytes during security boundary implementation; any changed content requires review."
+  }
+]
