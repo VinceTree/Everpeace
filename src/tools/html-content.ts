@@ -3,6 +3,18 @@ import { parseDocument } from "htmlparser2";
 type DomNode = ReturnType<typeof parseDocument>["children"][number];
 const NOISE = new Set(["head", "script", "style", "noscript", "svg", "template", "object", "form", "nav", "footer", "button"]);
 const BLOCKS = new Set(["article", "main", "section", "div", "p", "header", "aside", "dl", "dt", "dd"]);
+function bodyScore(node: DomNode): number {
+  const stack = [node]; let characters = 0, linked = 0, structure = 0, visited = 0;
+  while (stack.length && visited++ < 10000) {
+    const current = stack.pop()!, tag = name(current);
+    if (hidden(current) || NOISE.has(tag) || tag === 'aside') continue;
+    if (current.type === 'text') { characters += current.data.trim().length; if (current.parent && name(current.parent) === 'a') linked += current.data.length; }
+    if (/^h[1-6]$/u.test(tag)) structure += 60;
+    if (tag === 'pre' || tag === 'table') structure += 180;
+    stack.push(...children(current));
+  }
+  return characters < 20 ? 0 : (characters + structure - linked * 0.8) * (name(node) === 'article' ? 1.1 : 1);
+}
 export interface ExtractedHtml { title: string | null; content: string; links: Array<{ title: string; url: string }>; extraction: "dom_main" | "dom_body"; extractionTruncated: boolean }
 function children(node: DomNode): DomNode[] { return "children" in node ? node.children : []; }
 function name(node: DomNode): string { return "name" in node ? node.name.toLowerCase() : ""; }
@@ -25,7 +37,7 @@ function text(node: DomNode, onTruncated?: () => void): string {
 }
 export function extractHtmlContent(html: string, pageUrl: URL, linkLimit = 40): ExtractedHtml {
   const document = parseDocument(html);
-  let title: string | null = null; let body: DomNode = document; let main: DomNode | undefined;
+  let title: string | null = null; let body: DomNode = document; let main: DomNode | undefined; let bestScore = 0; let candidates = 0;
   const discovery = [{ node: document as DomNode, depth: 0 }]; let scanned = 0; let truncated = false;
   while (discovery.length && scanned++ < 100_000) {
     const { node, depth } = discovery.pop()!;
@@ -34,13 +46,13 @@ export function extractHtmlContent(html: string, pageUrl: URL, linkLimit = 40): 
     const tag = name(node);
     if (tag === "title" && !title) title = text(node).replace(/\s+/gu, " ").trim().slice(0, 500) || null;
     if (tag === "body") body = node;
-    if (["main", "article"].includes(tag) && !main && text(node).trim().length >= 20) main = node;
+    if (["main", "article"].includes(tag) && candidates++ < 32) { const score = bodyScore(node); if (score > bestScore) {main = node; bestScore = score;} }
     if (["script", "style", "template"].includes(tag)) continue;
     for (const child of children(node).slice().reverse()) discovery.push({ node: child, depth: depth + 1 });
   }
   if (discovery.length) truncated = true;
   const links: ExtractedHtml["links"] = []; const seen = new Set<string>(); let rendered = 0;
-  const render = (node: DomNode, depth: number, inPre = false): string => {
+  const render = (node: DomNode, depth: number, inPre = false, listDepth = 0): string => {
     if (depth > 64 || rendered++ >= 100_000) { truncated = true; return ""; }
     if (hidden(node)) return "";
     if (node.type === "text") return inPre ? node.data : node.data.replace(/[\t\r\n ]+/gu, " ");
@@ -62,11 +74,13 @@ export function extractHtmlContent(html: string, pageUrl: URL, linkLimit = 40): 
         if (name(item) === "tr") rows.push(item); else stack.push(...children(item).slice().reverse().map((child) => ({ item: child, depth: current.depth + 1 })));
       }
       if (stack.length) truncated = true;
-      return "\n\n" + rows.map((row) => children(row).filter((cell) => ["td", "th"].includes(name(cell))).map((cell) => render(cell, depth + 2).trim().replaceAll("|", "\\|").replace(/\n+/gu, " / ")).join(" | ")).join("\n") + "\n\n";
+      const values = rows.map((row) => children(row).filter((cell) => ["td", "th"].includes(name(cell))).map((cell) => render(cell, depth + 2).trim().replaceAll("|", "\\|").replace(/\n+/gu, " / ")));
+      const header = rows[0] && children(rows[0]).some(cell => name(cell) === 'th');
+      return "\n\n" + values.flatMap((cells, index) => { const row = '| '+cells.join(' | ')+' |'; return index === 0 && header ? [row, '| '+cells.map(()=>'---').join(' | ')+' |'] : [row]; }).join("\n") + "\n\n";
     }
-    const content = children(node).map((child) => render(child, depth + 1, inPre)).join("");
+    const content = children(node).map((child) => render(child, depth + 1, inPre, tag === 'ul' || tag === 'ol' ? listDepth + 1 : listDepth)).join("");
     if (/^h[1-6]$/u.test(tag)) return `\n\n${"#".repeat(Number(tag[1]))} ${content.trim()}\n\n`;
-    if (tag === "li") return `\n${node.parent && name(node.parent) === "ol" ? "1." : "-"} ${content.trim()}\n`;
+    if (tag === "li") { const ordered = node.parent && name(node.parent) === 'ol'; const start = ordered ? Number(attrs(node.parent!).start ?? 1) : 1; const ordinal = ordered ? Math.max(1,Number.isSafeInteger(start)?start:1) + children(node.parent!).filter(child=>name(child)==='li').indexOf(node) : 1; return `\n${'  '.repeat(Math.max(0,listDepth-1))}${ordered ? ordinal+'.' : '-'} ${content.trim()}\n`; }
     if (tag === "ul" || tag === "ol") return `\n${content}\n`;
     if (tag === "blockquote") return "\n\n" + content.trim().split("\n").map((line) => `> ${line}`).join("\n") + "\n\n";
     if (tag === "br") return "\n";
@@ -83,7 +97,7 @@ export function extractHtmlContent(html: string, pageUrl: URL, linkLimit = 40): 
         } catch { /* Unsupported or invalid links retain their visible label. */ }
       }
     }
-    if (tag === "code" && !inPre) return `\`${content.replaceAll("`", "\\`")}\``;
+    if (tag === "code" && !inPre) { const fence = '`'.repeat(Math.max(1,...[...content.matchAll(/`+/gu)].map(m=>m[0].length+1))); const pad = content.startsWith('`') || content.endsWith('`') ? ' ' : ''; return `${fence}${pad}${content}${pad}${fence}`; }
     return BLOCKS.has(tag) ? `\n\n${content}\n\n` : content;
   };
   const lines: string[] = []; let fence: string | undefined; let blanks = 0;

@@ -1,0 +1,494 @@
+<!doctype html><html><head><title>Path</title></head><body><main>Navigation account subscription portal: this is an intentionally synthetic teaser.</main><main><nav>Navigation account subscription portal</nav><article id="documentation"><h1>Path</h1>
+<!--introduced_in=v0.10.0--><blockquote>
+<p>Stability: 2 - Stable</p>
+</blockquote>
+<!-- source_link=lib/path.js --><p>The <code>node:path</code> module provides utilities for working with file and directory
+paths. It can be accessed using:</p>
+<pre><code class="language-cjs">const path = require(&#39;node:path&#39;);
+</code></pre>
+<pre><code class="language-mjs">import path from &#39;node:path&#39;;
+</code></pre>
+<h2>Windows vs. POSIX</h2>
+<p>The default operation of the <code>node:path</code> module varies based on the operating
+system on which a Node.js application is running. Specifically, when running on
+a Windows operating system, the <code>node:path</code> module will assume that
+Windows-style paths are being used.</p>
+<p>So using <code>path.basename()</code> might yield different results on POSIX and Windows:</p>
+<p>On POSIX:</p>
+<pre><code class="language-js">path.basename(&#39;C:\\temp\\myfile.html&#39;);
+// Returns: &#39;C:\\temp\\myfile.html&#39;
+</code></pre>
+<p>On Windows:</p>
+<pre><code class="language-js">path.basename(&#39;C:\\temp\\myfile.html&#39;);
+// Returns: &#39;myfile.html&#39;
+</code></pre>
+<p>To achieve consistent results when working with Windows file paths on any
+operating system, use <a href="#pathwin32"><code>path.win32</code></a>:</p>
+<p>On POSIX and Windows:</p>
+<pre><code class="language-js">path.win32.basename(&#39;C:\\temp\\myfile.html&#39;);
+// Returns: &#39;myfile.html&#39;
+</code></pre>
+<p>To achieve consistent results when working with POSIX file paths on any
+operating system, use <a href="#pathposix"><code>path.posix</code></a>:</p>
+<p>On POSIX and Windows:</p>
+<pre><code class="language-js">path.posix.basename(&#39;/tmp/myfile.html&#39;);
+// Returns: &#39;myfile.html&#39;
+</code></pre>
+<p>On Windows Node.js follows the concept of per-drive working directory.
+This behavior can be observed when using a drive path without a backslash. For
+example, <code>path.resolve(&#39;C:\\&#39;)</code> can potentially return a different result than
+<code>path.resolve(&#39;C:&#39;)</code>. For more information, see
+<a href="https://docs.microsoft.com/en-us/windows/desktop/FileIO/naming-a-file#fully-qualified-vs-relative-paths">this MSDN page</a>.</p>
+<h2><code>path.basename(path[, suffix])</code></h2>
+<!-- YAML
+added: v0.1.25
+changes:
+  - version: v6.0.0
+    pr-url: https://github.com/nodejs/node/pull/5348
+    description: Passing a non-string as the `path` argument will throw now.
+--><ul>
+<li><code>path</code> {string}</li>
+<li><code>suffix</code> {string} An optional suffix to remove</li>
+<li>Returns: {string}</li>
+</ul>
+<p>The <code>path.basename()</code> method returns the last portion of a <code>path</code>, similar to
+the Unix <code>basename</code> command. Trailing <a href="#pathsep">directory separators</a> are
+ignored.</p>
+<pre><code class="language-js">path.basename(&#39;/foo/bar/baz/asdf/quux.html&#39;);
+// Returns: &#39;quux.html&#39;
+
+path.basename(&#39;/foo/bar/baz/asdf/quux.html&#39;, &#39;.html&#39;);
+// Returns: &#39;quux&#39;
+</code></pre>
+<p>Although Windows usually treats file names, including file extensions, in a
+case-insensitive manner, this function does not. For example, <code>C:\\foo.html</code> and
+<code>C:\\foo.HTML</code> refer to the same file, but <code>basename</code> treats the extension as a
+case-sensitive string:</p>
+<pre><code class="language-js">path.win32.basename(&#39;C:\\foo.html&#39;, &#39;.html&#39;);
+// Returns: &#39;foo&#39;
+
+path.win32.basename(&#39;C:\\foo.HTML&#39;, &#39;.html&#39;);
+// Returns: &#39;foo.HTML&#39;
+</code></pre>
+<p>A <a href="errors.md#class-typeerror"><code>TypeError</code></a> is thrown if <code>path</code> is not a string or if <code>suffix</code> is given
+and is not a string.</p>
+<h2><code>path.delimiter</code></h2>
+<!-- YAML
+added: v0.9.3
+--><ul>
+<li>Type: {string}</li>
+</ul>
+<p>Provides the platform-specific path delimiter:</p>
+<ul>
+<li><code>;</code> for Windows</li>
+<li><code>:</code> for POSIX</li>
+</ul>
+<p>For example, on POSIX:</p>
+<pre><code class="language-js">console.log(process.env.PATH);
+// Prints: &#39;/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin&#39;
+
+process.env.PATH.split(path.delimiter);
+// Returns: [&#39;/usr/bin&#39;, &#39;/bin&#39;, &#39;/usr/sbin&#39;, &#39;/sbin&#39;, &#39;/usr/local/bin&#39;]
+</code></pre>
+<p>On Windows:</p>
+<pre><code class="language-js">console.log(process.env.PATH);
+// Prints: &#39;C:\Windows\system32;C:\Windows;C:\Program Files\node\&#39;
+
+process.env.PATH.split(path.delimiter);
+// Returns [&#39;C:\\Windows\\system32&#39;, &#39;C:\\Windows&#39;, &#39;C:\\Program Files\\node\\&#39;]
+</code></pre>
+<h2><code>path.dirname(path)</code></h2>
+<!-- YAML
+added: v0.1.16
+changes:
+  - version: v6.0.0
+    pr-url: https://github.com/nodejs/node/pull/5348
+    description: Passing a non-string as the `path` argument will throw now.
+--><ul>
+<li><code>path</code> {string}</li>
+<li>Returns: {string}</li>
+</ul>
+<p>The <code>path.dirname()</code> method returns the directory name of a <code>path</code>, similar to
+the Unix <code>dirname</code> command. Trailing directory separators are ignored, see
+<a href="#pathsep"><code>path.sep</code></a>.</p>
+<pre><code class="language-js">path.dirname(&#39;/foo/bar/baz/asdf/quux&#39;);
+// Returns: &#39;/foo/bar/baz/asdf&#39;
+</code></pre>
+<p>A <a href="errors.md#class-typeerror"><code>TypeError</code></a> is thrown if <code>path</code> is not a string.</p>
+<h2><code>path.extname(path)</code></h2>
+<!-- YAML
+added: v0.1.25
+changes:
+  - version: v6.0.0
+    pr-url: https://github.com/nodejs/node/pull/5348
+    description: Passing a non-string as the `path` argument will throw now.
+--><ul>
+<li><code>path</code> {string}</li>
+<li>Returns: {string}</li>
+</ul>
+<p>The <code>path.extname()</code> method returns the extension of the <code>path</code>, from the last
+occurrence of the <code>.</code> (period) character to end of string in the last portion of
+the <code>path</code>. If there is no <code>.</code> in the last portion of the <code>path</code>, or if
+there are no <code>.</code> characters other than the first character of
+the basename of <code>path</code> (see <code>path.basename()</code>) , an empty string is returned.</p>
+<pre><code class="language-js">path.extname(&#39;index.html&#39;);
+// Returns: &#39;.html&#39;
+
+path.extname(&#39;index.coffee.md&#39;);
+// Returns: &#39;.md&#39;
+
+path.extname(&#39;index.&#39;);
+// Returns: &#39;.&#39;
+
+path.extname(&#39;index&#39;);
+// Returns: &#39;&#39;
+
+path.extname(&#39;.index&#39;);
+// Returns: &#39;&#39;
+
+path.extname(&#39;.index.md&#39;);
+// Returns: &#39;.md&#39;
+</code></pre>
+<p>A <a href="errors.md#class-typeerror"><code>TypeError</code></a> is thrown if <code>path</code> is not a string.</p>
+<h2><code>path.format(pathObject)</code></h2>
+<!-- YAML
+added: v0.11.15
+changes:
+  - version: v19.0.0
+    pr-url: https://github.com/nodejs/node/pull/44349
+    description: The dot will be added if it is not specified in `ext`.
+--><ul>
+<li><code>pathObject</code> {Object} Any JavaScript object having the following properties:<ul>
+<li><code>dir</code> {string}</li>
+<li><code>root</code> {string}</li>
+<li><code>base</code> {string}</li>
+<li><code>name</code> {string}</li>
+<li><code>ext</code> {string}</li>
+</ul>
+</li>
+<li>Returns: {string}</li>
+</ul>
+<p>The <code>path.format()</code> method returns a path string from an object. This is the
+opposite of <a href="#pathparsepath"><code>path.parse()</code></a>.</p>
+<p>When providing properties to the <code>pathObject</code> remember that there are
+combinations where one property has priority over another:</p>
+<ul>
+<li><code>pathObject.root</code> is ignored if <code>pathObject.dir</code> is provided</li>
+<li><code>pathObject.ext</code> and <code>pathObject.name</code> are ignored if <code>pathObject.base</code> exists</li>
+</ul>
+<p>For example, on POSIX:</p>
+<pre><code class="language-js">// If `dir`, `root` and `base` are provided,
+// `${dir}${path.sep}${base}`
+// will be returned. `root` is ignored.
+path.format({
+  root: &#39;/ignored&#39;,
+  dir: &#39;/home/user/dir&#39;,
+  base: &#39;file.txt&#39;,
+});
+// Returns: &#39;/home/user/dir/file.txt&#39;
+
+// `root` will be used if `dir` is not specified.
+// If only `root` is provided or `dir` is equal to `root` then the
+// platform separator will not be included. `ext` will be ignored.
+path.format({
+  root: &#39;/&#39;,
+  base: &#39;file.txt&#39;,
+  ext: &#39;ignored&#39;,
+});
+// Returns: &#39;/file.txt&#39;
+
+// `name` + `ext` will be used if `base` is not specified.
+path.format({
+  root: &#39;/&#39;,
+  name: &#39;file&#39;,
+  ext: &#39;.txt&#39;,
+});
+// Returns: &#39;/file.txt&#39;
+
+// The dot will be added if it is not specified in `ext`.
+path.format({
+  root: &#39;/&#39;,
+  name: &#39;file&#39;,
+  ext: &#39;txt&#39;,
+});
+// Returns: &#39;/file.txt&#39;
+</code></pre>
+<p>On Windows:</p>
+<pre><code class="language-js">path.format({
+  dir: &#39;C:\\path\\dir&#39;,
+  base: &#39;file.txt&#39;,
+});
+// Returns: &#39;C:\\path\\dir\\file.txt&#39;
+</code></pre>
+<h2><code>path.matchesGlob(path, pattern)</code></h2>
+<!-- YAML
+added: v22.5.0
+--><blockquote>
+<p>Stability: 1 - Experimental</p>
+</blockquote>
+<ul>
+<li><code>path</code> {string} The path to glob-match against.</li>
+<li><code>pattern</code> {string} The glob to check the path against.</li>
+<li>Returns: {boolean} Whether or not the <code>path</code> matched the <code>pattern</code>.</li>
+</ul>
+<p>The <code>path.matchesGlob()</code> method determines if <code>path</code> matches the <code>pattern</code>.</p>
+<p>For example:</p>
+<pre><code class="language-js">path.matchesGlob(&#39;/foo/bar&#39;, &#39;/foo/*&#39;); // true
+path.matchesGlob(&#39;/foo/bar*&#39;, &#39;foo/bird&#39;); // false
+</code></pre>
+<p>A <a href="errors.md#class-typeerror"><code>TypeError</code></a> is thrown if <code>path</code> or <code>pattern</code> are not strings.</p>
+<h2><code>path.isAbsolute(path)</code></h2>
+<!-- YAML
+added: v0.11.2
+--><ul>
+<li><code>path</code> {string}</li>
+<li>Returns: {boolean}</li>
+</ul>
+<p>The <code>path.isAbsolute()</code> method determines if the literal <code>path</code> is absolute.
+Therefore, it’s not safe for mitigating path traversals.</p>
+<p>If the given <code>path</code> is a zero-length string, <code>false</code> will be returned.</p>
+<p>For example, on POSIX:</p>
+<pre><code class="language-js">path.isAbsolute(&#39;/foo/bar&#39;);   // true
+path.isAbsolute(&#39;/baz/..&#39;);    // true
+path.isAbsolute(&#39;/baz/../..&#39;); // true
+path.isAbsolute(&#39;qux/&#39;);       // false
+path.isAbsolute(&#39;.&#39;);          // false
+</code></pre>
+<p>On Windows:</p>
+<pre><code class="language-js">path.isAbsolute(&#39;//server&#39;);    // true
+path.isAbsolute(&#39;\\\\server&#39;);  // true
+path.isAbsolute(&#39;C:/foo/..&#39;);   // true
+path.isAbsolute(&#39;C:\\foo\\..&#39;); // true
+path.isAbsolute(&#39;bar\\baz&#39;);    // false
+path.isAbsolute(&#39;bar/baz&#39;);     // false
+path.isAbsolute(&#39;.&#39;);           // false
+</code></pre>
+<p>A <a href="errors.md#class-typeerror"><code>TypeError</code></a> is thrown if <code>path</code> is not a string.</p>
+<h2><code>path.join([...paths])</code></h2>
+<!-- YAML
+added: v0.1.16
+--><ul>
+<li><code>...paths</code> {string} A sequence of path segments</li>
+<li>Returns: {string}</li>
+</ul>
+<p>The <code>path.join()</code> method joins all given <code>path</code> segments together using the
+platform-specific separator as a delimiter, then normalizes the resulting path.</p>
+<p>Zero-length <code>path</code> segments are ignored. If the joined path string is a
+zero-length string then <code>&#39;.&#39;</code> will be returned, representing the current
+working directory.</p>
+<pre><code class="language-js">path.join(&#39;/foo&#39;, &#39;bar&#39;, &#39;baz/asdf&#39;, &#39;quux&#39;, &#39;..&#39;);
+// Returns: &#39;/foo/bar/baz/asdf&#39;
+
+path.join(&#39;foo&#39;, {}, &#39;bar&#39;);
+// Throws &#39;TypeError: Path must be a string. Received {}&#39;
+</code></pre>
+<p>A <a href="errors.md#class-typeerror"><code>TypeError</code></a> is thrown if any of the path segments is not a string.</p>
+<h2><code>path.normalize(path)</code></h2>
+<!-- YAML
+added: v0.1.23
+--><ul>
+<li><code>path</code> {string}</li>
+<li>Returns: {string}</li>
+</ul>
+<p>The <code>path.normalize()</code> method normalizes the given <code>path</code>, resolving <code>&#39;..&#39;</code> and
+<code>&#39;.&#39;</code> segments.</p>
+<p>When multiple, sequential path segment separation characters are found (e.g.
+<code>/</code> on POSIX and either <code>\</code> or <code>/</code> on Windows), they are replaced by a single
+instance of the platform-specific path segment separator (<code>/</code> on POSIX and
+<code>\</code> on Windows). Trailing separators are preserved.</p>
+<p>If the <code>path</code> is a zero-length string, <code>&#39;.&#39;</code> is returned, representing the
+current working directory.</p>
+<p>On POSIX, the types of normalization applied by this function do not strictly
+adhere to the POSIX specification. For example, this function will replace two
+leading forward slashes with a single slash as if it was a regular absolute
+path, whereas a few POSIX systems assign special meaning to paths beginning with
+exactly two forward slashes. Similarly, other substitutions performed by this
+function, such as removing <code>..</code> segments, may change how the underlying system
+resolves the path.</p>
+<p>For example, on POSIX:</p>
+<pre><code class="language-js">path.normalize(&#39;/foo/bar//baz/asdf/quux/..&#39;);
+// Returns: &#39;/foo/bar/baz/asdf&#39;
+</code></pre>
+<p>On Windows:</p>
+<pre><code class="language-js">path.normalize(&#39;C:\\temp\\\\foo\\bar\\..\\&#39;);
+// Returns: &#39;C:\\temp\\foo\\&#39;
+</code></pre>
+<p>Since Windows recognizes multiple path separators, both separators will be
+replaced by instances of the Windows preferred separator (<code>\</code>):</p>
+<pre><code class="language-js">path.win32.normalize(&#39;C:////temp\\\\/\\/\\/foo/bar&#39;);
+// Returns: &#39;C:\\temp\\foo\\bar&#39;
+</code></pre>
+<p>A <a href="errors.md#class-typeerror"><code>TypeError</code></a> is thrown if <code>path</code> is not a string.</p>
+<h2><code>path.parse(path)</code></h2>
+<!-- YAML
+added: v0.11.15
+--><ul>
+<li><code>path</code> {string}</li>
+<li>Returns: {Object}</li>
+</ul>
+<p>The <code>path.parse()</code> method returns an object whose properties represent
+significant elements of the <code>path</code>. Trailing directory separators are ignored,
+see <a href="#pathsep"><code>path.sep</code></a>.</p>
+<p>The returned object will have the following properties:</p>
+<ul>
+<li><code>dir</code> {string}</li>
+<li><code>root</code> {string}</li>
+<li><code>base</code> {string}</li>
+<li><code>name</code> {string}</li>
+<li><code>ext</code> {string}</li>
+</ul>
+<p>For example, on POSIX:</p>
+<pre><code class="language-js">path.parse(&#39;/home/user/dir/file.txt&#39;);
+// Returns:
+// { root: &#39;/&#39;,
+//   dir: &#39;/home/user/dir&#39;,
+//   base: &#39;file.txt&#39;,
+//   ext: &#39;.txt&#39;,
+//   name: &#39;file&#39; }
+</code></pre>
+<pre><code class="language-text">┌─────────────────────┬────────────┐
+│          dir        │    base    │
+├──────┬              ├──────┬─────┤
+│ root │              │ name │ ext │
+&quot;  /    home/user/dir / file  .txt &quot;
+└──────┴──────────────┴──────┴─────┘
+(All spaces in the &quot;&quot; line should be ignored. They are purely for formatting.)
+</code></pre>
+<p>On Windows:</p>
+<pre><code class="language-js">path.parse(&#39;C:\\path\\dir\\file.txt&#39;);
+// Returns:
+// { root: &#39;C:\\&#39;,
+//   dir: &#39;C:\\path\\dir&#39;,
+//   base: &#39;file.txt&#39;,
+//   ext: &#39;.txt&#39;,
+//   name: &#39;file&#39; }
+</code></pre>
+<pre><code class="language-text">┌─────────────────────┬────────────┐
+│          dir        │    base    │
+├──────┬              ├──────┬─────┤
+│ root │              │ name │ ext │
+&quot; C:\      path\dir   \ file  .txt &quot;
+└──────┴──────────────┴──────┴─────┘
+(All spaces in the &quot;&quot; line should be ignored. They are purely for formatting.)
+</code></pre>
+<p>A <a href="errors.md#class-typeerror"><code>TypeError</code></a> is thrown if <code>path</code> is not a string.</p>
+<h2><code>path.posix</code></h2>
+<!-- YAML
+added: v0.11.15
+changes:
+  - version: v15.3.0
+    pr-url: https://github.com/nodejs/node/pull/34962
+    description: Exposed as `require('path/posix')`.
+--><ul>
+<li>Type: {Object}</li>
+</ul>
+<p>The <code>path.posix</code> property provides access to POSIX specific implementations
+of the <code>path</code> methods.</p>
+<p>The API is accessible via <code>require(&#39;node:path&#39;).posix</code> or <code>require(&#39;node:path/posix&#39;)</code>.</p>
+<h2><code>path.relative(from, to)</code></h2>
+<!-- YAML
+added: v0.5.0
+changes:
+  - version: v6.8.0
+    pr-url: https://github.com/nodejs/node/pull/8523
+    description: On Windows, the leading slashes for UNC paths are now included
+                 in the return value.
+--><ul>
+<li><code>from</code> {string}</li>
+<li><code>to</code> {string}</li>
+<li>Returns: {string}</li>
+</ul>
+<p>The <code>path.relative()</code> method returns the relative path from <code>from</code> to <code>to</code> based
+on the current working directory. If <code>from</code> and <code>to</code> each resolve to the same
+path (after calling <code>path.resolve()</code> on each), a zero-length string is returned.</p>
+<p>If a zero-length string is passed as <code>from</code> or <code>to</code>, the current working
+directory will be used instead of the zero-length strings.</p>
+<p>For example, on POSIX:</p>
+<pre><code class="language-js">path.relative(&#39;/data/orandea/test/aaa&#39;, &#39;/data/orandea/impl/bbb&#39;);
+// Returns: &#39;../../impl/bbb&#39;
+</code></pre>
+<p>On Windows:</p>
+<pre><code class="language-js">path.relative(&#39;C:\\orandea\\test\\aaa&#39;, &#39;C:\\orandea\\impl\\bbb&#39;);
+// Returns: &#39;..\\..\\impl\\bbb&#39;
+</code></pre>
+<p>A <a href="errors.md#class-typeerror"><code>TypeError</code></a> is thrown if either <code>from</code> or <code>to</code> is not a string.</p>
+<h2><code>path.resolve([...paths])</code></h2>
+<!-- YAML
+added: v0.3.4
+--><ul>
+<li><code>...paths</code> {string} A sequence of paths or path segments</li>
+<li>Returns: {string}</li>
+</ul>
+<p>The <code>path.resolve()</code> method resolves a sequence of paths or path segments into
+an absolute path.</p>
+<p>The given sequence of paths is processed from right to left, with each
+subsequent <code>path</code> prepended until an absolute path is constructed.
+For instance, given the sequence of path segments: <code>/foo</code>, <code>/bar</code>, <code>baz</code>,
+calling <code>path.resolve(&#39;/foo&#39;, &#39;/bar&#39;, &#39;baz&#39;)</code> would return <code>/bar/baz</code>
+because <code>&#39;baz&#39;</code> is not an absolute path but <code>&#39;/bar&#39; + &#39;/&#39; + &#39;baz&#39;</code> is.</p>
+<p>If, after processing all given <code>path</code> segments, an absolute path has not yet
+been generated, the current working directory is used.</p>
+<p>The resulting path is normalized and trailing slashes are removed unless the
+path is resolved to the root directory.</p>
+<p>Zero-length <code>path</code> segments are ignored.</p>
+<p>If no <code>path</code> segments are passed, <code>path.resolve()</code> will return the absolute path
+of the current working directory.</p>
+<pre><code class="language-js">path.resolve(&#39;/foo/bar&#39;, &#39;./baz&#39;);
+// Returns: &#39;/foo/bar/baz&#39;
+
+path.resolve(&#39;/foo/bar&#39;, &#39;/tmp/file/&#39;);
+// Returns: &#39;/tmp/file&#39;
+
+path.resolve(&#39;wwwroot&#39;, &#39;static_files/png/&#39;, &#39;../gif/image.gif&#39;);
+// If the current working directory is /home/myself/node,
+// this returns &#39;/home/myself/node/wwwroot/static_files/gif/image.gif&#39;
+</code></pre>
+<p>A <a href="errors.md#class-typeerror"><code>TypeError</code></a> is thrown if any of the arguments is not a string.</p>
+<h2><code>path.sep</code></h2>
+<!-- YAML
+added: v0.7.9
+--><ul>
+<li>Type: {string}</li>
+</ul>
+<p>Provides the platform-specific path segment separator:</p>
+<ul>
+<li><code>\</code> on Windows</li>
+<li><code>/</code> on POSIX</li>
+</ul>
+<p>For example, on POSIX:</p>
+<pre><code class="language-js">&#39;foo/bar/baz&#39;.split(path.sep);
+// Returns: [&#39;foo&#39;, &#39;bar&#39;, &#39;baz&#39;]
+</code></pre>
+<p>On Windows:</p>
+<pre><code class="language-js">&#39;foo\\bar\\baz&#39;.split(path.sep);
+// Returns: [&#39;foo&#39;, &#39;bar&#39;, &#39;baz&#39;]
+</code></pre>
+<p>On Windows, both the forward slash (<code>/</code>) and backward slash (<code>\</code>) are accepted
+as path segment separators; however, the <code>path</code> methods only add backward
+slashes (<code>\</code>).</p>
+<h2><code>path.toNamespacedPath(path)</code></h2>
+<!-- YAML
+added: v9.0.0
+--><ul>
+<li><code>path</code> {string}</li>
+<li>Returns: {string}</li>
+</ul>
+<p>On Windows systems only, returns an equivalent <a href="https://docs.microsoft.com/en-us/windows/desktop/FileIO/naming-a-file#namespaces">namespace-prefixed path</a> for
+the given <code>path</code>. If <code>path</code> is not a string, <code>path</code> will be returned without
+modifications.</p>
+<p>This method is meaningful only on Windows systems. On POSIX systems, the
+method is non-operational and always returns <code>path</code> without modifications.</p>
+<h2><code>path.win32</code></h2>
+<!-- YAML
+added: v0.11.15
+changes:
+  - version: v15.3.0
+    pr-url: https://github.com/nodejs/node/pull/34962
+    description: Exposed as `require('path/win32')`.
+--><ul>
+<li>Type: {Object}</li>
+</ul>
+<p>The <code>path.win32</code> property provides access to Windows-specific implementations
+of the <code>path</code> methods.</p>
+<p>The API is accessible via <code>require(&#39;node:path&#39;).win32</code> or <code>require(&#39;node:path/win32&#39;)</code>.</p>
+</article><aside>Footer advertising tracking</aside></main><footer>Footer advertising tracking</footer></body></html>

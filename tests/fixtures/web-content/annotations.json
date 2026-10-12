@@ -1,19 +1,131 @@
 {
   "schema": 1,
   "method": "Reviewed rendered project documentation: body heading/paragraph/list/code/table blocks are relevant; synthetic site chrome is irrelevant. Gold comes from the frozen markup, independently of the extractor.",
-  "noise": ["Navigation account subscription portal", "Credentials input", "Footer advertising tracking"],
+  "noise": [
+    "Navigation account subscription portal",
+    "Credentials input",
+    "Footer advertising tracking"
+  ],
   "pages": {
-    "01.html": ["公共资源网络边界", "解析、连接与释放", "性质"],
-    "02.html": ["生产调用关系", "ReAct 循环", "必要源码与回归"],
-    "03.html": ["调度、整合与验证", "总账与恢复", "协作默认关闭"],
-    "04.html": ["Fixed references", "Comparison and decision", "Dimension"],
-    "05.html": ["状态所有权", "存储位置与凭据", "不得混入的内容"],
-    "06.html": ["数据与作用域", "读取与召回", "revision + loadedAt + entryIds + injected text"],
-    "07.html": ["工具链与安装", "开发与检查命令", "pnpm install --frozen-lockfile"],
-    "08.html": ["DeepSeek loop A/B acceptance", "Task and fixture contract", "task / campaign token 草案"],
-    "09.html": ["Official Sources", "Everpeace Implementation", "Control"],
-    "10.html": ["职责地图", "文件读取与版本", "回归入口"],
-    "11.html": ["私密报告与供应链", "外部内容与授权", "安全门禁与诊断契约"],
-    "12.html": ["对标基线", "Sandbox", "Everpeace mode"]
+    "01.html": [
+      "公共资源网络边界",
+      "解析、连接与释放",
+      "性质"
+    ],
+    "02.html": [
+      "生产调用关系",
+      "ReAct 循环",
+      "必要源码与回归"
+    ],
+    "03.html": [
+      "调度、整合与验证",
+      "总账与恢复",
+      "协作默认关闭"
+    ],
+    "04.html": [
+      "Fixed references",
+      "Comparison and decision",
+      "Dimension"
+    ],
+    "05.html": [
+      "状态所有权",
+      "存储位置与凭据",
+      "不得混入的内容"
+    ],
+    "06.html": [
+      "数据与作用域",
+      "读取与召回",
+      "revision + loadedAt + entryIds + injected text"
+    ],
+    "07.html": [
+      "工具链与安装",
+      "开发与检查命令",
+      "pnpm install --frozen-lockfile"
+    ],
+    "08.html": [
+      "DeepSeek loop A/B acceptance",
+      "Task and fixture contract",
+      "task / campaign token 草案"
+    ],
+    "09.html": [
+      "Official Sources",
+      "Everpeace Implementation",
+      "Control"
+    ],
+    "10.html": [
+      "职责地图",
+      "文件读取与版本",
+      "回归入口"
+    ],
+    "11.html": [
+      "私密报告与供应链",
+      "外部内容与授权",
+      "安全门禁与诊断契约"
+    ],
+    "12.html": [
+      "对标基线",
+      "Sandbox",
+      "Everpeace mode"
+    ],
+    "13.html": [
+      "Assert",
+      "Strict assertion mode",
+      "Legacy assertion mode"
+    ],
+    "14.html": [
+      "Buffer",
+      "Buffers and character encodings",
+      "Buffers and TypedArrays"
+    ],
+    "15.html": [
+      "Child process",
+      "Asynchronous process creation",
+      "Synchronous process creation"
+    ],
+    "16.html": [
+      "Events",
+      "Passing arguments and this to listeners",
+      "Asynchronous vs. synchronous"
+    ],
+    "17.html": [
+      "File system",
+      "Promise example",
+      "Callback example"
+    ],
+    "18.html": [
+      "HTTP",
+      "Class: http.Agent",
+      "Class: http.ClientRequest"
+    ],
+    "19.html": [
+      "Net",
+      "IPC support",
+      "Class: net.BlockList"
+    ],
+    "20.html": [
+      "Path",
+      "Windows vs. POSIX",
+      "path.basename(path[, suffix])"
+    ],
+    "21.html": [
+      "Process",
+      "Process events",
+      "process.abort()"
+    ],
+    "22.html": [
+      "Stream",
+      "Organization of this document",
+      "Types of streams"
+    ],
+    "23.html": [
+      "Timers",
+      "Class: Immediate",
+      "Class: Timeout"
+    ],
+    "24.html": [
+      "URL",
+      "URL strings and URL objects",
+      "The WHATWG URL API"
+    ]
   }
 }
