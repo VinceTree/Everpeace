@@ -55,6 +55,16 @@
       "file": "pilot-interruption.json",
       "sha256": "7058af2eef707ac614f23945d689b2abefb4b60853a3243979e33822c7601ced",
       "purpose": "Original experiment receipt"
+    },
+    {
+      "file": "windows-checks.json",
+      "sha256": "46b36a61cc0ce17e3ed1e93bfab84144679e77880b06de9cf977510d62fe002a",
+      "purpose": "Windows or hosted source checks; no portable package acceptance"
+    },
+    {
+      "file": "hosted-ci.json",
+      "sha256": "0e5596550dec3f1099d51d16c1f312c6b4ac05f8ff2eb86063e4f841042ff9b7",
+      "purpose": "Windows or hosted source checks; no portable package acceptance"
     }
   ],
   "rawRecords": "Local .cache/evaluation retains campaign plans, JSONL and frozen artifacts; raw model output and customer paths are not uploaded.",

@@ -31,3 +31,11 @@
 ### 本次最终 Windows 收据
 
 串行 typecheck → lint → test → build 全部通过：1258 tests，1255 pass、3 skip、0 fail、0 cancel；CLI/SDK/native PTY 安装烟测 7 pass。干净安装及工作流固定/门禁配置检查通过。命令和日志摘要见 [windows-checks.json](implementation/evidence/windows-checks.json)。安全工具初次下载连接中断不计成功，重试及远端安全结果另行追加。
+
+### 本次远端独立验收
+
+[PR #10](https://github.com/VinceTree/Everpeace/pull/10) 的第二轮 [完整 CI](https://github.com/VinceTree/Everpeace/actions/runs/38216807264) 全部通过，绑定 commit 4483a606113baf0709853a4a4d7d9ca986163169。Ubuntu hosted：1258 tests、1249 pass、9 skip、0 fail；Windows hosted 结果见 [hosted-ci.json](implementation/evidence/hosted-ci.json)。security 与 Required checks 全成功。首次远端失败原样保留：Memory CLI 测试隔离变量误用 XDG_CONFIG_HOME，修正为 XDG_STATE_HOME；合成 PEM 标记增加精确历史/当前文件哈希的审查记录，不放宽扫描。
+
+本机安全工具下载失败及 TLS 中断仍记录为未完成；远端安全扫描独立通过。Linux hosted 源码检查现在有实际证据，本机 WSL 及专用 Windows native 发布验收仍未执行。末次仅补正文展示版本及验收文档的提交继续接受同一分支保护门禁。正式原生安装包不因源码预发布绕过其门禁。
+
+本次源码预发布名称 v0.6.0-rc.1，[Release 入口](https://github.com/VinceTree/Everpeace/releases/tag/v0.6.0-rc.1) 在合并及打标签之后创建；公开附件仅含脱敏 evidence。
