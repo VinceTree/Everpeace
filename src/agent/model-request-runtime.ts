@@ -1,4 +1,4 @@
-import type { AgentResponse, ResponseStreamLike, ResponseRecoveryState, ResponsesClientLike, ResponsesRequestOptions } from './react-agent.js';
+import type { AgentResponse, ResponseStreamLike, ResponseRecoveryState, ResponsesClientLike, ResponsesRequestOptions } from './model-protocol.js';
 import type { LoopEvent } from './agent-loop.js';
 import { ResponseStreamConsumer } from './response-stream-consumer.js';
 import { ResourceCleanupError } from '../util/resource-cleanup-error.js';

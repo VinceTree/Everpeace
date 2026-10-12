@@ -1,3 +1,5 @@
+import {redactSecretsPreservingLayout} from '../util/redact-secrets.js';
+
 export interface CommandRecord {
   id: string;
   command: string;
@@ -27,10 +29,15 @@ export class BoundedOutputBuffer {
   #bytes = 0;
   #newlines = 0;
   #truncated = false;
+  #discardContext = '';
+  #openPrivateKey = false;
+  #cutCredential = false;
+  readonly #redact: boolean;
 
-  constructor(maxBytes = 2 * 1024 * 1024) {
+  constructor(maxBytes = 2 * 1024 * 1024, redact = false) {
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new RangeError("maxBytes must be a positive integer");
     this.#maxBytes = maxBytes;
+    this.#redact = redact;
   }
 
   append(value: string): void {
@@ -43,23 +50,40 @@ export class BoundedOutputBuffer {
   }
 
   result(): { text: string; truncated: boolean } {
-    return { text: this.#chunks.join(""), truncated: this.#truncated };
+    return { text: this.text, truncated: this.#truncated };
   }
 
-  get text(): string { return this.#chunks.join(""); }
+  get text(): string {
+    let text=this.#chunks.join('');
+    if(!this.#redact)return text;
+    if(this.#cutCredential)text=text.replace(/^[^\s"'`; ,\r\n]+/u,'[secret redacted]');
+    if(this.#openPrivateKey)return redactSecretsPreservingLayout('-----BEGIN PRIVATE KEY-----\n'+text).split('\n').slice(1).join('\n');
+    return redactSecretsPreservingLayout(text);
+  }
   get truncated(): boolean { return this.#truncated; }
+
+  #observeDiscarded(fragment: string): void {
+    if(!this.#redact)return;
+    const context=this.#discardContext+fragment;
+    for(const match of context.matchAll(/-----((?:BEGIN|END)) (?:[A-Z ]*PRIVATE KEY|OPENSSH PRIVATE KEY)-----/gu))this.#openPrivateKey=match[1]==='BEGIN';
+    if(this.#cutCredential&&/[\s"'`; ,\r\n]/u.test(fragment))this.#cutCredential=false;
+    if(/(?:Bearer\s+|(?:api[_ -]?key|access[_ -]?token|password|secret)\s*[:=]\s*["']?|sk-(?:proj-)?|gh[pousr]_|github_pat_|glpat-|npm_|xox[baprs]-|AKIA|ASIA)[^\s"'`; ,\r\n]*$/iu.test(context))this.#cutCredential=true;
+    this.#discardContext=context.slice(-512);
+  }
 
   #discardPrefix(characters: number): void {
     let remaining = characters;
     while (remaining > 0 && this.#chunks.length > 0) {
       const first = this.#chunks[0]!;
       if (first.length <= remaining) {
+        this.#observeDiscarded(first);
         this.#chunks.shift();
         remaining -= first.length;
         this.#bytes -= Buffer.byteLength(first);
         this.#newlines -= newlineCount(first);
       } else {
         const removed = first.slice(0, remaining);
+        this.#observeDiscarded(removed);
         this.#chunks[0] = first.slice(remaining);
         this.#bytes -= Buffer.byteLength(removed);
         this.#newlines -= newlineCount(removed);
@@ -99,6 +123,7 @@ export class BoundedOutputBuffer {
       let start = excess;
       while (start < bytes.length && (bytes[start]! & 0xc0) === 0x80) start += 1;
       const retained = bytes.subarray(start).toString("utf8");
+      this.#observeDiscarded(first.slice(0,first.length-retained.length));
       this.#bytes -= bytes.length;
       this.#newlines -= newlineCount(first);
       this.#chunks[0] = retained;

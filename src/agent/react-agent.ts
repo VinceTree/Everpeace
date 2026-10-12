@@ -1,3 +1,8 @@
+import type { AgentResponse, ResponsesRequestOptions, PromptCacheOptions, ResponsesClientLike } from './model-protocol.js';
+export type { ResponseOutputItem, AgentResponse, ResponseStreamLike, ResponseRecoveryState, ResponseRecoveryAdapter, ResponsesRequestOptions, PromptCacheOptions, ResponsesClientLike } from './model-protocol.js';
+import { TurnLifecycle } from './turn-lifecycle.js';
+import { AgentHistoryWriter } from './history-writer.js';
+import { ToolDispatcher } from './tool-dispatcher.js';
 import { ModelRequestRuntime } from './model-request-runtime.js';
 import { AgentContextRuntime, ContextCompactionError } from './context-runtime.js';
 import { FileToolRuntime } from './file-tool-runtime.js';
@@ -17,7 +22,7 @@ import { PersistenceError, persistState } from "../storage/persistence-error.js"
 import { repairToolContext } from "./repair-context.js";
 import { CHECKPOINT_INSTRUCTION, checkpointRetentionCut, frameCheckpoint, projectConversationCheckpoints, validateCheckpoint } from "./conversation-checkpoint.js";
 import { formatWorkflowContext, projectWorkflowContext, type WorkflowContext } from "../workflow/model-context.js";
-import { invalidToolArgument, POLICY_DENIED_REMEDY, ToolFeedbackError, toolFeedbackFields } from "../tools/tool-feedback.js";
+import { invalidToolArgument, POLICY_DENIED_REMEDY, toolFeedbackFields } from "../tools/tool-feedback.js";
 import {
   isContextLimitError,
   ModelResponseError,
@@ -115,14 +120,6 @@ import {
   type ProviderCapabilities,
 } from "../providers/capabilities.js";
 
-interface ResponseOutputItem extends Record<string, unknown> {
-  type: string;
-  id?: string;
-  name?: string;
-  arguments?: string;
-  call_id?: string;
-}
-
 const PROJECT_RULE_MESSAGE_PREFIX = "Host-maintained project rule snapshot revision ";
 const MAX_OUTSTANDING_BACKGROUND_NOTICES = 20;
 const TOOL_RESULT_PRUNE_CODEPOINTS = 8_192;
@@ -144,66 +141,6 @@ function isPersistedProjectRuleSnapshot(item: Record<string, unknown>): boolean 
     && item.content.startsWith(PROJECT_RULE_MESSAGE_PREFIX);
 }
 
-export interface AgentResponse {
-  end_turn?: boolean;
-  status?: string;
-  id: string;
-  output_text: string;
-  output: ResponseOutputItem[];
-  usage?: unknown;
-  error?: unknown;
-  incomplete_details?: unknown;
-}
-
-export type ResponseStreamLike = AsyncIterable<Record<string, unknown>>;
-
-export interface ResponseRecoveryState {
-  events: readonly Record<string, unknown>[];
-  lastEventId?: string;
-  responseId?: string;
-}
-
-export interface ResponseRecoveryAdapter {
-  resume(
-    params: Record<string, unknown>,
-    state: ResponseRecoveryState,
-    options?: ResponsesRequestOptions,
-  ): Promise<AgentResponse | ResponseStreamLike>;
-}
-
-export interface ResponsesRequestOptions {
-  signal?: AbortSignal;
-  maxRetries?: number;
-  timeout?: number;
-  headers?: Record<string, string>;
-}
-
-export interface PromptCacheOptions {
-  mode: "implicit";
-  ttl: "30m";
-}
-
-export interface ResponsesClientLike {
-  responses: {
-    create(
-      params: Record<string, unknown>,
-      options?: ResponsesRequestOptions,
-    ): Promise<AgentResponse>;
-    compact?(
-      params: Record<string, unknown>,
-      options?: ResponsesRequestOptions,
-    ): Promise<{
-      output: Array<Record<string, unknown>>;
-      usage?: unknown;
-    }>;
-    stream?(
-      params: Record<string, unknown>,
-      options?: ResponsesRequestOptions,
-    ): Promise<ResponseStreamLike> | ResponseStreamLike;
-    recovery?: ResponseRecoveryAdapter;
-  };
-}
-
 export interface AgentIO {
   getSessionId?(): string | undefined;
   getPermissions?(): PermissionPolicy;
@@ -212,6 +149,8 @@ export interface AgentIO {
   confirmBash(command: string, signal?: AbortSignal): Promise<boolean>;
   confirmPatch?(summary: string, signal?: AbortSignal): Promise<boolean>;
   previewPatch?(operations: readonly ApplyPatchOperation[]): Promise<ApplyPatchPreview>;
+  runTeamByteIntegration?(record: import('../team/workspace.js').TeamWorkspaceRecord, operations: readonly import('../team/byte-integration.js').TeamByteOperation[], scopes: readonly string[], integrationId: string, signal?: AbortSignal): Promise<ApplyPatchResult>;
+  recoverTeamByteIntegration?(record: import('../team/workspace.js').TeamWorkspaceRecord, scopes: readonly string[], integrationId: string, signal?: AbortSignal): Promise<{conflicts:string[];recovered:boolean}>;
   confirmWeb?(request: string, signal?: AbortSignal): Promise<boolean>;
   confirmMcp?(request: string, signal?: AbortSignal): Promise<boolean>;
   confirmGoal?(request: string, signal?: AbortSignal): Promise<boolean>;
@@ -546,7 +485,8 @@ export class ReactAgent {
   readonly #context = new AgentContextRuntime();
   readonly #files: FileToolRuntime;
   readonly #streams: ResponseStreamConsumer;
-  #running = false;
+  readonly #lifecycle = new TurnLifecycle<AgentTurnResult>();
+  readonly #dispatcher = new ToolDispatcher();
   readonly #onPhase: ((phase: LoopPhase) => void) | undefined;
   readonly #onEvent: ((event: LoopEvent) => void) | undefined;
   readonly #onToolEvent: ReactAgentOptions["onToolEvent"];
@@ -563,10 +503,7 @@ export class ReactAgent {
   readonly #questionInteraction: QuestionInteraction | undefined;
   readonly #planInteraction: PlanInteraction | undefined;
   readonly #goalRuntime: GoalRuntime | undefined;
-  readonly #onHistoryAppend:
-    | ((items: readonly Record<string, unknown>[]) => Promise<void>)
-    | undefined;
-  readonly #onToolResultAppend: ReactAgentOptions["onToolResultAppend"];
+  readonly #historyWriter: AgentHistoryWriter;
   readonly #sessionHistory: SessionHistoryRuntimeLike | undefined;
   readonly #onContextCompacted:
     | ((items: readonly Record<string, unknown>[], automatic: boolean, usage: TokenUsageSample | null) => Promise<void>)
@@ -579,10 +516,6 @@ export class ReactAgent {
     | undefined;
   #pendingSteering: Array<{ text: string; attachments: readonly FileAttachment[] }> = [];
   #sampleController: AbortController | undefined;
-  #turnController: AbortController | undefined;
-  #turnOperation: Promise<AgentTurnResult> | undefined;
-  #disposed = false;
-  #disposal: Promise<void> | undefined;
   #mcpSnapshot: McpSnapshot = { tools: [], toolInfo: [], instructions: "", servers: [] };
   #stepToolCatalog: StepToolCatalog | undefined;
   #turnInput: string[] = [];
@@ -702,8 +635,7 @@ export class ReactAgent {
       item.type === "function_call_output" && typeof item.output === "string" && Buffer.byteLength(item.output, "utf8") > MODEL_TOOL_OUTPUT_MAX_BYTES
         ? { ...item, output: this.#toolOutputs.bound(item.output) }
         : item);
-    this.#onHistoryAppend = options.onHistoryAppend;
-    this.#onToolResultAppend = options.onToolResultAppend;
+    this.#historyWriter = new AgentHistoryWriter({ append: options.onHistoryAppend, toolResult: options.onToolResultAppend, recorded: items => this.#appendRecordedHistory(items), event: this.#onEvent });
     this.#sessionHistory = options.sessionHistory;
     this.#onContextCompacted = options.onContextCompacted;
     this.#onContextPruned = options.onContextPruned;
@@ -722,7 +654,7 @@ export class ReactAgent {
 
   async compact(signal?: AbortSignal): Promise<ContextCompactionResult> {
     this.#assertAvailable();
-    if (this.#running) throw new Error("Cannot compact while an agent turn is running");
+    if (this.#lifecycle.running) throw new Error("Cannot compact while an agent turn is running");
     if (this.#context.compacting) throw new Error("Context compaction is already running");
     signal?.throwIfAborted();
     const controller = new AbortController();
@@ -742,7 +674,7 @@ export class ReactAgent {
   setRequestSettings(settings: ModelRequestSettings): void {
     if (this.#team && this.#taskActive) throw new Error("Team model settings are frozen until the task ends");
     this.#assertAvailable();
-    if (this.#running) throw new Error("Request settings can only change between turns");
+    if (this.#lifecycle.running) throw new Error("Request settings can only change between turns");
     if (this.#context.compacting) throw new Error("Request settings cannot change during context compaction");
     this.#requestSettings = { ...settings };
   }
@@ -758,7 +690,7 @@ export class ReactAgent {
 
   async beginTask(options: AgentTaskOptions): Promise<void> {
     this.#assertAvailable();
-    if (this.#running) throw new Error("Cannot start a task while an agent turn is running");
+    if (this.#lifecycle.running) throw new Error("Cannot start a task while an agent turn is running");
     if (this.#context.compacting) throw new Error("Cannot start a task during context compaction");
     await this.#beforeTask?.();
     this.#assertAvailable();
@@ -784,7 +716,7 @@ export class ReactAgent {
     try {
       await this.#team?.end();
       this.#clearTaskState();
-      if (!this.#disposed) await this.#learnedMemory?.endTask?.();
+      if (!this.#lifecycle.disposed) await this.#learnedMemory?.endTask?.();
     } finally {
       const report = this.performance.finish();
       if (report) { this.#lastPerformance = report; await this.#onPerformanceReport?.(report); }
@@ -828,18 +760,18 @@ export class ReactAgent {
     return (signal) => team.verificationPrompt(signal);
   }
   dispose(): Promise<void> {
-    return this.#disposal ??= this.#dispose();
+    return this.#lifecycle.disposeOnce(() => this.#dispose());
   }
 
   async #dispose(): Promise<void> {
-    this.#disposed = true;
+    this.#lifecycle.markDisposed();
     this.#clearTaskState();
     const reason = new Error("The agent has been disposed");
-    this.#turnController?.abort(reason);
+    this.#lifecycle.controller?.abort(reason);
     this.#context.controller?.abort(reason);
     try {
       const [turn, compaction, background] = await Promise.allSettled([
-        this.#turnOperation ?? Promise.resolve(),
+        this.#lifecycle.operation ?? Promise.resolve(),
         this.#context.operation ?? Promise.resolve(),
         this.#backgroundJobs.dispose(),
       ]);
@@ -858,17 +790,17 @@ export class ReactAgent {
 
   async runTurn(userInput: string, signal?: AbortSignal, options: AgentTurnOptions = {}): Promise<AgentTurnResult> {
     this.#assertAvailable();
-    if (this.#running) throw new Error("An agent turn is already running");
+    if (this.#lifecycle.running) throw new Error("An agent turn is already running");
     if (this.#context.compacting) throw new Error("Cannot start an agent turn during context compaction");
     signal?.throwIfAborted();
     if (!this.#taskActive) this.#toolFeedback.reset();
     const controller = new AbortController();
-    this.#turnController = controller;
+    this.#lifecycle.setController(controller);
     this.#team?.setRootInput(userInput);
     const baseSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     const ownedSignal = this.#team?.signal(baseSignal) ?? baseSignal;
     const operation = this.#runTurn(userInput, ownedSignal, options);
-    this.#turnOperation = operation;
+    this.#lifecycle.setOperation(operation);
     try { return await operation; }
     catch (error) {
       if (this.#team && !signal?.aborted && !(error instanceof ResourceCleanupError) && !(error instanceof PersistenceError)) {
@@ -879,15 +811,14 @@ export class ReactAgent {
       throw error;
     }
     finally {
-      this.#turnController = undefined;
-      this.#turnOperation = undefined;
-      this.#running = false;
+      this.#lifecycle.clearTurn();
+      this.#lifecycle.markIdle();
       this.#assertResourceCleanup();
     }
   }
 
   async #runTurn(userInput: string, signal: AbortSignal, options: AgentTurnOptions): Promise<AgentTurnResult> {
-    this.#running = true;
+    this.#lifecycle.markRunning();
     this.#pendingLearnedTurn = undefined;
     const turnItems: Array<Record<string, unknown>> = [];
     this.#turnItems = turnItems;
@@ -1034,7 +965,7 @@ export class ReactAgent {
           // Small feedback stays inline. Large retained bodies are unchanged.
           return markExternalToolOutput(call.name, Buffer.byteLength(feedback.output, "utf8") <= MODEL_TOOL_OUTPUT_MAX_BYTES ? feedback.output : output);
         },
-        ...(this.#onToolResultAppend ? {
+        ...(this.#historyWriter.supportsToolResults ? {
           prepareToolOutput: (output: string, call: ToolCall) => prepareToolOutput(output, call.name),
           recordToolResult: (item: Record<string, unknown>, prepared: PreparedToolOutput) => this.#recordToolResult(item, prepared),
         } : {}),
@@ -1096,7 +1027,7 @@ export class ReactAgent {
         this.#stepToolCatalog = undefined;
         this.#turnGoalId = undefined;
         this.#mcpSnapshot = { tools: [], toolInfo: [], instructions: "", servers: [] };
-        this.#running = false;
+        this.#lifecycle.markIdle();
         this.#streamRecoveryRemaining = 0;
         this.#turnItems = undefined;
         this.#assertResourceCleanup();
@@ -1117,7 +1048,7 @@ export class ReactAgent {
 
   requestSteering(text: string, attachments: readonly FileAttachment[] = []): boolean {
     const value = text.trim();
-    if (!value || !this.#running) return false;
+    if (!value || !this.#lifecycle.running) return false;
     this.#team?.invalidate(value);
     this.#pendingSteering.push({
       text: value,
@@ -1155,20 +1086,9 @@ export class ReactAgent {
     else if (outcome === "verified") this.#learnedMemory.scheduleCapture(turn);
   }
 
-  async #record(items: readonly Record<string, unknown>[]): Promise<void> {
-    await this.#persist(items);
-    this.#appendRecordedHistory(items);
-  }
+  async #record(items: readonly Record<string, unknown>[]): Promise<void> { await this.#historyWriter.record(items); }
 
-  async #recordToolResult(item: Record<string, unknown>, prepared: PreparedToolOutput): Promise<void> {
-    const started = performance.now();
-    try {
-      await persistState("Tool output persistence failed", () => this.#onToolResultAppend!(item, prepared.attachment));
-      this.#appendRecordedHistory([item]);
-    } finally {
-      this.#onEvent?.({ type: "timing_recorded", operation: "persistence", durationMs: performance.now() - started });
-    }
-  }
+  async #recordToolResult(item: Record<string, unknown>, prepared: PreparedToolOutput): Promise<void> { await this.#historyWriter.recordTool(item, prepared); }
 
   #appendRecordedHistory(items: readonly Record<string, unknown>[]): void {
     const copies = items.map((item) => ({ ...item }));
@@ -1205,24 +1125,7 @@ export class ReactAgent {
   }
 
   async #dispatchTool(call: ToolCall, signal?: AbortSignal): Promise<string | { output: string; stop?: boolean }> {
-    let dispatched: string | { output: string; stop?: boolean };
-    try { dispatched = await this.#dispatchToolInner(call, signal); }
-    catch (error) {
-      if (error instanceof ResourceCleanupError) {
-        this.#cleanupFailure ??= error;
-        return JSON.stringify({ status: "error", cleanup_failed: true, error: error.message });
-      }
-      if (signal?.aborted || !(error instanceof ToolFeedbackError)) throw error;
-      dispatched = JSON.stringify({ status: "error", error: error.message, ...toolFeedbackFields(error) });
-    }
-    const interaction = this.#io.takeInteractionRequired?.();
-    if (!interaction) return dispatched;
-    const snapshot = structuredClone(interaction);
-    this.#turnResult = { ...this.#turnResult, interactionRequired: snapshot };
-    return {
-      output: JSON.stringify({ status: "interaction_required", ...snapshot }),
-      stop: true,
-    };
+    return this.#dispatcher.run(call, { execute: (value, ownedSignal) => this.#dispatchToolInner(value, ownedSignal), cleanupFailed: error => { this.#cleanupFailure ??= error; }, takeInteraction: () => this.#io.takeInteractionRequired?.(), recordInteraction: value => { this.#turnResult = { ...this.#turnResult, ...(value ? { interactionRequired: value } : {}) }; } }, signal);
   }
 
   async #dispatchToolInner(call: ToolCall, signal?: AbortSignal): Promise<string | { output: string; stop?: boolean }> {
@@ -1639,16 +1542,6 @@ export class ReactAgent {
     return accepted;
   }
 
-  async #persist(items: readonly Record<string, unknown>[]): Promise<void> {
-    if (items.length === 0) return;
-    const started = performance.now();
-    try {
-      await persistState("Context persistence failed", () => this.#onHistoryAppend?.(items));
-    } finally {
-      this.#onEvent?.({ type: "timing_recorded", operation: "persistence", durationMs: performance.now() - started });
-    }
-  }
-
   async #runWebTool(
     operation: () => Promise<unknown>,
     signal?: AbortSignal,
@@ -2002,7 +1895,7 @@ export class ReactAgent {
     };
     const execute = async () => { admitted = true; this.#activeProviderRequests++; try { return await run(); } finally { this.#activeProviderRequests--; } };
     try {
-      const result = await (this.#requestExecutor ? this.#requestExecutor.execute(purpose, execute, { reservation: (purpose === "coding" ? this.#requestReservation : Buffer.byteLength(JSON.stringify(this.#context.history)) + Buffer.byteLength(this.#stableInstructions()) + 1024) + requestSettingsForPurpose(purpose === "coding" ? "coding" : "summary", this.#requestSettings).maxOutputTokens, ...(this.#turnController ? { signal: this.#team?.signal(this.#turnController.signal) ?? this.#turnController.signal } : {}) }) : execute());
+      const result = await (this.#requestExecutor ? this.#requestExecutor.execute(purpose, execute, { reservation: (purpose === "coding" ? this.#requestReservation : Buffer.byteLength(JSON.stringify(this.#context.history)) + Buffer.byteLength(this.#stableInstructions()) + 1024) + requestSettingsForPurpose(purpose === "coding" ? "coding" : "summary", this.#requestSettings).maxOutputTokens, ...(this.#lifecycle.controller ? { signal: this.#team?.signal(this.#lifecycle.controller.signal) ?? this.#lifecycle.controller.signal } : {}) }) : execute());
       reported = true;
       trace("completed", normalizeTokenUsageSample(result.usage));
       await observe?.(normalizeTokenUsageSample(result.usage));
@@ -2013,7 +1906,7 @@ export class ReactAgent {
       }
       if (admitted && !reported) {
         reported = true;
-        trace(this.#turnController?.signal.aborted ? "cancelled" : "failed", error instanceof ModelStreamCleanupError ? error.usage : null);
+        trace(this.#lifecycle.controller?.signal.aborted ? "cancelled" : "failed", error instanceof ModelStreamCleanupError ? error.usage : null);
         await observe?.(error instanceof ModelStreamCleanupError ? error.usage : null);
       }
       if (error instanceof ResourceCleanupError || error instanceof PersistenceError) throw error;
@@ -2173,7 +2066,7 @@ export class ReactAgent {
   async #refreshLearnedPrompt(userInput: string): Promise<void> {
     if (!this.#learnedMemory) return;
     const key = JSON.stringify([userInput, [...this.#files.activeFiles].sort()]);
-    if (key === this.#learnedPromptKey) return;
+    if (key === this.#learnedPromptKey && !this.#learnedMemory.loadSnapshot) return;
     try {
       if (this.#learnedMemory.loadSnapshot) {
         this.#learnedSnapshot = await this.#learnedMemory.loadSnapshot(this.#workspacePath, userInput, [...this.#files.activeFiles]);
@@ -2228,7 +2121,7 @@ export class ReactAgent {
 
   #assertAvailable(): void {
     this.#assertResourceCleanup();
-    if (this.#disposed) throw new Error("The agent has been disposed");
+    if (this.#lifecycle.disposed) throw new Error("The agent has been disposed");
   }
 
   async #recordGoalUsage(usage: TokenUsageSample | null): Promise<void> {

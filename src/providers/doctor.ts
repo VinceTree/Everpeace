@@ -5,7 +5,7 @@ import { defaultModelRequestSettings, resolveProviderCapabilities, requestReason
 import type { ProviderRuntime } from "./openai-compatible.js";
 import { RequestAttemptLedger } from "../agent/request-attempt-ledger.js";
 import { RequestExecutor } from "../agent/request-executor.js";
-import type { AgentResponse } from "../agent/react-agent.js";
+import type { AgentResponse } from "../agent/model-protocol.js";
 
 export type DiagnosticState = "verified" | "configured" | "unsupported" | "not_tested" | "inconclusive";
 export type DiagnosticStage = "streaming_text" | "single_tool" | "continuous_tools" | "reasoning" | "usage" | "cancellation";

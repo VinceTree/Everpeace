@@ -246,8 +246,8 @@ export async function runBash(
     return runSandboxBash(command, options, env, bashPath, cwd, streamOutput);
   }
 
-  const stdout = new BoundedOutputBuffer(1024 * 1024);
-  const stderr = new BoundedOutputBuffer(1024 * 1024);
+  const stdout = new BoundedOutputBuffer(1024 * 1024, options.sandbox !== undefined);
+  const stderr = new BoundedOutputBuffer(1024 * 1024, options.sandbox !== undefined);
   let child;
   try {
     const launch = resolveBashLaunch(command, options);

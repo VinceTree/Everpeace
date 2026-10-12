@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { EnvHttpProxyAgent } from "undici";
-import type { AgentResponse, ResponseStreamLike } from "../agent/react-agent.js";
+import type { AgentResponse, ResponseStreamLike } from "../agent/model-protocol.js";
 import { ownResponseStream } from "./response-stream.js";
 import {
   defaultModelRequestSettings,

@@ -4,7 +4,7 @@ import type { RequestPurpose, RequestAttemptStatus } from "../agent/request-atte
 import type { TokenUsageSample } from "../status/model-status.js";
 import { PerformanceTrace, type PerformanceTiming } from "./trace.js";
 
-const OPERATIONS = ["model_request", "prepare_context", "request_snapshot", "retry_delay", "tool_wait", "tool_execution", "compaction", "persistence", "workspace_snapshot", "verification", "artifact_persistence", "sandbox_startup", "rendering", "repair"] as const;
+const OPERATIONS = ["model_request", "prepare_context", "request_snapshot", "retry_delay", "tool_wait", "tool_execution", "compaction", "persistence", "workspace_snapshot", "verification", "artifact_persistence", "sandbox_startup", "rendering", "repair", "team_integration"] as const;
 const PURPOSES = ["coding", "summary", "title", "skill", "memory", "doctor", "benchmark"] as const;
 const COUNTERS = ["compactions", "retries", "repeatedReads", "repeatedCalls", "repairRounds"] as const;
 export interface PurposeUsage { requests: number; unknown: number; inputTokens: number; outputTokens: number }
@@ -90,6 +90,8 @@ export function formatTaskPerformance(report?: TaskPerformanceReport): string {
     `First model event / text since task start: ${report.firstModelEventMs === undefined ? "unavailable" : (report.firstModelEventMs / 1000).toFixed(2) + " s"} / ${report.firstModelTextMs === undefined ? "unavailable" : (report.firstModelTextMs / 1000).toFixed(2) + " s"}.`,
     "Phase durations are cumulative and may overlap; sandbox startup is included in tool/check time. Do not sum phases as wall time.",
     ...slow.map(([name, timing]) => `${name}: ${(timing!.totalMs / 1000).toFixed(2)} s across ${timing!.count} observations`),
+    'All measured phases (overlapping cumulative time):',
+    ...OPERATIONS.map(name => { const timing = report.timings[name]; return `${name}: ${timing ? (timing.totalMs/1000).toFixed(2)+' s; '+timing.count+' observations; max '+(timing.maxMs/1000).toFixed(2)+' s' : 'unavailable'}`; }),
     ...tokens.map(([purpose, usage]) => `${purpose}: ${usage!.inputTokens + usage!.outputTokens} known tokens; ${usage!.requests} requests; ${usage!.unknown} unknown`),
     `Compactions: ${report.counters.compactions ?? 0}; retries: ${report.counters.retries ?? 0}; repeated calls: ${report.counters.repeatedCalls ?? 0}; repeated reads of unchanged observed files: ${report.counters.repeatedReads ?? 0}.`,
     "Missing phases are unavailable. Repeated-call counts are observations, not proof that the calls were unnecessary.",

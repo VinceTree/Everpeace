@@ -6,6 +6,9 @@ import { SessionStore } from "./session-store.js";
 import { scanSensitiveText } from "../util/sensitive-scan.js";
 import { redactSecretsPreservingLayout } from "../util/redact-secrets.js";
 import { stripVTControlCharacters } from "node:util";
+import { defaultRegistryPath } from './model-registry.js';
+import { defaultMemoryDirectory } from '../memory/learned-memory.js';
+import { readToolOutputReferences } from './session-outputs.js';
 
 interface PrivacySettings { version: 1; retentionDays: number | null; lastCleanupDay?: string }
 export interface CleanupPreview { version: 1; token: string; at: string; directoryDigest: string; retentionDays: number | null; candidates: Array<{ id: string; fingerprint: string; bytes: number }>; excluded: Array<{ id: string; reason: string }>; invalidRecords: number }
@@ -98,6 +101,9 @@ export class SessionPrivacy {
     const session = await this.store.load(sessionId); const rules: Record<string, number> = {}; let findings = 0;
     let complete = true; let remaining = 16 * 1024 * 1024;
     const texts = [...session.timeline.flatMap((entry) => "text" in entry ? [entry.text] : []), ...session.context.map((item) => JSON.stringify(item))];
+    const attachments = await readToolOutputReferences(path.join(this.store.directory, `${sessionId}.jsonl`), sessionId);
+    if (!attachments.safeToClean) complete = false;
+    for (const reference of attachments.references) { const attachment = await this.store.readToolOutput(sessionId, reference.output_id); if (attachment) {texts.push(attachment.bytes.toString('utf8')); if (attachment.bytes.byteLength < reference.original_bytes) complete = false;} else complete = false; }
     for (const value of texts) {
       if (remaining <= 0 || findings >= 10_000) { complete = false; break; }
       const bounded = value.slice(0, Math.min(remaining, 1024 * 1024)); remaining -= bounded.length;
@@ -140,6 +146,7 @@ export class SessionPrivacy {
   }
   async describe(): Promise<string> {
     const settings = await this.settings.read();
-    return [`Session storage: ${this.store.directory}`, `Retention: ${settings.retentionDays === null ? "forever (default)" : settings.retentionDays + " days since last persisted activity"}`, "Persisted: user/assistant text, model context, tool interactions, usage and bounded redacted attachments (16 × 2 MiB/session).", "Context can contain source code, paths, customer data and unrecognized secrets.", "Default export: diagnostic summary; no conversation, source, tool bodies, paths or reasoning.", "Cleanup excludes active, unknown and retained-team sessions. Failures can be retried with a new preview.", "Memory, keyring credentials, input history and exported files have separate storage and are not removed by Session cleanup.", "Deletion removes application files; it does not erase backups, disk remnants or external copies."].join("\n");
+    const config = path.dirname(defaultRegistryPath());
+    return [`Session storage: ${this.store.directory}`, `Tool attachments: ${path.join(this.store.directory,'outputs')} (owned by their Session)`, `Retention: ${settings.retentionDays === null ? "forever (default)" : settings.retentionDays + " days since last persisted activity"}`, `Privacy policy: ${this.settings.path}`, `Learned Memory: ${defaultMemoryDirectory()} (project entries: 90 days; user entries: until reviewed or removed; /memory inspect, disable, delete or clear)`, `Model registry: ${defaultRegistryPath()} (metadata until model removal)`, 'Credentials: operating-system Keyring, service Everpeace; remove using everpeace logout', `Input history: ${path.join(config,'input-history.json')} (separate retention; remove this file while the app is closed)`, 'Exports: stored at the destination you choose, retained until you delete that file.', "Persisted: user/assistant text, model context, tool interactions, usage and bounded redacted attachments (16 × 2 MiB/session).", "Context can contain source code, paths, customer data and unrecognized secrets.", "Default export: diagnostic summary; no conversation, source, tool bodies, paths or reasoning.", "Cleanup excludes active, unknown and retained-team sessions. Failures can be retried with a new preview.", "Memory, keyring credentials, input history and exported files have separate storage and are not removed by Session cleanup.", "Deletion removes application files; it does not erase backups, disk remnants or external copies."].join("\n");
   }
 }

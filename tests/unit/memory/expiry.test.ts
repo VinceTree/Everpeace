@@ -11,7 +11,7 @@ test("project Memory expires without recall refreshing it and manual review is r
   const store = new LearnedMemoryStore({ directory: root, now: () => now });
   try {
     await store.append("project", root, [{ lesson: "Use the fixture API", applyWhen: "fixture API", sourceSessionId: "source-session" }]);
-    await store.append("user", root, [{ lesson: "Prefer concise output", applyWhen: "all conversations" }]);
+    await store.append("user", root, [{ lesson: "Prefer concise output", applyWhen: "all conversations", reviewedAt: now.toISOString() }]);
     const original = (await store.read("project", root))[0]!;
     assert.equal((await store.snapshot(root, "fixture API")).entryIds.includes(original.id), true);
     now = new Date("2026-04-02T00:00:00Z");

@@ -26,6 +26,7 @@ async function createRegistry() {
 }
 
 export async function main(args = process.argv.slice(2)): Promise<number> {
+  if (args[0] === 'memory') { const {runMemoryCommand} = await import('./commands/memory.js'); return runMemoryCommand(args.slice(1)); }
   if (args[0] === "privacy") {
     const { runPrivacyCommand } = await import("./commands/privacy.js");
     return runPrivacyCommand(args.slice(1));

@@ -8,6 +8,7 @@ import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 import { discoverVerificationCommands, runVerificationCommand, runVerificationSuite, selectVerificationCommand, selectVerificationCommands, verificationPrompt } from "./verifier.js";
 import { WorkspaceChangeTracker, type WorkspaceChangeObservation } from "./workspace-tracker.js";
 import { formatVerificationEvidence, invalidateVerificationEvidence } from "./verification-evidence.js";
+import { captureChangedLines } from "./changed-line-evidence.js";
 import { createWorkflowState, type VerificationSuiteResult, type WorkflowPatchFollowup, type WorkflowReviewResult, type WorkflowRunResult, type WorkflowState, type VerificationCommand, type WorkflowResultClassification, type WorkflowTaskSource } from "./types.js";
 
 export interface WorkflowRuntimeOptions {
@@ -197,7 +198,8 @@ export class CodingWorkflowRuntime {
       if (refreshes > 0) before = await this.#refreshObservedChanges();
       const commands = await discoverVerificationCommands(this.#workspacePath);
       signal?.throwIfAborted();
-      let suite = await this.#verify(() => runVerificationSuite(selectVerificationCommands(commands, "full"), run, signal, { workspacePath: this.#workspacePath, changedPaths: before.changedPaths, ...(before.available && before.complete && before.revision ? { revision: before.revision } : {}) }));
+      const changedLines = before.available && before.complete ? await captureChangedLines(this.#workspacePath, before.changedPaths, signal) : {};
+      let suite = await this.#verify(() => runVerificationSuite(selectVerificationCommands(commands, "full"), run, signal, { workspacePath: this.#workspacePath, changedPaths: before.changedPaths, changedLines, ...(before.available && before.complete && before.revision ? { revision: before.revision } : {}) }));
       signal?.throwIfAborted();
       const after = await this.#refreshObservedChanges();
       const stale = before.available && before.complete && after.available && after.complete && before.revision !== after.revision;

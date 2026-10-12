@@ -30,7 +30,7 @@ jobs:
           EVERPEACE_PROPERTY_DAILY: '1'
           EVERPEACE_PROPERTY_SEED: ${{ github.run_id }}
           EVERPEACE_PROPERTY_REPORT: ${{ runner.temp }}/property-evidence
-        run: pnpm exec tsx --test tests/unit/security/properties.test.ts
+        run: pnpm exec tsx --test tests/unit/security/*.test.ts
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

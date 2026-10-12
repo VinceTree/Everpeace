@@ -8,7 +8,7 @@ import type { VerificationEvidence, VerificationResult } from "./types.js";
 const REPORTS = ["test-results.xml", "junit.xml", "reports/junit.xml", "coverage/junit.xml", "coverage/lcov.info", "coverage/coverage-final.json"];
 const LIMIT = 4 * 1024 * 1024;
 interface Report { text: string; digest: string; identity: string }
-export interface EvidenceContext { workspacePath: string; changedPaths: readonly string[]; revision?: string; supplemental?: boolean }
+export interface EvidenceContext { workspacePath: string; changedPaths: readonly string[]; revision?: string; supplemental?: boolean; changedLines?: Readonly<Record<string, readonly number[]>> }
 export type EvidenceReports = Map<string, Report>;
 
 function count(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
@@ -16,8 +16,8 @@ export function isVerificationEvidence(value: unknown): value is VerificationEvi
   if (!value || typeof value !== "object") return false;
   const v = value as VerificationEvidence;
   const keys = (item: object, allowed: string[]) => Object.keys(item).every((key) => allowed.includes(key));
-  return keys(v, ["version", "projectChecks", "tests", "coverage", "independent", "source", "modifiedTests", "workspaceRevision", "reportDigests"])
-    && v.version === 1 && ["none", "static_or_build", "test_entry"].includes(v.projectChecks)
+  return keys(v, ["version", "projectChecks", "tests", "coverage", "changedLines", "independent", "independentSource", "source", "modifiedTests", "workspaceRevision", "reportDigests"])
+    && [1, 2].includes(v.version) && ["none", "static_or_build", "test_entry"].includes(v.projectChecks)
     && Boolean(v.tests) && ["reported", "unknown"].includes(v.tests.state) && v.tests.assertions === "unknown"
     && keys(v.tests, ["state", "count", "skipped", "assertions"])
     && (v.tests.count === undefined || count(v.tests.count)) && (v.tests.skipped === undefined || count(v.tests.skipped))
@@ -25,7 +25,10 @@ export function isVerificationEvidence(value: unknown): value is VerificationEvi
     && Boolean(v.coverage) && ["unknown", "uncovered", "partial", "covered"].includes(v.coverage.state)
     && keys(v.coverage, ["state", "changedFiles", "measuredFiles"])
     && count(v.coverage.changedFiles) && count(v.coverage.measuredFiles) && v.coverage.measuredFiles <= v.coverage.changedFiles
+    && (v.changedLines === undefined || keys(v.changedLines, ["state", "total", "measured", "covered"]) && ["unknown", "uncovered", "partial", "covered"].includes(v.changedLines.state) && count(v.changedLines.total) && count(v.changedLines.measured) && count(v.changedLines.covered) && v.changedLines.covered <= v.changedLines.measured && v.changedLines.measured <= v.changedLines.total)
+    && (v.independentSource === undefined || keys(v.independentSource, ["id", "digest"]) && /^[A-Za-z0-9_-]{1,100}$/u.test(v.independentSource.id) && /^[a-f0-9]{64}$/u.test(v.independentSource.digest))
     && ["not_run", "passed", "failed"].includes(v.independent) && ["project_checks", "supplemental_check"].includes(v.source)
+    && (v.version === 1 || v.independent === 'not_run' || v.independentSource !== undefined)
     && typeof v.modifiedTests === "boolean" && (v.workspaceRevision === undefined || /^[a-f0-9]{64}$/u.test(v.workspaceRevision))
     && Array.isArray(v.reportDigests) && v.reportDigests.length <= REPORTS.length && v.reportDigests.every((d) => /^[a-f0-9]{64}$/u.test(d));
 }
@@ -123,6 +126,7 @@ export function collectVerificationEvidence(results: readonly VerificationResult
     if (parsed.state === "reported") tests = parsed;
   }
   const measured = new Map<string, boolean>();
+  const lineHits = new Map<string, Map<number, boolean>>();
   for (const [name, report] of fresh) {
     if (name.endsWith(".xml") && executedTests.length) {
       const parsed = parseTestEvidence(report.text, "junit");
@@ -130,13 +134,27 @@ export function collectVerificationEvidence(results: readonly VerificationResult
     }
     if (name.endsWith("lcov.info") || name.endsWith("coverage-final.json")) {
       for (const [file, covered] of parseCoverage(report.text, name.endsWith(".json") ? "istanbul" : "lcov", context.workspacePath)) measured.set(file, (measured.get(file) ?? false) || covered);
+      for (const [file, lines] of parseCoverageLines(report.text, name.endsWith(".json") ? "istanbul" : "lcov", context.workspacePath)) {
+        const hits = lineHits.get(file) ?? new Map<number, boolean>();
+        for (const [line, covered] of lines) hits.set(line, (hits.get(line) ?? false) || covered);
+        lineHits.set(file, hits);
+      }
     }
   }
   const changed = [...new Set(context.changedPaths.map((p) => relativeFile(context.workspacePath, p)).filter((p): p is string => p !== undefined))];
   const measuredFiles = changed.filter((p) => measured.has(p)).length;
   const coveredFiles = changed.filter((p) => measured.get(p) === true).length;
+  let total = 0, measuredLines = 0, coveredLines = 0, mappedFiles = 0;
+  for (const file of changed) {
+    const lines = context.changedLines?.[file];
+    if (!lines) continue;
+    mappedFiles++;
+    for (const line of new Set(lines)) { total++; if (lineHits.get(file)?.has(line)) measuredLines++; if (lineHits.get(file)?.get(line)) coveredLines++; }
+  }
+  const lineState = !total || !measuredLines ? "unknown" : coveredLines === total && mappedFiles === changed.length ? "covered" : coveredLines === 0 && measuredLines === total && mappedFiles === changed.length ? "uncovered" : "partial";
   return {
-    version: 1, projectChecks: !results.length ? "none" : executedTests.length ? "test_entry" : "static_or_build", tests,
+    version: 2, projectChecks: !results.length ? "none" : executedTests.length ? "test_entry" : "static_or_build", tests,
+    changedLines: { state: lineState, total, measured: measuredLines, covered: coveredLines },
     coverage: { state: !measuredFiles ? "unknown" : !coveredFiles ? "uncovered" : coveredFiles === changed.length ? "covered" : "partial", changedFiles: changed.length, measuredFiles },
     independent: "not_run", source: context.supplemental ? "supplemental_check" : "project_checks",
     modifiedTests: context.changedPaths.some((p) => /(?:^|[\\/])(?:tests?|__tests__)(?:[\\/]|$)|\.(?:test|spec)\.[^/]+$/iu.test(p)),
@@ -148,11 +166,40 @@ export function collectVerificationEvidence(results: readonly VerificationResult
 export function invalidateVerificationEvidence(evidence: VerificationEvidence): VerificationEvidence {
   const result = { ...evidence, tests: { state: "unknown" as const, assertions: "unknown" as const }, coverage: { ...evidence.coverage, state: "unknown" as const, measuredFiles: 0 }, independent: "not_run" as const, reportDigests: [] };
   delete result.workspaceRevision;
+  delete result.independentSource;
+  if (result.changedLines) result.changedLines = { ...result.changedLines, state: "unknown", measured: 0, covered: 0 };
   return result;
 }
 export function formatVerificationEvidence(evidence?: VerificationEvidence): string {
   if (!evidence) return "Verification evidence: unavailable. Independent functional verification: not run.";
   const tests = evidence.tests.state === "reported" ? `${evidence.tests.count} reported tests (assertions unknown)` : "test count and assertions unknown";
   const suggestion = evidence.projectChecks !== "test_entry" || evidence.tests.count === 0 || evidence.coverage.state === "uncovered" ? " Add targeted tests for the changed behavior." : "";
-  return `Project evidence: ${evidence.projectChecks}; ${tests}; changed-file coverage: ${evidence.coverage.state}. Independent functional verification: ${evidence.independent.replaceAll("_", " ")}.${suggestion}`;
+  return `Project evidence: ${evidence.projectChecks}; ${tests}; file execution evidence: ${evidence.coverage.state}; modified-line coverage: ${evidence.changedLines?.state ?? "unknown"}. Independent functional verification: ${evidence.independent.replaceAll("_", " ")}.${suggestion}`;
+}
+
+/** Only a host-owned verifier may attach independent acceptance provenance. */
+export function bindIndependentVerification(evidence: VerificationEvidence, result: { passed: boolean; workspaceRevision: string; source: { id: string; digest: string } }): VerificationEvidence {
+  if (evidence.workspaceRevision !== result.workspaceRevision || !/^[a-f0-9]{64}$/u.test(result.workspaceRevision) || !/^[A-Za-z0-9_-]{1,100}$/u.test(result.source.id) || !/^[a-f0-9]{64}$/u.test(result.source.digest)) throw new Error('Independent verification provenance or revision is invalid');
+  return { ...evidence, version: 2, independent: result.passed ? 'passed' : 'failed', independentSource: { ...result.source } };
+}
+
+export function parseCoverageLines(text: string, format: "lcov" | "istanbul", root: string): Map<string, Map<number, boolean>> {
+  const files = new Map<string, Map<number, boolean>>();
+  const hit = (file: string, line: number, covered: boolean) => { if (!Number.isSafeInteger(line) || line < 1) return; const lines = files.get(file) ?? new Map<number, boolean>(); lines.set(line, (lines.get(line) ?? false) || covered); files.set(file, lines); };
+  if (format === "lcov") {
+    for (const record of text.split("end_of_record")) {
+      const name = /^SF:(.+)$/mu.exec(record)?.[1]?.trim(); const file = name ? relativeFile(root, name) : undefined;
+      if (file) for (const match of record.matchAll(/^DA:(\d+),(\d+)(?:,.*)?$/gmu)) { const n = Number(match[2]); if (count(n)) hit(file, Number(match[1]), n > 0); }
+    }
+  } else {
+    try {
+      const report = JSON.parse(text) as Record<string, {path?: string; s?: Record<string, number>; statementMap?: Record<string, {start?: {line?: number}}>}>;
+      for (const [name, entry] of Object.entries(report)) {
+        if (!entry || typeof entry !== "object") continue;
+        const file = relativeFile(root, typeof entry.path === "string" ? entry.path : name);
+        if (file && entry.s && entry.statementMap) for (const [id, n] of Object.entries(entry.s)) { const line = entry.statementMap[id]?.start?.line; if (count(n) && typeof line === "number") hit(file, line, n > 0); }
+      }
+    } catch { /* Unmapped statements remain unknown. */ }
+  }
+  return files;
 }

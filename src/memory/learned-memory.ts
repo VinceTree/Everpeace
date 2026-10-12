@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import lockfile from "proper-lockfile";
-import type { ResponsesClientLike } from "../agent/react-agent.js";
+import type { ResponsesClientLike } from "../agent/model-protocol.js";
 import type { TokenUsageSample } from "../status/model-status.js";
 import { assertCompletedModelResponse } from "../providers/capabilities.js";
 import { RequestAttemptLedger, RequestUsageIncompleteError } from "../agent/request-attempt-ledger.js";
@@ -15,6 +15,14 @@ export type LearnedScope = "project" | "user";
 export type LearnedKind = "preference" | "convention" | "procedure" | "constraint" | "summary";
 export type LearnedEntryStatus = "active" | "superseded" | "archived";
 export type LearnedConfidence = "low" | "medium" | "high";
+
+/** Legacy entries remain inspectable but need review before request injection. */
+export function memoryEntryHasProvenance(entry: LearnedEntry): boolean {
+  return Boolean(entry.reviewedAt && Number.isFinite(Date.parse(entry.reviewedAt)))
+    || Boolean(entry.sourceSessionId && /^[A-Za-z0-9_-]{1,100}$/u.test(entry.sourceSessionId))
+    || Boolean(entry.sourceSessionIds?.some(id => /^[A-Za-z0-9_-]{1,100}$/u.test(id)))
+    || Boolean(entry.evidence?.some(item => item.excerpt.trim().length > 0 && Number.isFinite(Date.parse(item.createdAt))));
+}
 
 export interface LearnedMemoryPolicy {
   readExisting: boolean;
@@ -28,6 +36,7 @@ export interface LearnedEvidence {
 }
 
 export interface LearnedEntry {
+  reviewHistory?: Array<{ action: "renew" | "correct" | "disable"; at: string; revision: string }>;
   expiresAt?: string;
   reviewedAt?: string;
   supersedes?: string;
@@ -177,6 +186,7 @@ function normalizeEntry(entry: Partial<LearnedEntry> & Pick<LearnedEntry, "lesso
   const applyWhen = redactSecrets(entry.applyWhen);
   if (!lesson || !applyWhen) return undefined;
   return {
+    ...(entry.reviewHistory ? { reviewHistory: entry.reviewHistory.filter(item => ["renew", "correct", "disable"].includes(item.action) && Number.isFinite(Date.parse(item.at)) && /^[a-f0-9]+$/u.test(item.revision)).slice(-20) } : {}),
     ...(entry.scope !== "user" ? { expiresAt: entry.expiresAt ?? new Date((Number.isNaN(Date.parse(entry.createdAt ?? "")) ? now.getTime() : Date.parse(entry.createdAt!)) + 90 * 86_400_000).toISOString() } : {}),
     ...(entry.reviewedAt ? { reviewedAt: entry.reviewedAt } : {}),
     ...(entry.supersedes ? { supersedes: entry.supersedes } : {}),
@@ -229,6 +239,7 @@ function serializeEntries(entries: readonly LearnedEntry[]): string {
     `- Updated at: ${entry.updatedAt}`,
     ...(entry.expiresAt ? [`- Expires at: ${entry.expiresAt}`] : []),
     ...(entry.reviewedAt ? [`- Reviewed at: ${entry.reviewedAt}`] : []),
+    ...(entry.reviewHistory?.length ? [`- Review history: ${JSON.stringify(entry.reviewHistory)}`] : []),
     ...(entry.supersedes ? [`- Supersedes: ${entry.supersedes}`] : []),
     ...(entry.sourceSessionIds?.length ? [`- Source sessions: ${JSON.stringify(entry.sourceSessionIds)}`] : []),
     ...(entry.lastUsedAt ? [`- Last used at: ${entry.lastUsedAt}`] : []),
@@ -257,6 +268,8 @@ function parseEntries(markdown: string): LearnedEntry[] {
     const expiresAt = /^-\s+Expires at:\s*(.+)$/mu.exec(block)?.[1];
     const reviewedAt = /^-\s+Reviewed at:\s*(.+)$/mu.exec(block)?.[1];
     const supersedes = /^-\s+Supersedes:\s*(.+)$/mu.exec(block)?.[1];
+    let reviewHistory: LearnedEntry["reviewHistory"];
+    try { const history: unknown = JSON.parse(/^-\s+Review history:\s*(.+)$/mu.exec(block)?.[1] ?? "null"); if (Array.isArray(history) && history.every(item => item && typeof item.action === "string" && typeof item.at === "string" && typeof item.revision === "string")) reviewHistory = history.slice(-20); } catch { /* Legacy records remain readable. */ }
     let sourceSessionIds: string[] | undefined;
     try {
       const sources: unknown = JSON.parse(/^-\s+Source sessions:\s*(.+)$/mu.exec(block)?.[1] ?? "null");
@@ -283,6 +296,7 @@ function parseEntries(markdown: string): LearnedEntry[] {
     const normalized = normalizeEntry({
       ...(expiresAt ? { expiresAt } : createdAt && Number.isNaN(Date.parse(createdAt)) ? { expiresAt: "unknown" } : {}),
       ...(reviewedAt ? { reviewedAt } : {}),
+      ...(reviewHistory ? { reviewHistory } : {}),
       ...(supersedes ? { supersedes } : {}),
       ...(sourceSessionIds ? { sourceSessionIds } : {}),
       scope: header[2]!.toLowerCase() === "user" ? "user" : "project",
@@ -497,6 +511,7 @@ export class LearnedMemoryStore {
       const found = entries.find((entry) => entry.id === id);
       if (!found || memoryEntryRevision(found) !== revision) throw new Error("Memory preview changed; inspect the entry again");
       const now = this.#now();
+      if (action !== "delete") { found.reviewHistory = [...(found.reviewHistory ?? []), { action, at: now.toISOString(), revision }].slice(-20); found.updatedAt = now.toISOString(); }
       let next = entries;
       if (action === "delete") next = entries.filter((entry) => entry.id !== id);
       else if (action === "disable") found.status = "archived";
@@ -530,7 +545,7 @@ export class LearnedMemoryStore {
     return {
       enabled,
       entries: [...project, ...user],
-      needsReview: project.filter((entry) => entry.status === "active" && memoryEntryExpired(entry, this.#now())).length,
+      needsReview: [...project, ...user].filter((entry) => entry.status === "active" && (memoryEntryExpired(entry, this.#now()) || !memoryEntryHasProvenance(entry))).length,
       projectEntries: project.length,
       userEntries: user.length,
       recent: [...project, ...user]
@@ -553,12 +568,12 @@ export class LearnedMemoryStore {
     ]);
     const terms = retrievalTerms(`${userInput} ${activeFiles.join(" ")}`);
     const score = (entry: LearnedEntry): number => {
-      if (entry.status !== "active" || memoryEntryExpired(entry, this.#now())) return -1000;
+      if (entry.status !== "active" || memoryEntryExpired(entry, this.#now()) || !memoryEntryHasProvenance(entry)) return -1000;
       const haystack = `${entry.lesson} ${entry.applyWhen}`.toLowerCase();
       const overlap = terms.reduce((total, term) => total + (haystack.includes(term) ? 3 : 0), 0);
       if (terms.length > 0 && overlap === 0 && entry.scope === "project") return -1000;
       const scopeWeight = entry.scope === "user" ? 2 : 1;
-      const recency = Math.max(0, 30 - Math.floor((Date.now() - Date.parse(entry.updatedAt)) / 86_400_000));
+      const recency = Math.max(0, 30 - Math.floor((this.#now().getTime() - Date.parse(entry.updatedAt)) / 86_400_000));
       const confidence = entry.confidence === "high" ? 2 : entry.confidence === "low" ? 0 : 1;
       return overlap + scopeWeight + recency / 30 + confidence;
     };
@@ -592,7 +607,7 @@ export class LearnedMemoryStore {
 
   async lookup(workspacePath: string, id: string): Promise<LearnedEntry | undefined> {
     const [project, user] = await Promise.all([this.read("project", workspacePath), this.read("user", workspacePath)]);
-    return [...project, ...user].find((entry) => entry.id === id && entry.status === "active" && !memoryEntryExpired(entry, this.#now()));
+    return [...project, ...user].find((entry) => entry.id === id && entry.status === "active" && !memoryEntryExpired(entry, this.#now()) && memoryEntryHasProvenance(entry));
   }
 
   async loadJobs(): Promise<MemoryCaptureJob[]> {
@@ -927,6 +942,7 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
         const values = entries
           .filter((entry) => typeof entry.lesson === "string" && typeof entry.applyWhen === "string")
           .map((entry) => ({
+            reviewedAt: new Date().toISOString(),
             lesson: entry.lesson as string,
             applyWhen: entry.applyWhen as string,
             kind: (entry.kind === "preference" || entry.kind === "convention" || entry.kind === "procedure" || entry.kind === "constraint" || entry.kind === "summary" ? entry.kind : "preference") as LearnedKind,
@@ -937,6 +953,7 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
             lesson: clean,
             applyWhen: "Apply this preference in future conversations across projects.",
             kind: "preference",
+            reviewedAt: new Date().toISOString(),
           }], { beforeCommit: () => this.#checkWrite(generation, ownedSignal) });
         } catch (error) {
           if (!(error instanceof MemoryOperationStoppedError)) this.#persistenceFailure ??= { error };
