@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "planned": 90,
+  "recorded": 90,
+  "requests": 90,
+  "knownInputTokens": 350289,
+  "knownOutputTokens": 6812,
+  "unknownUsageRuns": 1,
+  "groupResults": [
+    {
+      "group": "none",
+      "planned": 30,
+      "executed": 30,
+      "passed": 30,
+      "forbiddenMemoryInjected": 0
+    },
+    {
+      "group": "valid",
+      "planned": 30,
+      "executed": 30,
+      "passed": 29,
+      "forbiddenMemoryInjected": 0
+    },
+    {
+      "group": "filtered",
+      "planned": 30,
+      "executed": 30,
+      "passed": 30,
+      "forbiddenMemoryInjected": 0
+    }
+  ]
+}

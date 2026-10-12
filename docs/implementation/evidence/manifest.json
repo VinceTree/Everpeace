@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "files": [
+    {
+      "file": "repair-report.json",
+      "sha256": "348e9ecc9287dbdd1a1566be48eaa37868ec1339f7c266547ca9fa6d9692f086",
+      "purpose": "Post-run request-count correction; original outcomes and frozen run identities preserved"
+    },
+    {
+      "file": "repair-comparison.json",
+      "sha256": "3aa7c7f823794bacb6d217a6fc09f97aac76b76966275efc6c6bd5fe1f281407",
+      "purpose": "Frozen evaluator decision; no promotion gate met"
+    },
+    {
+      "file": "repair-metering.json",
+      "sha256": "362bfb6db72cae042f64ddf4f7ba709b9285a36b294ba5142cf2c4f1e1a4bf32",
+      "purpose": "Known metering with unknowns retained; not a billing total"
+    },
+    {
+      "file": "team-report.json",
+      "sha256": "093925a645eeef510522aa0c556a475548a78bb0bff2ba117e26b726b4aaf352",
+      "purpose": "Post-run request-count correction; original outcomes and frozen run identities preserved"
+    },
+    {
+      "file": "team-comparison.json",
+      "sha256": "67e34a6626e22b697b9903833b7839142d5db0bf457a5fc6f96f0c0d194465fe",
+      "purpose": "Frozen evaluator decision; no promotion gate met"
+    },
+    {
+      "file": "team-metering.json",
+      "sha256": "e4a29b1f3fbbf4bd23810b25c2062bad2cefcfb89135b5f9d8e608831cf407d3",
+      "purpose": "Known metering with unknowns retained; not a billing total"
+    },
+    {
+      "file": "memory-metering.json",
+      "sha256": "83832feab709ee8fb7f7417d7fed9901efa37d664d7ecf435b6992c3e39e0c2e",
+      "purpose": "Real model memory filtering experiment; 89/90 answers accepted and one incomplete usage"
+    },
+    {
+      "file": "web-comparison.json",
+      "sha256": "a6cfc911a8cc406b3b80ce87dbf127f1a1841a414b5f2d470a301b57d0a807c2",
+      "purpose": "Original experiment receipt"
+    },
+    {
+      "file": "optimization-proof.json",
+      "sha256": "a904acbc471905f19f8f0edd1c222ed25b04b7f4367a1d9d443be3f352d08aee",
+      "purpose": "Original experiment receipt"
+    },
+    {
+      "file": "memory-report.json",
+      "sha256": "17cbafdff3933226e0a2821640aecf391b1e3339ae5eb5d941cab11918ad4ab0",
+      "purpose": "Original experiment receipt"
+    },
+    {
+      "file": "pilot-interruption.json",
+      "sha256": "7058af2eef707ac614f23945d689b2abefb4b60853a3243979e33822c7601ced",
+      "purpose": "Original experiment receipt"
+    }
+  ],
+  "rawRecords": "Local .cache/evaluation retains campaign plans, JSONL and frozen artifacts; raw model output and customer paths are not uploaded.",
+  "sourceIdentityNote": "Measured harness predates final reporting correction and 64/256 MiB workflow fingerprint alignment; identities in model records refer to that measured snapshot."
+}

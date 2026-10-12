@@ -1,0 +1,847 @@
+{
+  "schema": 2,
+  "corpus": "12 licensed project documents and 12 pinned upstream Node API documents with explicitly synthetic site chrome; not a general-web benchmark",
+  "metric": "F1 over annotated relevant blocks and irrelevant chrome, plus exact code retention and structural counts",
+  "pages": [
+    {
+      "file": "01.html",
+      "source": "https://github.com/VinceTree/Everpeace/blob/7963b45ca1ef9665fb1dc2e2588c110634f3e650/docs/architecture/NETWORK.md",
+      "complex": true,
+      "before": {
+        "blocks": 26,
+        "found": 26,
+        "irrelevant": 3,
+        "precision": 0.896551724137931,
+        "recall": 1,
+        "f1": 0.9454545454545454
+      },
+      "baseline": {
+        "blocks": 26,
+        "found": 26,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "after": {
+        "blocks": 26,
+        "found": 26,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 0,
+      "exactCodeBlocks": 0,
+      "headings": 6,
+      "tables": 1,
+      "nestedLists": 0,
+      "links": 10
+    },
+    {
+      "file": "02.html",
+      "source": "https://github.com/VinceTree/Everpeace/blob/7963b45ca1ef9665fb1dc2e2588c110634f3e650/docs/architecture/RUNTIME.md",
+      "complex": true,
+      "before": {
+        "blocks": 48,
+        "found": 48,
+        "irrelevant": 3,
+        "precision": 0.9411764705882353,
+        "recall": 1,
+        "f1": 0.9696969696969697
+      },
+      "baseline": {
+        "blocks": 48,
+        "found": 48,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "after": {
+        "blocks": 48,
+        "found": 48,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 1,
+      "exactCodeBlocks": 1,
+      "headings": 6,
+      "tables": 1,
+      "nestedLists": 0,
+      "links": 40
+    },
+    {
+      "file": "03.html",
+      "source": "https://github.com/VinceTree/Everpeace/blob/7963b45ca1ef9665fb1dc2e2588c110634f3e650/docs/architecture/TEAMS.md",
+      "complex": false,
+      "before": {
+        "blocks": 26,
+        "found": 26,
+        "irrelevant": 3,
+        "precision": 0.896551724137931,
+        "recall": 1,
+        "f1": 0.9454545454545454
+      },
+      "baseline": {
+        "blocks": 26,
+        "found": 26,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "after": {
+        "blocks": 26,
+        "found": 26,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 0,
+      "exactCodeBlocks": 0,
+      "headings": 6,
+      "tables": 0,
+      "nestedLists": 0,
+      "links": 17
+    },
+    {
+      "file": "04.html",
+      "source": "https://github.com/VinceTree/Everpeace/blob/7963b45ca1ef9665fb1dc2e2588c110634f3e650/docs/architecture/SANDBOX.md",
+      "complex": true,
+      "before": {
+        "blocks": 58,
+        "found": 58,
+        "irrelevant": 3,
+        "precision": 0.9508196721311475,
+        "recall": 1,
+        "f1": 0.9747899159663865
+      },
+      "baseline": {
+        "blocks": 58,
+        "found": 58,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "after": {
+        "blocks": 58,
+        "found": 58,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 0,
+      "exactCodeBlocks": 0,
+      "headings": 10,
+      "tables": 1,
+      "nestedLists": 0,
+      "links": 17
+    },
+    {
+      "file": "05.html",
+      "source": "https://github.com/VinceTree/Everpeace/blob/7963b45ca1ef9665fb1dc2e2588c110634f3e650/docs/architecture/STATE_AND_UI.md",
+      "complex": true,
+      "before": {
+        "blocks": 64,
+        "found": 64,
+        "irrelevant": 3,
+        "precision": 0.9552238805970149,
+        "recall": 1,
+        "f1": 0.9770992366412213
+      },
+      "baseline": {
+        "blocks": 64,
+        "found": 64,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "after": {
+        "blocks": 64,
+        "found": 64,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 0,
+      "exactCodeBlocks": 0,
+      "headings": 6,
+      "tables": 3,
+      "nestedLists": 0,
+      "links": 17
+    },
+    {
+      "file": "06.html",
+      "source": "https://github.com/VinceTree/Everpeace/blob/7963b45ca1ef9665fb1dc2e2588c110634f3e650/docs/architecture/MEMORY.md",
+      "complex": true,
+      "before": {
+        "blocks": 41,
+        "found": 41,
+        "irrelevant": 3,
+        "precision": 0.9318181818181818,
+        "recall": 1,
+        "f1": 0.9647058823529412
+      },
+      "baseline": {
+        "blocks": 41,
+        "found": 41,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "after": {
+        "blocks": 41,
+        "found": 41,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 1,
+      "exactCodeBlocks": 1,
+      "headings": 6,
+      "tables": 0,
+      "nestedLists": 0,
+      "links": 11
+    },
+    {
+      "file": "07.html",
+      "source": "https://github.com/VinceTree/Everpeace/blob/7963b45ca1ef9665fb1dc2e2588c110634f3e650/docs/DEVELOPMENT.md",
+      "complex": true,
+      "before": {
+        "blocks": 48,
+        "found": 48,
+        "irrelevant": 3,
+        "precision": 0.9411764705882353,
+        "recall": 1,
+        "f1": 0.9696969696969697
+      },
+      "baseline": {
+        "blocks": 48,
+        "found": 48,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "after": {
+        "blocks": 48,
+        "found": 48,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 3,
+      "exactCodeBlocks": 3,
+      "headings": 4,
+      "tables": 2,
+      "nestedLists": 0,
+      "links": 16
+    },
+    {
+      "file": "08.html",
+      "source": "https://github.com/VinceTree/Everpeace/blob/7963b45ca1ef9665fb1dc2e2588c110634f3e650/docs/BENCHMARKING.md",
+      "complex": true,
+      "before": {
+        "blocks": 27,
+        "found": 27,
+        "irrelevant": 3,
+        "precision": 0.9,
+        "recall": 1,
+        "f1": 0.9473684210526316
+      },
+      "baseline": {
+        "blocks": 27,
+        "found": 27,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "after": {
+        "blocks": 27,
+        "found": 27,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 3,
+      "exactCodeBlocks": 3,
+      "headings": 4,
+      "tables": 1,
+      "nestedLists": 0,
+      "links": 2
+    },
+    {
+      "file": "09.html",
+      "source": "https://github.com/VinceTree/Everpeace/blob/7963b45ca1ef9665fb1dc2e2588c110634f3e650/docs/architecture/PERMISSIONS.md",
+      "complex": true,
+      "before": {
+        "blocks": 36,
+        "found": 36,
+        "irrelevant": 3,
+        "precision": 0.9230769230769231,
+        "recall": 1,
+        "f1": 0.9600000000000001
+      },
+      "baseline": {
+        "blocks": 36,
+        "found": 36,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "after": {
+        "blocks": 36,
+        "found": 36,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 0,
+      "exactCodeBlocks": 0,
+      "headings": 6,
+      "tables": 1,
+      "nestedLists": 0,
+      "links": 8
+    },
+    {
+      "file": "10.html",
+      "source": "https://github.com/VinceTree/Everpeace/blob/7963b45ca1ef9665fb1dc2e2588c110634f3e650/docs/architecture/TOOLS.md",
+      "complex": true,
+      "before": {
+        "blocks": 52,
+        "found": 52,
+        "irrelevant": 3,
+        "precision": 0.9454545454545454,
+        "recall": 1,
+        "f1": 0.9719626168224299
+      },
+      "baseline": {
+        "blocks": 52,
+        "found": 52,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "after": {
+        "blocks": 52,
+        "found": 52,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 0,
+      "exactCodeBlocks": 0,
+      "headings": 8,
+      "tables": 2,
+      "nestedLists": 0,
+      "links": 40
+    },
+    {
+      "file": "11.html",
+      "source": "https://github.com/VinceTree/Everpeace/blob/7963b45ca1ef9665fb1dc2e2588c110634f3e650/docs/architecture/SECURITY_AND_DIAGNOSTICS.md",
+      "complex": false,
+      "before": {
+        "blocks": 24,
+        "found": 24,
+        "irrelevant": 3,
+        "precision": 0.8888888888888888,
+        "recall": 1,
+        "f1": 0.9411764705882353
+      },
+      "baseline": {
+        "blocks": 24,
+        "found": 24,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "after": {
+        "blocks": 24,
+        "found": 24,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 0,
+      "exactCodeBlocks": 0,
+      "headings": 6,
+      "tables": 0,
+      "nestedLists": 0,
+      "links": 19
+    },
+    {
+      "file": "12.html",
+      "source": "https://github.com/VinceTree/Everpeace/blob/7963b45ca1ef9665fb1dc2e2588c110634f3e650/docs/architecture/CODEX_CAPABILITIES.md",
+      "complex": true,
+      "before": {
+        "blocks": 53,
+        "found": 53,
+        "irrelevant": 3,
+        "precision": 0.9464285714285714,
+        "recall": 1,
+        "f1": 0.9724770642201834
+      },
+      "baseline": {
+        "blocks": 53,
+        "found": 53,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "after": {
+        "blocks": 53,
+        "found": 53,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 0,
+      "exactCodeBlocks": 0,
+      "headings": 6,
+      "tables": 1,
+      "nestedLists": 0,
+      "links": 12
+    },
+    {
+      "file": "13.html",
+      "source": "https://raw.githubusercontent.com/nodejs/node/v22.19.0/doc/api/assert.md",
+      "complex": true,
+      "before": {
+        "blocks": 371,
+        "found": 371,
+        "irrelevant": 2,
+        "precision": 0.9946380697050938,
+        "recall": 1,
+        "f1": 0.9973118279569892
+      },
+      "baseline": {
+        "blocks": 371,
+        "found": 0,
+        "irrelevant": 1,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0
+      },
+      "after": {
+        "blocks": 371,
+        "found": 371,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 87,
+      "exactCodeBlocks": 87,
+      "headings": 37,
+      "tables": 0,
+      "nestedLists": 4,
+      "links": 14
+    },
+    {
+      "file": "14.html",
+      "source": "https://raw.githubusercontent.com/nodejs/node/v22.19.0/doc/api/buffer.md",
+      "complex": true,
+      "before": {
+        "blocks": 898,
+        "found": 898,
+        "irrelevant": 2,
+        "precision": 0.9977777777777778,
+        "recall": 1,
+        "f1": 0.9988876529477196
+      },
+      "baseline": {
+        "blocks": 898,
+        "found": 0,
+        "irrelevant": 1,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0
+      },
+      "after": {
+        "blocks": 898,
+        "found": 898,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 203,
+      "exactCodeBlocks": 203,
+      "headings": 124,
+      "tables": 0,
+      "nestedLists": 2,
+      "links": 21
+    },
+    {
+      "file": "15.html",
+      "source": "https://raw.githubusercontent.com/nodejs/node/v22.19.0/doc/api/child_process.md",
+      "complex": true,
+      "before": {
+        "blocks": 445,
+        "found": 445,
+        "irrelevant": 2,
+        "precision": 0.9955257270693513,
+        "recall": 1,
+        "f1": 0.9977578475336324
+      },
+      "baseline": {
+        "blocks": 445,
+        "found": 0,
+        "irrelevant": 1,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0
+      },
+      "after": {
+        "blocks": 445,
+        "found": 445,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 62,
+      "exactCodeBlocks": 62,
+      "headings": 46,
+      "tables": 0,
+      "nestedLists": 11,
+      "links": 17
+    },
+    {
+      "file": "16.html",
+      "source": "https://raw.githubusercontent.com/nodejs/node/v22.19.0/doc/api/events.md",
+      "complex": true,
+      "before": {
+        "blocks": 486,
+        "found": 486,
+        "irrelevant": 2,
+        "precision": 0.9959016393442623,
+        "recall": 1,
+        "f1": 0.997946611909651
+      },
+      "baseline": {
+        "blocks": 486,
+        "found": 0,
+        "irrelevant": 1,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0
+      },
+      "after": {
+        "blocks": 486,
+        "found": 486,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 81,
+      "exactCodeBlocks": 81,
+      "headings": 85,
+      "tables": 0,
+      "nestedLists": 7,
+      "links": 12
+    },
+    {
+      "file": "17.html",
+      "source": "https://raw.githubusercontent.com/nodejs/node/v22.19.0/doc/api/fs.md",
+      "complex": true,
+      "before": {
+        "blocks": 2081,
+        "found": 2081,
+        "irrelevant": 2,
+        "precision": 0.9990398463754201,
+        "recall": 1,
+        "f1": 0.999519692603266
+      },
+      "baseline": {
+        "blocks": 2081,
+        "found": 0,
+        "irrelevant": 1,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0
+      },
+      "after": {
+        "blocks": 2081,
+        "found": 2081,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 109,
+      "exactCodeBlocks": 109,
+      "headings": 280,
+      "tables": 7,
+      "nestedLists": 136,
+      "links": 20
+    },
+    {
+      "file": "18.html",
+      "source": "https://raw.githubusercontent.com/nodejs/node/v22.19.0/doc/api/http.md",
+      "complex": true,
+      "before": {
+        "blocks": 967,
+        "found": 967,
+        "irrelevant": 2,
+        "precision": 0.9979360165118679,
+        "recall": 1,
+        "f1": 0.9989669421487603
+      },
+      "baseline": {
+        "blocks": 967,
+        "found": 3,
+        "irrelevant": 1,
+        "precision": 0.75,
+        "recall": 0.0031023784901758012,
+        "f1": 0.006179196704428423
+      },
+      "after": {
+        "blocks": 967,
+        "found": 967,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 77,
+      "exactCodeBlocks": 77,
+      "headings": 173,
+      "tables": 0,
+      "nestedLists": 10,
+      "links": 31
+    },
+    {
+      "file": "19.html",
+      "source": "https://raw.githubusercontent.com/nodejs/node/v22.19.0/doc/api/net.md",
+      "complex": true,
+      "before": {
+        "blocks": 538,
+        "found": 538,
+        "irrelevant": 2,
+        "precision": 0.9962962962962963,
+        "recall": 1,
+        "f1": 0.9981447124304267
+      },
+      "baseline": {
+        "blocks": 538,
+        "found": 0,
+        "irrelevant": 1,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0
+      },
+      "after": {
+        "blocks": 538,
+        "found": 538,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 23,
+      "exactCodeBlocks": 23,
+      "headings": 103,
+      "tables": 0,
+      "nestedLists": 6,
+      "links": 18
+    },
+    {
+      "file": "20.html",
+      "source": "https://raw.githubusercontent.com/nodejs/node/v22.19.0/doc/api/path.md",
+      "complex": true,
+      "before": {
+        "blocks": 169,
+        "found": 169,
+        "irrelevant": 2,
+        "precision": 0.9883040935672515,
+        "recall": 1,
+        "f1": 0.9941176470588234
+      },
+      "baseline": {
+        "blocks": 169,
+        "found": 0,
+        "irrelevant": 1,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0
+      },
+      "after": {
+        "blocks": 169,
+        "found": 169,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 30,
+      "exactCodeBlocks": 30,
+      "headings": 18,
+      "tables": 0,
+      "nestedLists": 1,
+      "links": 3
+    },
+    {
+      "file": "21.html",
+      "source": "https://raw.githubusercontent.com/nodejs/node/v22.19.0/doc/api/process.md",
+      "complex": true,
+      "before": {
+        "blocks": 904,
+        "found": 904,
+        "irrelevant": 2,
+        "precision": 0.9977924944812362,
+        "recall": 1,
+        "f1": 0.9988950276243094
+      },
+      "baseline": {
+        "blocks": 904,
+        "found": 0,
+        "irrelevant": 1,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0
+      },
+      "after": {
+        "blocks": 904,
+        "found": 904,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 177,
+      "exactCodeBlocks": 177,
+      "headings": 125,
+      "tables": 0,
+      "nestedLists": 11,
+      "links": 40
+    },
+    {
+      "file": "22.html",
+      "source": "https://raw.githubusercontent.com/nodejs/node/v22.19.0/doc/api/stream.md",
+      "complex": true,
+      "before": {
+        "blocks": 993,
+        "found": 993,
+        "irrelevant": 2,
+        "precision": 0.9979899497487437,
+        "recall": 1,
+        "f1": 0.9989939637826961
+      },
+      "baseline": {
+        "blocks": 993,
+        "found": 0,
+        "irrelevant": 1,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0
+      },
+      "after": {
+        "blocks": 993,
+        "found": 993,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 109,
+      "exactCodeBlocks": 109,
+      "headings": 150,
+      "tables": 1,
+      "nestedLists": 53,
+      "links": 18
+    },
+    {
+      "file": "23.html",
+      "source": "https://raw.githubusercontent.com/nodejs/node/v22.19.0/doc/api/timers.md",
+      "complex": true,
+      "before": {
+        "blocks": 143,
+        "found": 143,
+        "irrelevant": 2,
+        "precision": 0.9862068965517241,
+        "recall": 1,
+        "f1": 0.9930555555555556
+      },
+      "baseline": {
+        "blocks": 143,
+        "found": 0,
+        "irrelevant": 1,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0
+      },
+      "after": {
+        "blocks": 143,
+        "found": 143,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 13,
+      "exactCodeBlocks": 13,
+      "headings": 28,
+      "tables": 0,
+      "nestedLists": 4,
+      "links": 5
+    },
+    {
+      "file": "24.html",
+      "source": "https://raw.githubusercontent.com/nodejs/node/v22.19.0/doc/api/url.md",
+      "complex": true,
+      "before": {
+        "blocks": 411,
+        "found": 411,
+        "irrelevant": 2,
+        "precision": 0.9951573849878934,
+        "recall": 1,
+        "f1": 0.9975728155339806
+      },
+      "baseline": {
+        "blocks": 411,
+        "found": 0,
+        "irrelevant": 1,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0
+      },
+      "after": {
+        "blocks": 411,
+        "found": 411,
+        "irrelevant": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "codeBlocks": 61,
+      "exactCodeBlocks": 61,
+      "headings": 71,
+      "tables": 1,
+      "nestedLists": 11,
+      "links": 13
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "planned": 120,
+  "recorded": 29,
+  "skipped": 91,
+  "requests": 25,
+  "tokenUsage": 0,
+  "statisticsComplete": false,
+  "cleanupFailures": 4,
+  "stopReason": "Campaign stopped because process cleanup failed"
+}

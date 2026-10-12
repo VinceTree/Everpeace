@@ -26,7 +26,7 @@ export function publicBenchmarkReport(campaign: BenchmarkCampaignResult, provena
   }
   if (seen.size !== plannedIds.size) throw new Error("Unaccounted planned runs; denominator cannot be reduced");
   const completeProvenance = records.every((record) => record.codeDigest && record.buildDigest && record.evaluationDigest && record.model && record.endpointId);
-  return { schema: 1, campaignId: campaign.campaignId, evidence: campaign.statisticsComplete && completeProvenance ? "complete" : "insufficient", planned: campaign.planned.length, outcomes, unknownUsage: records.filter((record) => record.usage === "unknown").length, realModelRuns: provenance.realModelRuns ? campaign.results.filter((result) => !result.preparationError).length : 0, records, skipped: campaign.skipped, notes: ["Unknown Usage is a metering dimension, not a task outcome.", "Synthetic fixtures are not evidence of real-world repository performance."] };
+  return { schema: 1, campaignId: campaign.campaignId, evidence: campaign.statisticsComplete && completeProvenance ? "complete" : "insufficient", planned: campaign.planned.length, outcomes, unknownUsage: records.filter((record) => record.usage === "unknown").length, realModelRuns: provenance.realModelRuns ? campaign.results.filter((result) => (result.requestAttempts ?? result.metrics.samplingAttempts) > 0).length : 0, records, skipped: campaign.skipped, notes: ["Unknown Usage is a metering dimension, not a task outcome.", "Real model runs count recorded request attempts, including failed requests; no-request preparations are excluded.", "Synthetic fixtures are not evidence of real-world repository performance."] };
 }
 export function benchmarkMarkdown(report: PublicBenchmarkReport): string {
   const counts = report.outcomes;

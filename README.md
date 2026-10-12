@@ -1,5 +1,7 @@
 # Everpeace
 
+**Candidate 0.6.0-rc.1.** Windows source checks are verified; Linux and the portable native package remain pending. Repair/team model comparisons have insufficient evidence and do not enable a new default. [Candidate evidence and usage](docs/implementation/REPORT.md).
+
 **Plan, edit and verify your Node.js / TypeScript project from the terminal.**
 
 [简体中文](README.zh-CN.md) · [Usage guide](docs/USAGE.md) · [Tool acceptance](#real-tools-checked-changes) · [Developer docs](docs/README.md)

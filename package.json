@@ -1,12 +1,25 @@
 {
   "name": "everpeace",
-  "version": "0.5.0-local.1",
+  "version": "0.6.0-rc.1",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.19.0" },
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "packageManager": "pnpm@10.30.3",
-  "bin": { "everpeace": "dist/cli/index.js" },
-  "exports": { ".": { "types": "./dist/sdk/index.d.ts", "import": "./dist/sdk/index.js" }, "./sdk": { "types": "./dist/sdk/index.d.ts", "import": "./dist/sdk/index.js" } },
+  "bin": {
+    "everpeace": "dist/cli/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/sdk/index.d.ts",
+      "import": "./dist/sdk/index.js"
+    },
+    "./sdk": {
+      "types": "./dist/sdk/index.d.ts",
+      "import": "./dist/sdk/index.js"
+    }
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "node scripts/lint.mjs",
@@ -17,7 +30,20 @@
     "install:clean": "node scripts/verify-clean-install.mjs",
     "benchmark": "tsx src/benchmark/campaign-cli.ts",
     "test:security": "node --import tsx --test tests/unit/security/*.test.ts",
-    "prove:web": "tsx tests/fixtures/prove-web-content.ts"
+    "prove:web": "tsx tests/fixtures/prove-web-content.ts",
+    "dev": "tsx src/cli/index.ts",
+    "start": "node dist/cli/index.js",
+    "clean": "node --eval \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "prepack": "node scripts/release/require-bundle.mjs",
+    "pack:release": "node scripts/release/pack.mjs",
+    "install:consumer": "node scripts/release/consumer-install.mjs",
+    "native:verify": "node scripts/release/native-verify.mjs",
+    "ci:verify": "node scripts/release/check-workflows.mjs",
+    "security:scan": "node scripts/security/scan.mjs",
+    "benchmark:campaign": "tsx src/benchmark/campaign-cli.ts",
+    "benchmark:prove-expanded": "tsx tests/fixtures/prove-expanded.ts",
+    "benchmark:optimization": "tsx scripts/benchmark/run-optimization.ts",
+    "benchmark:memory": "tsx scripts/benchmark/evaluate-memory.ts"
   },
   "dependencies": {
     "@inkjs/ui": "2.0.0",
@@ -53,5 +79,18 @@
     "tsx": "4.23.13",
     "typescript": "7.0.2",
     "typescript-evaluator": "npm:typescript@5.9.3"
-  }
+  },
+  "description": "A sandboxed terminal ReAct agent with persistent sessions, MCP, skills, and web access.",
+  "files": [
+    "dist",
+    "assets",
+    "third_party/codex",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "bundleDependencies": [
+    "node-pty"
+  ]
 }

@@ -1,5 +1,7 @@
 # 当前开发计划
 
+本轮用户授权十项全量优化及源码预发布；当前逐项验收以 [优化报告](implementation/REPORT.md) 为准，真实修复/团队收益未达标、Linux 本机验证待服务器。
+
 ## 当前：验证证据、隐私、Memory 与性能（20–30）
 
 按用户授权补齐 Request token budget 表述、可选验证解释、任务性能报告、Session 保留/安全导出/扫描、Memory 到期及 revision-bound 审查、Git 子目录/linked worktree、运行时状态抽取、结构化正文及安全属性回归。契约见 [专题](architecture/VALIDATION_PRIVACY_PERFORMANCE.md)，实际门禁与交付见 HANDOFF。

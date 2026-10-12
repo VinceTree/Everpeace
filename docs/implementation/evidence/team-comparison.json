@@ -1,0 +1,522 @@
+{
+  "schema": 2,
+  "experiment": "team",
+  "realModelRuns": true,
+  "comparison": {
+    "baseline": {
+      "planned": 60,
+      "executed": 14,
+      "passed": 0,
+      "successRate": 0,
+      "firstPassSuccesses": 0,
+      "firstPassEvidenceComplete": false,
+      "manualInterventions": 0,
+      "unsafeActions": 0,
+      "usageComplete": false,
+      "totalKnownTokens": 0,
+      "tokensPerSuccessfulTaskIncludingFailures": null,
+      "successfulTasks": []
+    },
+    "candidate": {
+      "planned": 60,
+      "executed": 15,
+      "passed": 0,
+      "successRate": 0,
+      "firstPassSuccesses": 0,
+      "firstPassEvidenceComplete": false,
+      "manualInterventions": 0,
+      "unsafeActions": 0,
+      "usageComplete": false,
+      "totalKnownTokens": 0,
+      "tokensPerSuccessfulTaskIncludingFailures": null,
+      "successfulTasks": []
+    },
+    "complete": false,
+    "safetyPassed": false,
+    "qualityPassed": false,
+    "usageComplete": false,
+    "perTask": [
+      {
+        "taskId": "text-codecs",
+        "baselinePassed": 0,
+        "candidatePassed": 0
+      },
+      {
+        "taskId": "configuration-values",
+        "baselinePassed": 0,
+        "candidatePassed": 0
+      },
+      {
+        "taskId": "boolean-and-slug",
+        "baselinePassed": 0,
+        "candidatePassed": 0
+      },
+      {
+        "taskId": "wire-contract",
+        "baselinePassed": 0,
+        "candidatePassed": 0
+      },
+      {
+        "taskId": "numeric-boundaries",
+        "baselinePassed": 0,
+        "candidatePassed": 0
+      },
+      {
+        "taskId": "html-escaping",
+        "baselinePassed": 0,
+        "candidatePassed": 0
+      },
+      {
+        "taskId": "case-contract",
+        "baselinePassed": 0,
+        "candidatePassed": 0
+      },
+      {
+        "taskId": "path-portability",
+        "baselinePassed": 0,
+        "candidatePassed": 0
+      },
+      {
+        "taskId": "syntax-strings",
+        "baselinePassed": 0,
+        "candidatePassed": 0
+      },
+      {
+        "taskId": "collections",
+        "baselinePassed": 0,
+        "candidatePassed": 0
+      },
+      {
+        "taskId": "syntax-branches",
+        "baselinePassed": 0,
+        "candidatePassed": 0
+      },
+      {
+        "taskId": "workspace-traversal",
+        "baselinePassed": 0,
+        "candidatePassed": 0
+      }
+    ],
+    "commonSuccessfulPairs": [],
+    "commonBaselineTokenMedian": null,
+    "commonCandidateTokenMedian": null,
+    "tokenMedianReduction": null,
+    "observedSavings": false,
+    "eligibleForDefault": false,
+    "interpretation": "Insufficient evidence to enable candidate optimizations by default."
+  },
+  "measurements": {
+    "baseline": {
+      "wallMs": 11582765,
+      "requests": null,
+      "duplicateReads": null,
+      "conflicts": null,
+      "independentFailures": 0,
+      "errorModificationRate": null,
+      "unknownEditClassifications": 1,
+      "wallMsPerSuccessfulTaskIncludingFailures": null,
+      "successRate95PercentInterval": [
+        0,
+        0.06017393047793289
+      ]
+    },
+    "candidate": {
+      "wallMs": 15794736,
+      "requests": null,
+      "duplicateReads": null,
+      "conflicts": null,
+      "independentFailures": 0,
+      "errorModificationRate": null,
+      "unknownEditClassifications": 3,
+      "wallMsPerSuccessfulTaskIncludingFailures": null,
+      "successRate95PercentInterval": [
+        0,
+        0.06017393047793289
+      ]
+    }
+  },
+  "sufficientRepetitions": true,
+  "qualityPassed": false,
+  "efficiencyPassed": false,
+  "tokenRatio": null,
+  "wallRatio": null,
+  "teamExecuted": false,
+  "categories": [
+    {
+      "tag": "parallel_modules",
+      "tasks": 2,
+      "comparison": {
+        "baseline": {
+          "planned": 10,
+          "executed": 5,
+          "passed": 0,
+          "successRate": 0,
+          "firstPassSuccesses": 0,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 0,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": []
+        },
+        "candidate": {
+          "planned": 10,
+          "executed": 5,
+          "passed": 0,
+          "successRate": 0,
+          "firstPassSuccesses": 0,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 0,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": []
+        },
+        "complete": false,
+        "safetyPassed": false,
+        "qualityPassed": false,
+        "usageComplete": false,
+        "perTask": [
+          {
+            "taskId": "text-codecs",
+            "baselinePassed": 0,
+            "candidatePassed": 0
+          },
+          {
+            "taskId": "boolean-and-slug",
+            "baselinePassed": 0,
+            "candidatePassed": 0
+          }
+        ],
+        "commonSuccessfulPairs": [],
+        "commonBaselineTokenMedian": null,
+        "commonCandidateTokenMedian": null,
+        "tokenMedianReduction": null,
+        "observedSavings": false,
+        "eligibleForDefault": false,
+        "interpretation": "Insufficient evidence to enable candidate optimizations by default."
+      },
+      "tokenRatio": null,
+      "wallRatio": null,
+      "errorModificationRate": {
+        "baseline": 0,
+        "candidate": null
+      },
+      "eligibleForRecommendation": false
+    },
+    {
+      "tag": "build_environment",
+      "tasks": 2,
+      "comparison": {
+        "baseline": {
+          "planned": 10,
+          "executed": 3,
+          "passed": 0,
+          "successRate": 0,
+          "firstPassSuccesses": 0,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 0,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": []
+        },
+        "candidate": {
+          "planned": 10,
+          "executed": 4,
+          "passed": 0,
+          "successRate": 0,
+          "firstPassSuccesses": 0,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 0,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": []
+        },
+        "complete": false,
+        "safetyPassed": false,
+        "qualityPassed": false,
+        "usageComplete": false,
+        "perTask": [
+          {
+            "taskId": "configuration-values",
+            "baselinePassed": 0,
+            "candidatePassed": 0
+          },
+          {
+            "taskId": "path-portability",
+            "baselinePassed": 0,
+            "candidatePassed": 0
+          }
+        ],
+        "commonSuccessfulPairs": [],
+        "commonBaselineTokenMedian": null,
+        "commonCandidateTokenMedian": null,
+        "tokenMedianReduction": null,
+        "observedSavings": false,
+        "eligibleForDefault": false,
+        "interpretation": "Insufficient evidence to enable candidate optimizations by default."
+      },
+      "tokenRatio": null,
+      "wallRatio": null,
+      "errorModificationRate": {
+        "baseline": 0,
+        "candidate": null
+      },
+      "eligibleForRecommendation": false
+    },
+    {
+      "tag": "cross_file",
+      "tasks": 2,
+      "comparison": {
+        "baseline": {
+          "planned": 10,
+          "executed": 3,
+          "passed": 0,
+          "successRate": 0,
+          "firstPassSuccesses": 0,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 0,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": []
+        },
+        "candidate": {
+          "planned": 10,
+          "executed": 3,
+          "passed": 0,
+          "successRate": 0,
+          "firstPassSuccesses": 0,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 0,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": []
+        },
+        "complete": false,
+        "safetyPassed": true,
+        "qualityPassed": false,
+        "usageComplete": false,
+        "perTask": [
+          {
+            "taskId": "wire-contract",
+            "baselinePassed": 0,
+            "candidatePassed": 0
+          },
+          {
+            "taskId": "case-contract",
+            "baselinePassed": 0,
+            "candidatePassed": 0
+          }
+        ],
+        "commonSuccessfulPairs": [],
+        "commonBaselineTokenMedian": null,
+        "commonCandidateTokenMedian": null,
+        "tokenMedianReduction": null,
+        "observedSavings": false,
+        "eligibleForDefault": false,
+        "interpretation": "Insufficient evidence to enable candidate optimizations by default."
+      },
+      "tokenRatio": null,
+      "wallRatio": null,
+      "errorModificationRate": {
+        "baseline": 0,
+        "candidate": 0
+      },
+      "eligibleForRecommendation": false
+    },
+    {
+      "tag": "logic",
+      "tasks": 2,
+      "comparison": {
+        "baseline": {
+          "planned": 10,
+          "executed": 2,
+          "passed": 0,
+          "successRate": 0,
+          "firstPassSuccesses": 0,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 0,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": []
+        },
+        "candidate": {
+          "planned": 10,
+          "executed": 1,
+          "passed": 0,
+          "successRate": 0,
+          "firstPassSuccesses": 0,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 0,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": []
+        },
+        "complete": false,
+        "safetyPassed": false,
+        "qualityPassed": false,
+        "usageComplete": false,
+        "perTask": [
+          {
+            "taskId": "numeric-boundaries",
+            "baselinePassed": 0,
+            "candidatePassed": 0
+          },
+          {
+            "taskId": "collections",
+            "baselinePassed": 0,
+            "candidatePassed": 0
+          }
+        ],
+        "commonSuccessfulPairs": [],
+        "commonBaselineTokenMedian": null,
+        "commonCandidateTokenMedian": null,
+        "tokenMedianReduction": null,
+        "observedSavings": false,
+        "eligibleForDefault": false,
+        "interpretation": "Insufficient evidence to enable candidate optimizations by default."
+      },
+      "tokenRatio": null,
+      "wallRatio": null,
+      "errorModificationRate": {
+        "baseline": null,
+        "candidate": 0
+      },
+      "eligibleForRecommendation": false
+    },
+    {
+      "tag": "security_regression",
+      "tasks": 1,
+      "comparison": {
+        "baseline": {
+          "planned": 5,
+          "executed": 1,
+          "passed": 0,
+          "successRate": 0,
+          "firstPassSuccesses": 0,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 0,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": []
+        },
+        "candidate": {
+          "planned": 5,
+          "executed": 1,
+          "passed": 0,
+          "successRate": 0,
+          "firstPassSuccesses": 0,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 0,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": []
+        },
+        "complete": false,
+        "safetyPassed": true,
+        "qualityPassed": false,
+        "usageComplete": false,
+        "perTask": [
+          {
+            "taskId": "html-escaping",
+            "baselinePassed": 0,
+            "candidatePassed": 0
+          }
+        ],
+        "commonSuccessfulPairs": [],
+        "commonBaselineTokenMedian": null,
+        "commonCandidateTokenMedian": null,
+        "tokenMedianReduction": null,
+        "observedSavings": false,
+        "eligibleForDefault": false,
+        "interpretation": "Insufficient evidence to enable candidate optimizations by default."
+      },
+      "tokenRatio": null,
+      "wallRatio": null,
+      "errorModificationRate": {
+        "baseline": 0,
+        "candidate": 0
+      },
+      "eligibleForRecommendation": false
+    },
+    {
+      "tag": "typecheck_lint",
+      "tasks": 1,
+      "comparison": {
+        "baseline": {
+          "planned": 5,
+          "executed": 0,
+          "passed": 0,
+          "successRate": 0,
+          "firstPassSuccesses": 0,
+          "firstPassEvidenceComplete": true,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": true,
+          "totalKnownTokens": 0,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": []
+        },
+        "candidate": {
+          "planned": 5,
+          "executed": 1,
+          "passed": 0,
+          "successRate": 0,
+          "firstPassSuccesses": 0,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 0,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": []
+        },
+        "complete": false,
+        "safetyPassed": false,
+        "qualityPassed": false,
+        "usageComplete": false,
+        "perTask": [
+          {
+            "taskId": "syntax-strings",
+            "baselinePassed": 0,
+            "candidatePassed": 0
+          }
+        ],
+        "commonSuccessfulPairs": [],
+        "commonBaselineTokenMedian": null,
+        "commonCandidateTokenMedian": null,
+        "tokenMedianReduction": null,
+        "observedSavings": false,
+        "eligibleForDefault": false,
+        "interpretation": "Insufficient evidence to enable candidate optimizations by default."
+      },
+      "tokenRatio": null,
+      "wallRatio": null,
+      "errorModificationRate": {
+        "baseline": null,
+        "candidate": null
+      },
+      "eligibleForRecommendation": false
+    }
+  ],
+  "eligibleForDefault": false,
+  "interpretation": "Quality, completeness, repetition or efficiency gate not met; retain the baseline."
+}

@@ -1,5 +1,7 @@
 # Everpeace 开发知识库
 
+本次优化实现、真实评测限制和复现入口见 [优化验收报告](implementation/REPORT.md)。
+
 从 [AGENTS.md](../AGENTS.md) 和 [HANDOFF.md](HANDOFF.md) 开始，然后按当前任务选一至两个专题。这里保存产品定位、实现契约、源码与测试入口、开发操作和未验收边界；不要求每次从头阅读全部项目文件。
 
 `docs/` 是唯一维护目录。[dosc/](../dosc/README.md) 保留为拼写导航入口。面向用户的安装及命令说明继续维护在 [English README](../README.md) 和 [中文 README](../README.zh-CN.md)。

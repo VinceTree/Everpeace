@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "evidence": "real provider requests through frozen ReactAgent and LearnedMemoryRuntime; six synthetic acceptance tasks",
+  "model": "deepseek-flash",
+  "planned": 90,
+  "executed": 90,
+  "groups": [
+    {
+      "group": "none",
+      "planned": 30,
+      "executed": 30,
+      "passed": 30,
+      "forbiddenMemoryInjected": 0
+    },
+    {
+      "group": "valid",
+      "planned": 30,
+      "executed": 30,
+      "passed": 29,
+      "forbiddenMemoryInjected": 0
+    },
+    {
+      "group": "filtered",
+      "planned": 30,
+      "executed": 30,
+      "passed": 30,
+      "forbiddenMemoryInjected": 0
+    }
+  ],
+  "passed": false
+}
