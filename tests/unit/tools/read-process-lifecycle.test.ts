@@ -1,3 +1,4 @@
+import { mockProcessOwner } from '../../helpers/process-owner.js';
 import assert from "node:assert/strict";
 import childProcess, { ChildProcess } from "node:child_process";
 import { promises as fs } from "node:fs";
@@ -11,12 +12,12 @@ import { SkillManager } from "../../../src/skills/manager.js";
 import { ReactAgent } from "../../../src/agent/react-agent.js";
 import { runFileTool } from "../../../src/tools/files.js";
 import { ProcessCleanupError } from "../../../src/tools/process-completion.js";
-import { runProjectMap } from "../../../src/tools/project-map.js";
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 async function fixture(context: TestContext, failTree: boolean) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-read-process-"));
+  await fs.writeFile(path.join(root, 'note.txt'), 'needle');
   const child = new ChildProcess();
   Object.defineProperty(child, "pid", { value: 123456789 });
   child.stdout = new PassThrough();
@@ -25,6 +26,8 @@ async function fixture(context: TestContext, failTree: boolean) {
   let started!: () => void;
   const spawned = new Promise<void>((resolve) => { started = resolve; });
   let launches = 0;
+  const realSpawn = childProcess.spawn.bind(childProcess);
+  mockProcessOwner(context, child, killers, () => {}, command => command === 'git' || command === process.execPath || /rg(?:\.exe)?$/u.test(command));
   let preparationRoot: string | undefined;
   let closed = false, removedBeforeClose = false;
   child.once("close", () => { closed = true; });
@@ -34,6 +37,7 @@ async function fixture(context: TestContext, failTree: boolean) {
     return remove(target, options);
   });
   context.mock.method(childProcess, "spawn", (command: string, args: string[]) => {
+    if (command.endsWith('everpeace-process.exe')) return realSpawn(command, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     if (command === "taskkill.exe") {
       const killer = new ChildProcess();
       killers.push(killer);
@@ -68,11 +72,10 @@ async function fixture(context: TestContext, failTree: boolean) {
   return { root, child, killers, spawned, manager, launches: () => launches, preparationRoot: () => preparationRoot, removedBeforeClose: () => removedBeforeClose };
 }
 
-for (const tool of ["search", "map", "skill"] as const) {
+for (const tool of ["search", "skill"] as const) {
   const run = (value: Awaited<ReturnType<typeof fixture>>, signal?: AbortSignal) => tool === "search"
     ? runFileTool("search_files", '{"query":"needle","path":"."}', value.root, signal, undefined, async () => process.execPath)
-    : tool === "map" ? runProjectMap({}, value.root, signal, async () => process.execPath)
-      : value.manager.prepareInstall("https://example.com/skills.git", signal);
+    : value.manager.prepareInstall("https://example.com/skills.git", signal);
 
   test(`${tool} preserves process-tree cleanup failure over ordinary cancellation`, async (context) => {
     const value = await fixture(context, true);
@@ -131,7 +134,7 @@ test("Skill manager disposal owns an active Git preparation and shares its wait"
   assert.equal(value.launches(), 1);
 });
 
-for (const name of ["search_files", "project_map"] as const) {
+for (const name of ["search_files"] as const) {
   test(`${name} cleanup failure closes Agent tool pairs and later admission`, async (context) => {
     const value = await fixture(context, true);
     let requests = 0;

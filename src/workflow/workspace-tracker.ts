@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
+import { observeProcessCompletion } from '../tools/process-completion.js';
+import { ResourceCleanupError } from '../util/resource-cleanup-error.js';
+import { spawnOwned as spawn } from "../tools/owned-process.js";
 import { createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
 
@@ -42,33 +44,26 @@ function inside(root: string, target: string): boolean {
   return relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`));
 }
 
-function runGit(workspacePath: string, args: readonly string[]): Promise<GitResult> {
-  return new Promise((resolve) => {
-    const child = spawn("git", [...args], {
-      cwd: workspacePath,
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
+async function runGit(workspacePath: string, args: readonly string[], signal?: AbortSignal): Promise<GitResult> {
+    signal?.throwIfAborted();
+    const child = spawn("git", ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=', ...args], {
+      cwd: workspacePath, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
     });
-    const stdout: Buffer[] = [];
-    let stdoutBytes = 0;
-    let stderr = "";
-    let truncated = false;
+    const owned = observeProcessCompletion(child, { timeoutMs: 10000, ...(signal ? { signal } : {}) });
+    const stdout: Buffer[] = []; let stdoutBytes = 0, stderr = '', truncated = false;
     child.stdout.on("data", (chunk: Buffer) => {
-      if (stdoutBytes >= MAX_STATUS_BYTES) { truncated = true; return; }
-      const retained = chunk.subarray(0, MAX_STATUS_BYTES - stdoutBytes);
-      stdout.push(retained);
-      stdoutBytes += retained.length;
-      if (retained.length !== chunk.length) truncated = true;
+      const retained = chunk.subarray(0, Math.max(0, MAX_STATUS_BYTES - stdoutBytes)); stdout.push(retained); stdoutBytes += retained.length;
+      if (retained.length !== chunk.length) { truncated = true; owned.stop(); }
     });
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-64 * 1024); });
-    child.once("error", (error) => resolve({ exitCode: null, stdout: Buffer.concat(stdout), stderr: error.message, truncated }));
-    child.once("close", (exitCode) => resolve({ exitCode, stdout: Buffer.concat(stdout), stderr, truncated }));
-  });
+    child.stderr.setEncoding("utf8"); child.stderr.on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-64 * 1024); });
+    const result = await owned.completion;
+    if (result.cleanupError) throw result.cleanupError;
+    signal?.throwIfAborted();
+    return { exitCode: result.exitCode, stdout: Buffer.concat(stdout), stderr: result.error?.message ?? stderr, truncated: truncated || result.timedOut };
 }
 
-async function resolveGitRoot(workspacePath: string): Promise<{ root?: string; workspace?: string; reason?: string }> {
-  const result = await runGit(workspacePath, ["rev-parse", "--show-toplevel"]);
+async function resolveGitRoot(workspacePath: string, signal?: AbortSignal): Promise<{ root?: string; workspace?: string; reason?: string }> {
+  const result = await runGit(workspacePath, ["rev-parse", "--show-toplevel"], signal);
   if (result.exitCode !== 0) return { reason: result.stderr.trim() || "Workspace is not a Git repository" };
   const reportedRoot = result.stdout.toString("utf8").trim();
   if (!reportedRoot) return { reason: "Git did not report a repository root" };
@@ -77,6 +72,7 @@ async function resolveGitRoot(workspacePath: string): Promise<{ root?: string; w
     if (!inside(root, workspace)) return { reason: "Workspace is outside the reported Git repository" };
     return { root, workspace };
   } catch (error) {
+    if (error instanceof ResourceCleanupError || signal?.aborted) throw error;
     return { reason: error instanceof Error ? error.message : String(error) };
   }
 }
@@ -89,18 +85,18 @@ function parsePorcelainStatus(value: Buffer): Array<{ path: string; status: stri
     if (!record) continue;
     if (record.length < 4 || record[2] !== " ") throw new Error("Git returned an invalid porcelain status record");
     const status = record.slice(0, 2);
+    const previousPath = status.includes('R') || status.includes('C') ? records[++index] : undefined;
+    if ((status.includes('R') || status.includes('C')) && !previousPath) throw new Error('Git returned an incomplete rename status record');
+    if (/\.everpeace-(?:recovery|stage|batch)-/u.test(record.slice(3)) || previousPath && /\.everpeace-(?:recovery|stage|batch)-/u.test(previousPath)) continue;
     result.push({ status, path: record.slice(3) });
-    if (status.includes("R") || status.includes("C")) {
-      const previousPath = records[index + 1];
-      if (!previousPath) throw new Error("Git returned an incomplete rename status record");
-      result.push({ status: `${status}:source`, path: previousPath });
-      index += 1;
-    }
+    if (previousPath) result.push({ status: `${status}:source`, path: previousPath });
+
   }
   return result;
 }
 
-async function fingerprintPath(root: string, relativePath: string, budget: { bytes: number }): Promise<{ value: string; complete: boolean }> {
+async function fingerprintPath(root: string, relativePath: string, budget: { bytes: number }, signal?: AbortSignal): Promise<{ value: string; complete: boolean }> {
+  signal?.throwIfAborted();
   const target = path.resolve(root, relativePath);
   if (!inside(path.resolve(root), target)) return { value: "outside", complete: false };
   try {
@@ -113,13 +109,14 @@ async function fingerprintPath(root: string, relativePath: string, budget: { byt
     budget.bytes += stat.size;
     const hash = createHash("sha256");
     await new Promise<void>((resolve, reject) => {
-      const stream = createReadStream(target);
+      const stream = createReadStream(target, signal ? { signal } : {});
       stream.on("data", (chunk: Buffer | string) => hash.update(chunk));
       stream.once("error", reject);
       stream.once("end", resolve);
     });
     return { value: `file:${stat.size}:${hash.digest("hex")}`, complete: true };
   } catch (error) {
+    if (error instanceof ResourceCleanupError) throw error;
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { value: "missing", complete: true };
     return { value: `error:${error instanceof Error ? error.message : String(error)}`, complete: false };
   }
@@ -152,10 +149,11 @@ async function captureStatus(
   gitRoot: string,
   workspaceRoot: string,
   explicitPaths: ReadonlySet<string> = new Set(),
+  signal?: AbortSignal,
 ): Promise<WorkspaceStatusSnapshot> {
   // The pathspec keeps sibling directories out of the task snapshot. Porcelain
   // paths are still repository-root relative, so fingerprints must use gitRoot.
-  const result = await runGit(workspacePath, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=no", "--", "."]);
+  const result = await runGit(workspacePath, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=no", "--", "."], signal);
   if (result.exitCode !== 0) {
     return {
       available: false,
@@ -190,7 +188,7 @@ async function captureStatus(
   const fingerprints = await mapConcurrent(ordered, FINGERPRINT_WORKERS, async ([scopedPath, candidate]) => ({
     scopedPath,
     status: candidate.status,
-    fingerprint: await fingerprintPath(candidate.root, candidate.path, budget),
+    fingerprint: await fingerprintPath(candidate.root, candidate.path, budget, signal),
   }));
   const paths = new Map<string, PathState>();
   let complete = true;
@@ -216,19 +214,19 @@ export class WorkspaceChangeTracker {
 
   constructor(workspacePath: string) { this.#workspacePath = workspacePath; }
 
-  async begin(): Promise<WorkspaceChangeObservation> {
-    const context = await resolveGitRoot(this.#workspacePath);
+  async begin(signal?: AbortSignal): Promise<WorkspaceChangeObservation> {
+    const context = await resolveGitRoot(this.#workspacePath, signal);
     this.#gitRoot = context.root;
     this.#workspaceRoot = context.workspace;
     this.#baseline = context.root && context.workspace
-      ? await captureStatus(this.#workspacePath, context.root, context.workspace)
+      ? await captureStatus(this.#workspacePath, context.root, context.workspace, undefined, signal)
       : { available: false, complete: false, paths: new Map(), reason: context.reason ?? "Workspace tracking is unavailable" };
     return this.#compare(this.#baseline);
   }
 
   /** Include host-observed edit targets even when Git ignores them. */
-  async trackPaths(paths: readonly string[]): Promise<void> {
-    if (!this.#baseline) await this.begin();
+  async trackPaths(paths: readonly string[], signal?: AbortSignal): Promise<void> {
+    if (!this.#baseline) await this.begin(signal);
     if (!this.#baseline || !this.#workspaceRoot) return;
     const workspaceRoot = this.#workspaceRoot;
     const requestedPaths = [...new Set(paths)].sort((left, right) => left.localeCompare(right));
@@ -238,7 +236,7 @@ export class WorkspaceChangeTracker {
       if (!inside(workspaceRoot, target)) return undefined;
       const scoped = path.relative(workspaceRoot, target).split(path.sep).join("/");
       if (!scoped) return undefined;
-      const fingerprint = await fingerprintPath(workspaceRoot, scoped, budget);
+      const fingerprint = await fingerprintPath(workspaceRoot, scoped, budget, signal);
       return { scoped, fingerprint };
     });
     for (const item of tracked) {
@@ -249,7 +247,7 @@ export class WorkspaceChangeTracker {
     }
   }
 
-  async observe(): Promise<WorkspaceChangeObservation> {
+  async observe(signal?: AbortSignal): Promise<WorkspaceChangeObservation> {
     if (!this.#baseline) await this.begin();
     if (!this.#gitRoot || !this.#workspaceRoot) return this.#compare({
       available: false,
@@ -257,7 +255,7 @@ export class WorkspaceChangeTracker {
       paths: new Map(),
       reason: this.#baseline?.reason ?? "Workspace tracking is unavailable",
     });
-    const current = await captureStatus(this.#workspacePath, this.#gitRoot, this.#workspaceRoot, this.#explicitPaths);
+    const current = await captureStatus(this.#workspacePath, this.#gitRoot, this.#workspaceRoot, this.#explicitPaths, signal);
     return this.#compare(current);
   }
 

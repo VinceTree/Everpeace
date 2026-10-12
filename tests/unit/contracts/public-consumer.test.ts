@@ -18,6 +18,11 @@ test('frozen consumers read both original versions and the built public CLI/SDK'
     for(const version of [1,2])consume(await fs.readFile('tests/fixtures/public-contract/v'+version+'.jsonl','utf8'),version);
     assert.throws(()=>consume('{"schema_version":1,"type":"assistant_message","timestamp":"2026-10-12T00:00:00Z","text":"finished"}\n'));
     await fs.copyFile('package.json',path.join(root,'package.json'));
+    if (process.platform === 'win32') for (const [kind, executable] of [['files', 'everpeace-files.exe'], ['process', 'everpeace-process.exe']]) {
+      const relative = `native/${kind}/bin/win32-${process.arch}/${executable}`;
+      await fs.mkdir(path.dirname(path.join(root, relative)), { recursive: true });
+      for (const suffix of ['', '.sha256']) await fs.copyFile(relative + suffix, path.join(root, relative + suffix));
+    }
     await fs.copyFile('tests/fixtures/public-contract/sdk-consumer.mjs',path.join(root,'sdk-consumer.mjs'));
     const compiler=path.resolve('node_modules/typescript/bin/tsc');
     await run(process.execPath,[compiler,'-p','tsconfig.build.json','--outDir',path.join(root,'dist')],{windowsHide:true,timeout:60000});

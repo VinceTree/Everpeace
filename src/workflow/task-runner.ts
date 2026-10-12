@@ -105,8 +105,8 @@ export class CodingTaskRunner {
       while (true) {
       input.signal?.throwIfAborted();
       if (nextMode === "default" && !workflowStarted) {
-        if (taskSource === "session_resume") await this.#workflow.resumeTurn();
-        else await this.#workflow.beginTurn({ mode: "default", source: taskSource });
+        if (taskSource === "session_resume") await this.#workflow.resumeTurn(input.signal);
+        else await this.#workflow.beginTurn({ mode: "default", source: taskSource, ...(input.signal ? { signal: input.signal } : {}) });
         workflowStarted = true;
       } else if (nextMode === "default" && this.#workflow.state.phase === "diagnose") {
         const evaluationStop = this.#host.evaluationRepairDecision?.(this.#workflow.state);

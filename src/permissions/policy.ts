@@ -13,6 +13,7 @@ export type CommandRuleAction = "allow" | "ask" | "deny";
 export interface CommandPrefixRule {
   prefix: string;
   action: CommandRuleAction;
+  source?: 'project';
 }
 
 export interface PermissionPolicy {
@@ -21,13 +22,14 @@ export interface PermissionPolicy {
   /** Omitted denies model-shell networking outside explicit full-access. allow requires per-command approval. */
   shellNetwork?: "deny" | "allow";
   commandRules?: readonly CommandPrefixRule[];
+  legacyAllowPending?: boolean;
 }
 
-const POLICY_VERSION = 1;
+const POLICY_VERSION = 2;
 const policyWriteQueues = new Map<string, Promise<void>>();
 
 interface StoredPermissionPolicy {
-  version: typeof POLICY_VERSION;
+  version: 1 | typeof POLICY_VERSION;
   policy: PermissionPolicy;
 }
 
@@ -57,6 +59,7 @@ function isPolicy(value: unknown): value is PermissionPolicy {
   const record = value as Record<string, unknown>;
   if (record.mode !== "read-only" && record.mode !== "ask" && record.mode !== "workspace-write" && record.mode !== "full-access") return false;
   if (typeof record.web !== "boolean") return false;
+  if (record.legacyAllowPending !== undefined && typeof record.legacyAllowPending !== 'boolean') return false;
   if (record.shellNetwork !== undefined && record.shellNetwork !== "deny" && record.shellNetwork !== "allow") return false;
   if (record.commandRules !== undefined && (!Array.isArray(record.commandRules) || !record.commandRules.every((rule) => {
     if (!rule || typeof rule !== "object" || Array.isArray(rule)) return false;
@@ -76,6 +79,7 @@ function normalizePolicy(policy: PermissionPolicy, defaultDeny = false): Permiss
     web: policy.web,
     ...(policy.shellNetwork ? { shellNetwork: policy.shellNetwork } : defaultDeny && policy.mode !== "full-access" ? { shellNetwork: "deny" as const } : {}),
     ...(rules.length ? { commandRules: rules } : {}),
+    ...(policy.legacyAllowPending ? { legacyAllowPending: true } : {}),
   };
 }
 
@@ -95,20 +99,22 @@ export async function loadPermissionPolicy(
       const parsed = JSON.parse(await fs.readFile(filePath, "utf8")) as unknown;
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
       const record = parsed as Partial<StoredPermissionPolicy>;
-      if (record.version !== POLICY_VERSION || !isPolicy(record.policy)) continue;
+      if (![1, POLICY_VERSION].includes(record.version ?? 0) || !isPolicy(record.policy)) continue;
       const next = normalizePolicy(record.policy, index === 0);
       if (index === 0) {
         result = next;
+        if (record.version === 1 && next.commandRules?.some(rule => rule.action === 'allow')) result.legacyAllowPending = true;
       } else {
         // Project files are untrusted input: they may restrict a user policy,
         // but never elevate it or grant a more permissive command rule.
-        const projectRules = (next.commandRules ?? []).filter((rule) => rule.action !== "allow");
+        const projectRules = (next.commandRules ?? []).filter((rule) => rule.action !== "allow").map(rule => ({ ...rule, source: 'project' as const }));
         const rules = [...(result.commandRules ?? []), ...projectRules];
         result = {
           mode: restrictiveMode(result.mode, next.mode),
           web: result.web && next.web,
           ...(result.shellNetwork === "deny" || next.shellNetwork === "deny" ? { shellNetwork: "deny" as const } : {}),
           ...(rules.length ? { commandRules: rules } : {}),
+          ...(result.legacyAllowPending ? { legacyAllowPending: true } : {}),
         };
       }
     } catch {
@@ -127,7 +133,7 @@ export async function savePermissionPolicy(
   const filePath = scope === "project"
     ? options.projectPath ?? projectPermissionPath(workspacePath)
     : options.userPath ?? defaultPermissionPath();
-  const normalized = normalizePolicy(policy);
+  const normalized = normalizePolicy({ ...policy, commandRules: (policy.commandRules ?? []).filter(rule => scope === 'project' || rule.source !== 'project') });
   const previous = policyWriteQueues.get(filePath) ?? Promise.resolve();
   const current = previous.catch(() => undefined).then(async () => {
     const temporary = `${filePath}.tmp-${process.pid}-${randomUUID()}`;
@@ -205,12 +211,13 @@ export function analyzeCommand(command: string): CommandAnalysis {
       current += character;
       continue;
     }
-    if (quote !== "single" && (character === "`" || (character === "$" && next === "("))) {
+    if (quote !== "single" && (character === "`" || character === "$" || character === "%")) {
       unresolved = true;
     }
     if (!quote && (character === "(" || character === ")" || character === "{" || character === "}")) {
       unresolved = true;
     }
+    if (!quote && (character === '<' || character === '>')) unresolved = true;
     if (!quote && (character === ";" || character === "\n" || character === "\r" || character === "|" || character === "&")) {
       push();
       if (character === "&" && next !== "&") unresolved = true;
@@ -232,8 +239,9 @@ export function permissionPolicyRevision(policy: PermissionPolicy): string {
     web: policy.web,
     shellNetwork: policy.shellNetwork ?? "profile-default",
     commandRules: [...(policy.commandRules ?? [])]
-      .map((rule) => ({ prefix: rule.prefix.trim(), action: rule.action }))
+      .map((rule) => ({ prefix: rule.prefix.trim(), action: rule.action, ...(rule.source ? { source: rule.source } : {}) }))
       .sort((left, right) => left.prefix.localeCompare(right.prefix) || left.action.localeCompare(right.action)),
+    legacyAllowPending: policy.legacyAllowPending ?? false,
   });
 }
 
@@ -261,11 +269,13 @@ export function commandPermission(
   if (profilePermission === "deny") return "deny";
   const rules = policy.commandRules ?? [];
   const analysis = analyzeCommand(command);
-  let result: "ask" | "allow" = profilePermission;
+  let result: "ask" | "allow" = 'allow';
   for (const segment of analysis.segments) {
-    const selected = segmentPermission(segment, rules);
+    const project = rules.filter(rule => rule.source === 'project' && matchesPrefix(segment, rule.prefix));
+    if (project.some(rule => rule.action === 'deny')) return 'deny';
+    const selected = segmentPermission(segment, rules.filter(rule => rule.source !== 'project'));
     if (selected === "deny") return "deny";
-    if (selected === "ask") result = "ask";
+    if (selected === "ask" || project.some(rule => rule.action === 'ask') || policy.mode === 'read-only' || selected === 'allow' && policy.legacyAllowPending || selected === undefined && profilePermission === 'ask') result = "ask";
   }
   // A deny rule embedded behind a wrapper or nested interpreter must not be
   // downgraded to a user-overridable approval.

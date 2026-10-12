@@ -4,13 +4,14 @@ import path from 'node:path';
 import type { ApplyPatchResult } from '../tools/apply-patch.js';
 import { isProtectedPatchPath } from '../tools/sandbox-policy.js';
 import { safeReadFile, safeCommitFile, SafeFileError } from '../tools/safe-files.js';
+import { runFileBatch, recoverFileBatch, cleanFileBatch, type ByteChange } from '../tools/file-batch.js';
 import { ResourceCleanupError } from '../util/resource-cleanup-error.js';
 import { loadTeamWorkspace, type TeamWorkspaceRecord } from './workspace.js';
 import { safeTeamPath, TEAM_TOTAL_LIMIT } from './file-artifacts.js';
 
 export interface TeamByteOperation { path: string; action: 'create'|'update'|'delete'; beforeHash: string|null; afterHash: string|null }
 interface JournalOperation extends TeamByteOperation { beforeIdentity?: string|null; installedIdentity?: string|null; beforeAttributes?: number }
-interface Journal { version: 1|2; source: string; workspace: string; state: 'prepared'|'committed'|'recovered'; operations: JournalOperation[] }
+interface Journal { version: 1|2|3; batchId?: string; source: string; workspace: string; state: 'prepared'|'committed'|'recovered'; operations: JournalOperation[] }
 type Guard = () => void|Promise<void>;
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const identity = (value: unknown) => value === null || typeof value === 'string' && /^\d+:\d+:\d+$/u.test(value);
@@ -23,7 +24,7 @@ async function read(root: string, record: TeamWorkspaceRecord, scopes: readonly 
   try { metadata = await fs.lstat(file); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
   if (!metadata.isFile() || metadata.size > 128 * 1024) throw new Error('Invalid integration journal');
   const journal = JSON.parse(await fs.readFile(file, 'utf8')) as Journal;
-  if (![1, 2].includes(journal.version) || journal.source !== record.source || journal.workspace !== record.workspace || !['prepared', 'committed', 'recovered'].includes(journal.state) || !Array.isArray(journal.operations) || journal.operations.length > 20 || journal.operations.some(op => !op || typeof op.path !== 'string' || !authorized(op.path, scopes) || !validOperation(op) || op.beforeIdentity !== undefined && !identity(op.beforeIdentity) || op.installedIdentity !== undefined && !identity(op.installedIdentity))) throw new Error('Integration journal ownership or scope changed');
+  if (![1, 2, 3].includes(journal.version) || journal.source !== record.source || journal.workspace !== record.workspace || !['prepared', 'committed', 'recovered'].includes(journal.state) || !Array.isArray(journal.operations) || journal.operations.length > 20 || journal.operations.some(op => !op || typeof op.path !== 'string' || !authorized(op.path, scopes) || !validOperation(op) || op.beforeIdentity !== undefined && !identity(op.beforeIdentity) || op.installedIdentity !== undefined && !identity(op.installedIdentity))) throw new Error('Integration journal ownership or scope changed');
   return journal;
 }
 async function snapshot(root: string, file: string, signal?: AbortSignal) { const value = await safeReadFile(root, file, signal); return { ...value, hash: value.exists ? hash(value.bytes) : null }; }
@@ -31,6 +32,13 @@ function sameOperations(first: readonly TeamByteOperation[], second: readonly Te
 export async function recoverTeamIntegration(record: TeamWorkspaceRecord, id: string, scopes: readonly string[], guard: Guard, signal?: AbortSignal): Promise<{ conflicts: string[]; recovered: boolean }> {
   const root = await directory(record, id); const journal = await read(root, record, scopes);
   if (!journal) return { conflicts: [], recovered: true };
+  if (journal.state !== 'prepared') return { conflicts: [], recovered: true };
+  if (journal.version === 3 && journal.batchId) {
+    const result = await recoverFileBatch(record.source, journal.batchId, async () => { await guard(); signal?.throwIfAborted(); }, true);
+    if (result.state === 'committed') { journal.operations.forEach((op,index) => { op.installedIdentity = result.identities[index] ?? null; }); journal.state = 'committed'; await save(root,journal); await cleanFileBatch(record.source,journal.batchId); return { conflicts: [], recovered: true }; }
+    if (result.state === 'rolled_back') { journal.state = 'recovered'; await save(root,journal); await cleanFileBatch(record.source,journal.batchId); return { conflicts: [], recovered: true }; }
+    return { conflicts: result.conflicts, recovered: false };
+  }
   if (journal.version !== 2) return { conflicts: journal.operations.map(op => op.path), recovered: false };
   if (journal.state !== 'prepared') return { conflicts: [], recovered: true };
   const conflicts: string[] = [];
@@ -55,12 +63,12 @@ export async function integrateTeamBytes(record: TeamWorkspaceRecord, operations
   if (!operations.length || operations.length > 20 || new Set(operations.map(op => op.path)).size !== operations.length || operations.some(op => !validOperation(op) || !authorized(op.path, scopes))) return { status: 'rejected', files: [], error: 'Unsafe byte integration scope' };
   const root = await directory(record, id); const prior = await read(root, record, scopes);
   if (prior?.state === 'committed') {
-    if (prior.version !== 2 || !sameOperations(prior.operations, operations)) return { status: 'rejected', files: [], error: 'Integration identity or legacy evidence changed' };
+    if (![2, 3].includes(prior.version) || !sameOperations(prior.operations, operations)) return { status: 'rejected', files: [], error: 'Integration identity or legacy evidence changed' };
     for (const op of prior.operations) { const current = await snapshot(record.source, op.path, signal); if (current.hash !== op.afterHash || op.installedIdentity === undefined || (current.identity ?? null) !== op.installedIdentity) return { status: 'rejected', files: [], error: 'Committed integration changed' }; }
     return { status: 'applied', files: operations.map(op => ({ path: op.path, action: op.action, status: 'applied' })) };
   }
-  if (prior?.state === 'prepared') { const result = await recoverTeamIntegration(record, id, scopes, guard, signal); if (!result.recovered) return { status: 'failed', files: [], rolledBack: false, rollbackConflicts: result.conflicts, error: 'Prior integration requires conflict resolution' }; }
-  const journal: Journal = { version: 2, source: record.source, workspace: record.workspace, state: 'prepared', operations: operations.map(op => ({ ...op })) };
+  if (prior?.state === 'prepared') { const result = await recoverTeamIntegration(record, id, scopes, guard, signal); if (!result.recovered) return { status: 'failed', files: [], rolledBack: false, rollbackConflicts: result.conflicts, error: 'Prior integration requires conflict resolution' }; if ((await read(root, record, scopes))?.state === 'committed') return integrateTeamBytes(record, operations, scopes, id, guard, signal); }
+  const journal: Journal = { version: 3, batchId: id.replaceAll('-', ''), source: record.source, workspace: record.workspace, state: 'prepared', operations: operations.map(op => ({ ...op })) };
   const files: ApplyPatchResult['files'] = []; let total = 0; let commitStarted = false;
   try {
     await guard(); signal?.throwIfAborted();
@@ -76,16 +84,22 @@ export async function integrateTeamBytes(record: TeamWorkspaceRecord, operations
       if (after.exists) await fs.writeFile(path.join(root, `${index}.after`), after.bytes, { flag: 'wx', mode: 0o600 });
     }
     await save(root, journal);
+    const changes: ByteChange[] = [];
     for (const [index, op] of journal.operations.entries()) {
       const before = op.beforeHash === null ? undefined : await snapshot(root, `${index}.before`, signal);
       const after = op.afterHash === null ? undefined : await snapshot(root, `${index}.after`, signal);
       if ((before?.hash ?? null) !== op.beforeHash || (after?.hash ?? null) !== op.afterHash) throw new Error('Staged integration bytes changed');
-      await guard(); signal?.throwIfAborted(); commitStarted = true;
-      const installed = await safeCommitFile(record.source, op.path, before?.bytes, after?.bytes, signal, undefined, op.beforeIdentity ?? undefined);
-      op.installedIdentity = installed.identity ?? null; await save(root, journal);
-      files.push({ path: op.path, action: op.action, status: 'applied', beforeSha256: op.beforeHash, afterSha256: op.afterHash, beforeFileIdentity: op.beforeIdentity!, afterFileIdentity: op.installedIdentity });
+      changes.push({ path: op.path, ...(before ? { before: before.bytes, ...(op.beforeIdentity ? { beforeIdentity: op.beforeIdentity } : {}) } : {}), ...(after ? { after: after.bytes } : {}), ...(op.beforeAttributes === undefined ? {} : { attributes: op.beforeAttributes }) });
     }
+    commitStarted = true;
+    const batch = await runFileBatch(record.source, changes, { id: journal.batchId!, retainCommitted: true, maxBytes: 2 * TEAM_TOTAL_LIMIT, ...(signal ? { signal } : {}), beforeCommit: async () => { await guard(); signal?.throwIfAborted(); } });
+    if (batch.state !== 'committed') {
+      if (batch.state === 'rolled_back') { journal.state = 'recovered'; await save(root, journal); await cleanFileBatch(record.source, batch.id); }
+      return { status: 'failed', files: [], batchId: batch.id, batchState: batch.state, rolledBack: batch.state === 'rolled_back', rollbackConflicts: batch.conflicts, error: batch.error instanceof Error ? batch.error.message : 'Byte integration failed' };
+    }
+    journal.operations.forEach((op, index) => { op.installedIdentity = batch.identities[index] ?? null; files.push({ path: op.path, action: op.action, status: 'applied', beforeSha256: op.beforeHash, afterSha256: op.afterHash, beforeFileIdentity: op.beforeIdentity!, afterFileIdentity: op.installedIdentity }); });
     journal.state = 'committed'; await save(root, journal);
+    try { await cleanFileBatch(record.source, batch.id); } catch (error) { if (error instanceof ResourceCleanupError) throw error; return { status: 'applied', files, batchId: batch.id, batchState: 'committed', recoveryPending: true }; }
     return { status: 'applied', files, diffSummary: operations.map(op => `${op.action} ${op.path} (raw bytes)`).join('\n') };
   } catch (error) {
     if (error instanceof ResourceCleanupError) throw error;

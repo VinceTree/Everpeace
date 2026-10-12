@@ -5,7 +5,7 @@
 Host display: `--lang auto|en|zh-CN`, `EVERPEACE_LANG` and `/language`. `--accessible` provides append-only TTY interaction; redirected automation uses `exec --json`. [Task and acceptance status](docs/core-experience/STATUS.md).
 
 
-**Candidate 0.6.0-rc.2.** The hardened workspace file backend requires Windows and local NTFS. Other platforms report unavailable file access. See [current validation and limitations](docs/HANDOFF.md); real-model security evaluation remains paused.
+**Candidate 0.6.0-rc.3.** The hardened workspace file backend requires Windows and local NTFS. Other platforms report unavailable file access. See [current validation and limitations](docs/HANDOFF.md); real-model security evaluation remains paused.
 
 **Plan, edit and verify your Node.js / TypeScript project from the terminal.**
 
@@ -54,7 +54,7 @@ pnpm link --global
 everpeace
 ```
 
-Current source version: **0.6.0-rc.2** (source prerelease).
+Current source version: **0.6.0-rc.3** (source prerelease).
 
 ## Real tools, checked changes
 
@@ -70,7 +70,7 @@ Root-to-directory rules, `@` attachments and an on-demand project map help the a
 
 Configured MCP tools, resources and prompts and local Skills extend the agent. Learned Memory can retain preferences and verified lessons. Public web tools check redirects and network boundaries. Search falls back to Bing China and DuckDuckGo when the first provider is unavailable. See the [usage guide](docs/USAGE.md) for setup and limits.
 
-MCP stdio programs require separate startup trust and default to a native workspace sandbox with networking denied. `/mcp trust <server>` reviews launch identity, `/mcp reconnect` starts or reloads, and `/mcp revoke <server>` cancels access. `/mcp mode <server> host` explicitly selects host user authority and revokes old trust; review and trust again before starting. Changed executable or entry-script bytes require new trust; dynamic launchers require approval at every startup. Remote MCP requires HTTPS. Loopback HTTP requires its own exception; redirects are blocked. Missing startup approval returns `interaction_required` (exit 5) in headless CLI/SDK runs.
+MCP stdio programs require separate startup trust and default to a native workspace sandbox with networking denied. `/mcp trust <server>` reviews launch identity, `/mcp reconnect` starts or reloads, and `/mcp revoke <server>` cancels access. `/mcp mode <server> host` explicitly selects host user authority and revokes old trust; review and trust again before starting. Changed executable or entry-script bytes require new trust; dynamic launchers require approval at every startup. Windows host stdio requires a verified executable and argv; configure an interpreter explicitly for `.cmd`/`.bat` entry points. Remote MCP requires HTTPS. Loopback HTTP requires its own exception; redirects are blocked. Missing startup approval returns `interaction_required` (exit 5) in headless CLI/SDK runs.
 
 Search uses DOM selectors by default. `/web` can explicitly select Brave LLM Context; its key stays in the system credential store, and saving sends no request. `/doctor --live` previews bounded streaming/tool/usage/cancellation probes and defaults to Cancel. `/cost` records user-priced estimates, unknown/partial metering and task warnings; request token budgets are not spending caps. [Security and diagnostic contracts](docs/architecture/SECURITY_AND_DIAGNOSTICS.md).
 
@@ -115,6 +115,7 @@ Team JSONL uses schema v2; ordinary execution retains v1. Interrupted or conflic
 ## Control and boundaries
 
 - Model shell commands run in a pinned native sandbox. Windows uses PowerShell through MXC. Sandbox or LSP network-probe failure blocks execution. Optional language servers must already be installed and explicitly configured.
+- Multi-file edits use durable, conditional recovery. Inspect retained batches with `everpeace recover-batch <workspace>` and recover an ID after interactive review. Files up to 16 MiB support small patches; patch payloads remain limited to 512 KiB. Explicit nested-package checks use `/verify --package <relative-path>`. Windows process cleanup uses a verified Job owner; unresolved cleanup blocks later tasks. See [reliability boundaries](docs/architecture/RELIABILITY_HARDENING.md).
 - File tools reject reparse points and hard-linked targets. Updates preserve the original, check raw bytes under an exclusive write/delete boundary, and install without overwriting a concurrent target. The path may briefly be absent. Recover retained originals with `everpeace recover-file <workspace> <relative-backup-path>`; later user saves block recovery.
 - Sensitive reads offer masking, one-time original access or rejection before model context and Session storage. Original access triggers fresh Web/MCP approvals. Model shell networking defaults off; enabling it authorizes each process separately. Plan displays workspace writes, public networking and sensitive outward transmission separately. [Security boundaries and remaining risks](docs/architecture/SECURITY_HARDENING.md).
 - Changed verification scripts or a restored task without a trusted baseline require review; rejection keeps the task unverified.
@@ -141,6 +142,6 @@ Licensed under [Apache 2.0](LICENSE). Maintained by [VinceTree](https://github.c
 
 Public web and remote Skill requests bind validated DNS addresses to the actual connection, including HTTP/HTTPS proxy CONNECT. Configure host HTTP_PROXY, HTTPS_PROXY and NO_PROXY (lowercase variants are supported). Proxy infrastructure is trusted; SOCKS/PAC are unsupported and failures do not fall back to a direct connection. HTTPS certificate verification remains enabled. [Network boundary](docs/architecture/NETWORK.md).
 
-Source installation uses pnpm and the pinned node-pty patch. Run `pnpm files:build`, `pnpm install:verify`, `pnpm build`, `pnpm files:smoke`, then `pnpm install:smoke`. `pnpm install:clean` checks a fresh source installation and recompiles the file worker. Native file race tests use `pnpm files:verify`. The packer requires a verified Windows file worker, includes its digest and rejects fault-injection workers; ordinary npm/pnpm pack remains blocked. Formal portable packaging and consumer delivery still require separate acceptance. npm registry publication remains pending.
+Source installation uses pnpm and the pinned node-pty patch. Run `pnpm files:build`, `pnpm install:verify`, `pnpm build`, `pnpm files:smoke`, `pnpm process:smoke`, then `pnpm install:smoke`. `pnpm install:clean` checks a fresh source installation and recompiles the file worker and process owner. Native file race tests use `pnpm files:verify`. The packer requires a verified Windows file worker and process owner, includes its digest and rejects fault-injection workers; ordinary npm/pnpm pack remains blocked. Formal portable packaging and consumer delivery still require separate acceptance. npm registry publication remains pending.
 
 Node 22 CI runs the full suite on Windows and portable privacy/network/provider tests on Linux. Linux/macOS workspace file access is unavailable in this candidate; portable tests do not establish native file support. Release still requires dedicated Windows and package acceptance; no Release is created by a source push. [Windows runner](docs/WINDOWS_RUNNER.md). Development gates run `typecheck → lint → test → build`, stopping on failure, followed by UI/document and installation checks. Paid tests need separate numerical authorization.

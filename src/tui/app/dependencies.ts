@@ -448,10 +448,11 @@ export function createDefaultTuiDependencies(
       await savePermissionPolicy(policy, workspacePath, { scope });
       await mcp.close();
     },
-    runBash(command, policy: PermissionPolicy, signal, onOutput, timeoutMs) {
+    runBash(command, policy: PermissionPolicy, signal, onOutput, timeoutMs, workingDirectory) {
       const cwd = process.cwd();
       return createProductionCommandExecutor({
         workspacePath: cwd,
+        ...(workingDirectory ? { cwd: workingDirectory } : {}),
         policy,
         onProcessStarted: (ms) => activeAgent?.recordPerformanceTiming("sandbox_startup", ms),
         readableRoots: () => skills.readableRoots(),

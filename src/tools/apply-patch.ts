@@ -1,13 +1,15 @@
 import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { safeReadFile, safeCommitFile, SafeFileError } from "./safe-files.js";
+import { safeReadFile, SafeFileError } from "./safe-files.js";
 import { isProtectedPatchPath } from "./sandbox-policy.js";
 import { decodeTextFile, encodeTextFile, sha256Bytes, type TextFileVersion } from "./file-version.js";
+import { runFileBatch, type BatchState } from './file-batch.js';
 
 const MAX_OPERATIONS = 20;
 const MAX_PATCH_BYTES = 512 * 1024;
-const MAX_FILE_BYTES = 512 * 1024;
+const MAX_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_BATCH_BYTES = 64 * 1024 * 1024;
 
 export type ApplyPatchAction = "create" | "update" | "delete";
 
@@ -44,12 +46,14 @@ export type ApplyPatchErrorCode =
   | "PATCH_MISMATCH"
   | "PATCH_FAILED"
   | "FILE_CONFLICT"
-  | "FILE_ACCESS_UNAVAILABLE";
+  | "FILE_ACCESS_UNAVAILABLE"
+  | "FILE_TOO_LARGE" | "PATCH_TOO_LARGE" | "BATCH_TOO_LARGE";
+// Resource limits are distinct from malformed edits.
 
 export interface ApplyPatchFileResult {
   path: string;
   action: ApplyPatchAction;
-  status: "applied" | "failed";
+  status: "applied" | "failed" | 'rolled_back' | 'conflict' | 'unknown';
   beforeSha256?: string | null;
   afterSha256?: string | null;
   beforeFileIdentity?: string | null;
@@ -67,6 +71,9 @@ export interface ApplyPatchResult {
   rollbackConflicts?: string[];
   rollbackErrors?: string[];
   recoveryPath?: string;
+  batchId?: string;
+  batchState?: BatchState;
+  recoveryPending?: boolean;
   error?: string;
   errorCode?: ApplyPatchErrorCode;
   remedy?: string;
@@ -79,6 +86,7 @@ export interface ApplyPatchPreviewFile {
   afterSha256: string | null;
   beforeFileIdentity?: string | null;
   diff: string;
+  diffTruncated?: boolean;
   matchMode?: "exact" | "line_whitespace";
   matchedLines?: { start: number; end: number };
 }
@@ -87,6 +95,7 @@ export interface ApplyPatchPreview {
   status: "ready" | "rejected";
   files: ApplyPatchPreviewFile[];
   diff: string;
+  diffTruncated?: boolean;
   error?: string;
   errorCode?: ApplyPatchErrorCode;
   remedy?: string;
@@ -110,7 +119,7 @@ function patchError(code: ApplyPatchErrorCode, message: string, remedy?: string)
 export const APPLY_PATCH_TOOL_DEFINITION = {
   type: "function",
   name: "apply_patch",
-  description: "Apply a bounded, workspace-relative set of file changes atomically. Prefer this for code edits instead of rewriting files through Bash.",
+  description: "Apply bounded workspace-relative file changes with version checks, conditional rollback and durable recovery. Multiple files are committed sequentially. Prefer this for code edits instead of rewriting files through Bash.",
   parameters: {
     type: "object",
     properties: {
@@ -192,46 +201,51 @@ export function parseApplyPatchArguments(argumentsJson: string): ApplyPatchOpera
   return operations.map(operation => parseOperation(operation));
 }
 
-function applyUnifiedPatch(original: string, patch: string): string {
-  const source = original.replace(/\r\n/gu, "\n").split("\n");
+export function applyUnifiedPatch(original: string, patch: string): string {
+  type Line = { text: string; newline: boolean };
+  const normalized = original.replace(/\r\n/gu, "\n");
+  const source: Line[] = normalized === '' ? [] : normalized.split("\n").map(text => ({ text, newline: true }));
+  if (source.length) { if (normalized.endsWith("\n")) source.pop(); else source[source.length - 1]!.newline = false; }
   const lines = patch.replace(/\r\n/gu, "\n").split("\n");
-  if (!lines.some((line) => line.startsWith("@@ "))) patchError("PATCH_MISMATCH", "Update patch must contain a unified diff hunk", "Read the current file and submit corrected hunks.");
-  const output: string[] = [];
-  let sourceIndex = 0;
-  let lineIndex = 0;
-  while (lineIndex < lines.length) {
-    if (!lines[lineIndex]!.startsWith("@@ ")) { lineIndex++; continue; }
-    const hunk = lines[lineIndex]!;
-    const index = lineIndex;
-    const hunkLines: string[] = [];
-    for (let cursor = index + 1; cursor < lines.length && !lines[cursor]!.startsWith("@@ "); cursor++) hunkLines.push(lines[cursor]!);
-    const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/u.exec(hunk);
-    if (!match) patchError("PATCH_MISMATCH", `Invalid unified diff hunk: ${hunk}`, "Read the current file and submit corrected hunks.");
-    const oldStart = Number(match[1]) - 1;
-    if (oldStart < sourceIndex || oldStart > source.length) patchError("PATCH_MISMATCH", "Unified diff hunk is out of range", "Read the current file and submit corrected hunks.");
-    output.push(...source.slice(sourceIndex, oldStart));
-    sourceIndex = oldStart;
-    for (const line of hunkLines) {
-      if (line.startsWith("\\ No newline")) continue;
-      const marker = line[0];
-      const text = line.slice(1);
-      if (marker === " ") {
-        if (source[sourceIndex] !== text) patchError("PATCH_MISMATCH", "Unified diff context does not match the current file", "Read the current file and submit corrected hunks.");
-        output.push(source[sourceIndex]!);
-        sourceIndex++;
-      } else if (marker === "-") {
-        if (source[sourceIndex] !== text) patchError("PATCH_MISMATCH", "Unified diff removal does not match the current file", "Read the current file and submit corrected hunks.");
-        sourceIndex++;
-      } else if (marker === "+") {
-        output.push(text);
-      } else if (line.length > 0) {
-        patchError("PATCH_MISMATCH", "Unified diff contains an invalid hunk line", "Read the current file and submit corrected hunks.");
+  if (lines.at(-1) === '') lines.pop();
+  let cursor = 0;
+  if (lines[0]?.startsWith('--- ') && lines[1]?.startsWith('+++ ')) cursor = 2;
+  const output: Line[] = []; let sourceIndex = 0, delta = 0, hunks = 0, priorStart = -1;
+  const fail = (detail: string): never => patchError('PATCH_MISMATCH', detail, 'Read the current file and submit corrected hunks.');
+  while (cursor < lines.length) {
+    const header = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: .*)?$/u.exec(lines[cursor++]!);
+    if (!header) return fail('Invalid unified diff hunk header or unexpected text');
+    const [oldLine, oldCount, newLine, newCount] = [Number(header[1]), Number(header[2] ?? 1), Number(header[3]), Number(header[4] ?? 1)];
+    if ([oldLine, oldCount, newLine, newCount].some(value => !Number.isSafeInteger(value) || value < 0) || oldCount > 0 && oldLine === 0 || newCount > 0 && newLine === 0) fail('Invalid unified diff range');
+    const oldStart = oldCount === 0 ? oldLine : oldLine - 1;
+    const newStart = newCount === 0 ? newLine : newLine - 1;
+    if (oldStart < sourceIndex || oldStart === priorStart || oldStart + oldCount > source.length || newStart !== oldStart + delta) fail('Unified diff range, overlap or continuity mismatch');
+    for (; sourceIndex < oldStart; sourceIndex++) output.push({ ...source[sourceIndex]! });
+    const removed: Line[] = []; const added: Line[] = [];
+    let previous: { old?: Line; fresh?: Line } | undefined;
+    while (cursor < lines.length && !lines[cursor]!.startsWith('@@ ')) {
+      const line = lines[cursor++]!;
+      if (line === '\\ No newline at end of file') {
+        if (!previous || previous.old?.newline === false || previous.fresh?.newline === false) return fail('Misplaced no-newline marker');
+        if (previous.old) previous.old.newline = false;
+        if (previous.fresh) previous.fresh.newline = false;
+        previous = undefined; continue;
       }
+      const marker = line[0]; const text = line.slice(1); previous = {};
+      if (marker === ' ' || marker === '-') { const old = { text, newline: true }; removed.push(old); previous.old = old; }
+      if (marker === ' ' || marker === '+') { const fresh = { text, newline: true }; added.push(fresh); previous.fresh = fresh; }
+      if (marker !== ' ' && marker !== '-' && marker !== '+') fail('Invalid unified diff body');
+      if (removed.length > oldCount || added.length > newCount) fail('Unified diff body exceeds declared line counts');
     }
-    lineIndex = index + 1 + hunkLines.length;
+    if (removed.length !== oldCount || added.length !== newCount) fail('Unified diff declared line counts do not match its body');
+    for (const line of removed) { const actual = source[sourceIndex++]; if (!actual || line.text !== actual.text || line.newline !== actual.newline) fail('Unified diff context or newline does not match the file'); }
+    for (const line of added) output.push(line);
+    priorStart = oldStart; delta += newCount - oldCount; hunks++;
   }
-  output.push(...source.slice(sourceIndex));
-  return output.join("\n");
+  if (!hunks) fail('Update patch must contain a unified diff hunk');
+  for (; sourceIndex < source.length; sourceIndex++) output.push({ ...source[sourceIndex]! });
+  if (output.some((line, index) => !line.newline && index !== output.length - 1)) fail('No-newline marker is not at the end of the file');
+  return output.map(line => line.text + (line.newline ? '\n' : '')).join('');
 }
 
 function locateReplacement(original: string, replacement: NonNullable<ApplyPatchOperation["replace"]>): { text: string; matchMode: "exact" | "line_whitespace"; matchedLines: { start: number; end: number } } {
@@ -301,7 +315,7 @@ type ObservedTextVersion = TextFileVersion & { identity: string; attributes?: nu
 async function readTarget(target: string, workspace: string): Promise<{ exists: false } | ({ exists: true } & ObservedTextVersion)> {
   const value = await safeReadFile(workspace, path.relative(workspace, target));
   if (!value.exists) return { exists: false };
-  if (value.bytes.length > MAX_FILE_BYTES) throw new Error("Patch target exceeds the 512 KiB limit");
+  if (value.bytes.length > MAX_FILE_BYTES) patchError("FILE_TOO_LARGE", "Patch target exceeds the 16 MiB limit", "Split or reduce this file before editing.");
   if (!value.identity) throw new SafeFileError('FILE_ACCESS_UNAVAILABLE');
   return { exists: true, ...decodeTextFile(value.bytes), identity: value.identity, ...(value.attributes === undefined ? {} : { attributes: value.attributes }) };
 }
@@ -327,15 +341,17 @@ async function preparePatch(
   const prepared: PreparedPatch[] = [];
   const seen = new Set<string>();
   let patchBytes = 0;
+  let batchBytes = 0;
   try {
     for (const rawOperation of operations) {
       const operation = parseOperation(rawOperation, true);
       patchBytes += Buffer.byteLength(operation.content ?? operation.patch ?? operation.replace?.oldText ?? "", "utf8")
         + Buffer.byteLength(operation.replace?.newText ?? "", "utf8");
-      if (patchBytes > MAX_PATCH_BYTES) throw new Error("Patch batch exceeds the 512 KiB limit");
+      if (patchBytes > MAX_PATCH_BYTES) patchError("PATCH_TOO_LARGE", "Patch payload exceeds the 512 KiB limit", "Use a smaller hunk or replacement and split the batch.");
       const target = path.resolve(root, operation.path);
       await assertSafeTarget(root, target);
       const relative = path.relative(root, target);
+      if (/\.everpeace-(?:recovery|stage|batch)-/u.test(relative)) patchError('POLICY_DENIED', 'Recovery and staging materials are host-only');
       if (relative.includes(":")) patchError("POLICY_DENIED", "Alternate data streams are not supported");
       if (!options.allowProtectedPaths && isProtectedPatchPath(relative)) patchError("POLICY_DENIED", "Editing protected workspace metadata requires full access");
       const key = path.relative(root, target).toLowerCase();
@@ -365,7 +381,9 @@ async function preparePatch(
       const afterBytes = after === undefined
         ? undefined
         : encodeTextFile(after, operation.action === "update" && before.exists ? before : undefined);
-      if (afterBytes !== undefined && afterBytes.byteLength > MAX_FILE_BYTES) throw new Error("Patched file exceeds the 512 KiB limit");
+      if (afterBytes !== undefined && afterBytes.byteLength > MAX_FILE_BYTES) patchError("FILE_TOO_LARGE", "Patched file exceeds the 16 MiB limit", "Reduce the resulting file size.");
+      batchBytes += (before.exists ? before.bytes.length : 0) + (afterBytes?.length ?? 0);
+      if (batchBytes > MAX_BATCH_BYTES) patchError("BATCH_TOO_LARGE", "Patch original and target bytes exceed 64 MiB", "Split the operation into smaller batches.");
       prepared.push({ operation, target, before, ...(afterBytes === undefined ? {} : { after: afterBytes, afterText: after! }), ...(match ? { matchMode: match.matchMode, matchedLines: match.matchedLines } : {}) });
     }
     return { prepared };
@@ -377,16 +395,24 @@ async function preparePatch(
   }
 }
 
-function diffFor(item: PreparedPatch): string {
-  const oldLines = (item.before.exists ? item.before.text : "").replace(/\r\n/gu, "\n").split("\n");
-  const newLines = (item.afterText ?? "").replace(/\r\n/gu, "\n").split("\n");
-  const oldHeader = item.before.exists ? `--- a/${item.operation.path}` : "--- /dev/null";
-  const newHeader = item.operation.action === "delete" ? "+++ /dev/null" : `+++ b/${item.operation.path}`;
-  const removed = item.before.exists ? oldLines.map((line) => `-${line}`) : [];
-  const added = item.operation.action === "delete" ? [] : newLines.map((line) => `+${line}`);
-  const oldCount = item.before.exists ? oldLines.length : 0;
-  const newCount = item.operation.action === "delete" ? 0 : newLines.length;
-  return [oldHeader, newHeader, `@@ -1,${oldCount} +1,${newCount} @@`, ...removed, ...added].join("\n");
+function previewPrefix(text: string, limit: number): string { const bytes = Buffer.from(text); limit = Math.max(0, limit); if (bytes.length <= limit) return text; let end = limit; while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end--; return bytes.subarray(0, end).toString('utf8'); }
+function diffFor(item: PreparedPatch): { diff: string; truncated: boolean } {
+  const oldText = (item.before.exists ? item.before.text : '').replace(/\r\n/gu, '\n');
+  const newText = (item.afterText ?? '').replace(/\r\n/gu, '\n');
+  let start = 0; while (start < oldText.length && start < newText.length && oldText[start] === newText[start]) start++;
+  start = oldText.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+  let oldEnd = oldText.length, newEnd = newText.length;
+  while (oldEnd > start && newEnd > start && oldText[oldEnd - 1] === newText[newEnd - 1]) { oldEnd--; newEnd--; }
+  const oldBoundary = oldText.indexOf('\n', oldEnd), newBoundary = newText.indexOf('\n', newEnd);
+  oldEnd = oldBoundary < 0 ? oldText.length : oldBoundary + 1; newEnd = newBoundary < 0 ? newText.length : newBoundary + 1;
+  const oldPart = oldText.slice(start, oldEnd), newPart = newText.slice(start, newEnd);
+  const count = (text: string) => text === '' ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
+  const startLine = count(oldText.slice(0, start));
+  const removed = count(oldPart), added = count(newPart);
+  const render = (text: string, marker: string) => { const limited = previewPrefix(text, 30 * 1024); const lines = limited === '' ? [] : limited.split('\n'); if (limited.endsWith('\n')) lines.pop(); const body = lines.map(line => marker + line).join('\n'); return body + (limited && !limited.endsWith('\n') && limited === text ? '\n\\ No newline at end of file' : ''); };
+  const raw = [item.before.exists ? `--- a/${item.operation.path}` : '--- /dev/null', item.operation.action === 'delete' ? '+++ /dev/null' : `+++ b/${item.operation.path}`, `@@ -${removed ? startLine + 1 : startLine},${removed} +${added ? startLine + 1 : startLine},${added} @@`, render(oldPart, '-'), render(newPart, '+')].filter(Boolean).join('\n');
+  const diff = previewPrefix(raw, 64 * 1024);
+  return { diff, truncated: diff !== raw || Buffer.byteLength(oldPart) > 30 * 1024 || Buffer.byteLength(newPart) > 30 * 1024 };
 }
 
 export async function previewApplyPatch(
@@ -396,16 +422,19 @@ export async function previewApplyPatch(
 ): Promise<ApplyPatchPreview> {
   const result = await preparePatch(operations, workspace, options);
   if ("error" in result) return { status: "rejected", files: [], diff: "", error: result.error, ...(result.errorCode ? { errorCode: result.errorCode } : {}), ...(result.remedy ? { remedy: result.remedy } : {}) };
-  const files = result.prepared.map((item) => ({
+  let remaining = 256 * 1024;
+  const files = result.prepared.map((item) => {
+    const preview = diffFor(item); const diff = previewPrefix(preview.diff, remaining); remaining -= Buffer.byteLength(diff) + 1;
+    return ({
     path: item.operation.path,
     action: item.operation.action,
     beforeSha256: item.before.exists ? item.before.sha256 : null,
     afterSha256: item.after === undefined ? null : sha256Bytes(item.after),
     beforeFileIdentity: item.before.exists ? item.before.identity : null,
-    diff: diffFor(item),
+    diff, diffTruncated: preview.truncated || diff !== preview.diff,
     ...(item.matchMode ? { matchMode: item.matchMode, matchedLines: item.matchedLines! } : {}),
-  }));
-  return { status: "ready", files, diff: files.map((file) => file.diff).join("\n") };
+  }); });
+  return { status: "ready", files, diff: files.map((file) => file.diff).join("\n"), diffTruncated: files.some(file => file.diffTruncated) };
 }
 
 export async function runApplyPatch(
@@ -416,43 +445,7 @@ export async function runApplyPatch(
   const preparedResult = await preparePatch(operations, workspace, options);
   if ("error" in preparedResult) return { status: "rejected", files: [], error: preparedResult.error, ...(preparedResult.errorCode ? { errorCode: preparedResult.errorCode } : {}), ...(preparedResult.remedy ? { remedy: preparedResult.remedy } : {}) };
   const prepared = preparedResult.prepared;
-  const files: ApplyPatchFileResult[] = [];
-  const applied: PreparedPatch[] = [];
-  try {
-    for (const item of prepared) {
-      options.signal?.throwIfAborted();
-      await options.beforeCommit?.(item.operation.path);
-      const committed = await safeCommitFile(workspace, item.operation.path, item.before.exists ? item.before.bytes : undefined, item.after, options.signal, undefined, item.before.exists ? item.before.identity : undefined);
-      if (committed.identity) item.afterIdentity = committed.identity;
-      applied.push(item);
-      files.push({ path: item.operation.path, action: item.operation.action, status: "applied", beforeSha256: item.before.exists ? item.before.sha256 : null, afterSha256: item.after === undefined ? null : sha256Bytes(item.after), beforeFileIdentity: item.before.exists ? item.before.identity : null, afterFileIdentity: item.afterIdentity ?? null, ...(item.matchMode ? { matchMode: item.matchMode, matchedLines: item.matchedLines! } : {}) });
-    }
-    return {
-      status: "applied",
-      files,
-      diffSummary: prepared.map(({ operation }) => `${operation.action} ${operation.path}`).join("\n"),
-    };
-  } catch (error) {
-    if (error instanceof ResourceCleanupError) throw error;
-    const rollbackConflicts: string[] = [];
-    const rollbackErrors: string[] = [];
-    for (const item of [...applied].reverse()) {
-      try {
-        await safeCommitFile(workspace, item.operation.path, item.after, item.before.exists ? item.before.bytes : undefined, undefined, item.before.exists ? item.before.attributes : undefined, item.afterIdentity);
-      } catch (rollbackError) {
-        if (rollbackError instanceof ResourceCleanupError) throw rollbackError;
-        if (rollbackError instanceof SafeFileError && (rollbackError.code === "STALE_VERSION" || rollbackError.code === "FILE_CONFLICT")) rollbackConflicts.push(item.operation.path);
-        else rollbackErrors.push(`${item.operation.path}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
-      }
-    }
-    return {
-      status: "failed",
-      files,
-      rolledBack: !options.signal?.aborted && rollbackConflicts.length === 0 && rollbackErrors.length === 0 && !(error instanceof SafeFileError && (error.recoveryPath || error.code === "FILE_ACCESS_UNAVAILABLE")),
-      ...(rollbackConflicts.length > 0 ? { rollbackConflicts } : {}),
-      ...(rollbackErrors.length > 0 ? { rollbackErrors } : {}),
-      error: error instanceof Error ? error.message : String(error),
-      ...(error instanceof ApplyPatchError ? { errorCode: error.code, ...(error.remedy ? { remedy: error.remedy } : {}) } : error instanceof SafeFileError ? { errorCode: error.code, ...(error.recoveryPath ? { recoveryPath: error.recoveryPath } : {}) } : { errorCode: "PATCH_FAILED" as const }),
-    };
-  }
+  const batch = await runFileBatch(workspace, prepared.map(item => ({ path: path.relative(path.resolve(workspace), item.target), ...(item.before.exists ? { before: item.before.bytes, beforeIdentity: item.before.identity, ...(item.before.attributes === undefined ? {} : { attributes: item.before.attributes }) } : {}), ...(item.after === undefined ? {} : { after: item.after }) })), { ...(options.signal ? { signal: options.signal } : {}), ...(options.beforeCommit ? { beforeCommit: options.beforeCommit } : {}) });
+  const files: ApplyPatchFileResult[] = prepared.slice(0, batch.identities.length).map((item, index) => ({ path: item.operation.path, action: item.operation.action, status: batch.state === 'committed' ? 'applied' : batch.outcomes?.find(op => path.normalize(op.path) === path.normalize(item.operation.path))?.state === 'rolled_back' ? 'rolled_back' : 'unknown', beforeSha256: item.before.exists ? item.before.sha256 : null, afterSha256: item.after === undefined ? null : sha256Bytes(item.after), beforeFileIdentity: item.before.exists ? item.before.identity : null, afterFileIdentity: batch.identities[index] ?? null, ...(item.matchMode ? { matchMode: item.matchMode, matchedLines: item.matchedLines! } : {}) }));
+  return { status: batch.state === 'committed' ? 'applied' : 'failed', files, batchId: batch.id, batchState: batch.state, ...(batch.error && batch.state === 'committed' ? { recoveryPending: true } : {}), ...(batch.state === 'committed' ? { diffSummary: prepared.map(({ operation }) => `${operation.action} ${operation.path}`).join('\n') } : { rolledBack: batch.state === 'rolled_back', rollbackConflicts: batch.conflicts, error: batch.error instanceof Error ? batch.error.message : 'File batch did not commit', ...(batch.error instanceof SafeFileError ? { errorCode: batch.error.code, ...(batch.error.recoveryPath ? { recoveryPath: batch.error.recoveryPath } : {}) } : { errorCode: 'PATCH_FAILED' as const }) }) };
 }

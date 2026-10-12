@@ -1,3 +1,4 @@
+import { mockProcessOwner } from '../../helpers/process-owner.js';
 import assert from "node:assert/strict";
 import childProcess, { ChildProcess } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
@@ -5,7 +6,23 @@ import { PassThrough } from "node:stream";
 import { test, type TestContext } from "node:test";
 import { runBash } from "../../../src/tools/bash.js";
 import { runBenchmarkVerification } from "../../../src/benchmark/runner.js";
-import {observeProcessCompletion,ProcessCleanupError} from "../../../src/tools/process-completion.js";
+import {observeProcessCompletion,ProcessCleanupError,terminateProcessTree} from "../../../src/tools/process-completion.js";
+
+test('Unix termination confirms the group is absent rather than trusting signal delivery', async context => {
+  const signals: Array<number | NodeJS.Signals | undefined> = []; let queries = 0;
+  context.mock.method(process, 'kill', (pid: number, signal?: number | NodeJS.Signals) => {
+    assert.equal(pid, -7654321); signals.push(signal);
+    if (signal === 0 && ++queries === 2) throw Object.assign(new Error('gone'), { code: 'ESRCH' });
+    return true;
+  });
+  await terminateProcessTree(7654321, 'linux'); assert.deepEqual(signals, ['SIGKILL', 0, 0]);
+});
+test('Unix status query denial cannot report successful cleanup', async context => {
+  context.mock.method(process, 'kill', (_pid: number, signal?: number | NodeJS.Signals) => {
+    if (signal === 0) throw Object.assign(new Error('query denied'), { code: 'EPERM' }); return true;
+  });
+  await assert.rejects(terminateProcessTree(7654321, 'linux'), { code: 'EPERM' });
+});
 
 function fixture(context: TestContext) {
   const child = new ChildProcess();
@@ -14,6 +31,7 @@ function fixture(context: TestContext) {
   child.stderr = new PassThrough();
   const killers: ChildProcess[] = [];
   let launches = 0;
+  mockProcessOwner(context, child, killers);
   context.mock.method(childProcess, "spawn", (command: string) => {
     if (command === "taskkill.exe") {
       const killer = new ChildProcess();
@@ -35,8 +53,17 @@ function fixture(context: TestContext) {
   return { child, killers, launches: () => launches };
 }
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+test('unresponsive owner and launcher return bounded unknown state without success', { timeout: 1000 }, async context => {
+  const child = new ChildProcess(); Object.defineProperty(child, 'pid', { value: 123456789 });
+  context.mock.method(child, 'kill', () => true);
+  let requests = 0;
+  const owner = { ownerId: 'fixture', receipt: new Promise<import('../../../src/tools/owned-process.js').ProcessReceipt>(() => {}), stop() { requests++; } };
+  const owned = observeProcessCompletion(child, { owner, cleanupTimeoutMs: 20 });
+  owned.stop(); owned.stop(); const result = await owned.completion;
+  assert.equal(requests, 1); assert.equal(result.cleanupStatus, 'unknown'); assert.ok(result.cleanupError); assert.equal(owned.closed, false);
+});
 
-test("taskkill 128 remains a cleanup failure after a real owned child's fallback close",async(context)=>{
+test("an unowned Windows PID retains unknown descendant state after its root closes",async(context)=>{
   const child=childProcess.spawn(process.execPath,['-e','process.stdout.write("ready");setInterval(()=>{},1000)'],{windowsHide:true,stdio:['ignore','pipe','pipe']});
   context.after(()=>{if(child.exitCode===null&&child.signalCode===null)child.kill();});
   await new Promise<void>((resolve,reject)=>{child.stdout!.once('data',()=>resolve());child.once('error',reject);});
@@ -51,7 +78,8 @@ test("taskkill 128 remains a cleanup failure after a real owned child's fallback
   controller.abort();const result=await owned.completion;
   assert.equal(owned.closed,true);assert.equal(result.cancelled,true);
   assert.ok(result.cleanupError instanceof ProcessCleanupError);
-  assert.match(result.cleanupError.message,/128/);
+  assert.match(result.cleanupError.message,/Unowned Windows PID/);
+  assert.equal(result.cleanupStatus, 'unknown');
   assert.throws(()=>process.kill(pid,0),{code:'ESRCH'});
 });
 

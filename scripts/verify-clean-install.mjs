@@ -20,7 +20,7 @@ try {
     const target = join(temporary, name); await fs.mkdir(dirname(target), { recursive: true }); await fs.copyFile(path, target);
   }
   execFileSync("git", ["init", "--quiet", temporary], { windowsHide: true });
-  for (const args of [["install", "--frozen-lockfile"], ["files:build"], ["install:verify"], ["build"], ["files:smoke"], ["install:smoke"]]) {
+  for (const args of [["install", "--frozen-lockfile"], ["files:build"], ["install:verify"], ["build"], ["files:smoke"], ["process:smoke"], ["install:smoke"]]) {
     execFileSync(process.execPath, [pnpm, ...args], { cwd: temporary, stdio: "inherit", windowsHide: true });
   }
   console.log("Clean source snapshot installation verified; no existing node_modules or user directories were copied.");

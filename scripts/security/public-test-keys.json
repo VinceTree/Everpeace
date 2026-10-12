@@ -34,9 +34,10 @@
       "a24f9c9e47779af000d634c1f08795b77cae42fbd0e1e076506aca206f64f27d",
       "4afbfaa87a2b041c62b56ef5cfd980ac054a5147e5da025c189cc98cb4780ce8",
       "d6d379fe18a46b0b7a9e39355c50c38007e27a8a41b76088f019e6cbc45b75c5",
-      "7c2c3e7f0f2cbbc006620e7883505e3ccb7fe2c09a58aa5b595bb67aafea01d6"
+      "7c2c3e7f0f2cbbc006620e7883505e3ccb7fe2c09a58aa5b595bb67aafea01d6",
+      "7ca62d76a0bdd9cef673fda90a960f73cd0f6dc4993ed85040648ef6c1b0af65"
     ],
     "reason": "False positive on static host-copy JSON next to the Brave API-key label and a generated message identifier; catalog contains UI literals/interpolation placeholders, not a credential.",
-    "review": "Reviewed current security/privacy UI additions and exact LF catalog bytes; static labels and SHA-derived message identifiers contain no usable credential. Any content change requires fresh exact-hash review."
+    "review": "Reviewed exact LF catalog and reliability additions: static UI labels, recovery/package commands and generated identifiers; the existing Brave label finding contains no credential. Any content change requires fresh exact-hash review."
   }
 ]

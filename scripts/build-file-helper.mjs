@@ -32,3 +32,25 @@ const result = spawnSync(compiler, args, { cwd: directory, windowsHide: true, st
 if (result.error || result.status !== 0) throw result.error || new Error('Native file helper build failed');
 writeFileSync(`${output}.sha256`, createHash('sha256').update(readFileSync(output)).digest('hex'));
 console.log(`Built file helper for ${process.platform}-${process.arch}`);
+if (testing) {
+  const processDirectory = path.join(root, 'native/process/bin', `${process.platform}-${process.arch}`);
+  mkdirSync(processDirectory, { recursive: true });
+  const processOutput = path.join(processDirectory, 'everpeace-output-test.exe');
+  const processSource = path.join(root, 'native/process/output-test.cpp');
+  const fixtureArgs = path.basename(compiler).toLowerCase().startsWith('cl') ? ['/EHsc', '/O2', '/MT', processSource, `/Fe:${processOutput}`] : ['-O2', '-static', '-o', processOutput, processSource];
+  const built = spawnSync(compiler, fixtureArgs, { cwd: processDirectory, windowsHide: true, stdio: 'inherit', env: buildEnv });
+  if (built.error || built.status !== 0) throw built.error || new Error('Process fixture build failed');
+}
+if (!testing) {
+  const processDirectory = path.join(root, 'native/process/bin', `${process.platform}-${process.arch}`);
+  mkdirSync(processDirectory, { recursive: true });
+  const processOutput = path.join(processDirectory, 'everpeace-process.exe');
+  const processSource = path.join(root, 'native/process/main.cpp');
+  const processArgs = path.basename(compiler).toLowerCase().startsWith('cl')
+    ? ['/std:c++17', '/EHsc', '/O2', '/MT', processSource, `/Fe:${processOutput}`, 'advapi32.lib']
+    : ['-std=c++17', '-O2', '-static', '-municode', '-o', processOutput, processSource, '-ladvapi32'];
+  const processBuild = spawnSync(compiler, processArgs, { cwd: processDirectory, windowsHide: true, stdio: 'inherit', shell: false, env: buildEnv });
+  if (processBuild.error || processBuild.status !== 0) throw processBuild.error || new Error('Native process owner build failed');
+  writeFileSync(`${processOutput}.sha256`, createHash('sha256').update(readFileSync(processOutput)).digest('hex'));
+  console.log(`Built process owner for ${process.platform}-${process.arch}`);
+}

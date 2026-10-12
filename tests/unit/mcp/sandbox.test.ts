@@ -7,6 +7,25 @@ import http from 'node:http';
 import { SandboxedMcpTransport } from '../../../src/mcp/sandbox-transport.js';
 import { prepareMcpConfig } from '../../../src/mcp/launch.js';
 
+test('explicit host MCP close owns detached descendants and remains bounded', { skip: process.platform !== 'win32', timeout: 10000 }, async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'everpeace-mcp-owner-'));
+  const script = path.join(root, 'host.mjs');
+  await fs.writeFile(script, `import {spawn} from 'node:child_process';
+const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});
+process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:1,result:{pids:[process.pid,child.pid]}})+'\\n');
+process.stdin.resume();setInterval(()=>{},1000);`);
+  const transport = new SandboxedMcpTransport({ name: 'host-owner', enabled: true, transport: { type: 'stdio', isolation: 'host', command: process.execPath, args: [script] } }, root);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const message = new Promise<unknown>((resolve, reject) => { transport.onmessage = resolve; transport.onerror = reject; timer = setTimeout(() => reject(new Error('Host MCP did not initialize')), 5000); });
+  try {
+    await transport.start();
+    const response = await message as { result: { pids: number[] } }; clearTimeout(timer);
+    const started = performance.now(); await Promise.all([transport.close(), transport.close()]);
+    assert.ok(performance.now() - started < 2000);
+    for (const pid of response.result.pids) assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+  } finally { clearTimeout(timer); await transport.close(); await fs.rm(root, { recursive: true, force: true }); }
+});
+
 test('default stdio sandbox denies sensitive startup reads and network before tool approval', { skip: process.platform !== 'win32', timeout: 30_000 }, async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'everpeace-mcp-sandbox-')); let network = 0;
   const server = http.createServer((_request, response) => { network++; response.end('unexpected'); });

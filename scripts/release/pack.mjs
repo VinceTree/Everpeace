@@ -33,6 +33,9 @@ try {
   assert.ok((await fs.stat(path.join(staging, "dist/cli/index.js"))).isFile(), "Build before packing");
   const fileWorker = 'native/files/bin/win32-x64/everpeace-files.exe';
   const fileWorkerDigest = digest(path.join(staging, fileWorker));
+  const processWorker = 'native/process/bin/win32-x64/everpeace-process.exe';
+  const processWorkerDigest = digest(path.join(staging, processWorker));
+  assert.equal((await fs.readFile(path.join(staging, `${processWorker}.sha256`), 'utf8')).trim(), processWorkerDigest, 'Build and verify the process owner before packing');
   assert.equal((await fs.readFile(path.join(staging, `${fileWorker}.sha256`), 'utf8')).trim(), fileWorkerDigest, 'Build and verify the Windows file helper before packing');
   for (const [name, pin] of Object.entries(pins)) {
     if (name === "node-pty") assert.equal(manifest.dependencies[name], pin.version);
@@ -97,6 +100,7 @@ try {
   };
   await visitNative(path.join(staging, "node_modules/node-pty"));
   binaryFiles[fileWorker] = fileWorkerDigest;
+  binaryFiles[processWorker] = processWorkerDigest;
   assert.ok(Object.keys(binaryFiles).length, "Native binary inventory missing");
   native.binaryFiles = binaryFiles;
   native.coverageLimit = "Binary digests identify delivered native components; statically linked internal dependency versions may not be identifiable.";
@@ -104,8 +108,8 @@ try {
   manifest.files.push("native-provenance.json");
   await fs.writeFile(path.join(staging, "package.json"), JSON.stringify(manifest, null, 2) + "\n");
   const packed = JSON.parse(await packageManager("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", output], { cwd: staging }))[0];
-  for (const required of [fileWorker, `${fileWorker}.sha256`]) assert.ok(packed.files.some(file => file.path === required), `Missing native file worker: ${required}`);
-  assert.ok(!packed.files.some(file => /everpeace-files-test\.exe(?:\.sha256)?$/u.test(file.path)), 'Fault-injection workers must not be distributed');
+  for (const required of [fileWorker, `${fileWorker}.sha256`, processWorker, `${processWorker}.sha256`]) assert.ok(packed.files.some(file => file.path === required), `Missing native worker: ${required}`);
+  assert.ok(!packed.files.some(file => /everpeace-(?:files|output)-test\.exe(?:\.sha256)?$/u.test(file.path)), 'Fault-injection workers must not be distributed');
   for (const required of ["node_modules/node-pty/lib/windowsPtyAgent.js", "node_modules/node-pty/lib/conpty_console_list_agent.js", "node_modules/node-pty/node_modules/node-addon-api/package.json", "node_modules/node-pty/LICENSE", "node_modules/node-pty/prebuilds/win32-x64/conpty.node"]) assert.ok(packed.files.some((file) => file.path === required), `Missing bundled native file: ${required}`);
   if (native.build) for (const file of Object.keys(native.build.files)) assert.ok(packed.files.some((entry) => entry.path === `node_modules/node-pty/prebuilds/linux-x64/${file}`), `Missing maintainer-built native file: ${file}`);
   assert.deepEqual(sourceIdentity(root), identity, "Source changed while packing");

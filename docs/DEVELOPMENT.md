@@ -230,3 +230,5 @@ Oxlint JSON 配置见 [.oxlintrc.json](../.oxlintrc.json)，[官方配置说明]
 当前文件后端只接受 Windows 本地 NTFS。Windows CI 执行完整四门禁；Linux CI 的 `test:portable` 只覆盖可移植隐私、网络、供应商和能力拒绝，不代表文件原生验收。构建后运行 `files:smoke`，`files:verify` 验证真实句柄竞争；`install:clean` 在干净源码副本重新编译组件。正式打包必须携带已核验 Windows worker 与摘要，未完成跨平台组件传递时拒绝缺组件包。
 
 `pnpm benchmark:prove-expanded <新绝对证据目录>` 对九项固定目录逐项证明正常基线、缺陷和参考修复，零模型请求；上游任务需首次只读克隆。全量 test 中使用已绑定源码的离线 helper 控制场景，TypeScript 旧编译器 API 仅用于外置评分器。Python 协议用例需要本机 Python 3（Windows 为 `python`，Linux 为 `python3`）；共享 CI 显式安装 Python 3.12，并在测试前核对可执行程序。冷启动探测上限 30 s、准备阶段上限 60 s，不放宽取消验收的 2 s 上限。真实终端回归通过 owned PTY 对 Web/cost/doctor 执行确认、取消和 resize，不访问付费服务。详见 [安全与诊断契约](architecture/SECURITY_AND_DIAGNOSTICS.md)。
+
+问题 13–23 的源码/回归与平台限制见 [可靠性加固](architecture/RELIABILITY_HARDENING.md)。`files:build` 同时构建文件 worker 和 Windows Job owner；构建后增加 `process:smoke`。required native 专项包含真实进程和持久批次故障；输出 fixture 只在 `--test` 构建，禁止打包。

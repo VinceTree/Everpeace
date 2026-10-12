@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawnOwned as spawn } from "./owned-process.js";
 import { promises as fs } from "node:fs";
 import { safeReadFile } from './safe-files.js';
 import path from "node:path";
@@ -145,7 +145,7 @@ export async function listWorkspaceChanges(
     const renamed = x === "R" || x === "C" || y === "R" || y === "C";
     const oldPathValue = renamed ? normalizeGitPath(values[index++] ?? "") : undefined;
     const oldPath = oldPathValue === undefined ? undefined : workspaceRelativeGitPath(root, workspaceRoot, oldPathValue);
-    if (target === undefined) continue;
+    if (target === undefined || /\.everpeace-(?:recovery|stage|batch)-/u.test(target)) continue;
     if (x === "?" && y === "?") {
       entries.push({ id: `untracked:${target}`, path: target, kind: "untracked", status: "??" });
     } else {
@@ -206,6 +206,7 @@ export async function readWorkspaceChange(
   signal?: AbortSignal,
 ): Promise<WorkspaceChangeDetail> {
   signal?.throwIfAborted();
+  if ([entry.path, entry.oldPath ?? ''].some(name => /\.everpeace-(?:recovery|stage|batch)-/u.test(name))) return { entry, contentKind: 'summary', text: 'Host recovery materials require explicit user recovery; contents are not previewed.', truncated: false };
   if (entry.kind === "untracked") return untrackedDetail(workspacePath, entry, signal);
   const workspaceRoot = await fs.realpath(workspacePath);
   for (const changedPath of [entry.path, entry.oldPath].filter((value): value is string => value !== undefined)) {

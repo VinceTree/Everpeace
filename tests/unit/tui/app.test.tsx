@@ -1226,7 +1226,8 @@ test("running turns keep a guidance composer and drain queued corrections", asyn
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("1 guidance message pending"));
   assert.match(view.lastFrame() ?? "", /use the safer approach/);
-  releaseFirst?.();
+  await waitFor(() => releaseFirst !== undefined);
+  releaseFirst!();
   await waitFor(() => (view.lastFrame() ?? "").includes("done: use the safer approach"));
   assert.deepEqual(calls, ["start task", "use the safer approach"]);
   view.unmount();
@@ -1270,7 +1271,8 @@ test("running composer sends guidance to agents with live steering support", asy
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("1 guidance message pending"));
   assert.deepEqual(corrections, ["avoid the unsafe command"]);
-  release?.();
+  await waitFor(() => release !== undefined);
+  release!();
   await waitFor(() => (view.lastFrame() ?? "").includes("applied avoid the unsafe command"));
   view.unmount();
 });

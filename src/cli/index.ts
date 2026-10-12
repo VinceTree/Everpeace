@@ -38,6 +38,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     return 2;
   }
   const HELP = uiText('help.main');
+  if (args[0] === 'recover-batch') { const { runRecoverBatch } = await import('./commands/recover-batch.js'); return runRecoverBatch(args.slice(1)); }
   if (args[0] === 'recover-file') {
     if (args.length !== 3) { process.stderr.write(uiText('security.recoveryUsage') + '\n'); return 2; }
     try { const { recoverFile } = await import('../tools/file-recovery.js'); await recoverFile(args[1]!, args[2]!); process.stdout.write(uiText('security.recovered') + '\n'); return 0; }

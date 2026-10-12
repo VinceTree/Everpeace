@@ -219,7 +219,9 @@ static void privateAcl(HANDLE h) {
 static void point(const char* name) {
   fprintf(stderr,"PHASE:%s\n",name);
   fflush(stderr);
-  if(getchar()==EOF)throw Failure {
+  int instruction=getchar();
+  if(instruction=='!') {SetLastError(ERROR_DISK_FULL);throw Failure {4};}
+  if(instruction==EOF)throw Failure {
     4
   };
 }
@@ -234,7 +236,8 @@ int main() {
   try {
     char magic[4];
     exact(magic,4);
-    if(memcmp(magic,"EPF2",4))throw Failure {
+    bool version3=!memcmp(magic,"EPF3",4);
+    if(!version3&&memcmp(magic,"EPF2",4))throw Failure {
       4
     };
     uint32_t op=number();
@@ -246,6 +249,12 @@ int main() {
     auto after=field();
     uint32_t exists=number();
     uint32_t restoreAttributes=number();
+    auto retained=version3?field():std::string();
+    if(!retained.empty()) {
+      if(retained.size()!=32)throw Failure {4};
+      for(auto c:retained)if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')))throw Failure {4};
+      if(op==0||op==4||op==5)throw Failure {4};
+    }
     if(restoreAttributes & ~0x20a7u)throw Failure {4};
     if(op>5||exists>1||root.size()<3||root[1]!=L':'||root[2]!=L'\\'||relative.find(L':')!=std::wstring::npos||relative.find(L'/')!=std::wstring::npos)throw Failure {
       4
@@ -365,12 +374,13 @@ int main() {
       2
     };
     if(!expectedTarget.empty() && (!present || identity(target->h)!=expectedTarget))throw Failure {3};
-    if(after.size()>32*1024*1024 || before.size()>32*1024*1024 || before.size()+after.size()>LIMIT-128*1024)throw Failure {
+    bool journalDeletion=op==3 && relative.size()>8 && relative.substr(relative.size()-8)==L".journal" && (before.substr(0,4)=="EPJ2" || before.substr(0,4)=="EPJ3");
+    if(after.size()>32*1024*1024 || (!journalDeletion && before.size()>32*1024*1024) || before.size()+after.size()>LIMIT-128*1024)throw Failure {
       6
     };
     point("locked");
-    std::wstring backup=current+L".everpeace-recovery-"+id()+L".bak";
-    std::wstring temp=current+L".everpeace-stage-"+id()+L".tmp";
+    std::wstring backup=current+L".everpeace-recovery-"+(retained.empty()?id():wide(retained))+L".bak";
+    std::wstring temp=current+L".everpeace-stage-"+(retained.empty()?id():wide(retained))+L".tmp";
     Held staged;
     PSECURITY_DESCRIPTOR originalSecurity=nullptr;
     PACL originalAcl=nullptr;
@@ -399,24 +409,29 @@ int main() {
         if(!SetFileInformationByHandle(staged->h,FileBasicInfo,&basic,sizeof basic))throw Failure {4};
       }
     }
+    if(staged && !FlushFileBuffers(staged->h))throw Failure {4};
     std::wstring journal=backup+L".journal";
     Held journalHandle;
-    if(present) {
+    if(present||!retained.empty()) {
       journalHandle=hold(relativeOpen(dirs.back()->h,journal.substr(journal.find_last_of(L'\\')+1),GENERIC_WRITE|DELETE|WRITE_DAC,0,false,true));
       journalHandle->eraseOnClose=true;
       privateAcl(journalHandle->h);
-      auto metadata=std::string("EPJ2")+encoded(narrow(relative))+encoded(before)+encoded(after)+encoded(identity(target->h))+encoded(staged?identity(staged->h):"");
+      auto metadata=std::string(retained.empty()?"EPJ2":"EPJ3")+encoded(narrow(relative))+encoded(before)+encoded(after)+encoded(target?identity(target->h):"")+encoded(staged?identity(staged->h):"");
+      if(!retained.empty())metadata+=encoded(rootIdentity)+encoded(std::to_string(exists))+encoded(std::to_string(op!=3))+encoded(staged?narrow(relative)+narrow(temp.substr(current.size())):"");
       write(journalHandle->h,metadata);
-      renameHandle(target->h,backup,dirs.back()->h);
+      journalHandle->eraseOnClose=false;
+      if(!retained.empty())point("journaled");
+      if(target)renameHandle(target->h,backup,dirs.back()->h);
       journalHandle->eraseOnClose=false;
       recovery=narrow(backup);
-      privateAcl(target->h);
+      if(target)privateAcl(target->h);
     }
     point("moved");
     try {
       if(staged) {
         renameHandle(staged->h,current,dirs.back()->h);
         staged->eraseOnClose=false;
+        if(!FlushFileBuffers(staged->h))throw Failure {4};
       }
     }catch(Failure f) {
       if(staged) {
@@ -429,16 +444,16 @@ int main() {
           renameHandle(target->h,current,dirs.back()->h);
           if(originalAcl)SetSecurityInfo(target->h,SE_FILE_OBJECT,DACL_SECURITY_INFORMATION,nullptr,nullptr,originalAcl,nullptr);
           recovery.clear();
-          if(journalHandle)removeHandle(journalHandle->h);
+          if(journalHandle&&retained.empty())removeHandle(journalHandle->h);
         }catch(...) {
         }
       }throw f;
     }
     point("installed");
-    if(target) {
+    if(target&&retained.empty()) {
       removeHandle(target->h);
       recovery.clear();
-    }if(journalHandle)removeHandle(journalHandle->h);
+    }if(journalHandle&&retained.empty())removeHandle(journalHandle->h);
     if(originalSecurity)LocalFree(originalSecurity);
     out(0);
     blob("");

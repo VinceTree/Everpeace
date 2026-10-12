@@ -42,6 +42,7 @@ export interface VerificationSuiteResult {
   reason?: string;
   stale?: boolean;
   evidence?: VerificationEvidence;
+  packageCoverage?: { discovered: string[]; uncovered: string[]; complete: boolean; reasons: string[] };
 }
 
 /** Reported project evidence is distinct from a host-owned independent scorer. */

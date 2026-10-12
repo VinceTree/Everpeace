@@ -814,7 +814,7 @@ export function EverpeaceApp({
       const output = commandOutput(result);
       const retained = retainOutput(output);
       appendCommand(retained.text, { id: randomUUID(), command, shell, workspace: workspacePath, source: "user", status: result.cancelled ? "cancelled" : result.error || result.exitCode !== 0 ? "failed" : "completed", durationMs: Date.now() - started, truncated: retained.truncated || result.truncated === true });
-      if(result.cleanupFailed) throw new ProcessCleanupError(result.error ?? uiText('task.cleanupFailed'));
+      if(result.cleanupFailed) { const error = new ProcessCleanupError(result.error ?? uiText('task.cleanupFailed')); await ensureWorkflow().recordCleanupFailure(error); throw error; }
       return result;
     },
     [appendCommand, dependencies, workspacePath],
@@ -2396,6 +2396,19 @@ directController.current = new AbortController();setLastTaskStartedAt(Date.now()
     };
     const operation = startCommandLoad(uiText('m7736fef88d36'), uiText('m388d25d7c04d'), true, true, cancel);
     try {
+      if (requested.trim().startsWith('--package')) {
+        const relative = requested.trim().slice('--package'.length).trim();
+        if (!relative) throw new Error(uiText('reliability.packageUsage'));
+        const revision = permissionPolicyRevision(permissions.current);
+        const result = await ensureWorkflow().runPackageVerification(relative, async (command, cwd, signal, timeoutMs) => {
+          if (permissionPolicyRevision(permissions.current) !== revision || commandPermission(command, permissions.current) === 'deny') throw new Error(uiText('m0fbbd0957e31'));
+          const result = await dependencies.runBash(command, permissions.current, signal, undefined, timeoutMs, cwd);
+          if (permissionPolicyRevision(permissions.current) !== revision) throw new Error(uiText('m0fbbd0957e31'));
+          return result;
+        }, controller.signal);
+        if (isCurrentCommandOperation(operation)) replaceCommandView(infoView(uiText('m9765081cd0f3'), JSON.stringify(result, null, 2), result.status === 'passed' ? 'default' : 'error'));
+        return;
+      }
       const commands = await discoverVerificationCommands(workspacePath);
       controller.signal.throwIfAborted();
       if (!isCurrentCommandOperation(operation)) return;

@@ -1,5 +1,5 @@
 import { ToolFeedbackError } from "./tool-feedback.js";
-import { spawn } from 'node:child_process';
+import { spawnOwned as spawn } from './owned-process.js';
 import { promises as fs } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -18,7 +18,7 @@ function word(value: number): Buffer { const b = Buffer.alloc(4); b.writeUInt32L
 function field(value: Uint8Array | string): Buffer { const b = Buffer.from(value); if (b.length > MAX || typeof value === 'string' && b.toString('utf8') !== value) throw new SafeFileError('POLICY_DENIED'); return Buffer.concat([word(b.length), b]); }
 
 const workspacePins = new Map<string, Promise<string>>();
-async function request(op: number, workspace: string, relative: string, before?: Uint8Array, after?: Uint8Array, signal?: AbortSignal, attributes?: number, expectedIdentity?: string): Promise<NativeFileResult> {
+async function request(op: number, workspace: string, relative: string, before?: Uint8Array, after?: Uint8Array, signal?: AbortSignal, attributes?: number, expectedIdentity?: string, retained?: string): Promise<NativeFileResult> {
   if (process.platform !== 'win32') throw new SafeFileError('FILE_ACCESS_UNAVAILABLE');
   const key = path.resolve(workspace).toLowerCase();
   let pin = workspacePins.get(key);
@@ -30,10 +30,10 @@ async function request(op: number, workspace: string, relative: string, before?:
     workspacePins.set(key, pin);
     void pin.catch(() => { if (workspacePins.get(key) === pin) workspacePins.delete(key); });
   }
-  return nativeRequest(op, workspace, relative, await pin, before, after, signal, attributes, expectedIdentity);
+  return nativeRequest(op, workspace, relative, await pin, before, after, signal, attributes, expectedIdentity, retained);
 }
 
-async function nativeRequest(op: number, workspace: string, relative: string, rootIdentity: string, before?: Uint8Array, after?: Uint8Array, signal?: AbortSignal, attributes?: number, expectedIdentity?: string): Promise<NativeFileResult> {
+async function nativeRequest(op: number, workspace: string, relative: string, rootIdentity: string, before?: Uint8Array, after?: Uint8Array, signal?: AbortSignal, attributes?: number, expectedIdentity?: string, retained?: string): Promise<NativeFileResult> {
   signal?.throwIfAborted();
   if (process.platform !== 'win32') throw new SafeFileError('FILE_ACCESS_UNAVAILABLE');
   const root = path.resolve(workspace);
@@ -46,7 +46,7 @@ async function nativeRequest(op: number, workspace: string, relative: string, ro
     const digest = createHash('sha256').update(await fs.readFile(executable)).digest('hex');
     if (digest !== (await fs.readFile(`${executable}.sha256`, 'utf8')).trim()) throw new Error('identity mismatch');
   } catch { throw new SafeFileError('FILE_ACCESS_UNAVAILABLE'); }
-  const input = Buffer.concat([Buffer.from('EPF2'), word(op), field(root), field(scoped), field(rootIdentity), field(expectedIdentity ?? ''), field(before ?? Buffer.alloc(0)), field(after ?? Buffer.alloc(0)), word(before === undefined ? 0 : 1), word(attributes ?? 0)]);
+  const input = Buffer.concat([Buffer.from('EPF3'), word(op), field(root), field(scoped), field(rootIdentity), field(expectedIdentity ?? ''), field(before ?? Buffer.alloc(0)), field(after ?? Buffer.alloc(0)), word(before === undefined ? 0 : 1), word(attributes ?? 0), field(retained ?? '')]);
   const child = spawn(executable, [], { windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
   const owned = observeProcessCompletion(child, { ...(signal ? { signal } : {}), timeoutMs: 10_000 });
   const chunks: Buffer[] = []; let bytes = 0;
@@ -72,10 +72,11 @@ async function nativeRequest(op: number, workspace: string, relative: string, ro
 }
 
 export const safeReadFile = (workspace: string, relative: string, signal?: AbortSignal) => request(0, workspace, relative, undefined, undefined, signal);
-export async function safeCommitFile(workspace: string, relative: string, before: Uint8Array | undefined, after: Uint8Array | undefined, signal?: AbortSignal, attributes?: number, expectedIdentity?: string): Promise<{ identity?: string }> {
-  const result = await request(after === undefined ? 3 : before === undefined ? 1 : 2, workspace, relative, before, after, signal, attributes, expectedIdentity);
+export async function safeCommitFile(workspace: string, relative: string, before: Uint8Array | undefined, after: Uint8Array | undefined, signal?: AbortSignal, attributes?: number, expectedIdentity?: string, retained?: string): Promise<{ identity?: string }> {
+  const result = await request(after === undefined ? 3 : before === undefined ? 1 : 2, workspace, relative, before, after, signal, attributes, expectedIdentity, retained);
   return result.identity ? { identity: result.identity } : {};
 }
+export async function safeWorkspaceIdentity(workspace: string): Promise<string> { const result = await request(5, workspace, ''); if (!result.identity) throw new SafeFileError('FILE_ACCESS_UNAVAILABLE'); return result.identity; }
 export async function safeListDirectory(workspace: string, relative: string, signal?: AbortSignal): Promise<Array<{ name: string; type: string }>> {
   return (await safeReadDirectory(workspace, relative, signal)).entries;
 }

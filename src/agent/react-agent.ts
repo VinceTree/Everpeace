@@ -31,6 +31,7 @@ import {
   isContextLimitError,
   ModelResponseError,
   ModelStreamCleanupError,
+  ModelStreamCancelledError,
 } from "./response-errors.js";
 import {
   BASH_TOOL_DEFINITION,
@@ -216,6 +217,7 @@ export interface ReactAgentOptions {
   recoveryCacheMaxBytes?: number;
   streamRecoveryBudget?: number;
   streamIdleTimeoutMs?: number;
+  streamCleanupTimeoutMs?: number;
   contextRecoveryBudget?: number;
   web?: WebToolExecutor;
   mcp?: McpRuntimeLike;
@@ -638,7 +640,7 @@ export class ReactAgent {
     this.#streamRecoveryBudget = integerBudget("streamRecoveryBudget", options.streamRecoveryBudget, 1);
     this.#streamIdleTimeoutMs = integerBudget("streamIdleTimeoutMs", options.streamIdleTimeoutMs, 60_000, 1);
     this.#contextRecoveryBudget = integerBudget("contextRecoveryBudget", options.contextRecoveryBudget, 1);
-    this.#streams = new ResponseStreamConsumer({ recovery: this.#client.responses.recovery !== undefined, recoveryCacheMaxBytes: this.#recoveryCacheMaxBytes, idleTimeoutMs: this.#streamIdleTimeoutMs, onEvent: this.#onEvent, writeAssistantDelta: (text) => this.#io.writeAssistantDelta?.(text), onToolProgress: (progress) => this.#io.onToolProgress?.(progress) });
+    this.#streams = new ResponseStreamConsumer({ recovery: this.#client.responses.recovery !== undefined, recoveryCacheMaxBytes: this.#recoveryCacheMaxBytes, idleTimeoutMs: this.#streamIdleTimeoutMs, cleanupTimeoutMs: integerBudget('streamCleanupTimeoutMs', options.streamCleanupTimeoutMs, 5000, 1), onEvent: this.#onEvent, writeAssistantDelta: (text) => this.#io.writeAssistantDelta?.(text), onToolProgress: (progress) => this.#io.onToolProgress?.(progress) });
     this.#requests = new ModelRequestRuntime(this.#client, this.#streams, options.client.responses.stream ? "stream" : "buffered", this.#onEvent);
     this.#web = options.web ?? createWebToolExecutor();
     this.#mcp = options.mcp;
@@ -2098,8 +2100,8 @@ export class ReactAgent {
       }
       if (admitted && !reported) {
         reported = true;
-        trace(this.#lifecycle.controller?.signal.aborted ? "cancelled" : "failed", error instanceof ModelStreamCleanupError ? error.usage : null);
-        await observe?.(error instanceof ModelStreamCleanupError ? error.usage : null);
+        trace(this.#lifecycle.controller?.signal.aborted ? "cancelled" : "failed", error instanceof ModelStreamCleanupError || error instanceof ModelStreamCancelledError ? error.usage : null);
+        await observe?.(error instanceof ModelStreamCleanupError || error instanceof ModelStreamCancelledError ? error.usage : null);
       }
       if (error instanceof ResourceCleanupError || error instanceof PersistenceError) throw error;
       if (error instanceof TeamLimitError) throw new LoopStoppedError(error.reason);

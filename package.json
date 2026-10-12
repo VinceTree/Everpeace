@@ -1,6 +1,6 @@
 {
   "name": "everpeace",
-  "version": "0.6.0-rc.2",
+  "version": "0.6.0-rc.3",
   "private": true,
   "type": "module",
   "engines": {
@@ -23,6 +23,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "files:smoke": "node scripts/verify-file-install.mjs",
+    "process:smoke": "node scripts/verify-process-install.mjs",
     "files:build": "node scripts/build-file-helper.mjs",
     "files:verify": "node scripts/build-file-helper.mjs --test && tsx --test tests/unit/security/native-files.test.ts",
     "pretest": "node scripts/build-file-helper.mjs && node scripts/build-file-helper.mjs --test",
@@ -96,6 +97,7 @@
     "assets",
     "third_party/codex",
     "native/files",
+    "native/process",
     "README.md",
     "README.zh-CN.md",
     "LICENSE",

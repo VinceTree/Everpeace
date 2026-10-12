@@ -6,9 +6,6 @@ import { createHash, randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import {
-  StdioClientTransport,
-} from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CallToolResultSchema, ListRootsRequestSchema, ListToolsResultSchema, type Tool } from "@modelcontextprotocol/sdk/types.js";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
@@ -793,22 +790,11 @@ export class McpRuntime {
     }) : undefined;
     if (http) this.#httpCleanup.set(client, http.close);
     const transport = config.transport.type === "stdio"
-      ? config.transport.isolation !== "host" ? new SandboxedMcpTransport(config, context.workspacePath) : new StdioClientTransport({
-          command: config.transport.command,
-          args: config.transport.args ?? [],
-          env: config.transport.env ?? {},
-          cwd: config.transport.cwd
-            ? resolve(context.workspacePath, config.transport.cwd)
-            : context.workspacePath,
-          stderr: "pipe",
-        })
+      ? new SandboxedMcpTransport(config, context.workspacePath)
       : new StreamableHTTPClientTransport(
           new URL(config.transport.url),
           { requestInit: { headers: this.#httpHeaders(config.transport) }, fetch: http!.fetch },
         );
-    if (transport instanceof StdioClientTransport) {
-      transport.stderr?.on("data", () => undefined);
-    }
     // SDK stdio close() may resolve immediately after SIGKILL, before the child
     // has emitted close. Observe the public transport event as the exit gate.
     this.#transportClosed.set(client, new Promise<void>((resolveClosed) => {

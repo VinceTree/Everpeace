@@ -1,6 +1,6 @@
 import { globPattern, enumerateSafeFiles } from "./secure-enumeration.js";
 import { sensitivePath } from "../permissions/sensitive-access.js";
-import { spawn } from "node:child_process";
+import { spawnOwned as spawn } from "./owned-process.js";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -185,19 +185,22 @@ async function resolveWorkspaceTarget(workspace: string, requestedPath: string):
   const target = path.resolve(root, requestedPath);
   if (!inside(root, target)) throw new ToolFeedbackError("POLICY_DENIED", "File access is limited to the current workspace", POLICY_DENIED_REMEDY);
   const relative = path.relative(root, target);
-  if (relative.split(path.sep).some(part => /\.everpeace-(?:recovery|stage)-/u.test(part))) throw new ToolFeedbackError('POLICY_DENIED', 'Recovery and staging files are host-only; use explicit user recovery.', POLICY_DENIED_REMEDY);
+  if (relative.split(path.sep).some(part => /\.everpeace-(?:recovery|stage|batch)-/u.test(part))) throw new ToolFeedbackError('POLICY_DENIED', 'Recovery and staging files are host-only; use explicit user recovery.', POLICY_DENIED_REMEDY);
   if (process.platform === "win32" && relative.includes(":")) throw new Error("Alternate data streams are not supported");
   return { root, lexical: target, relative };
 }
 
-async function runRipgrep(
+export async function runRipgrep(
   args: string[],
   cwd: string,
   signal?: AbortSignal,
   resolveRipgrep: RipgrepPathResolver = resolveBundledRipgrep,
   input?: Buffer,
-): Promise<{ lines: string[]; exitCode: number | null; incomplete: boolean }> {
+  outputBudget = MAX_SEARCH_BYTES,
+): Promise<{ lines: string[]; exitCode: number | null; incomplete: boolean; incompleteReason?: 'output_limit' | 'timeout' }> {
   signal?.throwIfAborted();
+  outputBudget = Math.max(0, Math.min(MAX_SEARCH_BYTES, outputBudget));
+  if (outputBudget === 0) return { lines: [], exitCode: null, incomplete: true, incompleteReason: 'output_limit' };
   const executable = await resolveRipgrep();
   signal?.throwIfAborted();
   const child = spawn(executable, ["--no-config", ...args], { cwd, windowsHide: true, shell: false, stdio: [input ? "pipe" : "ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
@@ -209,16 +212,19 @@ async function runRipgrep(
   let stderr = "";
   let incomplete = false;
   let stoppedByHost = false;
+  let incompleteReason: 'output_limit' | 'timeout' | undefined;
   const stop = () => owned.stop();
-  const timer = setTimeout(() => { incomplete = true; stoppedByHost = true; stop(); }, SEARCH_TIMEOUT_MS);
+  const timer = setTimeout(() => { incomplete = true; stoppedByHost = true; incompleteReason ??= 'timeout'; stop(); }, SEARCH_TIMEOUT_MS);
   timer.unref?.();
   child.stdout!.setEncoding("utf8");
   child.stderr!.setEncoding("utf8");
   child.stdout!.on("data", (chunk: string) => {
     if (stoppedByHost || owned.closed || owned.stopping) return;
-    if (retainedBytes + Buffer.byteLength(pending, "utf8") + Buffer.byteLength(chunk, "utf8") > MAX_SEARCH_BYTES) {
+    if (retainedBytes + Buffer.byteLength(pending, "utf8") + Buffer.byteLength(chunk, "utf8") >= outputBudget) {
       incomplete = true;
       stoppedByHost = true;
+      incompleteReason = 'output_limit';
+      stop();
       return;
     }
     pending += chunk;
@@ -227,9 +233,11 @@ async function runRipgrep(
       const line = pending.slice(0, newline).replace(/\r$/u, "");
       pending = pending.slice(newline + 1);
       const bytes = Buffer.byteLength(line, "utf8") + 1;
-      if (retainedBytes + bytes > MAX_SEARCH_BYTES) {
+      if (retainedBytes + bytes > outputBudget) {
         incomplete = true;
         stoppedByHost = true;
+        incompleteReason = 'output_limit';
+        stop();
         return;
       }
       retainedBytes += bytes;
@@ -247,11 +255,11 @@ async function runRipgrep(
   signal?.throwIfAborted();
   if (!stoppedByHost && pending) {
     const bytes = Buffer.byteLength(pending, "utf8");
-    if (retainedBytes + bytes <= MAX_SEARCH_BYTES) lines.push(pending.replace(/\r$/u, ""));
+    if (retainedBytes + bytes <= outputBudget) lines.push(pending.replace(/\r$/u, ""));
     else incomplete = true;
   }
   if (!stoppedByHost && result.exitCode !== 0 && result.exitCode !== 1) throw new Error(stderr.trim() || `ripgrep exited with ${result.exitCode}`);
-  return { lines, exitCode: result.exitCode, incomplete };
+  return { lines, exitCode: result.exitCode, incomplete, ...(incompleteReason ? { incompleteReason } : {}) };
 }
 
 export const fileSearchLimits = {
@@ -329,8 +337,8 @@ export async function runFileTool(
     await resolveRipgrep();
     signal?.throwIfAborted();
     const files = await enumerateSafeFiles(workspace, requestedPath, signal);
-    const result = { lines: [] as string[], incomplete: files.incomplete };
-    let readBytes = 0;
+    const result: { lines: string[]; incomplete: boolean; incompleteReason?: 'output_limit' | 'timeout' } = { lines: [], incomplete: files.incomplete };
+    let readBytes = 0, outputBytes = 0;
     const include = typeof record.glob === 'string' ? globPattern(record.glob) : undefined;
     for (const relative of files.paths) {
       if (sensitivePath(relative)) continue;
@@ -341,8 +349,16 @@ export async function runFileTool(
       readBytes += value.bytes.length;
       if (readBytes > MAX_SEARCH_BYTES) { result.incomplete = true; break; }
       const args = ["--json", "--line-number", "--column", ...(record.regex === true ? [] : ["--fixed-strings"]), '--', record.query as string, '-'];
-      const searched = await runRipgrep(args, root, signal, resolveRipgrep, value.bytes);
-      result.lines.push(...searched.lines.map(line => { try { const event = JSON.parse(line) as { data?: { path?: { text?: string } } }; if (event.data?.path) event.data.path.text = relative; return JSON.stringify(event); } catch { return line; } })); result.incomplete ||= searched.incomplete;
+      const searched = await runRipgrep(args, root, signal, resolveRipgrep, value.bytes, MAX_SEARCH_BYTES - outputBytes);
+      for (let line of searched.lines) {
+        try { const event = JSON.parse(line) as { data?: { path?: { text?: string } } }; if (event.data?.path) event.data.path.text = relative; line = JSON.stringify(event); } catch { /* preserve the bounded original record */ }
+        const size = Buffer.byteLength(line) + 1;
+        if (outputBytes + size > MAX_SEARCH_BYTES) { result.incomplete = true; result.incompleteReason = 'output_limit'; break; }
+        outputBytes += size; result.lines.push(line);
+      }
+      result.incomplete ||= searched.incomplete;
+      if (result.incompleteReason === 'output_limit') break;
+      if (searched.incompleteReason) { result.incompleteReason = searched.incompleteReason; break; }
     }
     const matches: Array<{ path: string; line: number; column: number; text: string }> = [];
     for (const line of result.lines) {
@@ -365,6 +381,7 @@ export async function runFileTool(
       continuation,
       has_more: continuation !== null,
       incomplete: result.incomplete || unavailableRemainder,
+      ...(result.incompleteReason ? { incompleteReason: result.incompleteReason } : {}),
       truncated: result.incomplete || unavailableRemainder || continuation !== null,
       ...(result.incomplete || unavailableRemainder ? { guidance: "Search stopped at its time or retained-byte limit; narrow the query if retained pages are insufficient." } : {}),
     };

@@ -36,7 +36,7 @@ export interface TeamMember {
   verification?: string;
   integrationId?: string;
   error?: string;
-  errorCode?: "SANDBOX_UNAVAILABLE";
+  errorCode?: "SANDBOX_UNAVAILABLE" | `TEAM_${string}`;
   integrationEligible?: boolean;
   artifactHashes?: Record<string, string | null>;
 }

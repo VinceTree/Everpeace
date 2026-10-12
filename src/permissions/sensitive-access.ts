@@ -7,7 +7,7 @@ import { redactSecretsPreservingLayout } from '../util/redact-secrets.js';
 export type SensitiveDecision = 'redact' | 'allow' | 'deny';
 export const SENSITIVE_CONTEXT_MARKER = 'Host sensitive-context boundary: external actions require fresh approval.';
 export function sensitivePath(value: string): boolean {
-  return value.split(/[\\/]/u).some((part) => /^(?:.*\.everpeace-(?:recovery|stage)-.*|\.env(?:\..*)?|\.npmrc|\.pypirc|\.netrc|\.ssh|\.aws|\.azure|\.kube|credentials(?:\.json)?|id_(?:rsa|ed25519|ecdsa)(?:\..*)?|.*\.(?:pem|p12|pfx|key))$/iu.test(part));
+  return value.split(/[\\/]/u).some((part) => /^(?:.*\.everpeace-(?:recovery|stage|batch)-.*|\.env(?:\..*)?|\.npmrc|\.pypirc|\.netrc|\.ssh|\.aws|\.azure|\.kube|credentials(?:\.json)?|id_(?:rsa|ed25519|ecdsa)(?:\..*)?|.*\.(?:pem|p12|pfx|key))$/iu.test(part));
 }
 export function sensitiveText(value: string): boolean { return scanSensitiveText(value).length > 0; }
 export function sensitiveDigest(value: string): string { return createHash('sha256').update(value).digest('hex'); }

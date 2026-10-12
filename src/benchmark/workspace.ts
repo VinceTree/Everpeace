@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawnOwned as spawn } from "../tools/owned-process.js";
 import type { BenchmarkWorkspaceGitSnapshot, BenchmarkWorkspaceSnapshot } from "./types.js";
 import { BoundedOutputBuffer } from "../tools/command-record.js";
 import { observeProcessCompletion, ProcessCleanupError } from "../tools/process-completion.js";

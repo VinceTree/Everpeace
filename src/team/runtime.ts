@@ -227,7 +227,7 @@ export class TeamRuntime implements TeamAgentBridge {
     } catch (error) {
       record.state = signal.aborted ? "cancelled" : "failed";
       record.error = error instanceof ToolFeedbackError ? `${diagnosticCategory(error.code)}: ${sanitizeExecOutput(error.message, 2048)} ${error.remedy}` : "Member stopped; inspect its Session and retained workspace for details.";
-      if (error instanceof ToolFeedbackError && error.code === "SANDBOX_UNAVAILABLE") record.errorCode = error.code;
+      if (error instanceof ToolFeedbackError && (error.code === 'SANDBOX_UNAVAILABLE' || error.code.startsWith('TEAM_'))) record.errorCode = error.code as 'SANDBOX_UNAVAILABLE' | `TEAM_${string}`;
       if (error instanceof ResourceCleanupError || error instanceof PersistenceError) throw error;
     } finally { delete owned.steering; await this.event(record); this.schedule(); }
   }

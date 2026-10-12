@@ -1,5 +1,7 @@
 # 工具：文件、规则、搜索与后台命令
 
+取消期限、Job 进程归属、持久批次恢复、allow 迁移与子包验证的现行契约见 [可靠性加固](RELIABILITY_HARDENING.md)。
+
 当前安全加固契约（文件后端、敏感内容、验证依据、MCP 与隐私迁移）见 [安全加固](SECURITY_HARDENING.md)，与旧说明冲突时以该契约及当前实现为准。
 
 本文是工具修改的知识入口。启动仍先读 [AGENTS.md](../../AGENTS.md) 和 [HANDOFF](../HANDOFF.md)；只修改某类工具时，阅读对应小节及链接的实现/测试即可。请求与最终结算见 [RUNTIME](RUNTIME.md)，权限配置和原生后端细节见 [PERMISSIONS](PERMISSIONS.md)、[SANDBOX](SANDBOX.md)。

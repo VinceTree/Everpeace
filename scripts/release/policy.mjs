@@ -16,6 +16,13 @@ export const nativeTests = [
   "crash after moving the original allows explicit exclusive recovery",
   "crash recovery refuses a later object with identical post-image bytes",
   "default stdio sandbox denies sensitive startup reads and network before tool approval",
+  'Windows owned Job cancels parent and detached descendants without killing a control',
+  'Windows parent natural exit cleans its remaining descendants',
+  'Windows owner crash fails closed and kill-on-close terminates payload',
+  'owner IPC denial terminates the bootstrap without launching payload',
+  'crashed multi-file batch recovers from durable intent',
+  'crashed multi-file batch preserves a later save',
+  'a failed second file rolls back the first and preserves the concurrent user object',
 ];
 
 export function candidateSha(value) {

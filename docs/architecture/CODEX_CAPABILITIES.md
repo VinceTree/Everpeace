@@ -43,7 +43,7 @@ Windows 的 Codex restricted-token backend 可以运行系统 PowerShell，但 G
 
 ### 启动信任与 HTTP 边界
 
-stdio 的宿主进程启动与 MCP tool-call 审批是独立权限边界。默认没有启动授权；`/mcp trust <server>` 读取有效 Codex 配置，展示工作区、解析后的程序、cwd、脱敏参数、环境名称和来源。CLI 不能证明配置文件来源时明确显示 unknown。确认默认 Cancel；批准只保存权限，`/mcp reconnect` 才显式启动。允许启动相当于允许运行该程序，其权限仍为宿主用户；本轮没有添加 MCP 原生沙箱，也不验证程序及依赖完整性。
+stdio 的宿主进程启动与 MCP tool-call 审批是独立权限边界。默认没有启动授权；`/mcp trust <server>` 读取有效 Codex 配置，展示工作区、解析后的程序、cwd、脱敏参数、环境名称和来源。CLI 不能证明配置文件来源时明确显示 unknown。确认默认 Cancel；批准只保存权限，`/mcp reconnect` 才显式启动。默认 stdio 使用原生 sandbox，限制工作区访问、默认禁网并过滤环境；初始化失败不回退宿主。显式 host 模式需另行确认，仍用私有 Job 管理后代，不获得沙箱隔离。启动身份纳入可执行文件、入口脚本、包清单/锁文件及隔离配置，不能证明全部传递依赖；动态身份每次授权。Windows host 入口须为明确的可执行程序，不能直接运行 `.cmd`/`.bat`，可配置已核验解释器与脚本。详见 [可靠性加固](RELIABILITY_HARDENING.md) 与 [安全专题](SECURITY_HARDENING.md)。
 
 [信任存储](../../src/mcp/trust.ts)在平台用户配置目录保存 `mcp-trust.json` schema v1，记录规范化工作区、服务名、授权种类和 HMAC 指纹；密钥仅通过 AuthStorage/keyring 保存。fingerprint 包含 transport、实际解析的 command、args、cwd 和冻结的完整环境，HTTP 例外绑定完整 URL、header 来源和实际凭据。项目配置不能授予信任，Session 也不恢复授权。文件读写使用跨进程锁和原子替换；坏文件、丢失密钥、keyring 或写入异常均不能自动放行。审批提交及落盘前重读配置并核对预览指纹、存储 revision 与 runtime generation。确认取消不授予权限。
 

@@ -1,5 +1,7 @@
 # 状态、持久化与终端交互
 
+取消期限、Job 进程归属、持久批次恢复、allow 迁移与子包验证的现行契约见 [可靠性加固](RELIABILITY_HARDENING.md)。
+
 当前安全加固契约（文件后端、敏感内容、验证依据、MCP 与隐私迁移）见 [安全加固](SECURITY_HARDENING.md)，与旧说明冲突时以该契约及当前实现为准。
 
 `/privacy`、无模型隐私 CLI、跨进程活动租约、安全导出及 `/perf` 的持久/兼容契约见 [验证、隐私与性能](VALIDATION_PRIVACY_PERFORMANCE.md)。首次保留期限需确认（推荐 30 天），旧策略保留；旧 Session 缺少解释字段和安全关闭证据时不推断成功或自动删除。

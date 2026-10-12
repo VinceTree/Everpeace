@@ -1,47 +1,40 @@
 # 当前交接
 
-本轮实施安全边界与隐私计划 01–12，源码候选为 `0.6.0-rc.2`。工作分支 `codex/public-contract-core-experience`，起点 `7ccce89240d6c970b092e1e75fdc0fd0915be9e8`，开始时工作树干净。用户已授权更新版本、提交、推送；不创建 tag 或 Release，不调用真实模型或付费评测。用户原有 `question`、`test-me`、`NUL` 和忽略的私有数据保持原样。
+2026-10-13：完成问题 13–23 的取消、进程清理与编辑可靠性修复，源码候选 `0.6.0-rc.3`。分支 `codex/public-contract-core-experience`，起点 `97f59fbe20f28d55e971d85979e8efa764243549`，开始时工作树干净。用户授权实现、更新候选号、提交和推送；不创建 tag/Release，不调用真实模型或付费评测。原有忽略的 `question`、`test-me`、`NUL` 与私有资料保持原样。
 
-具体契约、源码和回归入口见 [安全加固](architecture/SECURITY_HARDENING.md)。此前公开契约与核心体验证据保存于 [历史交接](archive/HANDOFF-2026-10-12-core-experience.md)，不能冒充本轮结果。
+现行契约和回归入口见 [可靠性加固](architecture/RELIABILITY_HARDENING.md)。01–12 的历史证据在 [上轮交接](archive/HANDOFF-2026-10-13-security-privacy.md)，不可作为本轮验证。
 
-## 实施与判定
+## 实施结果
 
-| 问题 | 本轮结果与范围 |
+- 13：流取消直达等待，consumer/body/dispatcher 使用共享期限；故障关闭请求准入，usage 保留，辅助 dispose 有界。
+- 14、15：Windows 私有 Job 在目标创建时建立归属，状态查询与独立终态收据，默认五秒故障期限；shell/PTY/Git/MCP/LSP/search/file worker 等接入，包含显式 host MCP，裸 Windows PID 拒绝终止。程序名只查询显式 PATH，IPC 启动失败清理 broker；诊断只保留进程内有界元数据。Unix 发送信号后查询组是否消失，查询失败保留故障。旧 taskkill 128 缺少后代证据，历史精确根因未定位，不能倒推历史清理成功。
+- 16：搜索总输出限制 2 MiB，超限即停止进程及后续文件，区分 output_limit/timeout。
+- 17、20：严格 hunk 数量/范围/连续性/换行校验，16 MiB 文件小修改，512 KiB 载荷及 64 MiB 批次预算，有界预览。
+- 19：原始字节、manifest、安装身份和回滚意图持久保存，patch/undo/team 共用协调器；明确 committed/rolled_back/conflict/unknown。recover-batch 显式审阅，已提交只清理，后续保存或同字节换对象拒绝覆盖。
+- 18：ask 中简单用户 allow 生效；项目限制独立求值，复杂语法询问；v1 allow 升级待显式激活。
+- 21：子包发现和覆盖债务，根没有 Node manifest 也发现嵌套包；显式 /verify --package，证据绑定 workspace revision，不随恢复重放。Git 跟踪、依据捕获与子包扫描接入任务取消。
+- 22、23：特殊快照稳定拒绝原因与 LFS 指针检测；网页静态提取/JS 未执行/可能不完整标记。
+
+13、15–18、20、21 的行为修复通过本轮离线和本机回归；14 的新清理路径已缓解旧退出码依赖，历史故障仍未定位。19、22、23 保留明确设计限制：多文件非原子、特殊团队快照安全拒绝、网页只作静态提取。
+
+## 本轮验收
+
+| 检查 | 结果与证据 |
 | --- | --- |
-| 01 | Windows 本地 NTFS：持有禁止并发写入/删除的对象句柄，核对原始字节与身份，保全原文件后排他安装。原生回归覆盖并发保存、提交间隙创建、回滚/undo、崩溃恢复；团队二进制整合也共用原生协议，17 MiB 回归通过。路径可能短暂不存在。 |
-| 02 | 文件读取、目录、搜索、附件、项目上下文/洞察、未跟踪/未暂存改动正文使用原生访问；拒绝 reparse/ADS/非普通文件/多重硬链接，固定工作区身份。Git 索引/对象数据库和应用存储是独立边界。 |
-| 03 | 敏感读取、逐次外传审批与离线合成攻击设施已实施；数据外传风险仍待真实模型验证，不称已复现凭据泄漏或模型免疫。 |
-| 04 | 敏感路径/内容进入模型和 Session 前遮罩、本次原文授权或拒绝；版本、对象和权限 revision 变化使授权失效，拒绝读取不授予编辑观察。 |
-| 05 | 捕获 manifest、生命周期脚本和包管理器依据，每项检查启动前复核；变化及恢复缺基线需确认，未授权保留验证债务。 |
-| 06 | stdio MCP 默认固定原生沙箱、禁网、过滤环境；失败不降级宿主。显式 host 模式单独审阅并撤销旧信任。 |
-| 07 | 显示安全 flags、数值、已核对入口、目录/模式；秘密和不明参数遮罩，拒绝控制字符。 |
-| 08 | 指纹增加程序、入口、manifest/锁文件及隔离配置，启动/调用/重连复核；动态 launcher 每次授权。按缓解处理，不能等同原子加载或全部依赖认证。 |
-| 09 | 输入历史逐次 no-save、提交前秘密审阅、v2 Session 关联与清理；旧字符串不猜归属，恢复不补回历史。Session 仍保存对话。 |
-| 10 | 首次设置推荐 30 天并复核预览，未确认不自动清理；旧策略不自动缩短。 |
-| 11 | Plan 只读且遵守网络/敏感外传审批，分别显示三个边界；退出 full-access 不撤回已发送数据。 |
-| 12 | 增加离线合成秘密、编码 Web/shell、恢复/拒绝、MCP 初始化/身份与原生竞争测试；真实模型端到端未执行。 |
+| typecheck → lint → test → build | 串行全部通过，首败停止；最终 test 共 1330 项，1327 通过、3 跳过、0 失败；约 353 秒。日志 `.cache/reliability-finalized-{typecheck,lint,test,build}.log` |
+| required Windows native | 61 项通过、0 跳过、0 失败；69 条报告记录包含 8 条汇总。覆盖真实 Job 后代/owner 崩溃/IPC 拒绝、文件句柄竞争、批次强杀/原生阶段/磁盘失败注入、MCP 与团队隔离。日志 `.cache/reliability-native-final.log`，收据 `.cache/reliability-native-evidence/receipt.json` |
+| UI / docs / CI 配置 | 953 组语言键及插值、135 份文档链接、工作流固定 revision 与门禁通过；`.cache/reliability-{ui,docs,ci}-final.log` |
+| 安全与供应链 | 完整 Git 历史与维护源码秘密扫描、锁文件依赖审计、许可证与 SBOM 通过，未审阅秘密 0；`.cache/reliability-security-delivery/scan.json` |
+| 安装 | install:verify、files:smoke、process:smoke 全通过；install:clean 从新源码副本 frozen-lockfile 安装并重编译两组件、构建与 CLI/SDK/真实 PTY 7 项烟测通过。`.cache/reliability-install-clean.log` |
 
-压缩持久化敏感状态，含敏感状态的恢复上下文重新审阅，历史授权不重放。团队由宿主双向传递敏感状态，原文共享与成员模型/存储范围重新确认；遮罩读取不返回原文摘要。恢复材料不经普通文件/搜索工具进入上下文，用 `everpeace recover-file <workspace> <relative-backup-path>` 显式恢复；字节或对象身份变化拒绝覆盖。正常更新保留 DACL/属性，undo 检查点保留原始字节、BOM/换行与常规属性；恢复不承诺此前全部 ACL 配置。
+全量测试跳过项是本机不允许文件 symlink、Windows 临时目录别名专门用例和 Unix 超时子进程实测。正常搜索超限及 host MCP 停止仍检查两秒快速界限；五秒只用于故障清理，不放宽正常取消。
 
-## 本地验收
+原生收据核验的冻结源码摘要为 `b04e93476e36f5ecad3d2846e42b819e26e177293ba45e3feb386e6ef1498e49`，`dirty: true`，基于上述起点并包含全部修复；收据生成后只增补交接及双语说明，没有实施代码变化。日志保留在 ignored `.cache`，不提交用户私有资料，不把本地 dirty 收据当正式 Release 候选认证。前期失败及取消的门禁轮次保留为诊断日志，不能作为通过证据。
 
-环境：Windows x64、本地 NTFS、Node `22.19.0`、pnpm `10.30.3`、MinGW-w64 g++。最终功能快照四门禁通过；完整测试 1,297 项、1,294 通过、3 跳过、零失败。跳过不视为原生通过。
+## 未验证与后续边界
 
-- 四门禁按 `typecheck → lint → test → build` 串行、首败停止；最终日志为 security-final-typecheck/lint/all-test/build；首败停止后修正再重跑，不复用失败轮结果。
-- `ui:verify`：942 项语言键与插值一致，宿主文案通过。`docs:verify`：133 个文档/工作流文件的本地链接与公开路径通过。
-- `install:verify`、构建后的 `files:smoke` 通过；`install:clean` 在新源码副本安装、重新编译文件 worker、构建并通过真实 PTY 7/7 烟测，没有复制用户目录或旧 node_modules。
-- `native:verify` required 模式本地通过 46/46；原生文件 6 项故障注入及 stdio 初始化隔离真实运行，不能替代专用 CI Runner。
-- 完整历史与维护文件秘密扫描、锁文件依赖审计、许可证和锁 SBOM 检查通过，日志 security-final-audit。
-- npm dry-run 清单核对：包含生产 worker、SHA-256 与源码，排除故障注入 worker；不是正式 tarball 的消费者安装证明。
+Windows x64、本地 NTFS、Node 22.19.0、pnpm 10.30.3、MinGW-w64、Windows build 26200。真实模型零调用；真实断电、MSVC、Linux/macOS 原生和本轮人工 Windows Terminal 操作未执行。Unix 状态检查只有离线模拟回归，不将 Windows Job 保证推广到其他平台。Job 不证明服务/WMI 等外部执行代理归属；其他平台文件访问仍不可用。正式跨平台包组件传递与消费者验收沿用待办，不把源码安装当正式包证明。Windows host MCP 入口须为明确的 PE 程序，不能直接执行 cmd/bat，不回退 SDK shell。
 
-原始日志留在忽略的 `.cache/`，不提交用户路径、恢复正文或秘密。真实模型评测零调用。Linux/macOS 本机原生未执行，文件后端明确不可用；Linux CI 只运行可移植隐私/网络/供应商及能力拒绝测试，不能标注完整文件原生通过。MSVC 分支未在本机执行。
+## 提交与远端
 
-正式跨平台包尚未接入 Windows worker artifact 传递，打包器拒绝缺少已核验组件的产物；正式消费者、专用 Windows Runner、真实终端输入法/NVDA 等历史待办继续保留。本轮只交付源码候选，不降低 Release 门禁。
-
-## 提交与后续
-
-提交使用 `[skip publish]`，保持测试启用。Release workflow 只接受 main 的显式 dispatch，源码 push 不触发发布。功能提交 b2d1f7965699a35d9ecd4a04714829768596bb22 已推送 origin/codex/public-contract-core-experience；本次后续提交仅回填交接收据。GitHub CLI 当前未登录，远端 CI 未查询，不作为通过证据。
-
-后续：其他平台原生后端、正式包组件传递与消费者安装、取得新授权后的真实模型安全评测。扫描不能证明不存在未知业务秘密；显式 host/full-access、可写映射/内核以及同用户恶意替换已安装组件不在本轮已验证保证内。
-
-最终 required 原生专项通过 46/46，冻结快照摘要 9d82dec44af916bb16e7080bca8a942459867c80accc87a79df4389e384b7b5e；之后仅交接文档记录更新。最终干净安装和安装路径 files:smoke 均通过，ui/docs/CI 结构与 diff 检查通过。
+交付使用 `[skip publish]`，不使用 `[skip ci]`；Release 工作流只有 main 上显式 workflow_dispatch。Test 工作流仅 PR/main push 触发，当前功能分支 push 不自动触发它，不能声称远端 CI 通过。提交推送完成后补充源码提交及远端核验结果。

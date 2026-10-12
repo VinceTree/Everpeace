@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { TeamWorkspaceError } from './workspace-errors.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
@@ -30,8 +31,9 @@ export async function inspectTeamFile(root: string, name: string, signal?: Abort
   const handle=await fs.open(target,'r');
   try {
     if(identity(await handle.stat())!==identity(before)) throw new Error('Team artifact changed before read');
-    const hash=createHash('sha256'); let size=0;
-    for await(const chunk of handle.createReadStream({autoClose:false,highWaterMark:64*1024})) { signal?.throwIfAborted(); size+=(chunk as Buffer).length; if(size>TEAM_FILE_LIMIT) throw new Error('Team artifact grew beyond its limit'); hash.update(chunk as Buffer); }
+    const hash=createHash('sha256'); let size=0; let prefix=Buffer.alloc(0);
+    for await(const chunk of handle.createReadStream({autoClose:false,highWaterMark:64*1024})) { signal?.throwIfAborted(); if(prefix.length<1024)prefix=Buffer.concat([prefix,(chunk as Buffer).subarray(0,1024-prefix.length)]);size+=(chunk as Buffer).length; if(size>TEAM_FILE_LIMIT) throw new Error('Team artifact grew beyond its limit'); hash.update(chunk as Buffer); }
+    if(size<=1024 && /^version https:\/\/git-lfs.github.com\/spec\/v1\r?\noid sha256:[a-f0-9]{64}\r?\nsize \d+\r?\n$/u.test(prefix.toString('utf8'))) throw new TeamWorkspaceError('lfs_object_missing');
     const after=await fs.lstat(target);
     if(after.isSymbolicLink()||size!==before.size||identity(after)!==identity(before)||await fs.realpath(target)!==target) throw new Error('Team artifact changed during read');
     return {hash:hash.digest('hex'),size,identity:identity(before)};

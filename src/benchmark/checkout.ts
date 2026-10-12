@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawnOwned as spawn } from "../tools/owned-process.js";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { lstat, mkdtemp, readFile, readdir, realpath, rm, stat } from "node:fs/promises";

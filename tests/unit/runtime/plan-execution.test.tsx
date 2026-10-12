@@ -19,7 +19,8 @@ import { createWorkflowState } from "../../../src/workflow/types.js";
 const model = { id: "offline", model_name: "offline", base_url: "https://compatible.invalid/v1", api_key: "fixture" };
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 10));
 async function waitFor(check: () => boolean) {
-  for (let attempt = 0; attempt < 150; attempt++) { if (check()) return; await tick(); }
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) { if (check()) return; await tick(); }
   assert.fail("Timed out waiting for the production Plan fixture");
 }
 function call(id: string, name?: string, args?: unknown): AgentResponse {

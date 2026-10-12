@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawnOwned as spawn } from '../tools/owned-process.js';
 import { observeProcessCompletion } from '../tools/process-completion.js';
 import type { BenchmarkTask, BenchmarkVerificationResult } from './types.js';
 

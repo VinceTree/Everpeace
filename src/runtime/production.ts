@@ -1,4 +1,5 @@
 import { isolatedCommand, verifyTeamIsolation } from "../team/isolation.js";
+import { listFileBatches } from '../tools/file-batch.js';
 import { realpath } from 'node:fs/promises';
 import { sanitizeExecOutput } from "../cli/exec-output.js";
 import { TeamRuntime, type MemberExecution } from "../team/runtime.js";
@@ -337,6 +338,10 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
   });
   const agent = new ReactAgent({
     beforeTask: async () => {
+        if (process.platform === 'win32') {
+          const pending = await listFileBatches(options.workspacePath);
+          if (pending.length) await options.io.writeTool?.(uiText('reliability.batchPending', { p0: pending.length }));
+        }
       await ensureActivity(); performanceSession = activitySession;
     },
     beforeRequest: ensureActivity,
@@ -459,6 +464,7 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
 }
 
 export interface ProductionCommandExecutorOptions {
+  cwd?: string;
   workspacePath: string;
   policy: PermissionPolicy | (() => PermissionPolicy);
   readableRoots?: readonly string[] | (() => readonly string[]);
@@ -482,7 +488,7 @@ export function createProductionCommandExecutor(options: ProductionCommandExecut
       ? options.readableRoots()
       : options.readableRoots ?? [];
     return runBash(options.isolation ? isolatedCommand(command, options.workspacePath) : command, {
-      cwd: options.workspacePath,
+      cwd: options.cwd ?? options.workspacePath,
       streamOutput: false,
       timeoutMs: timeoutMs ?? DEFAULT_MODEL_BASH_TIMEOUT_MS,
       sandbox: { policy: createEffectiveSandboxPolicy(policy, options.workspacePath, readableRoots, options.isolation ? { isolation: options.isolation } : {}) },
@@ -577,7 +583,7 @@ export function createProductionWorkflowAgentIO(options: ProductionWorkflowAgent
       if (await realpath(options.workspacePath) !== record.source) throw new Error('Byte integration workspace changed');
       const { integrateTeamBytes } = await import('../team/byte-integration.js');
       const result = await integrateTeamBytes(record, operations, scopes, integrationId, guard, signal);
-      await workflowFrom(options).observeShellExecution();
+      await workflowFrom(options).observeShellExecution(signal);
       if (result.status === 'applied') await workflowFrom(options).afterPatch(operations.map(o => ({path:o.path,action:o.action})), result, options.executeVerification ?? options.execute, signal);
       return result;
     },
@@ -586,11 +592,11 @@ export function createProductionWorkflowAgentIO(options: ProductionWorkflowAgent
       const guard=()=>{if(options.policy().mode==='read-only'||permissionPolicyRevision(options.policy())!==revision)throw new Error('Recovery permission changed');};
       guard();if(await realpath(options.workspacePath)!==record.source)throw new Error('Recovery workspace changed');
       const {recoverTeamIntegration}=await import('../team/byte-integration.js');
-      const result=await recoverTeamIntegration(record,integrationId,scopes,guard,signal);await workflowFrom(options).observeShellExecution();return result;
+      const result=await recoverTeamIntegration(record,integrationId,scopes,guard,signal);await workflowFrom(options).observeShellExecution(signal);return result;
     },
     async runApplyPatch(operations: readonly ApplyPatchOperation[], signal?: AbortSignal): Promise<ApplyPatchResult> {
       const workflow = workflowFrom(options);
-      await workflow.capturePatch(operations);
+      await workflow.capturePatch(operations, signal);
       signal?.throwIfAborted();
       const policy = options.policy();
       if (policy.mode === "read-only") {
@@ -622,7 +628,7 @@ export function createProductionWorkflowAgentIO(options: ProductionWorkflowAgent
         }
         throw error;
       } finally {
-        if (!cleanupFailed) await workflow.observeShellExecution();
+        if (!cleanupFailed) await workflow.observeShellExecution(signal);
       }
     },
     async runBackgroundBash(command, signal, timeoutMs, onOutput) {
@@ -646,7 +652,7 @@ export function createProductionWorkflowAgentIO(options: ProductionWorkflowAgent
         }
         throw error;
       } finally {
-        if (!cleanupFailed) await workflow.observeShellExecution();
+        if (!cleanupFailed) await workflow.observeShellExecution(signal);
       }
     },
     writeAssistant: (text) => output?.assistant?.(text),

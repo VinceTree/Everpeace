@@ -98,7 +98,7 @@ export function sensitiveSandboxPaths(workspace: string): string[] {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       if (++count > 10_000) throw new Error('Sensitive-path scan incomplete; sandbox launch blocked');
       const target = path.join(directory, entry.name);
-      if (entry.isSymbolicLink() || sensitivePath(entry.name) || /\.everpeace-(?:recovery|stage)-/u.test(entry.name)) denied.push(target);
+      if (entry.isSymbolicLink() || sensitivePath(entry.name) || /\.everpeace-(?:recovery|stage|batch)-/u.test(entry.name)) denied.push(target);
       else if (entry.isDirectory() && !['.git', '.everpeace', '.codex', '.agents', 'node_modules'].includes(entry.name)) visit(target);
     }
   };

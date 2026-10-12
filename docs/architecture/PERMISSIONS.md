@@ -1,5 +1,7 @@
 # Codex Permissions Baseline
 
+取消期限、Job 进程归属、持久批次恢复、allow 迁移与子包验证的现行契约见 [可靠性加固](RELIABILITY_HARDENING.md)。
+
 当前安全加固契约（文件后端、敏感内容、验证依据、MCP 与隐私迁移）见 [安全加固](SECURITY_HARDENING.md)，与旧说明冲突时以该契约及当前实现为准。
 
 Updated: 2026-09-28. The fixed-source three-harness comparison, implemented hardening, native probe evidence, and remaining optimization plan are in [SANDBOX.md](./SANDBOX.md). This does not claim full runtime equivalence.

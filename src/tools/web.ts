@@ -33,6 +33,9 @@ export interface WebSearchResult {
 }
 
 export interface WebFetchResult {
+  javascriptExecuted?: false;
+  extractionMethod?: 'static_html' | 'plain_text';
+  contentLimitations?: string[];
   extraction?: "dom_main" | "dom_body";
   url: string;
   title: string | null;
@@ -407,13 +410,16 @@ export async function fetchWebPage(
         : { title: plainTextTitle(contentType), content: body.text.trim() };
       const contentTruncated = parsed.content.length > PAGE_TEXT_LIMIT;
       const content = parsed.content.slice(0, PAGE_TEXT_LIMIT);
-      if (!content) throw new Error("Web page did not contain readable text");
+      const needsRendering = isHtml && (!content || /(?:enable javascript|javascript is required|you need to enable javascript)/iu.test(content) || content.length < 200 && /<script\b/iu.test(body.text));
 
       return {
         url: currentUrl.toString(),
         title: parsed.title,
         content_type: contentType,
         content,
+        javascriptExecuted: false,
+        extractionMethod: isHtml ? 'static_html' : 'plain_text',
+        contentLimitations: [...(needsRendering ? ['client_rendering_may_be_required'] : []), ...(!content ? ['no_readable_text'] : []), ...(body.truncated || contentTruncated ? ['content_truncated'] : [])],
         truncated: body.truncated || contentTruncated || ("extractionTruncated" in parsed && parsed.extractionTruncated),
         ...("extraction" in parsed ? { extraction: parsed.extraction } : {}),
         ...("links" in parsed ? { links: parsed.links } : {}),

@@ -139,6 +139,7 @@ export interface TuiDependencies {
     signal?: AbortSignal,
     onOutput?: (output: BashOutputPreview) => void,
     timeoutMs?: number,
+      workingDirectory?: string,
   ): Promise<BashResult>;
   getTeamConfig?(): Promise<TeamOptions>;
   configureTeam?(config: TeamOptions): Promise<void>;

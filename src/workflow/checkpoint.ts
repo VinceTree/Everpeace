@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { safeReadFile, safeCommitFile } from "../tools/safe-files.js";
+import { safeReadFile } from "../tools/safe-files.js";
+import { runFileBatch, type ByteChange } from '../tools/file-batch.js';
 import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 import path from "node:path";
 import type { ApplyPatchOperation, ApplyPatchResult } from "../tools/apply-patch.js";
@@ -21,6 +22,7 @@ export interface UndoResult {
   restored: string[];
   conflicts: string[];
   error?: string;
+  batchId?: string;
 }
 
 export interface CheckpointReviewResult {
@@ -106,9 +108,10 @@ export class TurnCheckpoint {
     if (![...this.#files.values()].some(file => file.committed)) return { status: "empty", restored: [], conflicts: [] };
     const restored: string[] = [];
     const conflicts: string[] = [];
+    const changes: ByteChange[] = [];
     for (const item of this.#files.values()) {
       if (!item.committed) continue;
-      let current: { exists: boolean; content: Buffer; identity?: string };
+      let current: { exists: boolean; content: Buffer; identity?: string; attributes?: number };
       try {
         current = await readFile(this.#root, item.path);
       } catch (error) {
@@ -121,16 +124,17 @@ export class TurnCheckpoint {
         conflicts.push(item.path);
         continue;
       }
-      try {
-        await safeCommitFile(this.#root, item.path, current.exists ? current.content : undefined, item.beforeExists ? item.beforeContent : undefined, undefined, item.beforeAttributes, current.identity);
-      } catch (error) { if (error instanceof ResourceCleanupError) throw error; conflicts.push(item.path); continue; }
-      restored.push(item.path);
+      changes.push({ path: item.path, ...(current.exists ? { before: current.content, beforeIdentity: current.identity } : {}), ...(item.beforeExists ? { after: item.beforeContent } : {}), ...(current.attributes === undefined ? {} : { attributes: current.attributes }), ...(item.beforeAttributes === undefined ? {} : { restoreAttributes: item.beforeAttributes }) });
     }
+    const batch = changes.length ? await runFileBatch(this.#root, changes) : undefined;
+    if (batch?.state === 'committed') restored.push(...changes.map(op => op.path));
+    else if (batch) conflicts.push(...changes.map(op => op.path));
     this.#available = false;
     return {
       status: conflicts.length > 0 ? "conflict" : "undone",
       restored,
       conflicts,
+      ...(batch ? { batchId: batch.id } : {}),
       ...(conflicts.length > 0 ? { error: "Some files changed after the Agent turn and were not overwritten." } : {}),
     };
   }

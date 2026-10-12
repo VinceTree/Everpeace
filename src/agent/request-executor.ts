@@ -2,7 +2,7 @@ import { normalizeTokenUsageSample } from "../status/model-status.js";
 import { randomUUID } from "node:crypto";
 import type { TaskPerformance } from "../performance/task-report.js";
 import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
-import { ModelStreamCleanupError } from "./response-errors.js";
+import { ModelStreamCleanupError, ModelStreamCancelledError } from "./response-errors.js";
 import { RequestAttemptLedger, type RequestAttemptStatus, type RequestPurpose } from "./request-attempt-ledger.js";
 import { recordRequestCost, type RequestCostContext, type ModelPrice } from "../status/cost.js";
 
@@ -62,7 +62,7 @@ export class RequestExecutor {
         const record = error && typeof error === "object" ? error as { name?: unknown; code?: unknown } : undefined;
         const cancelled = record?.name === "AbortError" || record?.code === "ABORT_ERR";
         const status = started ? cancelled ? "cancelled" : "failed" : "rejected";
-        const usage = !started ? { input_tokens: 0, output_tokens: 0, total_tokens: 0 } : error instanceof ModelStreamCleanupError ? error.usage : null;
+        const usage = !started ? { input_tokens: 0, output_tokens: 0, total_tokens: 0 } : error instanceof ModelStreamCleanupError || error instanceof ModelStreamCancelledError ? error.usage : null;
         this.#ledger.settle(attempt, status, usage);
         this.#trace(traces, `${this.#namespace}:${attempt}`, purpose, status, usage, performance.now() - startedAt);
         await this.#ledger.flush();

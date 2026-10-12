@@ -40,7 +40,7 @@ export async function enumerateSafeFiles(workspace: string, requested: string, s
     }
     if (entries.length === 10_000) reasons.add('directory_entry_limit');
     for (const entry of entries) {
-      if (excluded.has(entry.name) || /\.everpeace-(?:recovery|stage)-/u.test(entry.name) || entry.type === 'symlink') continue;
+      if (excluded.has(entry.name) || /\.everpeace-(?:recovery|stage|batch)-/u.test(entry.name) || entry.type === 'symlink') continue;
       const next = path.join(relative === '.' ? '' : relative, entry.name); const normal = next.split(path.sep).join('/');
       if (ignored(normal, entry.type === 'directory', rules)) continue;
       if (entry.type === 'directory') await visit(next, rules);
