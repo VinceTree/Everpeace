@@ -1,5 +1,7 @@
 # Public CLI and SDK compatibility
 
+[简体中文](COMPATIBILITY.zh-CN.md)
+
 The exec JSONL contract is independent of Session JSONL storage. Single-agent exec defaults to schema 1; team exec defaults to schema 2. Schemas shipped in `contracts/` describe records. Package versions do not silently reinterpret schema versions. `everpeace` and `everpeace/sdk` export the same `runTask` entry.
 
 Consumers must tolerate additional optional fields, match events by type and tool calls by `call_id`, and treat unknown usage as unknown. Existing required fields, types, units, absence semantics and enums remain stable within a schema. New event types or incompatible meanings require explicit version selection. v1 and v2 remain supported throughout 0.x. Removal requires a later major version, migration instructions and at least two minor releases **and** 90 days of notice.

@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "commit": "fce2321e7d64642e2c07d10fa095edf4e3f446b6",
+  "source": {
+    "sourceSha256": "30aa91d940ffefbde63fb6e520f8f710fe1e411b7cc2ec94beda0550fad64839",
+    "dirty": false
+  },
+  "node": "v22.19.0",
+  "platform": "win32",
+  "arch": "x64",
+  "liveModelRequests": 0,
+  "checks": [
+    {
+      "name": "typecheck",
+      "passed": true,
+      "ms": 5468,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "lint",
+      "passed": true,
+      "ms": 2280,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "ui:verify",
+      "passed": true,
+      "ms": 2479,
+      "sha256": "ebc8a8f8f4c328c9cc56fc35243a27df4ba55804e3e0d7c65a5cc91560430e88"
+    },
+    {
+      "name": "docs:verify",
+      "passed": true,
+      "ms": 1142,
+      "sha256": "a31d5c704f1c7791ac38cee62cb0dec96012e68d63d0fd1ffa9c11516c85879b"
+    },
+    {
+      "name": "test",
+      "passed": true,
+      "ms": 173313,
+      "sha256": "b132def8939b1d7ef933f8023d8a2ddab2654393e31312324683fe83ee9c0a2d",
+      "tests": 1274,
+      "pass": 1271,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 3
+    },
+    {
+      "name": "build",
+      "passed": true,
+      "ms": 1854,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "install:verify",
+      "passed": true,
+      "ms": 1127,
+      "sha256": "90da00a83b2deedb1bc382347da1c4d97710ffc0df09b4d566190fe9861f8423"
+    },
+    {
+      "name": "install:smoke",
+      "passed": true,
+      "ms": 8246,
+      "sha256": "a2635015b94a8c330f377906a9878e2feaeeebda429f4dc418d8ee5af6ddb734",
+      "tests": 7,
+      "pass": 7,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "name": "ci:verify",
+      "passed": true,
+      "ms": 965,
+      "sha256": "832d4f7aeb21cbcb05262d7f6ecfb6311ca3604ef5f470fd862f86ea63e643da"
+    }
+  ],
+  "scope": "Windows source candidate; skips are uncovered; no live model or formal native/package delivery proof",
+  "clientDate": "2026-10-12",
+  "cleanInstall": {
+    "passed": true,
+    "logSha256": "061553c1709f1459e50f37ddb533deb0f25ca0f47e8c226da45c6cf8dbb2fac5",
+    "note": "Clean-copy script includes contracts and contributor/security files. This check is source installation, not a release tarball."
+  }
+}

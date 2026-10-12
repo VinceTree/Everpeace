@@ -9,8 +9,8 @@ const source = dirname(dirname(fileURLToPath(import.meta.url)));
 const pnpm = process.env.npm_execpath;
 assert.ok(pnpm && /\.[cm]?js$/u.test(pnpm), "Run this check through pnpm install:clean");
 const temporary = await fs.mkdtemp(join(tmpdir(), "everpeace-clean-install-"));
-const roots = ["src", "tests", "scripts", "assets", "patches", "third_party", ".github", "docs", "dosc"];
-const rootFiles = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", ".npmrc", ".oxlintrc.json", "tsconfig.json", "tsconfig.build.json", ".gitignore", "AGENTS.md", "LICENSE", "README.md", "README.zh-CN.md"];
+const roots = ["src", "tests", "scripts", "contracts", "assets", "patches", "third_party", ".github", "docs", "dosc"];
+const rootFiles = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", ".npmrc", ".oxlintrc.json", "tsconfig.json", "tsconfig.build.json", ".gitignore", ".gitattributes", "AGENTS.md", "LICENSE", "SECURITY.md", "README.md", "README.zh-CN.md", "CONTRIBUTING.md", "CONTRIBUTING.zh-CN.md"];
 const files = [...new Set(execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ...roots, ...rootFiles], { cwd: source, encoding: "utf8" }).split("\0").filter(Boolean))];
 try {
   for (const name of files) {

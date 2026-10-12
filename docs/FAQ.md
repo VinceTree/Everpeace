@@ -6,6 +6,8 @@ The registry channel is not open. The intended consumer flow uses preinstalled N
 
 npm registry 渠道尚未开放。目标消费者流程是预装 Node 22.19+ 后安装同一份已验收包，不需要 Git、pnpm 或编译 TypeScript。源码预发布不能证明原生安装包已交付。
 
+On Windows PowerShell, an unsigned downloaded npm shim may be refused by local policy. Use `npm.cmd` and, if needed, `everpeace.cmd`; no execution-policy change is required. / Windows PowerShell 可能按本机策略拒绝未签名的 npm 脚本。使用 `npm.cmd`，必要时使用 `everpeace.cmd`，无需改变执行策略。
+
 **How do I select Chinese? / 怎样切换中文？**
 
 Use `everpeace --lang zh-CN`; `/language auto|en|zh-CN` saves a display preference. Priority: CLI, `EVERPEACE_LANG`, saved preference, system locale. `auto` selects simplified Chinese for Chinese locales and English otherwise. Commands, shortcuts, JSONL fields, error codes and original model/tool text retain their identities.

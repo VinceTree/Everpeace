@@ -147,7 +147,7 @@ workflow 提供路径列表时同时返回 `changed_paths_total` 和 `changed_pa
 
 详细目录职责见 [TUI_STRUCTURE](TUI_STRUCTURE.md)。界面始终 inline，使用终端原生 scrollback，不切换 alternate screen。主状态机拥有视图切换；展示组件不得自己创建 Agent、写 Session 或启动新任务。
 
-- 宿主界面英文；模型正文按其原始语言展示。Markdown、代码、shell 和严格 unified diff 分层高亮，超大或未知内容安全退回纯文本。
+- 宿主文案集中管理并支持中英文切换；模型正文、源码和第三方输出保持原文。状态仅投影协调器、权限、计量及清理事实，清理失败保留准入阻塞。Markdown、代码、shell 和严格 unified diff 分层高亮，超大或未知内容安全退回纯文本。
 - 等待状态包含 provider、耗时与 Ctrl+C 提示；`/status` 显示模型、供应商、实际协议、压缩/推理设置、context 占用和累计 token/cache，缺失数据明确显示未知或不完整。
 - `/status`、`/outputs`、`/history`、`/terminal-setup`、信息窗口及 picker/wizard 使用独立命令窗口；`/new`、`/clear`、`/exit` 是立即动作。
 - `/fork` 使用可取消 loading/结果窗口；任务、审批、直接命令或其他 command load 活动时拒绝。只有子日志原子发布并加载成功后才重放并切换 UI。

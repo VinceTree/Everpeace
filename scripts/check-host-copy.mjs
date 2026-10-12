@@ -2,7 +2,7 @@ import ts from 'typescript-evaluator';
 import { readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-const files = execFileSync('rg', ['--files', 'src/tui', 'src/cli'], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(f => /\.[jt]sx?$/.test(f) && !/(?:legacy-translation|settings|rich-text|syntax-highlight|unified-diff|editor|args|exec-output|exec-writer|types|dependencies|slash-commands|help)\./.test(f));
+const files = [...new Set(execFileSync('git', ['ls-files','-z','--cached','--others','--exclude-standard','--','src/tui','src/cli'], { encoding: 'utf8' }).split('\0'))].filter(f => /\.[jt]sx?$/.test(f) && !/(?:legacy-translation|settings|rich-text|syntax-highlight|unified-diff|editor|args|exec-output|exec-writer|types|dependencies|slash-commands|help)\./.test(f));
 const changes = [], messages = {};
 const catalog = JSON.parse(await readFile('src/localization/en.json', 'utf8'));
 let invalidCalls = 0;
