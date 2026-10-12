@@ -476,6 +476,20 @@ test('cleanup failure remains visible and blocks another task',async()=>{
   assert.ok((view.lastFrame()??'').includes(uiText('task.cleanupFailed')));
  }finally{view.unmount();}
 });
+
+test('late cleanup failure after clearing a Session blocks admission without publishing old output',async()=>{
+ let rejectTurn:((error:Error)=>void)|undefined,turns=0;
+ const fixture=createFixture({initial:[planModel],createAgent:()=>({async runTurn(){turns++;await new Promise<void>((_resolve,reject)=>{rejectTurn=reject;});return {};}})});
+ const view=render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{available:[planModel],missing:[]}} onReplayOutput={update=>update()}/>);
+ try{
+  await tick();view.stdin.write('old task');await tick();view.stdin.write('\r');await waitFor(()=>rejectTurn!==undefined);
+  view.stdin.write('/clear');await tick();view.stdin.write('\r');await tick();
+  rejectTurn!(new ProcessCleanupError('old task private detail'));
+  await waitFor(()=> (view.lastFrame()??'').includes('inspect_cleanup'));
+  assert.doesNotMatch(view.lastFrame()??'',/old task private detail/);
+  view.stdin.write('new task');await tick();view.stdin.write('\r');await tick();assert.equal(turns,1);
+ }finally{view.unmount();}
+});
 const approvedBody = "Inspect src/value.ts\n\nKeep the user's changes.\nUse exact replacement and run all checks.\n\nEND_OF_APPROVED_PLAN";
 
 function createPlanFixture(options: { endTask?: () => Promise<void>; coding?: (signal?: AbortSignal) => Promise<void> } = {}) {

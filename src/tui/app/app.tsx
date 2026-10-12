@@ -508,21 +508,25 @@ export function EverpeaceApp({
   );
 
   const ensureWorkflow = useCallback((initialState?: WorkflowState, workflowWorkspace = workspacePath): CodingWorkflowRuntime => {
+    let owner:CodingWorkflowRuntime;
+    let ownerSessionId=coordinator.sessionId;
     const runtimeOptions = {
       workspacePath: workflowWorkspace,
       ...(initialState ? { initialState } : {}),
       onState: async (state: WorkflowState) => {
-        const sessionId = coordinator.sessionId;
-        const runtime=workflowRuntime.current;
+        if(owner===workflowRuntime.current)ownerSessionId??=coordinator.sessionId;
+        const sessionId = ownerSessionId;
+        const runtime=owner;
         const task=coordinator.activeTask;
         if (sessionId) await dependencies.sessionStore.setWorkflow?.(sessionId, state);
         if(sessionId===coordinator.sessionId&&runtime===workflowRuntime.current&&task===coordinator.activeTask&&runtime?.state.task_id===state.task_id)setWorkflowProjection(state);
       },
     };
     if (workflowRuntime.current?.workspacePath !== workflowWorkspace || initialState !== undefined) {
-      workflowRuntime.current = new CodingWorkflowRuntime(runtimeOptions);
+      owner=new CodingWorkflowRuntime(runtimeOptions);
+      workflowRuntime.current = owner;
     }
-    if (!workflowRuntime.current) workflowRuntime.current = new CodingWorkflowRuntime(runtimeOptions);
+    if (!workflowRuntime.current) {owner=new CodingWorkflowRuntime(runtimeOptions);workflowRuntime.current=owner;}
     return workflowRuntime.current;
   }, [dependencies.sessionStore, workspacePath]);
 
@@ -2213,9 +2217,11 @@ export function EverpeaceApp({
       } catch (error) {
         await agent.finalizePendingGoalCompletion?.(false).catch(() => undefined);
         await agent.finishMemoryTurn?.(task.signal.aborted ? "cancelled" : "failed").catch(() => undefined);
+        // Cleanup debt belongs to the process owner, even after navigation has
+        // invalidated the old task's permission to publish conversation output.
+        if(error instanceof ResourceCleanupError){coordinator.markCleanupFailed(task);setCleanupFailed(true);setTaskOutcome('cleanup_failed');setBusyLabel(uiText('task.cleanupFailed'));if(coordinator.matchesTaskContext(task))append('error',uiText('task.cleanupFailed'));return;}
         if (!coordinator.matchesTaskContext(task)) return;
-        if(error instanceof ResourceCleanupError){coordinator.markCleanupFailed(task);setCleanupFailed(true);setTaskOutcome('cleanup_failed');setBusyLabel(uiText('task.cleanupFailed'));append('error',uiText('task.cleanupFailed'));}
-        else if (task.signal.aborted) {
+        if (task.signal.aborted) {
           setTaskOutcome('cancelled');
           const sessionId = coordinator.sessionId;
           if (mode === "default" && sessionId) {
