@@ -5,6 +5,7 @@ import { PassThrough } from "node:stream";
 import { test, type TestContext } from "node:test";
 import { runBash } from "../../../src/tools/bash.js";
 import { runBenchmarkVerification } from "../../../src/benchmark/runner.js";
+import {observeProcessCompletion,ProcessCleanupError} from "../../../src/tools/process-completion.js";
 
 function fixture(context: TestContext) {
   const child = new ChildProcess();
@@ -34,6 +35,25 @@ function fixture(context: TestContext) {
   return { child, killers, launches: () => launches };
 }
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+test("taskkill 128 remains a cleanup failure after a real owned child's fallback close",async(context)=>{
+  const child=childProcess.spawn(process.execPath,['-e','process.stdout.write("ready");setInterval(()=>{},1000)'],{windowsHide:true,stdio:['ignore','pipe','pipe']});
+  context.after(()=>{if(child.exitCode===null&&child.signalCode===null)child.kill();});
+  await new Promise<void>((resolve,reject)=>{child.stdout!.once('data',()=>resolve());child.once('error',reject);});
+  const pid=child.pid!;
+  context.mock.method(childProcess,'spawn',(command:string)=>{
+    assert.equal(command,'taskkill.exe');const killer=new ChildProcess();queueMicrotask(()=>killer.emit('close',128));return killer;
+  });
+  syncBuiltinESMExports();
+  context.after(()=>{context.mock.restoreAll();syncBuiltinESMExports();});
+  const controller=new AbortController();
+  const owned=observeProcessCompletion(child,{platform:'win32',signal:controller.signal});
+  controller.abort();const result=await owned.completion;
+  assert.equal(owned.closed,true);assert.equal(result.cancelled,true);
+  assert.ok(result.cleanupError instanceof ProcessCleanupError);
+  assert.match(result.cleanupError.message,/128/);
+  assert.throws(()=>process.kill(pid,0),{code:'ESRCH'});
+});
 
 test("host Bash cancellation does not finish on a fixed elapsed-time watchdog", async (context) => {
   const process = fixture(context);

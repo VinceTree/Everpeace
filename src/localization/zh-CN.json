@@ -897,5 +897,6 @@
   "mcd36c152b3a5": "{p0}#{p1}\n{p2}\n适用条件：{p3}\n提炼置信度：{p4}\n创建时间：{p5}\n到期时间：{p6}\n状态：{p7}{p8}\n来源会话：{p9}\n修订：{p10}",
   "m30bba58c7424": "\n\n/memory renew|disable|delete <scope> <id>\n/memory correct <scope> <id> {\"lesson\":\"...\",\"applyWhen\":\"...\"}",
   "value.environment": "环境问题",
-  "value.persistence": "持久化失败"
+  "value.persistence": "持久化失败",
+  "task.directShell": "正在运行你的直接 Shell 命令"
 }

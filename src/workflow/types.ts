@@ -30,6 +30,7 @@ export interface VerificationResult {
   timedOut: boolean;
   skipped?: boolean;
   error?: string;
+  diagnostic?: { category:'environment'|'unknown'; missingTool?:string };
 }
 
 export type VerificationSuiteStatus = "passed" | "failed" | "unavailable";

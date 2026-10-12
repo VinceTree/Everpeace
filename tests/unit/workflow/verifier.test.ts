@@ -15,6 +15,16 @@ import {
   verificationPrompt,
 } from "../../../src/workflow/verifier.js";
 
+test('conventional diagnostics report missing tools and leave unrecognized failures unknown',async()=>{
+ const command={id:'rust:test',label:'Cargo tests',command:'cargo test',tier:'full' as const,timeoutMs:1000};
+ const missing=await runVerificationCommand(command,async()=>({exitCode:1,stdout:'',stderr:"'cargo' is not recognized as an internal or external command",signal:null}));
+ assert.deepEqual(missing.diagnostic,{category:'environment',missingTool:'cargo'});
+ const unknown=await runVerificationCommand(command,async()=>({exitCode:1,stdout:'',stderr:'unrecognized failure',signal:null}));
+ assert.deepEqual(unknown.diagnostic,{category:'unknown'});
+ const custom=await runVerificationCommand(command,async()=>({exitCode:1,stdout:'',stderr:'unknown_personal_command: command not found',signal:null}));
+ assert.deepEqual(custom.diagnostic,{category:'environment'});
+});
+
 test("verification cleanup failure escapes the repair loop even with zero exit code", async () => {
   const command = { id: "test", label: "Test", command: "pnpm test", tier: "full" as const, timeoutMs: 1000 };
   let runs = 0;

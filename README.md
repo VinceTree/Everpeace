@@ -1,5 +1,10 @@
 # Everpeace
 
+[Public interface contract](docs/COMPATIBILITY.md) · [Contributing](CONTRIBUTING.md) · [FAQ](docs/FAQ.md) · [Installation status](docs/INSTALLATION.md) · [Candidate notes](docs/RELEASE_NOTES.md)
+
+Host display: `--lang auto|en|zh-CN`, `EVERPEACE_LANG` and `/language`. `--accessible` provides append-only TTY interaction; redirected automation uses `exec --json`. [Task and acceptance status](docs/core-experience/STATUS.md).
+
+
 **Candidate 0.6.0-rc.1.** Windows source and hosted Windows/Linux checks are verified; portable native delivery remains pending. Repair/team model comparisons have insufficient evidence and do not enable a new default. [Candidate evidence and usage](docs/implementation/REPORT.md).
 
 **Plan, edit and verify your Node.js / TypeScript project from the terminal.**
@@ -15,7 +20,7 @@ Work through a plan, review the edits and let the host check the result. It disc
 
 ## Start here
 
-Use **Node.js 22+**, Git and **pnpm 10.22.0**. Install from the repository so its Windows `node-pty` patches are applied. Keep optional dependencies enabled for bundled code search.
+Use **Node.js 22+**, Git and **pnpm 10.30.3**. Install from the repository so its Windows `node-pty` patches are applied. Keep optional dependencies enabled for bundled code search.
 
 ```powershell
 git clone https://github.com/VinceTree/Everpeace.git

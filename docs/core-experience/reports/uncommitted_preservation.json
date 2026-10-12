@@ -1,0 +1,352 @@
+{
+  "schema": 1,
+  "baselineCommit": "1e805410b713ab90ee09040fced7137416186d0c",
+  "candidateCommit": null,
+  "definitionDigest": "bd94ae15d72fca9a9cee813be625a07a9daa0624e30a89fc5d29c4d5d777a52f",
+  "seed": 20261012,
+  "model": "deepseek-flash",
+  "modelRegistration": null,
+  "endpoint": null,
+  "parameters": null,
+  "taskTokenBudget": null,
+  "campaignTokenBudget": null,
+  "parallelPairs": 1,
+  "repetitions": 5,
+  "status": "deferred_by_user",
+  "tasks": [
+    {
+      "id": "uncommitted_preservation-dirty-sibling",
+      "scenario": "uncommitted_preservation",
+      "prompt": "Repair one module while keeping dirty sibling edits.",
+      "acceptance": "Compare user-owned sibling bytes and accept the requested change.",
+      "materialStatus": "not_frozen"
+    },
+    {
+      "id": "uncommitted_preservation-dirty-same-file",
+      "scenario": "uncommitted_preservation",
+      "prompt": "Repair a function in a file containing unrelated user edits.",
+      "acceptance": "Compare reserved user line spans and hidden functional/regression vectors.",
+      "materialStatus": "not_frozen"
+    },
+    {
+      "id": "uncommitted_preservation-concurrent-edit",
+      "scenario": "uncommitted_preservation",
+      "prompt": "Handle a host edit occurring after the Agent reads a file.",
+      "acceptance": "Assert stale write refusal, conflict preservation, fresh approval/read and accepted recovery.",
+      "materialStatus": "not_frozen"
+    }
+  ],
+  "planned": [
+    {
+      "pair": 1,
+      "withinPair": 1,
+      "taskId": "uncommitted_preservation-dirty-sibling",
+      "scenario": "uncommitted_preservation",
+      "repetition": 1,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 1,
+      "withinPair": 2,
+      "taskId": "uncommitted_preservation-dirty-sibling",
+      "scenario": "uncommitted_preservation",
+      "repetition": 1,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 9,
+      "withinPair": 1,
+      "taskId": "uncommitted_preservation-dirty-same-file",
+      "scenario": "uncommitted_preservation",
+      "repetition": 3,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 9,
+      "withinPair": 2,
+      "taskId": "uncommitted_preservation-dirty-same-file",
+      "scenario": "uncommitted_preservation",
+      "repetition": 3,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 10,
+      "withinPair": 1,
+      "taskId": "uncommitted_preservation-concurrent-edit",
+      "scenario": "uncommitted_preservation",
+      "repetition": 4,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 10,
+      "withinPair": 2,
+      "taskId": "uncommitted_preservation-concurrent-edit",
+      "scenario": "uncommitted_preservation",
+      "repetition": 4,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 11,
+      "withinPair": 1,
+      "taskId": "uncommitted_preservation-dirty-same-file",
+      "scenario": "uncommitted_preservation",
+      "repetition": 1,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 11,
+      "withinPair": 2,
+      "taskId": "uncommitted_preservation-dirty-same-file",
+      "scenario": "uncommitted_preservation",
+      "repetition": 1,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 13,
+      "withinPair": 1,
+      "taskId": "uncommitted_preservation-dirty-same-file",
+      "scenario": "uncommitted_preservation",
+      "repetition": 4,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 13,
+      "withinPair": 2,
+      "taskId": "uncommitted_preservation-dirty-same-file",
+      "scenario": "uncommitted_preservation",
+      "repetition": 4,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 15,
+      "withinPair": 1,
+      "taskId": "uncommitted_preservation-dirty-sibling",
+      "scenario": "uncommitted_preservation",
+      "repetition": 3,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 15,
+      "withinPair": 2,
+      "taskId": "uncommitted_preservation-dirty-sibling",
+      "scenario": "uncommitted_preservation",
+      "repetition": 3,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 27,
+      "withinPair": 1,
+      "taskId": "uncommitted_preservation-concurrent-edit",
+      "scenario": "uncommitted_preservation",
+      "repetition": 3,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 27,
+      "withinPair": 2,
+      "taskId": "uncommitted_preservation-concurrent-edit",
+      "scenario": "uncommitted_preservation",
+      "repetition": 3,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 29,
+      "withinPair": 1,
+      "taskId": "uncommitted_preservation-dirty-same-file",
+      "scenario": "uncommitted_preservation",
+      "repetition": 5,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 29,
+      "withinPair": 2,
+      "taskId": "uncommitted_preservation-dirty-same-file",
+      "scenario": "uncommitted_preservation",
+      "repetition": 5,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 30,
+      "withinPair": 1,
+      "taskId": "uncommitted_preservation-dirty-sibling",
+      "scenario": "uncommitted_preservation",
+      "repetition": 2,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 30,
+      "withinPair": 2,
+      "taskId": "uncommitted_preservation-dirty-sibling",
+      "scenario": "uncommitted_preservation",
+      "repetition": 2,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 37,
+      "withinPair": 1,
+      "taskId": "uncommitted_preservation-dirty-sibling",
+      "scenario": "uncommitted_preservation",
+      "repetition": 5,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 37,
+      "withinPair": 2,
+      "taskId": "uncommitted_preservation-dirty-sibling",
+      "scenario": "uncommitted_preservation",
+      "repetition": 5,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 53,
+      "withinPair": 1,
+      "taskId": "uncommitted_preservation-dirty-sibling",
+      "scenario": "uncommitted_preservation",
+      "repetition": 4,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 53,
+      "withinPair": 2,
+      "taskId": "uncommitted_preservation-dirty-sibling",
+      "scenario": "uncommitted_preservation",
+      "repetition": 4,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 55,
+      "withinPair": 1,
+      "taskId": "uncommitted_preservation-concurrent-edit",
+      "scenario": "uncommitted_preservation",
+      "repetition": 1,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 55,
+      "withinPair": 2,
+      "taskId": "uncommitted_preservation-concurrent-edit",
+      "scenario": "uncommitted_preservation",
+      "repetition": 1,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 60,
+      "withinPair": 1,
+      "taskId": "uncommitted_preservation-concurrent-edit",
+      "scenario": "uncommitted_preservation",
+      "repetition": 5,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 60,
+      "withinPair": 2,
+      "taskId": "uncommitted_preservation-concurrent-edit",
+      "scenario": "uncommitted_preservation",
+      "repetition": 5,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 68,
+      "withinPair": 1,
+      "taskId": "uncommitted_preservation-dirty-same-file",
+      "scenario": "uncommitted_preservation",
+      "repetition": 2,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 68,
+      "withinPair": 2,
+      "taskId": "uncommitted_preservation-dirty-same-file",
+      "scenario": "uncommitted_preservation",
+      "repetition": 2,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 72,
+      "withinPair": 1,
+      "taskId": "uncommitted_preservation-concurrent-edit",
+      "scenario": "uncommitted_preservation",
+      "repetition": 2,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 72,
+      "withinPair": 2,
+      "taskId": "uncommitted_preservation-concurrent-edit",
+      "scenario": "uncommitted_preservation",
+      "repetition": 2,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    }
+  ],
+  "executed": 0,
+  "plannedCount": 30,
+  "complete": false,
+  "metrics": {
+    "success": null,
+    "errorModificationRate": null,
+    "wallMs": null,
+    "tokens": null,
+    "completeCost": null
+  },
+  "interpretation": "Task definitions only; fixtures, independent executable acceptance and model/candidate identities still need freezing. No real-model efficacy measured."
+}

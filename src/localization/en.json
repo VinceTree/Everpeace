@@ -897,5 +897,6 @@
   "mcd36c152b3a5": "{p0}#{p1}\n{p2}\nApply when: {p3}\nExtraction confidence: {p4}\nCreated: {p5}\nExpires: {p6}\nStatus: {p7}{p8}\nSource sessions: {p9}\nRevision: {p10}",
   "m30bba58c7424": "\n\n/memory renew|disable|delete <scope> <id>\n/memory correct <scope> <id> {\"lesson\":\"...\",\"applyWhen\":\"...\"}",
   "value.environment": "environment",
-  "value.persistence": "persistence"
+  "value.persistence": "persistence",
+  "task.directShell": "Running your direct shell command"
 }

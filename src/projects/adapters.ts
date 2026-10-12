@@ -91,7 +91,9 @@ export interface ProjectAdapter {
 }
 function explain(raw: string): ProjectDiagnostic {
     // Missing tools must be explicit. Unrecognized compiler output is not code failure evidence.
-    const match = raw.match(/(?:^|\n)([\w.-]+): command not found\b/);
+    const match = raw.match(/(?:^|\n)([\w.-]+): command not found\b/)
+        ?? raw.match(/['"]([\w.-]+)['"] is not recognized as (?:an internal or external command|the name of a cmdlet)/i)
+        ?? raw.match(/spawn ([\w.-]+) ENOENT/);
     return match ? { category: 'environment', raw, missingTool: match[1]! } : { category: 'unknown', raw };
 }
 const node: ProjectAdapter = { kind: 'node', support: 'full', recognize: async (workspace) => !!await readJson(path.join(workspace, 'package.json')), async toolchain(workspace) { const manifest = await readJson(path.join(workspace, 'package.json')); return manifest ? ['node', packageManager(workspace, manifest)] : []; }, async checks(workspace) { const manifest = await readJson(path.join(workspace, 'package.json')); if (!manifest)

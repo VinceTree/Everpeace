@@ -28,6 +28,7 @@ test('diagnostic uncertainty and basic language support are explicit', () => {
     for (const adapter of PROJECT_ADAPTERS) {
         assert.equal(adapter.explain('fixture failure').category, 'unknown');
         assert.equal(adapter.explain('cargo: command not found').category, 'environment');
+        assert.equal(adapter.explain("'cargo' is not recognized as an internal or external command").category,'environment');
         assert.equal(adapter.support, adapter.kind === 'node' ? 'full' : 'basic');
     }
 });

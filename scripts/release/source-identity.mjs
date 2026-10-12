@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 export function sourceIdentity(root) {
-  const roots = ["src", "tests", "scripts", ".github", "docs", "assets", "third_party", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "patches", "README.md", "README.zh-CN.md", "tsconfig.json", "tsconfig.build.json", ".oxlintrc.json", ".gitignore", ".gitattributes", ".gitleaks.toml", "AGENTS.md", "LICENSE", "SECURITY.md"];
+  const roots = ["src", "tests", "scripts", ".github", "docs", "contracts", "assets", "third_party", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "patches", "README.md", "README.zh-CN.md", "CONTRIBUTING.md", "CONTRIBUTING.zh-CN.md", "tsconfig.json", "tsconfig.build.json", ".oxlintrc.json", ".gitignore", ".gitattributes", ".gitleaks.toml", "AGENTS.md", "LICENSE", "SECURITY.md"];
   const files = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ...roots], { cwd: root, encoding: "utf8" }).split("\0").filter(Boolean).sort();
   const hash = createHash("sha256");
   for (const file of files) hash.update(file + "\0").update(readFileSync(path.join(root, file))).update("\0");

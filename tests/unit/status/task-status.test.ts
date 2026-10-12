@@ -18,6 +18,7 @@ test('task display preserves unsafe cleanup, unknown usage and distinct budgets'
 });
 test('idle and in-flight accounting do not pretend to block normal operation', () => {
     assert.equal(projectTaskStatus({ active: false, budgets: [{ scope: 'task', limit: null, used: null, complete: false }] }).blocker, null);
+    assert.equal(projectTaskStatus({ active: true, budgets: [{ scope: 'task', limit: null, used: null, complete: false }] }).blocker,null);
     const running = projectTaskStatus({ active: true, budgets: [{ scope: 'task', limit: 100, used: 20, complete: false, inFlight: true }] });
     assert.equal(running.blocker, null);
     assert.equal(running.budgets[0]?.remaining, null);

@@ -89,8 +89,9 @@ export function projectTaskStatus(f: TaskStatusFacts): TaskStatusSnapshot {
         nextAction = 'resume';
     }
     if (f.workflow?.pending_verification && !f.active) {
-        blocker = 'verification';
-        recovery = 'reapprove';
+        const environment=f.workflow.last_verification?.diagnostic?.category==='environment';
+        blocker = environment?'environment':'verification';
+        recovery = environment?'repair_environment':'reapprove';
         nextAction = 'review_checks';
     }
     if (f.cleanupFailed || f.outcome === 'cleanup_failed') {
@@ -102,7 +103,7 @@ export function projectTaskStatus(f: TaskStatusFacts): TaskStatusSnapshot {
     const budgets = Object.freeze((f.budgets ?? []).map(b => Object.freeze({ scope: b.scope, limit: b.limit, knownUsed: b.used, remaining: b.complete && b.used !== null && b.limit !== null ? Math.max(0, b.limit - b.used) : null, complete: b.complete, inFlight: b.inFlight === true })));
     // A request still in flight is not an accounting failure. Missing settled
     // usage remains unknown, including when the task itself has no token cap.
-    if (budgets.some(b => !b.complete && !b.inFlight) && blocker === null && (f.active || f.outcome !== undefined)) {
+    if (budgets.some(b => !b.complete && !b.inFlight && (b.knownUsed !== null || f.outcome !== undefined)) && blocker === null && (f.active || f.outcome !== undefined)) {
         blocker = 'usage_unknown';
         if (!f.active) {
             recovery = 'repair_environment';

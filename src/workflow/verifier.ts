@@ -1,6 +1,7 @@
 import type { BashResult } from "../tools/bash.js";
 import { retainOutput } from "../tools/command-record.js";
 import { ProcessCleanupError } from "../tools/process-completion.js";
+import {PROJECT_ADAPTERS} from '../projects/adapters.js';
 import type { VerificationCommand, VerificationResult, VerificationSuiteResult, VerificationTier } from "./types.js";
 import { verificationFromBash } from "./types.js";
 import { captureEvidenceReports, collectVerificationEvidence, invalidateVerificationEvidence, type EvidenceContext } from "./verification-evidence.js";
@@ -8,6 +9,16 @@ import { captureEvidenceReports, collectVerificationEvidence, invalidateVerifica
 const MAX_OUTPUT_BYTES=1024*1024;
 
 export {discoverProjectChecks as discoverVerificationCommands} from '../projects/adapters.js';
+
+function explainFailure(result:VerificationResult):VerificationResult{
+  if(result.passed)return result;
+  const adapter=PROJECT_ADAPTERS.find(adapter=>result.command.id.startsWith(adapter.kind+':'));
+  if(!adapter)return result;
+  const explanation=adapter.explain([result.error,result.stderr,result.stdout].filter(Boolean).join('\n'));
+  const tool=explanation.missingTool;
+  const knownTool=tool&&['node','npm','npm.cmd','pnpm','pnpm.cmd','yarn','yarn.cmd','bun','python','python3','pytest','cargo','rustc','go','tsc','eslint','tsx'].includes(tool.toLowerCase());
+  return {...result,diagnostic:{category:explanation.category,...(knownTool?{missingTool:tool}:{})}};
+}
 
 export function selectVerificationCommands(
   commands: readonly VerificationCommand[],
@@ -37,14 +48,14 @@ export async function runVerificationCommand(
     const result = await run(command.command, signal, command.timeoutMs);
     if (result.cleanupFailed) throw new ProcessCleanupError(result.error ?? "Verification process ownership is unresolved");
     signal?.throwIfAborted();
-    return verificationFromBash(command, {
+    return explainFailure(verificationFromBash(command, {
       ...result,
       stdout: retainOutput(result.stdout, MAX_OUTPUT_BYTES).text,
       stderr: retainOutput(result.stderr, MAX_OUTPUT_BYTES).text,
-    }, Date.now() - startedAt);
+    }, Date.now() - startedAt));
   } catch (error) {
     if (error instanceof ProcessCleanupError || signal?.aborted) throw error;
-    return {
+    return explainFailure({
       command,
       passed: false,
       exitCode: null,
@@ -53,7 +64,7 @@ export async function runVerificationCommand(
       durationMs: Date.now() - startedAt,
       timedOut: false,
       error: error instanceof Error ? error.message : String(error),
-    };
+    });
   }
 }
 

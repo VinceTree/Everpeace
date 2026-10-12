@@ -1,0 +1,352 @@
+{
+  "schema": 1,
+  "baselineCommit": "1e805410b713ab90ee09040fced7137416186d0c",
+  "candidateCommit": null,
+  "definitionDigest": "bd94ae15d72fca9a9cee813be625a07a9daa0624e30a89fc5d29c4d5d777a52f",
+  "seed": 20261012,
+  "model": "deepseek-flash",
+  "modelRegistration": null,
+  "endpoint": null,
+  "parameters": null,
+  "taskTokenBudget": null,
+  "campaignTokenBudget": null,
+  "parallelPairs": 1,
+  "repetitions": 5,
+  "status": "deferred_by_user",
+  "tasks": [
+    {
+      "id": "verification_repair-type-lint",
+      "scenario": "verification_repair",
+      "prompt": "Repair a type/lint failure under the unchanged production repair policy.",
+      "acceptance": "Independent type/runtime assertions and out-of-scope digest checks.",
+      "materialStatus": "not_frozen"
+    },
+    {
+      "id": "verification_repair-logic-regression",
+      "scenario": "verification_repair",
+      "prompt": "Repair a logic test failure while preserving existing behavior.",
+      "acceptance": "Separate new-feature acceptance and fixed legacy regression vectors.",
+      "materialStatus": "not_frozen"
+    },
+    {
+      "id": "verification_repair-build-environment",
+      "scenario": "verification_repair",
+      "prompt": "Diagnose build setup failure and stop unauthorized code repair.",
+      "acceptance": "Assert environmental classification, bounded progress and preserved source/cleanup.",
+      "materialStatus": "not_frozen"
+    }
+  ],
+  "planned": [
+    {
+      "pair": 3,
+      "withinPair": 1,
+      "taskId": "verification_repair-logic-regression",
+      "scenario": "verification_repair",
+      "repetition": 2,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 3,
+      "withinPair": 2,
+      "taskId": "verification_repair-logic-regression",
+      "scenario": "verification_repair",
+      "repetition": 2,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 6,
+      "withinPair": 1,
+      "taskId": "verification_repair-build-environment",
+      "scenario": "verification_repair",
+      "repetition": 3,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 6,
+      "withinPair": 2,
+      "taskId": "verification_repair-build-environment",
+      "scenario": "verification_repair",
+      "repetition": 3,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 14,
+      "withinPair": 1,
+      "taskId": "verification_repair-type-lint",
+      "scenario": "verification_repair",
+      "repetition": 3,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 14,
+      "withinPair": 2,
+      "taskId": "verification_repair-type-lint",
+      "scenario": "verification_repair",
+      "repetition": 3,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 17,
+      "withinPair": 1,
+      "taskId": "verification_repair-type-lint",
+      "scenario": "verification_repair",
+      "repetition": 5,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 17,
+      "withinPair": 2,
+      "taskId": "verification_repair-type-lint",
+      "scenario": "verification_repair",
+      "repetition": 5,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 20,
+      "withinPair": 1,
+      "taskId": "verification_repair-build-environment",
+      "scenario": "verification_repair",
+      "repetition": 4,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 20,
+      "withinPair": 2,
+      "taskId": "verification_repair-build-environment",
+      "scenario": "verification_repair",
+      "repetition": 4,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 24,
+      "withinPair": 1,
+      "taskId": "verification_repair-type-lint",
+      "scenario": "verification_repair",
+      "repetition": 2,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 24,
+      "withinPair": 2,
+      "taskId": "verification_repair-type-lint",
+      "scenario": "verification_repair",
+      "repetition": 2,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 31,
+      "withinPair": 1,
+      "taskId": "verification_repair-logic-regression",
+      "scenario": "verification_repair",
+      "repetition": 1,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 31,
+      "withinPair": 2,
+      "taskId": "verification_repair-logic-regression",
+      "scenario": "verification_repair",
+      "repetition": 1,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 39,
+      "withinPair": 1,
+      "taskId": "verification_repair-type-lint",
+      "scenario": "verification_repair",
+      "repetition": 4,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 39,
+      "withinPair": 2,
+      "taskId": "verification_repair-type-lint",
+      "scenario": "verification_repair",
+      "repetition": 4,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 43,
+      "withinPair": 1,
+      "taskId": "verification_repair-logic-regression",
+      "scenario": "verification_repair",
+      "repetition": 4,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 43,
+      "withinPair": 2,
+      "taskId": "verification_repair-logic-regression",
+      "scenario": "verification_repair",
+      "repetition": 4,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 49,
+      "withinPair": 1,
+      "taskId": "verification_repair-build-environment",
+      "scenario": "verification_repair",
+      "repetition": 5,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 49,
+      "withinPair": 2,
+      "taskId": "verification_repair-build-environment",
+      "scenario": "verification_repair",
+      "repetition": 5,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 57,
+      "withinPair": 1,
+      "taskId": "verification_repair-logic-regression",
+      "scenario": "verification_repair",
+      "repetition": 5,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 57,
+      "withinPair": 2,
+      "taskId": "verification_repair-logic-regression",
+      "scenario": "verification_repair",
+      "repetition": 5,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 63,
+      "withinPair": 1,
+      "taskId": "verification_repair-logic-regression",
+      "scenario": "verification_repair",
+      "repetition": 3,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 63,
+      "withinPair": 2,
+      "taskId": "verification_repair-logic-regression",
+      "scenario": "verification_repair",
+      "repetition": 3,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 69,
+      "withinPair": 1,
+      "taskId": "verification_repair-build-environment",
+      "scenario": "verification_repair",
+      "repetition": 2,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 69,
+      "withinPair": 2,
+      "taskId": "verification_repair-build-environment",
+      "scenario": "verification_repair",
+      "repetition": 2,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 71,
+      "withinPair": 1,
+      "taskId": "verification_repair-build-environment",
+      "scenario": "verification_repair",
+      "repetition": 1,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 71,
+      "withinPair": 2,
+      "taskId": "verification_repair-build-environment",
+      "scenario": "verification_repair",
+      "repetition": 1,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 73,
+      "withinPair": 1,
+      "taskId": "verification_repair-type-lint",
+      "scenario": "verification_repair",
+      "repetition": 1,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 73,
+      "withinPair": 2,
+      "taskId": "verification_repair-type-lint",
+      "scenario": "verification_repair",
+      "repetition": 1,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    }
+  ],
+  "executed": 0,
+  "plannedCount": 30,
+  "complete": false,
+  "metrics": {
+    "success": null,
+    "errorModificationRate": null,
+    "wallMs": null,
+    "tokens": null,
+    "completeCost": null
+  },
+  "interpretation": "Task definitions only; fixtures, independent executable acceptance and model/candidate identities still need freezing. No real-model efficacy measured."
+}

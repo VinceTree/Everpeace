@@ -1,6 +1,6 @@
 # 当前交接
 
-更新日期：2026-10-09。先读根 [AGENTS.md](../AGENTS.md)，再按 [文档索引](README.md) 定位。本轮实现 [PLAN](PLAN.md) 的 Windows/DeepSeek 工程缺口和实测准备，并使用用户指定的 [readme-generator Skill](https://github.com/geekjourneyx/readme-generator/blob/main/SKILL.md) 重排双语 README。此前 Memory 交付全文已移入 [归档](archive/HANDOFF_MEMORY_SERIALIZED_READ_DELIVERY.md)。
+更新日期：2026-10-09。先读根 [AGENTS.md](../../AGENTS.md)，再按 [文档索引](README.md) 定位。本轮实现 [PLAN](../PLAN.md) 的 Windows/DeepSeek 工程缺口和实测准备，并使用用户指定的 [readme-generator Skill](https://github.com/geekjourneyx/readme-generator/blob/main/SKILL.md) 重排双语 README。此前 Memory 交付全文已移入 [归档](HANDOFF_MEMORY_SERIALIZED_READ_DELIVERY.md)。
 
 **完整定位仍 active，尚不能宣布开始付费实测。** 原生导航、受控进程生命周期、离线协议和评测装配已有通过证据；真实 Windows Terminal 的必需操作证据仍 pending。工程回归不证明真实模型的成功率、稳定性或成本。
 
@@ -25,7 +25,7 @@ MCP SDK 升级到 1.31.0，同步锁文件，保持 stdio/Streamable HTTP 接口
 
 隔离 TUI `--integrations` 加载 owned-root 的 Skill、真实 stdio MCP、Memory 和原生协议 LSP，不读取个人凭据、Skill 根或 MCP 配置；正常生产 Skill 发现不变。Skill 读取、MCP 审批/ping、native hover、Memory 窗口/Esc 已有 ConPTY 记录，不代替真实 Windows Terminal 操作。
 
-README 按 Skill 的 clean-doc / 零图片样式重排，保留 Apache 2.0；首屏聚焦定位、安装、显式 Plan 执行、三个场景、CLI/SDK 与边界。详细原说明迁入 [英文使用指南](USAGE.md) 与 [中文使用指南](USAGE.zh-CN.md)。没有修改 GitHub Description/Topics。
+README 按 Skill 的 clean-doc / 零图片样式重排，保留 Apache 2.0；首屏聚焦定位、安装、显式 Plan 执行、三个场景、CLI/SDK 与边界。详细原说明迁入 [英文使用指南](../USAGE.md) 与 [中文使用指南](../USAGE.zh-CN.md)。没有修改 GitHub Description/Topics。
 
 最终候选核对发现旧 buildDigest 只哈希 production 入口：入口不变而导入模块变化时，旧构建无法被识别。修正为完整 artifact 顶层目录的确定性路径/字节摘要，拒绝 symlink 和非普通文件。实际回归证明新增、修改、删除入口之外模块均使摘要变化或恢复，源码摘要保持独立；摘要扩展后重新生成三组候选配置与预检。
 
@@ -35,7 +35,7 @@ README 按 Skill 的 clean-doc / 零图片样式重排，保留 Apache 2.0；首
 
 ## 实测准备与外置收据
 
-独立 owned-root 为 `C:\Users\39850\AppData\Local\Temp\everpeace-readiness-2eb92be531ab475d80b9ac4f141fa66a`，含 ownership marker，不使用用户原有 benchmark 目录写入。
+独立 owned-root 为 `<LOCAL_EVIDENCE>`，含 ownership marker，不使用用户原有 benchmark 目录写入。
 
 - `personal.json`：四项个人任务的固定基线副本、提示词、允许路径、独立验收及失败条件。两个修改任务的外置参考断言通过，seed→reference 补丁实际 apply --check 并应用，再恢复 seed；`personal-evaluators/` 在模型工作区外。
 - `personal-offline-preflight.json`：四任务的实际 runner 装配、请求计量、发现 typecheck/test/build；真实长进程取消、等待清理、债务落盘，重启 store 后 Plan-only fork 保留债务。不把 fake 输出当任务成功，不声称此收据执行了恢复后的全检查。
@@ -44,7 +44,7 @@ README 按 Skill 的 clean-doc / 零图片样式重排，保留 Apache 2.0；首
 - `smoke/artifacts/preflight-result.json`：最后一次 configs 后三组无凭据预检，绑定 revision/sourceDigest/buildDigest；源码、锁文件、构建或 HEAD 变化必须重新生成预检，旧开发结果不代替最终结果。
 - `native-typescript-navigation.json`、`native-navigation-lifecycle.json`：原生四查询和取消/权限改变后的实际 PID 退出。`terminal-automated-fixed/`、`terminal-integrations-fixed/` 保留 Session JSONL、失败及修正后的证据。
 
-重复准备命令和独立评分边界见 [READINESS](benchmark/READINESS.md)、[BENCHMARKING](BENCHMARKING.md)。取消、跳过和 unknown 保留在计划分母中。
+重复准备命令和独立评分边界见 [READINESS](../benchmark/READINESS.md)、[BENCHMARKING](../BENCHMARKING.md)。取消、跳过和 unknown 保留在计划分母中。
 
 ## 最终工程门禁与交付
 
@@ -58,4 +58,4 @@ README 按 Skill 的 clean-doc / 零图片样式重排，保留 Apache 2.0；首
 
 用户要求由 Agent 运行实际终端验收，本轮已尝试专属 Windows Terminal **1.24.12741.0** 窗口和限定标题 Win32 helper；当前桌面环境无法取得目标窗口焦点，helper 拒绝发送按键，未截取用户桌面。专属窗口已关闭，ConPTY 已收束。此为环境限制，不是自动审批拒绝。
 
-真实 Windows Terminal 的 Plan 修订/批准/显式执行、重复 Enter、guidance、审批中权限变化、Ctrl+C、Esc、中文/emoji、resize、scrollback、滚轮/缩放、单 prompt、直接 ! 输入独占及退出、相同 root 重启恢复仍 **pending**。步骤见 [DEVELOPMENT](DEVELOPMENT.md#离线-windows-terminal-手工验收)。必需证据取得且通过后，才可作“可以开始有预算的 DeepSeek 实测”结论；任何失败继续修正复验。
+真实 Windows Terminal 的 Plan 修订/批准/显式执行、重复 Enter、guidance、审批中权限变化、Ctrl+C、Esc、中文/emoji、resize、scrollback、滚轮/缩放、单 prompt、直接 ! 输入独占及退出、相同 root 重启恢复仍 **pending**。步骤见 [DEVELOPMENT](../DEVELOPMENT.md#离线-windows-terminal-手工验收)。必需证据取得且通过后，才可作“可以开始有预算的 DeepSeek 实测”结论；任何失败继续修正复验。

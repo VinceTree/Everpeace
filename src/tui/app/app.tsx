@@ -514,8 +514,9 @@ export function EverpeaceApp({
       onState: async (state: WorkflowState) => {
         const sessionId = coordinator.sessionId;
         const runtime=workflowRuntime.current;
+        const task=coordinator.activeTask;
         if (sessionId) await dependencies.sessionStore.setWorkflow?.(sessionId, state);
-        if(sessionId===coordinator.sessionId&&runtime===workflowRuntime.current)setWorkflowProjection(state);
+        if(sessionId===coordinator.sessionId&&runtime===workflowRuntime.current&&task===coordinator.activeTask&&runtime?.state.task_id===state.task_id)setWorkflowProjection(state);
       },
     };
     if (workflowRuntime.current?.workspacePath !== workflowWorkspace || initialState !== undefined) {
@@ -2071,6 +2072,7 @@ export function EverpeaceApp({
         return;
       }
       const task = admission.task;
+      setWorkflowProjection(undefined);
       setLastTaskStartedAt(Date.now());setTaskFinishedAt(undefined);setTaskOutcome(undefined);setTaskFailure(undefined);
       if (admission.approvedPlan) {
         const approved = admission.approvedPlan;
@@ -2804,12 +2806,13 @@ directController.current = new AbortController();setLastTaskStartedAt(Date.now()
     ? `${translateHostText('Thinking')} · ${formatElapsed(reasoningElapsedSeconds)}`
     : liveToolStatus;
 
-  const isTaskActive=coordinator.activeTask!==undefined||directController.current!==undefined;
+  const isDirectTask=directController.current!==undefined;
+  const isTaskActive=coordinator.activeTask!==undefined||isDirectTask;
   const taskReport=isTaskActive?agent?.getLivePerformanceReport?.():agent?.getPerformanceReport?.();
-  const requestBudget=agent?.getRequestBudgetSnapshot?.();
+  const requestBudget=!isTaskActive||taskReport!==undefined?agent?.getRequestBudgetSnapshot?.():undefined;
   const team=agent?.getTeamSnapshot?.();
   const taskUsed=taskReport?Object.values(taskReport.usage).reduce((sum,usage)=>sum+(usage?.inputTokens??0)+(usage?.outputTokens??0),0):null;
-  const taskStatus=projectTaskStatus({active:isTaskActive,...(coordinator.sessionId?{sessionId:coordinator.sessionId}:{}),...(workflowProjection?.task_id?{taskId:workflowProjection.task_id}:{}),cancelled:coordinator.activeTask?.signal.aborted===true||directController.current?.signal.aborted===true,cleanupFailed:cleanupFailed||coordinator.cleanupBlocked,approval:confirmation!==undefined,question:view.kind==='plan-questions',mode:agentMode,...(agentPhase?{loopPhase:agentPhase}:{}),...(workflowProjection?{workflow:workflowProjection}:{}),...(lastTaskStartedAt?{startedAt:lastTaskStartedAt}:{}),stageStartedAt:taskStageStartedAt,...(taskFinishedAt?{finishedAt:taskFinishedAt}:{}),...(taskOutcome?{outcome:taskOutcome}:{}),...(taskFailure?{failure:taskFailure}:{}),...(busyLabel?{operation:translateHostText(busyLabel)}:{}),budgets:[...(requestBudget?[{scope:'request' as const,...requestBudget}]:[]),{scope:'task',limit:team?.options.tokenBudget??null,used:team?team.usage.inputTokens+team.usage.outputTokens:taskUsed,complete:team?team.usage.complete:taskReport?.meteringComplete===true,inFlight:agentPhase==='sampling'||(team?.openRequests??0)>0},...(activeGoal?[{scope:'goal' as const,limit:activeGoal.token_budget,used:activeGoal.tokens_used,complete:activeGoal.usage_complete,inFlight:agentPhase==='sampling'||(team?.openRequests??0)>0}]:[])]});
+  const taskStatus=projectTaskStatus({active:isTaskActive,...(coordinator.sessionId?{sessionId:coordinator.sessionId}:{}),...(workflowProjection?.task_id?{taskId:workflowProjection.task_id}:{}),cancelled:coordinator.activeTask?.signal.aborted===true||directController.current?.signal.aborted===true,cleanupFailed:cleanupFailed||coordinator.cleanupBlocked,approval:confirmation!==undefined,question:view.kind==='plan-questions',mode:isDirectTask?'default':agentMode,...(isDirectTask?{loopPhase:'tools'}:agentPhase?{loopPhase:agentPhase}:{}),...(!isDirectTask&&workflowProjection?{workflow:workflowProjection}:{}),...(lastTaskStartedAt?{startedAt:lastTaskStartedAt}:{}),stageStartedAt:taskStageStartedAt,...(taskFinishedAt?{finishedAt:taskFinishedAt}:{}),...(taskOutcome?{outcome:taskOutcome}:{}),...(taskFailure?{failure:taskFailure}:{}),...(isDirectTask?{operation:uiText('task.directShell')} :busyLabel?{operation:translateHostText(busyLabel)}:{}),budgets:isDirectTask?[]:[...(requestBudget?[{scope:'request' as const,...requestBudget}]:[]),{scope:'task',limit:team?.options.tokenBudget??null,used:team?team.usage.inputTokens+team.usage.outputTokens:taskUsed,complete:team?team.usage.complete:taskReport!==undefined&&Object.values(taskReport.usage).every(usage=>usage?.unknown===0),inFlight:agentPhase==='sampling'||(team?.openRequests??0)>0},...(activeGoal?[{scope:'goal' as const,limit:activeGoal.token_budget,used:activeGoal.tokens_used,complete:activeGoal.usage_complete,inFlight:agentPhase==='sampling'||(team?.openRequests??0)>0}]:[])]});
   useEffect(()=>{setTaskStageStartedAt(Date.now());},[taskStatus.stage,taskStatus.taskId]);
 
   if (view.kind !== "chat") {

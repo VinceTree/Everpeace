@@ -151,6 +151,14 @@ dist/
 .cache/
 artifacts/
 reports/
+!docs/core-experience/reports/
+docs/core-experience/reports/*
+!docs/core-experience/reports/plan.json
+!docs/core-experience/reports/protected_modification.json
+!docs/core-experience/reports/deepseek_long_task.json
+!docs/core-experience/reports/cancellation_recovery.json
+!docs/core-experience/reports/verification_repair.json
+!docs/core-experience/reports/uncommitted_preservation.json
 NUL
 test-me/
 question/

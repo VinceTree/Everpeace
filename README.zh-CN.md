@@ -1,5 +1,10 @@
 # Everpeace
 
+[公开接口契约](docs/COMPATIBILITY.md) · [贡献指南](CONTRIBUTING.zh-CN.md) · [常见问题](docs/FAQ.md) · [安装状态](docs/INSTALLATION.md) · [候选变更](docs/RELEASE_NOTES.md)
+
+宿主显示使用 `--lang auto|en|zh-CN`、`EVERPEACE_LANG` 和 `/language`；`--accessible` 提供追加式 TTY 交互，重定向自动化使用 `exec --json`。[本轮任务与验收状态](docs/core-experience/STATUS.md)。
+
+
 **候选版本 0.6.0-rc.1。** 本机 Windows 及 GitHub Windows/Linux 源码检查已验证；跨平台原生安装包待验证。修复及团队模型对照证据不足，不调整默认策略。[候选证据与使用说明](docs/implementation/REPORT.md)。
 
 **在终端中规划、修改并验证你的 Node.js / TypeScript 项目。**
@@ -15,7 +20,7 @@ Everpeace 是 DeepSeek 优先、Windows 优先的个人 Node.js / TypeScript 开
 
 ## 开始使用
 
-准备 **Node.js 22+**、Git 和 **pnpm 10.22.0**。从仓库安装以应用 Windows `node-pty` 补丁；保留 optional dependencies，以使用随包代码搜索。
+准备 **Node.js 22+**、Git 和 **pnpm 10.30.3**。从仓库安装以应用 Windows `node-pty` 补丁；保留 optional dependencies，以使用随包代码搜索。
 
 ```powershell
 git clone https://github.com/VinceTree/Everpeace.git
@@ -38,7 +43,7 @@ pnpm dev
 解释请求预算的执行路径，并提出一个聚焦的回归修复计划。
 ```
 
-审阅或修订计划，批准后显式开始执行。`/diff` 审阅改动，`/status` 查看请求设置和用量，`/resume` 恢复 Session。`/doctor` 进行本地诊断；`/doctor --live` 先预览有界探测，显式开始后可能产生费用。宿主 TUI 界面使用英文。
+审阅或修订计划，批准后显式开始执行。`/diff` 审阅改动，`/status` 查看请求设置和用量，`/resume` 恢复 Session。`/doctor` 进行本地诊断；`/doctor --live` 先预览有界探测，显式开始后可能产生费用。宿主 TUI 支持英文与简体中文自动选择和切换。
 
 使用构建后的 CLI：
 

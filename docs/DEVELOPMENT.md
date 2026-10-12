@@ -6,7 +6,7 @@
 
 ## 工具链与安装
 
-- Node.js 22+，使用仓库指定的 `pnpm@10.22.0`；版本要求和脚本以 [package.json](../package.json) 为准。
+- Node.js 22+，使用仓库指定的 `pnpm@10.30.3`；版本要求和脚本以 [package.json](../package.json) 为准。
 - TypeScript + ESM，采用 NodeNext 模块解析。源码内本地导入保留 `.js` 扩展；配置见 [tsconfig.json](../tsconfig.json) 和 [tsconfig.build.json](../tsconfig.build.json)。
 - `tsx` 运行开发入口与 Node test runner；`tsc` 输出到 `dist/`，构建会先清理该生成目录。
 - Git 用于工作区跟踪；模型 search/glob、Composer `@` 候选和 doctor 使用固定的 `@vscode/ripgrep@1.18.0` 平台 optional dependency，并通过绝对路径运行。Windows 使用系统 PowerShell，macOS/Linux 模型 shell 使用 Bash。

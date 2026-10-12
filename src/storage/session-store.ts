@@ -678,7 +678,8 @@ function isVerificationResult(value: unknown): value is VerificationResult {
     typeof value.stdout === "string" && typeof value.stderr === "string" &&
     typeof value.durationMs === "number" && typeof value.timedOut === "boolean" &&
     (value.skipped === undefined || typeof value.skipped === "boolean") &&
-    (value.error === undefined || typeof value.error === "string");
+    (value.error === undefined || typeof value.error === "string") &&
+    (value.diagnostic===undefined||(isRecord(value.diagnostic)&&['environment','unknown'].includes(String(value.diagnostic.category))&&(value.diagnostic.missingTool===undefined||(typeof value.diagnostic.missingTool==='string'&&/^[A-Za-z0-9_.-]+$/u.test(value.diagnostic.missingTool)))));
 }
 
 function isVerificationSuite(value: unknown): value is VerificationSuiteResult {
@@ -726,6 +727,7 @@ function verificationSnapshot(verification: VerificationResult): VerificationRes
     durationMs: verification.durationMs,
     timedOut: verification.timedOut,
     ...(verification.skipped === undefined ? {} : { skipped: verification.skipped }),
+    ...(verification.diagnostic?{diagnostic:{category:verification.diagnostic.category,...(verification.diagnostic.missingTool?{missingTool:verification.diagnostic.missingTool}:{})}}:{}),
   };
 }
 

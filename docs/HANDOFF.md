@@ -1,41 +1,13 @@
 # 当前交接
 
-## 当前候选与授权
+本轮实施公开契约与核心体验计划。基线为已发布源码候选 `v0.6.0-rc.1`、commit `1e805410b713ab90ee09040fced7137416186d0c`；工作分支 `codex/public-contract-core-experience`。本轮不改包标识、不移动旧标签，不开发 IDE/ACP 或扩大其他语言支持承诺。
 
-当前源码候选 **0.6.0-rc.1**。用户明确授权十项优化、deepseek-flash 真实评测不限 Token/费用总额，以及提交、推送、更新版本和 GitHub Release。用户接受先在 Windows 测试，Linux 本机/云服务器检查后续进行。正式原生安装包仍保留原有完整发布门禁；本次发布为源码预发布，不把本机成功或跳过当作正式包验收。
+用户已明确暂停真实模型测试，等待后续资金准备：不得继续调用模型、付费预检或实验。此前较新 deepseek-flash 返回 503、另一配置返回 402，不能作为有效模型证据。当前继续实现和离线验收。Linux 本机不可用，专用 Windows native Runner 尚缺；真实输入法、NVDA 和原生安装门禁分别保持未执行。
 
-起点目录缺少 Git、根工程配置及锁文件。完整性清单在 [baseline-manifest.json](implementation/baseline-manifest.json)，恢复依据见 [RESTORATION](implementation/RESTORATION.md)。本地基线及阶段提交全部保留，随后与远端 main 的真实历史连接，不覆盖上游提交。pnpm 固定 10.30.3、依赖使用本机安装记录核验的精确版本。
+公开接口、文案和状态投影的实际结果、待验收列表统一见 [实施状态](core-experience/STATUS.md)。JSONL v1/v2 契约及旧消费者完整性冻结，稳定错误码是可选增量字段。TaskStatusSnapshot 只投影宿主事实；取消保留准入直至清理完成，清理失败继续阻塞。中英文设置使用既有原子存储机制，命令行与环境变量优先；助手、用户、源码和第三方正文不按关键词改写。
 
-## 逐项交付
+定向 UI/CLI/公开消费端最近 243 项全部通过；之后的追加展示修改仍须最终完整门禁，不能复用旧收据。源代码检查顺序仍为 typecheck → lint → test → build；增加 ui:verify 和 docs:verify，另行执行安装烟测。独立阶段提交和最终源码摘要将在实施状态记录。
 
-十项实现、验收、迁移和复现方式见 [优化验收报告](implementation/REPORT.md)。报告分别标出已有能力、补强、测试及真实效果待验证。生产修复上限继续三轮，团队默认仍单 Agent。验证 v1/v2 增量兼容；独立功能验证只能由宿主入口绑定。Memory 来源不足可读但不注入，纠正/禁用会在下一请求前刷新。二进制整合以宿主原始字节与事务恢复为边界，64 MiB 单文件、256 MiB 快照及 10,000 文件资源限制不代表费用预算。
+贡献入口见 [中文指南](../CONTRIBUTING.zh-CN.md)，[终端人工矩阵](TERMINAL_ACCEPTANCE.md)、[安装准备](INSTALLATION.md) 与 [候选变更](RELEASE_NOTES.md) 分别记录未覆盖边界。机器专属原始收据位于忽略的本地证据目录，公共文档和当前归档仅保留可重现命令、相对路径、Commit 与摘要。旧历史/标签不重写。
 
-## 真实评测结果
-
-模型使用可解析凭据的 deepseek-flash 注册项；较新的另一注册项凭据不可用。密钥只经 AuthStorage 读取，没有写入源码或报告。修复/团队各计划十二任务、每臂五次、共 120 次；实际运行与全部跳过均保留。四个配对通道并发，配对内顺序随机且串行，存在同端点/同机器竞争限制。
-
-- 修复：46 passed、32 failed、3 error、39 skipped；33 recorded runs 的 Usage 未知。
-- 团队：0 passed、28 failed、1 error、91 skipped；28 recorded runs 的 Usage 未知。
-- 两个 campaign 都因 Windows taskkill 128 清理失败停止；有失败模型请求、计量不完整与未运行项。没有达到策略门槛，不宣称效率改善，也不推荐自动开启团队。
-- Memory：90 次全部执行；无记忆 30/30、有效记忆 29/30、过期/禁用/纠正组 30/30。旧错误经验注入零次；一例解析失败且 Usage 未知，整体不能记为全通过。
-- Web：24 页固定技术文档对照，包含十二份有许可的 Node 上游快照；正文及关键代码保持，合成页面外壳不宣称通用网站效果。
-
-脱敏证据见 [evidence](implementation/evidence/manifest.json)。原始计划、JSONL、模型原始记录和冻结 harness 保存在本地 .cache/evaluation；不上传原始源码/客户路径/输出。修复已知 Token 5,218,486，Memory 已知输入 350,289、输出 6,812；这些是部分已知消耗，不是完整账单。先前基础设施失败 pilot 的已知输入 653,238、输出 41,803 及在途未知用量另行保留，不从总工作记录中删除。
-
-## 当前检查与发布状态
-
-最终 Windows 四项检查、干净安装、安装烟测、工作流配置及安全检查正在本次候选上执行。最后结果与远端 CI/PR/Release 链接将追加在本节；旧交接收据不迁移为本次成功。当前 Linux 本机未执行：WSL 映像不可用，用户选择后续服务器验证。GitHub hosted 检查如运行，将独立记录其结果和平台跳过。
-
-原有 question、test-me、NUL 及私有 .cache 模型产物保留。没有 npm registry 发布。上轮交接已归档到 [observability base](archive/HANDOFF-2026-10-12-observability-base.md)。
-
-### 本次最终 Windows 收据
-
-串行 typecheck → lint → test → build 全部通过：1258 tests，1255 pass、3 skip、0 fail、0 cancel；CLI/SDK/native PTY 安装烟测 7 pass。干净安装及工作流固定/门禁配置检查通过。命令和日志摘要见 [windows-checks.json](implementation/evidence/windows-checks.json)。安全工具初次下载连接中断不计成功，重试及远端安全结果另行追加。
-
-### 本次远端独立验收
-
-[PR #10](https://github.com/VinceTree/Everpeace/pull/10) 的第二轮 [完整 CI](https://github.com/VinceTree/Everpeace/actions/runs/38216807264) 全部通过，绑定 commit 4483a606113baf0709853a4a4d7d9ca986163169。Ubuntu hosted：1258 tests、1249 pass、9 skip、0 fail；Windows hosted 结果见 [hosted-ci.json](implementation/evidence/hosted-ci.json)。security 与 Required checks 全成功。首次远端失败原样保留：Memory CLI 测试隔离变量误用 XDG_CONFIG_HOME，修正为 XDG_STATE_HOME；合成 PEM 标记增加精确历史/当前文件哈希的审查记录，不放宽扫描。
-
-本机安全工具下载失败及 TLS 中断仍记录为未完成；远端安全扫描独立通过。Linux hosted 源码检查现在有实际证据，本机 WSL 及专用 Windows native 发布验收仍未执行。末次仅补正文展示版本及验收文档的提交继续接受同一分支保护门禁。正式原生安装包不因源码预发布绕过其门禁。
-
-本次源码预发布名称 v0.6.0-rc.1，[Release 入口](https://github.com/VinceTree/Everpeace/releases/tag/v0.6.0-rc.1) 在合并及打标签之后创建；公开附件仅含脱敏 evidence。
+上一轮十项优化的已发布结果见 [历史交接](archive/HANDOFF-2026-10-12-optimization-rc.md) 和 [原验收报告](implementation/REPORT.md)。这些结果不冒充本轮候选验收或优化收益。保留用户既有 question、test-me、NUL 和私有 .cache 数据。
