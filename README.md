@@ -48,7 +48,7 @@ pnpm link --global
 everpeace
 ```
 
-Current source version: **0.5.3**.
+Current source version: **0.6.0-rc.1** (source prerelease).
 
 ## Real tools, checked changes
 
