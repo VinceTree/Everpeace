@@ -1,4 +1,4 @@
-import {uiText} from '../../../localization/messages.js';
+import {uiText,translateHostText} from '../../../localization/messages.js';
 import { ConfirmInput, MultiSelect, Spinner } from "@inkjs/ui";
 import { Box, Text, useInput, usePaste, useWindowSize } from "ink";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -25,7 +25,9 @@ export interface SessionPickerProps {
 function sessionLabel(match: SessionSearchMatch, maximumWidth: number, allWorkspaces: boolean): string {
   const timestamp = new Date(match.summary.updated_at).toLocaleString("en-US");
   const workspace = allWorkspaces ? ` · ${match.summary.workspace_path}` : "";
-  return truncateEnd(`${translateLegacyUiText(match.summary.title)} — ${timestamp}${workspace}`, maximumWidth);
+  const title=match.summary.title_pending&&(match.summary.title==='New Session'||match.summary.title==='新 Session')
+    ?translateHostText(translateLegacyUiText(match.summary.title)):match.summary.title;
+  return truncateEnd(`${title} — ${timestamp}${workspace}`, maximumWidth);
 }
 
 export function SessionPicker({

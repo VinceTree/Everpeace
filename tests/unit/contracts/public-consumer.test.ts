@@ -8,6 +8,7 @@ import os from 'node:os';
 import {createHash} from 'node:crypto';
 const run=promisify(execFile);
 test('frozen consumers read both original versions and the built public CLI/SDK',async()=>{
+  await fs.mkdir(path.join(process.cwd(),'.cache'),{recursive:true});
   const root=await fs.mkdtemp(path.join(process.cwd(),'.cache','public-consumer-'));
   const workspace=await fs.mkdtemp(path.join(os.tmpdir(),'everpeace-public-scope-'));
   try{

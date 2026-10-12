@@ -26,5 +26,15 @@
     ],
     "reason": "Synthetic PEM markers followed by repeated A/Q characters, plus fake token prefixes, used only to verify multiline and truncated redaction; not usable private keys.",
     "review": "Reviewed full test source and exact historical/current bytes; any content change requires a new exact hash review."
+  },
+  {
+    "rule": "generic-api-key",
+    "file": "src/localization/en.json",
+    "sha256": [
+      "a24f9c9e47779af000d634c1f08795b77cae42fbd0e1e076506aca206f64f27d",
+      "4afbfaa87a2b041c62b56ef5cfd980ac054a5147e5da025c189cc98cb4780ce8"
+    ],
+    "reason": "False positive on static host-copy JSON next to the Brave API-key label and a generated message identifier; catalog contains UI literals/interpolation placeholders, not a credential.",
+    "review": "Reviewed the complete initial 264c066 catalog and current bytes. Message identifiers are SHA-derived UI keys; no usable credential is present. Any content change requires a fresh exact-hash review."
   }
 ]

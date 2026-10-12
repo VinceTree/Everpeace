@@ -28,6 +28,12 @@ const summary: SessionSummary = {
   model: { id: "model", model_name: "deepseek-chat", base_url: "https://api.deepseek.com" },
 };
 
+test('custom Session titles matching old host copy retain their original language',async()=>{
+ const result:SessionSearchResult={matches:[{summary:{...summary,title:'新 Session',title_pending:false}}],total:1,skipped:0};
+ const view=render(<SessionPicker initialResult={result} search={async()=>result} onSelect={()=>{}} onDelete={async()=>{}} onCancel={()=>{}}/>);
+ try{await tick();assert.match(view.lastFrame()??'',/新 Session/);}finally{view.unmount();}
+});
+
 test("session picker toggles to all workspaces, shows local preview, and resumes with Enter", async () => {
   const empty: SessionSearchResult = { matches: [], total: 0, skipped: 0 };
   const scopes: boolean[] = [];
