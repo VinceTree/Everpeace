@@ -1,4 +1,5 @@
 import type { ExecEvent, ExecModelRegistry, ExecOptions, ExecResult } from "../../exec/types.js";
+import { execErrorCode } from "../../exec/errors.js";
 import { runExec } from "../../exec/runtime.js";
 import { CliArgumentError, resolveExecPrompt, type ExecCliOptions } from "../args.js";
 import {
@@ -262,6 +263,7 @@ export async function runExecCommand(
         type: "run_finished",
         ...(result.sessionId ? { sessionId: result.sessionId } : {}),
         status: result.classification,
+        ...((result.errorCode ?? execErrorCode(result.classification, result.status)) ? { errorCode: result.errorCode ?? execErrorCode(result.classification, result.status)! } : {}),
         usageComplete: result.usageComplete,
         ...(result.stopReason ? { stopReason: result.stopReason } : {}),
         ...(result.workflowResult ? { workflowResult: result.workflowResult } : {}),
@@ -283,6 +285,7 @@ export async function runExecCommand(
           await emitter.finish({
             type: "run_finished",
             status: "cancelled",
+            errorCode: "CANCELLED",
             usageComplete: true,
             stopReason: "aborted",
           });
@@ -301,6 +304,7 @@ export async function runExecCommand(
         await emitter.finish({
           type: "run_finished",
           status: error instanceof CliArgumentError ? "configuration_error" : "runtime_error",
+          errorCode: error instanceof CliArgumentError ? "CONFIGURATION_ERROR" : "RUNTIME_ERROR",
           usageComplete: true,
         });
       }
