@@ -9,7 +9,7 @@ import {LearnedMemoryStore,memoryEntryRevision} from '../../../src/memory/learne
 test('CLI inspects, corrects and disables memory without a provider or keyring request',async t=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'ep-memory-cli-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));const config=process.platform==='win32'?path.join(root,'Everpeace'):path.join(root,'everpeace');
   const store=new LearnedMemoryStore({directory:path.join(config,'memory')}),workspace=process.cwd();await store.append('project',workspace,[{lesson:'fixture original convention',applyWhen:'fixture',reviewedAt:new Date().toISOString()}]);const original=(await store.read('project',workspace))[0]!;
-  const env={...process.env,...(process.platform==='win32'?{APPDATA:root}:process.platform==='darwin'?{}:{XDG_CONFIG_HOME:root})};
+  const env={...process.env,...(process.platform==='win32'?{APPDATA:root}:process.platform==='darwin'?{}:{XDG_CONFIG_HOME:root,XDG_STATE_HOME:root})};
   if(process.platform==='darwin'){t.skip('macOS configuration is tied to HOME; exercised by injected store tests');return;}
   const cli=(args:string[])=>promisify(execFile)(process.execPath,['--import','tsx','src/cli/index.ts','memory',...args],{cwd:workspace,env,windowsHide:true});
   const inspected=JSON.parse((await cli(['inspect','project',original.id])).stdout);assert.equal(inspected.revision,memoryEntryRevision(original));
