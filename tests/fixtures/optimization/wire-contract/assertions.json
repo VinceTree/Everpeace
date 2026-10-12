@@ -1,0 +1,39 @@
+{
+  "contract": "a.transform encodes a nonnegative integer as id:<decimal>; b.transform consumes that wire value and returns the integer. Keep the shared wire prefix contract and reject invalid inputs with null.",
+  "acceptance": {
+    "a": [
+      [
+        12,
+        "id:12"
+      ],
+      [
+        0,
+        "id:0"
+      ]
+    ],
+    "b": [
+      [
+        "id:12",
+        12
+      ],
+      [
+        "id:0",
+        0
+      ]
+    ]
+  },
+  "regression": {
+    "a": [
+      [
+        -1,
+        null
+      ]
+    ],
+    "b": [
+      [
+        "bad",
+        null
+      ]
+    ]
+  }
+}

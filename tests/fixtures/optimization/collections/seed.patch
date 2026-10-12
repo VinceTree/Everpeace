@@ -1,0 +1,14 @@
+diff --git a/a.mjs b/a.mjs
+index e01555a..73cbf8c 100644
+--- a/a.mjs
++++ b/a.mjs
+@@ -1 +1 @@
+-export function transform(value) { return [...new Set(value)]; }
++export function transform(value) { return [...new Set(value)].sort(); }
+diff --git a/b.mjs b/b.mjs
+index 3bb2bdd..807d7cc 100644
+--- a/b.mjs
++++ b/b.mjs
+@@ -1 +1 @@
+-export function transform(value) { return value.find(v=>v!==null&&v!==undefined) ?? null; }
++export function transform(value) { return value.find(Boolean) ?? null; }

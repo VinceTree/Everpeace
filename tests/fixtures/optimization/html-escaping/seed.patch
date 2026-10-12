@@ -1,0 +1,14 @@
+diff --git a/a.mjs b/a.mjs
+index 6a2e000..98f73d8 100644
+--- a/a.mjs
++++ b/a.mjs
+@@ -1 +1 @@
+-export function transform(value) { return value.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
++export function transform(value) { return value.replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('&','&amp;'); }
+diff --git a/b.mjs b/b.mjs
+index ab8b81b..d94e76e 100644
+--- a/b.mjs
++++ b/b.mjs
+@@ -1 +1 @@
+-import {transform as text} from './a.mjs'; export function transform(value) { return text(value).replaceAll('"','&quot;').replaceAll("'",'&#39;'); }
++import {transform as text} from './a.mjs'; export function transform(value) { return text(value).replaceAll('"','&quot;'); }

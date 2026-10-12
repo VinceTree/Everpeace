@@ -1,0 +1,14 @@
+diff --git a/a.mjs b/a.mjs
+index f4bf58f..d8b5084 100644
+--- a/a.mjs
++++ b/a.mjs
+@@ -1 +1 @@
+-export function transform(value) { return value.reduce((sum,n)=>sum+n,0); }
++export function transform(value) { return value.filter(n=>n>0).reduce((sum,n)=>sum+n,0); }
+diff --git a/b.mjs b/b.mjs
+index 37809ab..ed68adf 100644
+--- a/b.mjs
++++ b/b.mjs
+@@ -1 +1 @@
+-export function transform(value) { return Math.min(10,Math.max(0,value)); }
++export function transform(value) { return Math.max(0,value); }

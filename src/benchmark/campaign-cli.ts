@@ -72,8 +72,8 @@ export interface CampaignConfig {
   seed: number;
   ordering?: "random" | "paired";
   repetitions: number;
-  taskTokenBudget: number;
-  campaignTokenBudget: number;
+  taskTokenBudget: number | null;
+  campaignTokenBudget: number | null;
   taskIds?: string[];
   harnesses: Array<ProductionHarnessConfig | CheckoutHarnessConfig | ExternalHarnessConfig | DshHarnessConfig>;
 }
@@ -190,8 +190,8 @@ export function parseCampaignConfig(value: unknown, configPath: string): Campaig
     seed: integer(input.seed, "seed"),
     ...(input.ordering === undefined ? {} : { ordering: input.ordering as "random" | "paired" }),
     repetitions: integer(input.repetitions, "repetitions"),
-    taskTokenBudget: integer(input.taskTokenBudget, "taskTokenBudget"),
-    campaignTokenBudget: integer(input.campaignTokenBudget, "campaignTokenBudget"),
+    taskTokenBudget: input.taskTokenBudget === null ? null : integer(input.taskTokenBudget, "taskTokenBudget"),
+    campaignTokenBudget: input.campaignTokenBudget === null ? null : integer(input.campaignTokenBudget, "campaignTokenBudget"),
     ...(taskIds ? { taskIds } : {}),
     harnesses,
   };

@@ -1,0 +1,44 @@
+{
+  "contract": "a.transform normalizes a key by trimming and lowercasing; b.transform returns {key, valid} using a.transform, with valid true only for a nonempty normalized key.",
+  "acceptance": {
+    "a": [
+      [
+        " Ab ",
+        "ab"
+      ]
+    ],
+    "b": [
+      [
+        " Ab ",
+        {
+          "key": "ab",
+          "valid": true
+        }
+      ],
+      [
+        "   ",
+        {
+          "key": "",
+          "valid": false
+        }
+      ]
+    ]
+  },
+  "regression": {
+    "a": [
+      [
+        "abc",
+        "abc"
+      ]
+    ],
+    "b": [
+      [
+        "abc",
+        {
+          "key": "abc",
+          "valid": true
+        }
+      ]
+    ]
+  }
+}

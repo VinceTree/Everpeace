@@ -92,6 +92,7 @@ function bindTask(task: BenchmarkTask, workspacePath: string, fixtureRoot: strin
   if (fixture !== undefined) prepared.fixture = fixture;
   if (task.verification !== undefined) prepared.verification = bindVerification(task.verification, workspacePath, fixtureRoot)!;
   if (task.acceptance !== undefined) prepared.acceptance = bindVerification(task.acceptance, workspacePath, fixtureRoot)!;
+  if (task.regression !== undefined) prepared.regression = bindVerification(task.regression, workspacePath, fixtureRoot)!;
   return prepared;
 }
 

@@ -1,0 +1,64 @@
+{
+  "contract": "a.transform sums every numeric array entry, including negative values; b.transform clamps a number into the closed interval [0, 10].",
+  "acceptance": {
+    "a": [
+      [
+        [
+          -3,
+          2
+        ],
+        -1
+      ],
+      [
+        [],
+        0
+      ],
+      [
+        [
+          5,
+          -5
+        ],
+        0
+      ]
+    ],
+    "b": [
+      [
+        12,
+        10
+      ],
+      [
+        -2,
+        0
+      ],
+      [
+        5,
+        5
+      ]
+    ]
+  },
+  "regression": {
+    "a": [
+      [
+        [
+          1,
+          2
+        ],
+        3
+      ],
+      [
+        [],
+        0
+      ]
+    ],
+    "b": [
+      [
+        -1,
+        0
+      ],
+      [
+        4,
+        4
+      ]
+    ]
+  }
+}

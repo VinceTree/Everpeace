@@ -1,0 +1,29 @@
+{
+  "contract": "a.transform trims a string; b.transform returns the uppercase string.",
+  "acceptance": {
+    "a": [
+      [
+        " a ",
+        "a"
+      ],
+      [
+        "",
+        ""
+      ]
+    ],
+    "b": [
+      [
+        "ab",
+        "AB"
+      ],
+      [
+        "",
+        ""
+      ]
+    ]
+  },
+  "regression": {
+    "a": [],
+    "b": []
+  }
+}

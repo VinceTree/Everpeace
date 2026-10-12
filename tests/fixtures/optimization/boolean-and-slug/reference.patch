@@ -1,0 +1,14 @@
+diff --git b/a.mjs a/a.mjs
+index 44eb76d..3a9f650 100644
+--- b/a.mjs
++++ a/a.mjs
+@@ -1 +1 @@
+-export function transform(value) { return value==='true'?true:value==='false'?false:null; }
++export function transform(value) { const v=value.trim().toLowerCase();return ['true','yes','1'].includes(v)?true:['false','no','0'].includes(v)?false:null; }
+diff --git b/b.mjs a/b.mjs
+index 85fcf62..97d75b5 100644
+--- b/b.mjs
++++ a/b.mjs
+@@ -1 +1 @@
+-export function transform(value) { return value.toLowerCase().replaceAll(' ','-'); }
++export function transform(value) { return value.trim().toLowerCase().split(/\s+/).filter(Boolean).join('-'); }

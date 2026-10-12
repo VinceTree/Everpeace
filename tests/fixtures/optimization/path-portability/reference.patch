@@ -1,0 +1,14 @@
+diff --git b/a.mjs a/a.mjs
+index 1057349..7f46718 100644
+--- b/a.mjs
++++ a/a.mjs
+@@ -1 +1 @@
+-export function transform(value) { return value.replace('\\','/'); }
++export function transform(value) { return value.replaceAll('\\','/'); }
+diff --git b/b.mjs a/b.mjs
+index bf14c9f..dadff05 100644
+--- b/b.mjs
++++ a/b.mjs
+@@ -1 +1 @@
+-export function transform(value) { return value.split('.')[0]; }
++export function transform(value) { const slash=Math.max(value.lastIndexOf('/'),value.lastIndexOf('\\')); const dot=value.lastIndexOf('.'); return dot>slash?value.slice(0,dot):value; }

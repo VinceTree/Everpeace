@@ -1,0 +1,1 @@
+import {PREFIX} from './a.mjs'; export function transform(value) { if(typeof value!=='string'||!value.startsWith(PREFIX)||!/^\d+$/.test(value.slice(PREFIX.length)))return null; return Number(value.slice(PREFIX.length)); }

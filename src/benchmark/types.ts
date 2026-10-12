@@ -25,6 +25,9 @@ export interface BenchmarkTask {
   verification?: BenchmarkVerification;
   /** Evaluator-owned assertion used for scoring when it differs from harness-visible checks. */
   acceptance?: BenchmarkVerification;
+  /** Independent existing-behavior assertions, distinct from task acceptance. */
+  regression?: BenchmarkVerification;
+  allowedPaths?: readonly string[];
   source?: BenchmarkTaskSource;
   fixture?: BenchmarkTaskFixture;
 }
@@ -181,6 +184,8 @@ export interface BenchmarkVerificationResult {
 }
 
 export interface BenchmarkRunResult {
+  editClassification?: import('./edit-classification.js').EditClassification;
+  tags?: readonly string[];
   teamMetrics?: BenchmarkHarnessResult["teamMetrics"];
   isolationFailed?: boolean;
   requestAttempts?: number;

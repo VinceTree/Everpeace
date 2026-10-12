@@ -24,8 +24,9 @@ export interface BenchmarkCampaignOptions {
   campaignId: string;
   seed: number;
   repetitions: number;
-  taskTokenBudget: number;
-  campaignTokenBudget: number;
+  /** null explicitly disables the corresponding budget; usage is still measured. */
+  taskTokenBudget: number | null;
+  campaignTokenBudget: number | null;
   ordering?: "random" | "paired";
   liveApi: true;
   signal?: AbortSignal;
@@ -84,8 +85,8 @@ export async function runBenchmarkCampaign(
   harnesses: readonly BenchmarkHarnessAdapter[],
   options: BenchmarkCampaignOptions,
 ): Promise<BenchmarkCampaignResult> {
-  positiveInteger(options.taskTokenBudget, "taskTokenBudget");
-  positiveInteger(options.campaignTokenBudget, "campaignTokenBudget");
+  if (options.taskTokenBudget !== null) positiveInteger(options.taskTokenBudget, "taskTokenBudget");
+  if (options.campaignTokenBudget !== null) positiveInteger(options.campaignTokenBudget, "campaignTokenBudget");
   const plan = createBenchmarkCampaignPlan(tasks, harnesses, options.repetitions, options.seed, options.ordering);
   const taskById = new Map(tasks.map((task) => [task.id, task]));
   const harnessByName = new Map(harnesses.map((adapter) => [adapter.name, adapter]));
@@ -94,11 +95,11 @@ export async function runBenchmarkCampaign(
   let stopReason: string | undefined;
   for (const item of plan) {
     if (options.signal?.aborted) { stopReason = "Campaign was cancelled"; break; }
-    const remaining = options.campaignTokenBudget - tokens;
-    if (remaining <= 0) { stopReason = "Campaign token budget was exhausted"; break; }
+    const remaining = options.campaignTokenBudget === null ? null : options.campaignTokenBudget - tokens;
+    if (remaining !== null && remaining <= 0) { stopReason = "Campaign token budget was exhausted"; break; }
     const task = taskById.get(item.taskId)!;
     const adapter = harnessByName.get(item.harness)!;
-    const runBudget = Math.min(remaining, options.taskTokenBudget);
+    const runBudget = remaining === null ? options.taskTokenBudget : options.taskTokenBudget === null ? remaining : Math.min(remaining, options.taskTokenBudget);
     const suite = await runBenchmarkSuite([task], adapter, {
       liveApi: true,
       totalTokenBudget: runBudget,
@@ -121,6 +122,7 @@ export async function runBenchmarkCampaign(
     tokens += (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
     if (result.isolationFailed) { stopReason = "Campaign stopped because native isolation failed"; break; }
     if (result.usage === undefined || result.usage.complete !== true) {
+      if (options.campaignTokenBudget === null && options.taskTokenBudget === null) continue;
       stopReason = "Campaign stopped because a model request had unknown usage";
       break;
     }

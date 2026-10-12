@@ -1,0 +1,39 @@
+{
+  "contract": "a.transform accepts only relative slash-separated file paths without .. segments, colons, backslashes or a leading slash, returning the unchanged string or null; b.transform accepts only exact lowercase https URLs without username/password and returns the URL string or null.",
+  "acceptance": {
+    "a": [
+      [
+        "../outside",
+        null
+      ],
+      [
+        "a/../b",
+        null
+      ],
+      [
+        "a\\b",
+        null
+      ]
+    ],
+    "b": [
+      [
+        "https://user:secret@example.test/",
+        null
+      ]
+    ]
+  },
+  "regression": {
+    "a": [
+      [
+        "src/file.txt",
+        "src/file.txt"
+      ]
+    ],
+    "b": [
+      [
+        "https://example.test/",
+        "https://example.test/"
+      ]
+    ]
+  }
+}

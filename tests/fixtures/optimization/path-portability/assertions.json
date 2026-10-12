@@ -1,0 +1,35 @@
+{
+  "contract": "a.transform converts Windows backslashes to slashes without changing other characters; b.transform removes a final extension only from the basename, leaving dots in parent directories unchanged.",
+  "acceptance": {
+    "a": [
+      [
+        "a\\b\\c",
+        "a/b/c"
+      ]
+    ],
+    "b": [
+      [
+        "dir.v1/file.txt",
+        "dir.v1/file"
+      ],
+      [
+        "dir.v1/file",
+        "dir.v1/file"
+      ]
+    ]
+  },
+  "regression": {
+    "a": [
+      [
+        "a/b",
+        "a/b"
+      ]
+    ],
+    "b": [
+      [
+        "file.txt",
+        "file"
+      ]
+    ]
+  }
+}

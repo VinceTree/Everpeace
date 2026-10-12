@@ -1,0 +1,45 @@
+{
+  "contract": "a.transform parses a trimmed nonnegative safe integer string or returns null; b.transform parses a comma-separated environment list, trimming entries and discarding empty entries.",
+  "acceptance": {
+    "a": [
+      [
+        "3x",
+        null
+      ],
+      [
+        "-1",
+        null
+      ],
+      [
+        " 12 ",
+        12
+      ]
+    ],
+    "b": [
+      [
+        " a, ,b, ",
+        [
+          "a",
+          "b"
+        ]
+      ]
+    ]
+  },
+  "regression": {
+    "a": [
+      [
+        "12",
+        12
+      ]
+    ],
+    "b": [
+      [
+        "a,b",
+        [
+          "a",
+          "b"
+        ]
+      ]
+    ]
+  }
+}

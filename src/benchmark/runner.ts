@@ -20,6 +20,7 @@ import { observeProcessCompletion, ProcessCleanupError } from "../tools/process-
 import { captureWorkspaceSnapshot } from "./workspace.js";
 import { RequestAttemptLedger } from "../agent/request-attempt-ledger.js";
 import { BenchmarkPreparationError } from "./preparation-failure.js";
+import { classifyEditScope, type EditClassification } from './edit-classification.js';
 
 const DEFAULT_TASK_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_VERIFICATION_TIMEOUT_MS = 2 * 60 * 1000;
@@ -92,9 +93,9 @@ export interface BenchmarkRunOptions {
   onTaskPhase?(phase: BenchmarkTaskPhase, attempt: number): void;
   /** Required budget gate when a caller explicitly enables real provider requests. */
   liveApi?: boolean;
-  totalTokenBudget?: number;
+  totalTokenBudget?: number | null;
   /** Per-task admission budget. The campaign remainder may reduce this further. */
-  taskTokenBudget?: number;
+  taskTokenBudget?: number | null;
   tokenBudgetRemaining?: number;
   /** Internal artifact namespace used by isolated suite runs. */
   artifactPrefix?: string;
@@ -149,9 +150,10 @@ export async function runBenchmarkTask(
   adapter: BenchmarkHarnessAdapter,
   options: BenchmarkRunOptions = {},
 ): Promise<BenchmarkRunResult> {
-  const tokenBudget = options.tokenBudgetRemaining ?? options.totalTokenBudget;
-  if (options.liveApi === true && !validTokenBudget(tokenBudget)) {
-    throw new Error("Live API benchmarks require a positive total token budget");
+  const budgetSetting = options.tokenBudgetRemaining ?? options.totalTokenBudget;
+  const tokenBudget = budgetSetting === null ? undefined : budgetSetting;
+  if (options.liveApi === true && budgetSetting !== null && !validTokenBudget(tokenBudget)) {
+    throw new Error("Live API benchmarks require a positive total token budget or explicit null for unlimited");
   }
   const now = options.now ?? Date.now;
   const startedAtMs = now();
@@ -216,7 +218,7 @@ export async function runBenchmarkTask(
     if (cleanupFailed) throw new ProcessCleanupError(workspaceBefore.error);
     const maxRepairAttempts = Math.min(10, Math.max(0, task.maxRepairAttempts ?? 3));
     while (true) {
-      if (options.liveApi === true && (remainingBudget === undefined || remainingBudget <= 0)) {
+      if (options.liveApi === true && remainingBudget !== undefined && remainingBudget <= 0) {
         status = "failed";
         failure = "Benchmark token budget was exhausted before the next model request";
         break;
@@ -397,9 +399,20 @@ export async function runBenchmarkTask(
     metrics.onEvent({ type: "timing_recorded", operation: "artifact_persistence", durationMs: Math.max(0, now() - artifactStarted) });
   }
 
+  let editClassification: EditClassification | undefined;
+  if (task.regression || task.allowedPaths) {
+    if (cleanupFailed || timedOut || options.signal?.aborted) editClassification = {state:'unknown',outsideScope:0};
+    else {
+      const regression = task.regression ? await runBenchmarkVerification(task.regression, task.workspacePath, options.signal ?? new AbortController().signal) : undefined;
+      editClassification = await classifyEditScope(task, regression);
+      if (regression?.cleanupFailed) { cleanupFailed = true; status = 'error'; failure = regression.error; }
+    }
+  }
   const durationMs = Math.max(0, now() - startedAtMs);
   const runResult: BenchmarkRunResult = {
     taskId: task.id,
+    ...(task.tags ? { tags: task.tags } : {}),
+    ...(editClassification ? { editClassification } : {}),
     adapter: adapter.name,
     status,
     startedAt,
@@ -445,10 +458,10 @@ export async function runBenchmarkSuite(
   const repetitions = options.repetitions ?? 1;
   if (!Number.isSafeInteger(repetitions) || repetitions < 1) throw new Error("Benchmark repetitions must be a positive integer");
   if (repetitions > 1 && !options.prepareRun) throw new Error("Repeated benchmarks require prepareRun to restore an isolated workspace");
-  if (options.liveApi === true && !validTokenBudget(options.totalTokenBudget)) {
+  if (options.liveApi === true && options.totalTokenBudget !== null && !validTokenBudget(options.totalTokenBudget)) {
     throw new Error("Live API benchmarks require a positive total token budget");
   }
-  if (options.liveApi === true && !validTokenBudget(options.taskTokenBudget)) {
+  if (options.liveApi === true && options.taskTokenBudget !== null && !validTokenBudget(options.taskTokenBudget)) {
     throw new Error("Live API benchmark suites require a positive per-task token budget");
   }
   const results: BenchmarkRunResult[] = [];
@@ -464,10 +477,10 @@ export async function runBenchmarkSuite(
         stopReason = "Campaign was cancelled";
         break;
       }
-      const remaining = options.totalTokenBudget === undefined
+      const remaining = options.totalTokenBudget == null
         ? undefined
         : options.totalTokenBudget - tokensConsumed;
-      if (options.liveApi === true && (remaining === undefined || remaining <= 0)) {
+      if (options.liveApi === true && remaining !== undefined && remaining <= 0) {
         stopLiveSuite = true;
         stopReason = "Campaign token budget was exhausted";
         break;
@@ -505,13 +518,13 @@ export async function runBenchmarkSuite(
       }
       const runBudget = remaining === undefined
         ? options.taskTokenBudget
-        : options.taskTokenBudget === undefined
+        : options.taskTokenBudget == null
           ? remaining
           : Math.min(remaining, options.taskTokenBudget);
       const result = await runBenchmarkTask(preparedTask, adapter, {
         ...options,
         artifactPrefix: `${(options.campaignId ?? "campaign").replace(/[^A-Za-z0-9._-]/gu, "-")}-${adapter.name.replace(/[^A-Za-z0-9._-]/gu, "-")}-${task.id.replace(/[^A-Za-z0-9._-]/gu, "-")}-${repetition}`,
-        ...(runBudget === undefined ? {} : { tokenBudgetRemaining: runBudget }),
+        ...(runBudget == null ? {} : { tokenBudgetRemaining: runBudget }),
       });
       const repeated = repetitions === 1 ? result : { ...result, repetition };
       results.push(repeated);

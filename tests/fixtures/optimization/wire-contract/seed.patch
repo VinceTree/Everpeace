@@ -1,0 +1,14 @@
+diff --git a/a.mjs b/a.mjs
+index 51724d8..a500613 100644
+--- a/a.mjs
++++ b/a.mjs
+@@ -1 +1 @@
+-export const PREFIX='id:'; export function transform(value) { return Number.isSafeInteger(value)&&value>=0 ? PREFIX+value : null; }
++export const PREFIX='identifier:'; export function transform(value) { return Number.isSafeInteger(value)&&value>=0 ? PREFIX+value : null; }
+diff --git a/b.mjs b/b.mjs
+index e7324f9..031bde7 100644
+--- a/b.mjs
++++ b/b.mjs
+@@ -1 +1 @@
+-import {PREFIX} from './a.mjs'; export function transform(value) { if(typeof value!=='string'||!value.startsWith(PREFIX)||!/^\d+$/.test(value.slice(PREFIX.length)))return null; return Number(value.slice(PREFIX.length)); }
++import {PREFIX} from './a.mjs'; export function transform(value) { if(typeof value!=='string'||!value.startsWith(PREFIX))return null; return Number(value.slice(PREFIX.length+1)); }

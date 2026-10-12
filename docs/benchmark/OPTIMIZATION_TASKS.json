@@ -1,0 +1,966 @@
+{
+  "version": 1,
+  "provenance": "Authored frozen synthetic defects; real provider execution does not make them upstream issue tasks.",
+  "tasks": [
+    {
+      "id": "syntax-branches",
+      "prompt": "Repair the two source modules according to this contract: a.transform returns the absolute value of a finite number; b.transform doubles a finite number. Keep transform exports, preserve existing behavior, and change only a.mjs and b.mjs. Verify the resulting project. If team tools are available, use two workers with explicit file scopes, resolve cross-file dependencies, integrate their results and run root verification.",
+      "workspacePath": ".",
+      "tags": [
+        "typecheck_lint"
+      ],
+      "allowedPaths": [
+        "a.mjs",
+        "b.mjs"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "syntax-branches",
+        "sourceType": "synthetic",
+        "license": "MIT",
+        "fixtureDirectory": "syntax-branches/source",
+        "fixtureDigest": "eea1dddc4d2e0aa0678d99d6afa355f52884b15f309a4851fe1a230b34b71c87"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "syntax-branches",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "syntax-branches",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "syntax-branches",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 30000
+      },
+      "fixture": {
+        "seedPatch": "syntax-branches/seed.patch",
+        "referencePatch": "syntax-branches/reference.patch",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "syntax-branches",
+            "${WORKSPACE}",
+            "setup"
+          ],
+          "timeoutMs": 30000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "syntax-branches",
+            "${WORKSPACE}",
+            "acceptance"
+          ],
+          "timeoutMs": 30000
+        },
+        "seedFailureContains": [
+          "OPTIMIZATION_ASSERTION_FAILED"
+        ]
+      }
+    },
+    {
+      "id": "syntax-strings",
+      "prompt": "Repair the two source modules according to this contract: a.transform trims a string; b.transform returns the uppercase string. Keep transform exports, preserve existing behavior, and change only a.mjs and b.mjs. Verify the resulting project. If team tools are available, use two workers with explicit file scopes, resolve cross-file dependencies, integrate their results and run root verification.",
+      "workspacePath": ".",
+      "tags": [
+        "typecheck_lint"
+      ],
+      "allowedPaths": [
+        "a.mjs",
+        "b.mjs"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "syntax-strings",
+        "sourceType": "synthetic",
+        "license": "MIT",
+        "fixtureDirectory": "syntax-strings/source",
+        "fixtureDigest": "35ebf3a064703727bae7a832ea1c75da4f5ea8a6912aa7df08e1693a0aaca783"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "syntax-strings",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "syntax-strings",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "syntax-strings",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 30000
+      },
+      "fixture": {
+        "seedPatch": "syntax-strings/seed.patch",
+        "referencePatch": "syntax-strings/reference.patch",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "syntax-strings",
+            "${WORKSPACE}",
+            "setup"
+          ],
+          "timeoutMs": 30000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "syntax-strings",
+            "${WORKSPACE}",
+            "acceptance"
+          ],
+          "timeoutMs": 30000
+        },
+        "seedFailureContains": [
+          "OPTIMIZATION_ASSERTION_FAILED"
+        ]
+      }
+    },
+    {
+      "id": "numeric-boundaries",
+      "prompt": "Repair the two source modules according to this contract: a.transform sums every numeric array entry, including negative values; b.transform clamps a number into the closed interval [0, 10]. Keep transform exports, preserve existing behavior, and change only a.mjs and b.mjs. Verify the resulting project. If team tools are available, use two workers with explicit file scopes, resolve cross-file dependencies, integrate their results and run root verification.",
+      "workspacePath": ".",
+      "tags": [
+        "logic"
+      ],
+      "allowedPaths": [
+        "a.mjs",
+        "b.mjs"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "numeric-boundaries",
+        "sourceType": "synthetic",
+        "license": "MIT",
+        "fixtureDirectory": "numeric-boundaries/source",
+        "fixtureDigest": "3deab98ce7f45167560b7fe0ad41667de0fc108c8f4371c31eab3f2c47102392"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "numeric-boundaries",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "numeric-boundaries",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "numeric-boundaries",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 30000
+      },
+      "fixture": {
+        "seedPatch": "numeric-boundaries/seed.patch",
+        "referencePatch": "numeric-boundaries/reference.patch",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "numeric-boundaries",
+            "${WORKSPACE}",
+            "setup"
+          ],
+          "timeoutMs": 30000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "numeric-boundaries",
+            "${WORKSPACE}",
+            "acceptance"
+          ],
+          "timeoutMs": 30000
+        },
+        "seedFailureContains": [
+          "OPTIMIZATION_ASSERTION_FAILED"
+        ]
+      }
+    },
+    {
+      "id": "collections",
+      "prompt": "Repair the two source modules according to this contract: a.transform returns a stable deduplicated array; b.transform returns the first non-null and non-undefined entry (false, 0 and empty strings count), or null. Keep transform exports, preserve existing behavior, and change only a.mjs and b.mjs. Verify the resulting project. If team tools are available, use two workers with explicit file scopes, resolve cross-file dependencies, integrate their results and run root verification.",
+      "workspacePath": ".",
+      "tags": [
+        "logic"
+      ],
+      "allowedPaths": [
+        "a.mjs",
+        "b.mjs"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "collections",
+        "sourceType": "synthetic",
+        "license": "MIT",
+        "fixtureDirectory": "collections/source",
+        "fixtureDigest": "e5c79c24914605216e794e035023821d6fb49fd7f9bb6ee27e48a0a18274dceb"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "collections",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "collections",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "collections",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 30000
+      },
+      "fixture": {
+        "seedPatch": "collections/seed.patch",
+        "referencePatch": "collections/reference.patch",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "collections",
+            "${WORKSPACE}",
+            "setup"
+          ],
+          "timeoutMs": 30000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "collections",
+            "${WORKSPACE}",
+            "acceptance"
+          ],
+          "timeoutMs": 30000
+        },
+        "seedFailureContains": [
+          "OPTIMIZATION_ASSERTION_FAILED"
+        ]
+      }
+    },
+    {
+      "id": "wire-contract",
+      "prompt": "Repair the two source modules according to this contract: a.transform encodes a nonnegative integer as id:<decimal>; b.transform consumes that wire value and returns the integer. Keep the shared wire prefix contract and reject invalid inputs with null. Keep transform exports, preserve existing behavior, and change only a.mjs and b.mjs. Verify the resulting project. If team tools are available, use two workers with explicit file scopes, resolve cross-file dependencies, integrate their results and run root verification.",
+      "workspacePath": ".",
+      "tags": [
+        "cross_file"
+      ],
+      "allowedPaths": [
+        "a.mjs",
+        "b.mjs"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "wire-contract",
+        "sourceType": "synthetic",
+        "license": "MIT",
+        "fixtureDirectory": "wire-contract/source",
+        "fixtureDigest": "8b197ebfb7243bbf5c8a52089d3fa9ea78b7e0e5c402c89ccb5eae957868ae8f"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "wire-contract",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "wire-contract",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "wire-contract",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 30000
+      },
+      "fixture": {
+        "seedPatch": "wire-contract/seed.patch",
+        "referencePatch": "wire-contract/reference.patch",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "wire-contract",
+            "${WORKSPACE}",
+            "setup"
+          ],
+          "timeoutMs": 30000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "wire-contract",
+            "${WORKSPACE}",
+            "acceptance"
+          ],
+          "timeoutMs": 30000
+        },
+        "seedFailureContains": [
+          "OPTIMIZATION_ASSERTION_FAILED"
+        ]
+      }
+    },
+    {
+      "id": "case-contract",
+      "prompt": "Repair the two source modules according to this contract: a.transform normalizes a key by trimming and lowercasing; b.transform returns {key, valid} using a.transform, with valid true only for a nonempty normalized key. Keep transform exports, preserve existing behavior, and change only a.mjs and b.mjs. Verify the resulting project. If team tools are available, use two workers with explicit file scopes, resolve cross-file dependencies, integrate their results and run root verification.",
+      "workspacePath": ".",
+      "tags": [
+        "cross_file"
+      ],
+      "allowedPaths": [
+        "a.mjs",
+        "b.mjs"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "case-contract",
+        "sourceType": "synthetic",
+        "license": "MIT",
+        "fixtureDirectory": "case-contract/source",
+        "fixtureDigest": "07d412cbe4faa3106a991333ad8bbf5a6327a2b451a59026f7eca6708bb4baaa"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "case-contract",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "case-contract",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "case-contract",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 30000
+      },
+      "fixture": {
+        "seedPatch": "case-contract/seed.patch",
+        "referencePatch": "case-contract/reference.patch",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "case-contract",
+            "${WORKSPACE}",
+            "setup"
+          ],
+          "timeoutMs": 30000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "case-contract",
+            "${WORKSPACE}",
+            "acceptance"
+          ],
+          "timeoutMs": 30000
+        },
+        "seedFailureContains": [
+          "OPTIMIZATION_ASSERTION_FAILED"
+        ]
+      }
+    },
+    {
+      "id": "text-codecs",
+      "prompt": "Repair the two source modules according to this contract: a.transform reverses a string by Unicode code points, preserving astral characters; b.transform decodes + as a space before percent-decoding a form field. Keep transform exports, preserve existing behavior, and change only a.mjs and b.mjs. Verify the resulting project. If team tools are available, use two workers with explicit file scopes, resolve cross-file dependencies, integrate their results and run root verification.",
+      "workspacePath": ".",
+      "tags": [
+        "parallel_modules"
+      ],
+      "allowedPaths": [
+        "a.mjs",
+        "b.mjs"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "text-codecs",
+        "sourceType": "synthetic",
+        "license": "MIT",
+        "fixtureDirectory": "text-codecs/source",
+        "fixtureDigest": "6b1629d7c1f796193a904895b5bcdff963a3c2df3d00374c9456e8847a0194e7"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "text-codecs",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "text-codecs",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "text-codecs",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 30000
+      },
+      "fixture": {
+        "seedPatch": "text-codecs/seed.patch",
+        "referencePatch": "text-codecs/reference.patch",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "text-codecs",
+            "${WORKSPACE}",
+            "setup"
+          ],
+          "timeoutMs": 30000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "text-codecs",
+            "${WORKSPACE}",
+            "acceptance"
+          ],
+          "timeoutMs": 30000
+        },
+        "seedFailureContains": [
+          "OPTIMIZATION_ASSERTION_FAILED"
+        ]
+      }
+    },
+    {
+      "id": "boolean-and-slug",
+      "prompt": "Repair the two source modules according to this contract: a.transform parses booleans from trimmed strings, accepting true/yes/1 and false/no/0 case-insensitively, otherwise null; b.transform lowercases and joins nonempty whitespace-separated words with single hyphens. Keep transform exports, preserve existing behavior, and change only a.mjs and b.mjs. Verify the resulting project. If team tools are available, use two workers with explicit file scopes, resolve cross-file dependencies, integrate their results and run root verification.",
+      "workspacePath": ".",
+      "tags": [
+        "parallel_modules"
+      ],
+      "allowedPaths": [
+        "a.mjs",
+        "b.mjs"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "boolean-and-slug",
+        "sourceType": "synthetic",
+        "license": "MIT",
+        "fixtureDirectory": "boolean-and-slug/source",
+        "fixtureDigest": "a98fd17d7f83f55ba3a20e640add6b355741c3aa3690f0f54e8150f5913f0756"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "boolean-and-slug",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "boolean-and-slug",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "boolean-and-slug",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 30000
+      },
+      "fixture": {
+        "seedPatch": "boolean-and-slug/seed.patch",
+        "referencePatch": "boolean-and-slug/reference.patch",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "boolean-and-slug",
+            "${WORKSPACE}",
+            "setup"
+          ],
+          "timeoutMs": 30000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "boolean-and-slug",
+            "${WORKSPACE}",
+            "acceptance"
+          ],
+          "timeoutMs": 30000
+        },
+        "seedFailureContains": [
+          "OPTIMIZATION_ASSERTION_FAILED"
+        ]
+      }
+    },
+    {
+      "id": "path-portability",
+      "prompt": "Repair the two source modules according to this contract: a.transform converts Windows backslashes to slashes without changing other characters; b.transform removes a final extension only from the basename, leaving dots in parent directories unchanged. Keep transform exports, preserve existing behavior, and change only a.mjs and b.mjs. Verify the resulting project. If team tools are available, use two workers with explicit file scopes, resolve cross-file dependencies, integrate their results and run root verification.",
+      "workspacePath": ".",
+      "tags": [
+        "build_environment"
+      ],
+      "allowedPaths": [
+        "a.mjs",
+        "b.mjs"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "path-portability",
+        "sourceType": "synthetic",
+        "license": "MIT",
+        "fixtureDirectory": "path-portability/source",
+        "fixtureDigest": "ca22b380c42cfac9ec69d3eff51a9c294b84e213afceebc394939b91085c8107"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "path-portability",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "path-portability",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "path-portability",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 30000
+      },
+      "fixture": {
+        "seedPatch": "path-portability/seed.patch",
+        "referencePatch": "path-portability/reference.patch",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "path-portability",
+            "${WORKSPACE}",
+            "setup"
+          ],
+          "timeoutMs": 30000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "path-portability",
+            "${WORKSPACE}",
+            "acceptance"
+          ],
+          "timeoutMs": 30000
+        },
+        "seedFailureContains": [
+          "OPTIMIZATION_ASSERTION_FAILED"
+        ]
+      }
+    },
+    {
+      "id": "configuration-values",
+      "prompt": "Repair the two source modules according to this contract: a.transform parses a trimmed nonnegative safe integer string or returns null; b.transform parses a comma-separated environment list, trimming entries and discarding empty entries. Keep transform exports, preserve existing behavior, and change only a.mjs and b.mjs. Verify the resulting project. If team tools are available, use two workers with explicit file scopes, resolve cross-file dependencies, integrate their results and run root verification.",
+      "workspacePath": ".",
+      "tags": [
+        "build_environment"
+      ],
+      "allowedPaths": [
+        "a.mjs",
+        "b.mjs"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "configuration-values",
+        "sourceType": "synthetic",
+        "license": "MIT",
+        "fixtureDirectory": "configuration-values/source",
+        "fixtureDigest": "b04e2d4a9c9a68414811461467c70b6635bd0d4b85cce3c0bb481edad3972228"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "configuration-values",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "configuration-values",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "configuration-values",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 30000
+      },
+      "fixture": {
+        "seedPatch": "configuration-values/seed.patch",
+        "referencePatch": "configuration-values/reference.patch",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "configuration-values",
+            "${WORKSPACE}",
+            "setup"
+          ],
+          "timeoutMs": 30000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "configuration-values",
+            "${WORKSPACE}",
+            "acceptance"
+          ],
+          "timeoutMs": 30000
+        },
+        "seedFailureContains": [
+          "OPTIMIZATION_ASSERTION_FAILED"
+        ]
+      }
+    },
+    {
+      "id": "html-escaping",
+      "prompt": "Repair the two source modules according to this contract: a.transform escapes &, < and > in HTML text, in that order; b.transform also escapes double and single quotes for an HTML attribute. Keep transform exports, preserve existing behavior, and change only a.mjs and b.mjs. Verify the resulting project. If team tools are available, use two workers with explicit file scopes, resolve cross-file dependencies, integrate their results and run root verification.",
+      "workspacePath": ".",
+      "tags": [
+        "security_regression"
+      ],
+      "allowedPaths": [
+        "a.mjs",
+        "b.mjs"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "html-escaping",
+        "sourceType": "synthetic",
+        "license": "MIT",
+        "fixtureDirectory": "html-escaping/source",
+        "fixtureDigest": "c094968a33fbb73891b4c6f8ccce913babdabb06da0b6e410683d8fb7cbbeebe"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "html-escaping",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "html-escaping",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "html-escaping",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 30000
+      },
+      "fixture": {
+        "seedPatch": "html-escaping/seed.patch",
+        "referencePatch": "html-escaping/reference.patch",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "html-escaping",
+            "${WORKSPACE}",
+            "setup"
+          ],
+          "timeoutMs": 30000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "html-escaping",
+            "${WORKSPACE}",
+            "acceptance"
+          ],
+          "timeoutMs": 30000
+        },
+        "seedFailureContains": [
+          "OPTIMIZATION_ASSERTION_FAILED"
+        ]
+      }
+    },
+    {
+      "id": "workspace-traversal",
+      "prompt": "Repair the two source modules according to this contract: a.transform accepts only relative slash-separated file paths without .. segments, colons, backslashes or a leading slash, returning the unchanged string or null; b.transform accepts only exact lowercase https URLs without username/password and returns the URL string or null. Keep transform exports, preserve existing behavior, and change only a.mjs and b.mjs. Verify the resulting project. If team tools are available, use two workers with explicit file scopes, resolve cross-file dependencies, integrate their results and run root verification.",
+      "workspacePath": ".",
+      "tags": [
+        "security_regression"
+      ],
+      "allowedPaths": [
+        "a.mjs",
+        "b.mjs"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "repositoryUrl": "https://github.com/VinceTree/Everpeace",
+        "commit": "synthetic",
+        "issue": "workspace-traversal",
+        "sourceType": "synthetic",
+        "license": "MIT",
+        "fixtureDirectory": "workspace-traversal/source",
+        "fixtureDigest": "b93ffee0252ce321e569f611deaf35e18789a6bd13c874afcd4305048abb503c"
+      },
+      "verification": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "workspace-traversal",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "workspace-traversal",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 30000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "workspace-traversal",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 30000
+      },
+      "fixture": {
+        "seedPatch": "workspace-traversal/seed.patch",
+        "referencePatch": "workspace-traversal/reference.patch",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "workspace-traversal",
+            "${WORKSPACE}",
+            "setup"
+          ],
+          "timeoutMs": 30000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "workspace-traversal",
+            "${WORKSPACE}",
+            "acceptance"
+          ],
+          "timeoutMs": 30000
+        },
+        "seedFailureContains": [
+          "OPTIMIZATION_ASSERTION_FAILED"
+        ]
+      }
+    }
+  ]
+}

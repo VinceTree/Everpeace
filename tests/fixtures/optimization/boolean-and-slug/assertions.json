@@ -1,0 +1,47 @@
+{
+  "contract": "a.transform parses booleans from trimmed strings, accepting true/yes/1 and false/no/0 case-insensitively, otherwise null; b.transform lowercases and joins nonempty whitespace-separated words with single hyphens.",
+  "acceptance": {
+    "a": [
+      [
+        " YES ",
+        true
+      ],
+      [
+        "0",
+        false
+      ]
+    ],
+    "b": [
+      [
+        "  Hello   World ",
+        "hello-world"
+      ],
+      [
+        "",
+        ""
+      ]
+    ]
+  },
+  "regression": {
+    "a": [
+      [
+        "true",
+        true
+      ],
+      [
+        "false",
+        false
+      ],
+      [
+        "unknown",
+        null
+      ]
+    ],
+    "b": [
+      [
+        "hello",
+        "hello"
+      ]
+    ]
+  }
+}
