@@ -1,5 +1,7 @@
 # Codex Sandbox、MCP 与 Skill 接入
 
+当前安全加固契约（文件后端、敏感内容、验证依据、MCP 与隐私迁移）见 [安全加固](SECURITY_HARDENING.md)，与旧说明冲突时以该契约及当前实现为准。
+
 ## 对标基线
 
 本轮先读取 OpenAI 官方 [Permissions](https://developers.openai.com/es-419/docs/permissions)、[MCP](https://developers.openai.com/es-419/docs/extend/mcp?surface=cli) 和 [Skills](https://developers.openai.com/es-419/docs/build-skills) 文档，再检查 `openai/codex` 源码提交 [`78245b47af2a7aafcabe025828ceecca69db4df1`](https://github.com/openai/codex/tree/78245b47af2a7aafcabe025828ceecca69db4df1)。重点映射如下：
@@ -65,7 +67,7 @@ stdio 的宿主进程启动与 MCP tool-call 审批是独立权限边界。默�
 
 MCP 文本投影保留文本、URI 和 MIME；只处理协议明确的 tool `content[]`、prompt `messages[].content`、resource `contents[]` 及其中嵌入的 resource 内容块，将 image/audio/blob 的 base64 替换为类型与大小说明。`structuredContent`、各层 `_meta` 和列表 metadata 不递归改写，业务字段即使名为 `blob` 或形如 image 也保持原值。普通结果连同截断 envelope 保持有效 JSON 且最多 1 MiB。Client 声明 `roots: { listChanged: true }` 并应答 `roots/list`，把当前工作区作为唯一 root 提供给 server；`setWorkspace` 通过断开重连让新工作区生效。Codex OAuth 凭据复用、`http_headers_helper`、elicitation、sampling、tasks 和按工具持久审批策略尚未接入。OAuth/header-helper server 会以明确失败状态显示；不得声称与完整 Codex MCP runtime 等价。
 
-模型文件编辑通过兼容的 `apply_patch` function tool 接入，支持有界 unified diff；生产 update/delete 强制匹配宿主读版本，审批绑定 preview hash 与权限 revision。更新逐文件原子替换，创建排他执行；批量失败仅回滚仍匹配本次 post-image 的已写文件，冲突或回滚错误明确报告，不保证整个批次原子成功。详见 [TOOLS](TOOLS.md)；它不是完整 Codex 原生 `apply_patch_call` wire protocol。
+模型文件编辑通过兼容的 `apply_patch` function tool 接入，支持有界 unified diff；生产 update/delete 强制匹配宿主读版本，审批绑定 preview hash 与权限 revision。更新保全原文件后以不覆盖方式安装，路径可能短暂不存在；创建排他执行；批量失败仅回滚仍匹配本次 post-image 的已写文件，冲突或回滚错误明确报告，不保证整个批次原子成功。详见 [TOOLS](TOOLS.md)；它不是完整 Codex 原生 `apply_patch_call` wire protocol。
 
 MCP 的真实 stdio 恢复回归见 [stdio-recovery.test.ts](../../tests/unit/mcp/stdio-recovery.test.ts)。fixture 启动期限覆盖 Node／tsx／SDK 冷启动，首代主动不回应初始化以触发超时；仍严格检查恰好两代、旧进程先退出、binding 失效和不重放。测试时间预算见 [开发指南](../DEVELOPMENT.md#独立测试-ci-与证据范围)，不会修改生产默认期限或恢复策略。
 

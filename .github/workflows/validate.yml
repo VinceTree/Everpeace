@@ -12,7 +12,7 @@ permissions:
   contents: read
 jobs:
   test:
-    name: ${{ matrix.os }} · Node 22
+    name: ${{ matrix.os }} · Node 22 · ${{ matrix.os == 'windows-2025' && 'full' || 'portable only' }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -67,10 +67,16 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          pnpm test 2>&1 | tee test-output.log
+          if [ "$RUNNER_OS" = Windows ]; then
+            pnpm test 2>&1 | tee test-output.log
+          else
+            echo 'Native workspace files are unavailable here. This job checks portable behavior only.'
+            pnpm test:portable 2>&1 | tee test-output.log
+          fi
       - name: Windows release failure drill
         if: runner.os == 'Windows' && inputs.inject_windows_failure
         run: node --test tests/fixtures/release-failure.mjs
       - run: pnpm build
+      - run: pnpm files:smoke
       - run: pnpm install:smoke
       - run: git diff --check

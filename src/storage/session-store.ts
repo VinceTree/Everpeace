@@ -1772,6 +1772,8 @@ export class SessionStore implements SessionStoreLike {
             this.#dropSearchCache(this.#filePath(sessionId));
             try {
               await this.#outputs.deleteSession(sessionId);
+              const { InputHistory } = await import('./input-history.js');
+              await new InputHistory(path.join(path.dirname(this.#directory), 'input-history.json')).removeSessions([sessionId]);
               await fs.rm(this.#filePath(sessionId), { force: true });
             } catch (error) { this.#deletedSessionIds.delete(sessionId); throw error; }
             this.#outputReferences.delete(sessionId);

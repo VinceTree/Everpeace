@@ -9,6 +9,13 @@ export const nativeTests = [
   "native team sandbox proves root/state/Git denial before coding, or fails closed",
   "two production workers integrate independently and only the root native check determines success",
   "native subdirectory and linked worktree isolation protects Git and sibling roots",
+  "native access rejects junctions, hard links, and stale-byte commits",
+  "the process retains workspace identity across requests after root replacement",
+  "native pinned parents and target handles block concurrent replacement and saves",
+  "a concurrent save into the commit gap survives with a recoverable original",
+  "crash after moving the original allows explicit exclusive recovery",
+  "crash recovery refuses a later object with identical post-image bytes",
+  "default stdio sandbox denies sensitive startup reads and network before tool approval",
 ];
 
 export function candidateSha(value) {

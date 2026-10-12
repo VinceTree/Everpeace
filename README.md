@@ -5,7 +5,7 @@
 Host display: `--lang auto|en|zh-CN`, `EVERPEACE_LANG` and `/language`. `--accessible` provides append-only TTY interaction; redirected automation uses `exec --json`. [Task and acceptance status](docs/core-experience/STATUS.md).
 
 
-**Candidate 0.6.0-rc.1.** Windows source and hosted Windows/Linux checks are verified; portable native delivery remains pending. Repair/team model comparisons have insufficient evidence and do not enable a new default. [Candidate evidence and usage](docs/implementation/REPORT.md).
+**Candidate 0.6.0-rc.2.** The hardened workspace file backend requires Windows and local NTFS. Other platforms report unavailable file access. See [current validation and limitations](docs/HANDOFF.md); real-model security evaluation remains paused.
 
 **Plan, edit and verify your Node.js / TypeScript project from the terminal.**
 
@@ -20,12 +20,13 @@ Work through a plan, review the edits and let the host check the result. It disc
 
 ## Start here
 
-Use **Node.js 22+**, Git and **pnpm 10.30.3**. Install from the repository so its Windows `node-pty` patches are applied. Keep optional dependencies enabled for bundled code search.
+Use **Node.js 22+**, Git and **pnpm 10.30.3**, with a Windows local NTFS workspace. Source builds also require MinGW-w64 g++ or Visual Studio C++ Build Tools. Keep optional dependencies enabled for bundled code search.
 
 ```powershell
 git clone https://github.com/VinceTree/Everpeace.git
 cd Everpeace
 pnpm install --frozen-lockfile
+pnpm files:build
 pnpm dev
 ```
 
@@ -53,7 +54,7 @@ pnpm link --global
 everpeace
 ```
 
-Current source version: **0.6.0-rc.1** (source prerelease).
+Current source version: **0.6.0-rc.2** (source prerelease).
 
 ## Real tools, checked changes
 
@@ -69,11 +70,11 @@ Root-to-directory rules, `@` attachments and an on-demand project map help the a
 
 Configured MCP tools, resources and prompts and local Skills extend the agent. Learned Memory can retain preferences and verified lessons. Public web tools check redirects and network boundaries. Search falls back to Bing China and DuckDuckGo when the first provider is unavailable. See the [usage guide](docs/USAGE.md) for setup and limits.
 
-MCP stdio programs require separate startup trust. Use `/mcp trust <server>` to review and save approval for the current workspace and exact configuration, `/mcp reconnect` to start or reload, and `/mcp revoke <server>` to cancel access. Approval allows the program to run with your host user permissions; MCP tool-call approval does not sandbox it. Remote MCP requires HTTPS. Loopback HTTP requires its own explicit exception; redirects are blocked. Headless CLI/SDK runs return `interaction_required` (exit 5) before model requests when startup approval is missing.
+MCP stdio programs require separate startup trust and default to a native workspace sandbox with networking denied. `/mcp trust <server>` reviews launch identity, `/mcp reconnect` starts or reloads, and `/mcp revoke <server>` cancels access. `/mcp mode <server> host` explicitly selects host user authority and revokes old trust; review and trust again before starting. Changed executable or entry-script bytes require new trust; dynamic launchers require approval at every startup. Remote MCP requires HTTPS. Loopback HTTP requires its own exception; redirects are blocked. Missing startup approval returns `interaction_required` (exit 5) in headless CLI/SDK runs.
 
 Search uses DOM selectors by default. `/web` can explicitly select Brave LLM Context; its key stays in the system credential store, and saving sends no request. `/doctor --live` previews bounded streaming/tool/usage/cancellation probes and defaults to Cancel. `/cost` records user-priced estimates, unknown/partial metering and task warnings; request token budgets are not spending caps. [Security and diagnostic contracts](docs/architecture/SECURITY_AND_DIAGNOSTICS.md).
 
-`/privacy` shows local persistence and retention (forever by default), previews cleanup, scans credentials and exports diagnostic summaries; conversation export requires a separate review. `everpeace privacy --help` provides the local CLI. `/perf` separates wall time, cumulative phases and known tokens; missing measurements stay unknown. Workflow reports distinguish project checks from independent functional verification. Project Memory expires after 90 days and pauses recall until reviewed with `/memory`; team workers can use authorized Git subdirectories and existing linked worktrees. [Evidence, privacy and performance contracts](docs/architecture/VALIDATION_PRIVACY_PERFORMANCE.md).
+`/privacy` shows persistence and retention, previews cleanup and exports diagnostics. First setup recommends 30 days and requires a preview review; existing settings stay unchanged. `/history no-save` excludes the next input from input history; the Session still saves it. Suspected secret inputs offer masking, original-text authorization or cancellation; original secrets stay out of input history. Session deletion also removes linked history; older unlinked entries need `/history clear`. `everpeace privacy --help` provides local CLI controls. `/perf` reports measured time and tokens; Project Memory expires after 90 days until reviewed with `/memory`. [Privacy contracts](docs/architecture/SECURITY_HARDENING.md).
 
 Report vulnerabilities privately through [GitHub Security](https://github.com/VinceTree/Everpeace/security/advisories/new). See [SECURITY.md](SECURITY.md) for supported releases and coordinated disclosure. Dependency audit, redacted secret scans, license policy and candidate-bound SBOM evidence are required before merging and publishing.
 
@@ -114,7 +115,9 @@ Team JSONL uses schema v2; ordinary execution retains v1. Interrupted or conflic
 ## Control and boundaries
 
 - Model shell commands run in a pinned native sandbox. Windows uses PowerShell through MXC. Sandbox or LSP network-probe failure blocks execution. Optional language servers must already be installed and explicitly configured.
-- File updates require a current observed version. Approval and undo cannot overwrite a later user edit. Session recovery restores work, while current permissions govern new actions.
+- File tools reject reparse points and hard-linked targets. Updates preserve the original, check raw bytes under an exclusive write/delete boundary, and install without overwriting a concurrent target. The path may briefly be absent. Recover retained originals with `everpeace recover-file <workspace> <relative-backup-path>`; later user saves block recovery.
+- Sensitive reads offer masking, one-time original access or rejection before model context and Session storage. Original access triggers fresh Web/MCP approvals. Model shell networking defaults off; enabling it authorizes each process separately. Plan displays workspace writes, public networking and sensitive outward transmission separately. [Security boundaries and remaining risks](docs/architecture/SECURITY_HARDENING.md).
+- Changed verification scripts or a restored task without a trusted baseline require review; rejection keeps the task unverified.
 - `Ctrl+C` cancels active work and waits for cleanup. While idle it clears a draft, then exits. User-written `!` commands run in a separate host PTY, own terminal input and stay outside model context.
 - Request budgets include retries, compaction and repair. Unknown usage prevents another bounded request; reasoning tokens are a subset of output tokens. Token budgets are not strict billing caps.
   Failed requests with unknown usage retain safe HTTP/error categories without logging provider error bodies or headers.
@@ -138,6 +141,6 @@ Licensed under [Apache 2.0](LICENSE). Maintained by [VinceTree](https://github.c
 
 Public web and remote Skill requests bind validated DNS addresses to the actual connection, including HTTP/HTTPS proxy CONNECT. Configure host HTTP_PROXY, HTTPS_PROXY and NO_PROXY (lowercase variants are supported). Proxy infrastructure is trusted; SOCKS/PAC are unsupported and failures do not fall back to a direct connection. HTTPS certificate verification remains enabled. [Network boundary](docs/architecture/NETWORK.md).
 
-Source installation uses pnpm and the pinned node-pty patch. Run `pnpm install:verify`, build, then `pnpm install:smoke`; maintainers can run `pnpm install:clean` for a clean source installation. To produce a portable tarball, run `pnpm build` then `pnpm pack:release --output <empty-directory>`. It bundles the patched native dependency and its license; plain npm/pnpm pack is rejected. `pnpm install:consumer <package-directory> --local` checks clean npm, pnpm and global installation without model credentials. Portable candidates are built on Ubuntu 24.04 x64: the packer compiles Linux PTY in audited staging and retains the upstream Windows prebuilds, so pnpm need not execute a bundled child script. The producer needs Python, make and a C++ compiler; Windows local packing is development only. Other Linux systems/architectures remain unverified. npm registry publication remains pending.
+Source installation uses pnpm and the pinned node-pty patch. Run `pnpm files:build`, `pnpm install:verify`, `pnpm build`, `pnpm files:smoke`, then `pnpm install:smoke`. `pnpm install:clean` checks a fresh source installation and recompiles the file worker. Native file race tests use `pnpm files:verify`. The packer requires a verified Windows file worker, includes its digest and rejects fault-injection workers; ordinary npm/pnpm pack remains blocked. Formal portable packaging and consumer delivery still require separate acceptance. npm registry publication remains pending.
 
-Windows/Linux have Node 22 CI. **macOS support is experimental**, with no complete CI or native sandbox acceptance. Release requires an exact main commit, all platform and package checks, and dedicated Windows native acceptance; an absent runner or skipped required test blocks publishing. Maintainer setup and failure-drill instructions: [Windows runner](docs/WINDOWS_RUNNER.md). Development gates are `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` in order, stopping on failure, plus `git diff --check`. [Current team evaluation preparation](docs/benchmark/TEAM_READINESS.md) uses offline evidence and requires separate numerical authorization for paid tests.
+Node 22 CI runs the full suite on Windows and portable privacy/network/provider tests on Linux. Linux/macOS workspace file access is unavailable in this candidate; portable tests do not establish native file support. Release still requires dedicated Windows and package acceptance; no Release is created by a source push. [Windows runner](docs/WINDOWS_RUNNER.md). Development gates run `typecheck → lint → test → build`, stopping on failure, followed by UI/document and installation checks. Paid tests need separate numerical authorization.

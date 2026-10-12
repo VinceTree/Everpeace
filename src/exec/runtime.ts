@@ -9,7 +9,7 @@ import type { LoopEvent } from "../agent/agent-loop.js";
 import { RequestAttemptLedger } from "../agent/request-attempt-ledger.js";
 import type { AgentIO, AgentInteractionRequired } from "../agent/react-agent.js";
 import { normalizeWorkspacePath } from "../memory/learned-memory.js";
-import { loadPermissionPolicy, type PermissionPolicy } from "../permissions/policy.js";
+import { loadPermissionPolicy, permissionPolicyRevision, type PermissionPolicy } from "../permissions/policy.js";
 import {
   createProductionAgent,
   createProductionCommandExecutor,
@@ -490,6 +490,8 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
     await sessionStore.setMemoryPolicy(sessionId, EXEC_MEMORY_POLICY);
     workflow = new CodingWorkflowRuntime({
       workspacePath,
+      confirmVerificationBasis: async (summary) => requestInteraction("approval", "verification_basis", summary),
+      permissionRevision: () => permissionPolicyRevision(policy),
       ...(restored?.workflow ? { initialState: restored.workflow } : {}),
       async onState(state) {
         await sessionStore.setWorkflow(sessionId!, state);

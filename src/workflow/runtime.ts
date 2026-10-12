@@ -1,3 +1,4 @@
+import { VerificationBasisGuard } from "./verification-basis.js";
 import { persistState } from "../storage/persistence-error.js";
 import { randomUUID } from "node:crypto";
 import type { ApplyPatchOperation, ApplyPatchResult } from "../tools/apply-patch.js";
@@ -17,6 +18,8 @@ export interface WorkflowRuntimeOptions {
   onState?(state: WorkflowState): void | Promise<void>;
   review?(changedPaths: readonly string[], signal?: AbortSignal): Promise<WorkflowReviewResult>;
   now?: () => string;
+  confirmVerificationBasis?(summary: string, signal?: AbortSignal): Promise<boolean>;
+  permissionRevision?: () => string;
 }
 
 export interface WorkflowTurnOptions {
@@ -31,6 +34,7 @@ const MAX_VERIFICATION_REFRESHES = 2;
 /** Coordinates the production coding loop without changing the model's ReAct protocol. */
 export class CodingWorkflowRuntime {
   readonly #workspacePath: string;
+  readonly #basis: VerificationBasisGuard;
   readonly #checkpoint: TurnCheckpoint;
   readonly #tracker: WorkspaceChangeTracker;
   readonly #onState: ((state: WorkflowState) => void | Promise<void>) | undefined;
@@ -47,6 +51,7 @@ export class CodingWorkflowRuntime {
 
   constructor(options: WorkflowRuntimeOptions) {
     this.#workspacePath = options.workspacePath;
+    this.#basis = new VerificationBasisGuard(options.workspacePath, options.confirmVerificationBasis, options.permissionRevision);
     this.#checkpoint = new TurnCheckpoint(options.workspacePath);
     this.#tracker = new WorkspaceChangeTracker(options.workspacePath);
     this.#onState = options.onState;
@@ -55,6 +60,7 @@ export class CodingWorkflowRuntime {
     this.#state = options.initialState ?? createWorkflowState(randomUUID(), this.#now());
   }
 
+  configureVerificationBasisReview(confirm: (summary: string, signal?: AbortSignal) => Promise<boolean>, revision: () => string, notice?: (summary: string) => void): void { this.#basis.confirm = confirm; this.#basis.revision = revision; this.#basis.notice = notice; }
   get state(): WorkflowState { return structuredClone(this.#state); }
   get checkpointAvailable(): boolean { return this.#checkpoint.available; }
   get workspacePath(): string { return this.#workspacePath; }
@@ -91,6 +97,7 @@ export class CodingWorkflowRuntime {
 
   async beginTurn(options: WorkflowTurnOptions = {}): Promise<WorkflowState> {
     this.assertCleanupComplete();
+    await this.#basis.begin();
     const taskId = randomUUID();
     this.#checkpoint.clear();
     this.#changed = false;
@@ -115,6 +122,7 @@ export class CodingWorkflowRuntime {
   /** Rebuild process-local trackers without clearing persisted verification debt. */
   async resumeTurn(): Promise<WorkflowState> {
     this.assertCleanupComplete();
+    this.#basis.resume();
     this.#checkpoint.clear();
     this.#patchChanged = false;
     this.#shellObserved = false;
@@ -159,6 +167,10 @@ export class CodingWorkflowRuntime {
       await this.#set({ phase: "implement" });
       return { prompt: "The patch was applied. No safe fast verification command was discovered; inspect the changed files and continue with focused checks." };
     }
+    if (!(await this.#basis.authorize(signal))) {
+      await this.#set({ phase: 'implement', result: 'unverified', pending_verification: true, result_reason: 'Verification execution basis needs fresh user authorization' });
+      return { prompt: 'Verification execution basis changed. Fresh user authorization is required before running current checks.' };
+    }
     const verification = await this.#verify(() => runVerificationCommand(command, run, signal));
     await this.#set({
       phase: verification.passed ? "implement" : "diagnose",
@@ -199,7 +211,7 @@ export class CodingWorkflowRuntime {
       const commands = await discoverVerificationCommands(this.#workspacePath);
       signal?.throwIfAborted();
       const changedLines = before.available && before.complete ? await captureChangedLines(this.#workspacePath, before.changedPaths, signal) : {};
-      let suite = await this.#verify(() => runVerificationSuite(selectVerificationCommands(commands, "full"), run, signal, { workspacePath: this.#workspacePath, changedPaths: before.changedPaths, changedLines, ...(before.available && before.complete && before.revision ? { revision: before.revision } : {}) }));
+      let suite = await this.#verify(() => runVerificationSuite(selectVerificationCommands(commands, "full"), run, signal, { workspacePath: this.#workspacePath, changedPaths: before.changedPaths, changedLines, ...(before.available && before.complete && before.revision ? { revision: before.revision } : {}) }, signal => this.#basis.authorize(signal)));
       signal?.throwIfAborted();
       const after = await this.#refreshObservedChanges();
       const stale = before.available && before.complete && after.available && after.complete && before.revision !== after.revision;
@@ -305,7 +317,7 @@ export class CodingWorkflowRuntime {
     options.signal?.throwIfAborted();
     await this.#tracker.trackPaths(this.#state.changed_paths);
     const before = await this.#tracker.observe();
-    const suite = await this.#verify(() => runVerificationSuite(commands, run, options.signal, { workspacePath: this.#workspacePath, changedPaths: this.#state.changed_paths, supplemental: options.supplemental, ...(before.available && before.complete && before.revision ? { revision: before.revision } : {}) }));
+    const suite = await this.#verify(() => runVerificationSuite(commands, run, options.signal, { workspacePath: this.#workspacePath, changedPaths: this.#state.changed_paths, supplemental: options.supplemental, ...(before.available && before.complete && before.revision ? { revision: before.revision } : {}) }, signal => this.#basis.authorize(signal)));
     options.signal?.throwIfAborted();
     const after = await this.#tracker.observe();
     const gitBound = before.available && before.complete && after.available && after.complete;

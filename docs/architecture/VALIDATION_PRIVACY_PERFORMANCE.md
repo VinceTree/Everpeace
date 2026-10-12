@@ -1,5 +1,7 @@
 # 验证证据、Session 隐私与任务性能
 
+当前安全加固契约（文件后端、敏感内容、验证依据、MCP 与隐私迁移）见 [安全加固](SECURITY_HARDENING.md)，与旧说明冲突时以该契约及当前实现为准。
+
 后续增强、changed-line/独立来源、Memory 审查 CLI、二进制事务及真实评测状态见 [本轮验收](../implementation/REPORT.md)。
 
 问题 20–30 的实现契约集中在本页；当前候选、实际门禁和未完成证据只在 [HANDOFF](../HANDOFF.md) 维护。模型效果尚未实测，不改变三轮生产修复上限、默认单 Agent、权限或请求准入。
@@ -14,7 +16,7 @@ LCOV/Istanbul 表示改动**文件**是否出现执行命中，不证明改动�
 
 ## Session 保留、扫描、导出
 
-`/privacy` 是本地管理窗口，不请求模型。CLI `everpeace privacy status` 展示真实位置与独立存储，`preview <forever|days>` 生成十分钟、单次消费的预览 token；`configure <token>` 确认保留策略，`cleanup <token>` 按当前策略执行。默认永久保留。TUI 使用 `/privacy retention forever|30|90|180|<days>` 和 `/privacy cleanup`，默认 Cancel。
+`/privacy` 是本地管理窗口，不请求模型。CLI `everpeace privacy status` 展示真实位置与独立存储，`preview <forever|days>` 生成十分钟、单次消费的预览 token；`configure <token>` 确认保留策略，`cleanup <token>` 按当前策略执行。首次推荐 30 天，未确认前不开启自动清理，已有配置保留原策略。TUI 使用 `/privacy retention forever|30|90|180|<days>` 和 `/privacy cleanup`，默认 Cancel。
 
 到期按最后持久活动计算，启动/切换空闲 Session 时每天最多自动清理一次。活动租约跨进程保活；同一 SessionStore 的 TUI 与 Agent 引用共享租约，全部安全关闭后才写 closed。自动清理排除活动、未知归属、损坏/无法读取的记录和保留团队。成员 Session 在根发布团队引用前持久标记归属；这些标记保守保留，不因成员已完成就自动删除。删除在串行队列、Session 锁和活动租约内重查预览，清理所属附件并使缓存失效；部分失败报告 failed，可人工重新预览重试。旧会话没有安全关闭标记，自动清理跳过；用户可在原有 `/resume` 管理入口明确删除。
 

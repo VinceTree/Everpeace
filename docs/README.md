@@ -27,6 +27,7 @@
 | [PLAN](PLAN.md) | 当前里程碑、剩余证据、后续顺序 | 规划工作 |
 | [DECISIONS](architecture/DECISIONS.md) | 跨模块约束及设计理由 | 改变既有契约 |
 | [AGENT_LOOP](architecture/AGENT_LOOP.md) | 循环细节、顺序、停止、上游出处 | 修改调度/stream/steering |
+| [SECURITY_HARDENING](architecture/SECURITY_HARDENING.md) | 文件竞态、敏感外传、验证依据、MCP 和隐私加固 | 修改安全边界 |
 | [PERMISSIONS](architecture/PERMISSIONS.md) | 审批 profile、持久策略及差异 | 修改权限和审批 |
 | [SANDBOX](architecture/SANDBOX.md) | 原生执行边界、平台限制和后续加固 | 修改 shell/进程隔离 |
 | [CODEX_CAPABILITIES](architecture/CODEX_CAPABILITIES.md) | MCP/Skills/原生后端集成范围 | 修改外部集成 |

@@ -127,6 +127,8 @@ test("production TUI plans, records revision, waits for explicit execution, and 
     assert.equal((await store.load(child.id)).forkPendingResume, true);
     assert.equal((await store.load(child.id)).workflow?.pending_verification, true);
     await submit("/plan execute");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Verification execution basis changed"));
+    await tick(); view.stdin.write("y");
     await waitFor(() => (view.lastFrame() ?? "").includes("Implementation finished"));
     await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
     const loaded = await store.load(child.id);

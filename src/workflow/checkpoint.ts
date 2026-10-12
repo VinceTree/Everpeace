@@ -1,14 +1,19 @@
 import { createHash } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { safeReadFile, safeCommitFile } from "../tools/safe-files.js";
+import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 import path from "node:path";
 import type { ApplyPatchOperation, ApplyPatchResult } from "../tools/apply-patch.js";
 
 interface CheckpointFile {
   path: string;
   beforeExists: boolean;
-  beforeContent: string;
+  beforeContent: Buffer;
   beforeSha256: string | null;
   afterSha256: string | null;
+  committed: boolean;
+  beforeAttributes?: number;
+  beforeIdentity: string | null;
+  afterIdentity: string | null;
 }
 
 export interface UndoResult {
@@ -24,48 +29,15 @@ export interface CheckpointReviewResult {
   error?: string;
 }
 
-function digest(content: string): string {
+function digest(content: Uint8Array): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
-async function assertSafePath(root: string, relativePath: string): Promise<void> {
-  const resolvedRoot = path.resolve(root);
-  const target = path.resolve(resolvedRoot, relativePath);
-  const relative = path.relative(resolvedRoot, target);
-  if (path.isAbsolute(relative) || relative === ".." || relative.startsWith(`..${path.sep}`)) {
-    throw new Error(`Checkpoint path is outside the current workspace: ${relativePath}`);
-  }
-  let current = resolvedRoot;
-  for (const part of relative ? relative.split(path.sep) : []) {
-    current = path.join(current, part);
-    try {
-      if ((await fs.lstat(current)).isSymbolicLink()) throw new Error(`Checkpoint path traverses a symbolic link: ${relativePath}`);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      break;
-    }
-  }
-}
-
-async function readFile(root: string, relativePath: string): Promise<{ exists: boolean; content: string }> {
-  await assertSafePath(root, relativePath);
-  const target = path.resolve(root, relativePath);
-  try {
-    const stat = await fs.lstat(target);
-    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`Checkpoint target is not a regular file: ${relativePath}`);
-    return { exists: true, content: await fs.readFile(target, "utf8") };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { exists: false, content: "" };
-    throw error;
-  }
-}
-
-async function writeFile(root: string, relativePath: string, content: string): Promise<void> {
-  const target = path.resolve(root, relativePath);
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  const temp = `${target}.everpeace-undo-${process.pid}-${Date.now()}.tmp`;
-  await fs.writeFile(temp, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
-  try { await fs.rename(temp, target); } catch (error) { await fs.rm(temp, { force: true }); throw error; }
+async function readFile(root: string, relativePath: string): Promise<{ exists: boolean; content: Buffer; attributes?: number; identity?: string }> {
+  const relative = path.relative(path.resolve(root), path.resolve(root, relativePath));
+  if (path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${path.sep}`)) throw new Error('Checkpoint path is outside the current workspace');
+  const value = await safeReadFile(root, relativePath);
+  return { exists: value.exists, content: value.bytes, ...(value.attributes === undefined ? {} : { attributes: value.attributes }), ...(value.identity ? { identity: value.identity } : {}) };
 }
 
 /** In-memory only journal for the latest Agent turn. File contents never enter Session JSONL. */
@@ -78,7 +50,7 @@ export class TurnCheckpoint {
     this.#root = root;
   }
 
-  get available(): boolean { return this.#available && this.#files.size > 0; }
+  get available(): boolean { return this.#available && [...this.#files.values()].some(file => file.committed); }
   get paths(): string[] { return [...this.#files.keys()]; }
 
   #key(relativePath: string): string {
@@ -102,6 +74,10 @@ export class TurnCheckpoint {
         beforeContent: before.content,
         beforeSha256: before.exists ? digest(before.content) : null,
         afterSha256: null,
+        committed: false,
+        ...(before.attributes === undefined ? {} : { beforeAttributes: before.attributes }),
+        beforeIdentity: before.identity ?? null,
+        afterIdentity: null,
       });
     }
   }
@@ -112,32 +88,42 @@ export class TurnCheckpoint {
       const key = this.#key(operation.path);
       const item = this.#files.get(key);
       if (!item) continue;
-      const after = await readFile(this.#root, operation.path);
-      item.afterSha256 = after.exists ? digest(after.content) : null;
+      const committed = result.files.find(file => this.#key(file.path) === key && file.status === 'applied');
+      if (committed?.beforeSha256 !== (item.committed ? item.afterSha256 : item.beforeSha256) || committed.beforeFileIdentity !== (item.committed ? item.afterIdentity : item.beforeIdentity) || committed.afterSha256 === undefined || committed.afterFileIdentity === undefined) {
+        this.#available = false;
+        continue;
+      }
+      // The committed post-image is authoritative. A subsequent user save must
+      // never become the version that undo is permitted to overwrite.
+      item.afterSha256 = committed.afterSha256;
+      item.committed = true;
+      item.afterIdentity = committed.afterFileIdentity;
     }
   }
 
   async undo(): Promise<UndoResult> {
     if (!this.#available) return { status: "unavailable", restored: [], conflicts: [] };
-    if (this.#files.size === 0) return { status: "empty", restored: [], conflicts: [] };
+    if (![...this.#files.values()].some(file => file.committed)) return { status: "empty", restored: [], conflicts: [] };
     const restored: string[] = [];
     const conflicts: string[] = [];
     for (const item of this.#files.values()) {
-      let current: { exists: boolean; content: string };
+      if (!item.committed) continue;
+      let current: { exists: boolean; content: Buffer; identity?: string };
       try {
         current = await readFile(this.#root, item.path);
-      } catch {
+      } catch (error) {
+        if (error instanceof ResourceCleanupError) throw error;
         conflicts.push(item.path);
         continue;
       }
       const currentSha = current.exists ? digest(current.content) : null;
-      if (currentSha !== item.afterSha256) {
+      if (currentSha !== item.afterSha256 || (current.identity ?? null) !== item.afterIdentity) {
         conflicts.push(item.path);
         continue;
       }
-      const target = path.resolve(this.#root, item.path);
-      if (item.beforeSha256 === null && !item.beforeExists) await fs.rm(target, { force: true });
-      else await writeFile(this.#root, item.path, item.beforeContent);
+      try {
+        await safeCommitFile(this.#root, item.path, current.exists ? current.content : undefined, item.beforeExists ? item.beforeContent : undefined, undefined, item.beforeAttributes, current.identity);
+      } catch (error) { if (error instanceof ResourceCleanupError) throw error; conflicts.push(item.path); continue; }
       restored.push(item.path);
     }
     this.#available = false;
@@ -152,11 +138,12 @@ export class TurnCheckpoint {
   async reviewCurrent(): Promise<CheckpointReviewResult> {
     const conflicts: string[] = [];
     for (const item of this.#files.values()) {
+      if (!item.committed) continue;
       try {
         const current = await readFile(this.#root, item.path);
         const currentSha = current.exists ? digest(current.content) : null;
-        if (currentSha !== item.afterSha256) conflicts.push(item.path);
-      } catch { conflicts.push(item.path); }
+        if (currentSha !== item.afterSha256 || (current.identity ?? null) !== item.afterIdentity) conflicts.push(item.path);
+      } catch (error) { if (error instanceof ResourceCleanupError) throw error; conflicts.push(item.path); }
     }
     return conflicts.length === 0
       ? { passed: true, conflicts: [] }

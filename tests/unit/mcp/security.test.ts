@@ -23,7 +23,7 @@ async function fixture(t: TestContext) {
   const path = join(workspace, "user-state", "mcp-trust.json");
   const store = new McpTrustStore({ path, authStorage: auth });
   const marker = join(workspace, "started.txt");
-  const config: McpServerConfig = { name: "marker", enabled: true, transport: { type: "stdio", command: process.execPath, args: [markerFixture, marker], env: { FIXTURE_SECRET: "private-env-value" } } };
+  const config: McpServerConfig = { name: "marker", enabled: true, transport: { type: "stdio", isolation: "host", command: process.execPath, args: [markerFixture, marker], env: { FIXTURE_SECRET: "private-env-value" } } };
   return { workspace, store, auth, path, config, marker };
 }
 async function until(predicate: () => boolean): Promise<void> {
@@ -48,7 +48,7 @@ test("untrusted real stdio starts zero processes; explicit approval persists per
   const preview = await runtime.previewTrust("marker");
   assert.match(preview.summary, /host user permissions/u);
   assert.ok(!preview.summary.includes("private-env-value"));
-  assert.ok(!preview.summary.includes(markerFixture));
+  assert.ok(preview.summary.includes(JSON.stringify(markerFixture)));
   // Viewing or cancelling a preview never creates a startup grant.
   await runtime.refresh(); await assert.rejects(fs.stat(f.marker), { code: "ENOENT" });
   const cancelled = new AbortController(); cancelled.abort();
@@ -72,7 +72,7 @@ test("config and inherited environment changes invalidate previews and live bind
   let config = f.config;
   const runtime = new McpRuntime({ workspacePath: f.workspace, trustStore: f.store, async loadConfig() { return [config]; } }); t.after(() => runtime.close());
   const preview = await runtime.previewTrust("marker");
-  config = { ...config, transport: { ...f.config.transport, type: "stdio", command: process.execPath, env: { FIXTURE_SECRET: "changed-secret" } } };
+  config = { ...config, transport: { ...f.config.transport, type: "stdio", isolation: "host", command: process.execPath, env: { FIXTURE_SECRET: "changed-secret" } } };
   await assert.rejects(runtime.approveTrust(preview), /changed/u);
   await runtime.approveTrust(await runtime.previewTrust("marker"));
   const ready = await runtime.refresh(); const binding = ready.toolInfo?.[0]?.binding; assert.ok(binding);
@@ -83,7 +83,7 @@ test("config and inherited environment changes invalidate previews and live bind
   const variable = "EVERPEACE_MCP_INHERITED_FIXTURE"; const before = process.env[variable];
   t.after(() => { if (before === undefined) delete process.env[variable]; else process.env[variable] = before; });
   process.env[variable] = "one";
-  config = { ...f.config, transport: { type: "stdio", command: process.execPath, args: [markerFixture, f.marker], env_vars: [variable] } };
+  config = { ...f.config, transport: { type: "stdio", isolation: "host", command: process.execPath, args: [markerFixture, f.marker], env_vars: [variable] } };
   const inherited = await runtime.previewTrust("marker"); process.env[variable] = "two";
   await assert.rejects(runtime.approveTrust(inherited), /changed/u);
 });
@@ -115,7 +115,7 @@ test("configuration changes and cancellation during approval commit cannot save 
   }, async loadConfig() { return [config]; } });
   t.after(() => runtime.close());
   const preview = await runtime.previewTrust("marker");
-  atCommit = () => { config = { ...f.config, transport: { ...f.config.transport, type: "stdio", command: process.execPath, args: [markerFixture, f.marker, "changed"] } }; };
+  atCommit = () => { config = { ...f.config, transport: { ...f.config.transport, type: "stdio", isolation: "host", command: process.execPath, args: [markerFixture, f.marker, "changed"] } }; };
   await assert.rejects(runtime.approveTrust(preview), /changed/u);
   const cancelled = new AbortController();
   atCommit = () => { cancelled.abort(); };
@@ -183,7 +183,7 @@ test("non-loopback HTTP and URL credentials fail before any client or credential
 test("diagnostics redact environment, flag arguments, header tokens and sensitive endpoint queries", async (t) => {
   const message = "env-secret flag-secret header-secret https://example.invalid/mcp?token=query-secret";
   const transports: McpServerConfig["transport"][] = [
-    { type: "stdio", command: process.execPath, args: ["--token=flag-secret"], env: { SECRET: "env-secret" } },
+    { type: "stdio", isolation: "host", command: process.execPath, args: ["--token=flag-secret"], env: { SECRET: "env-secret" } },
     { type: "streamable_http", url: "https://example.invalid/mcp?token=query-secret", http_headers: { Authorization: "Bearer header-secret" } },
   ];
   for (const transport of transports) {

@@ -38,6 +38,11 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     return 2;
   }
   const HELP = uiText('help.main');
+  if (args[0] === 'recover-file') {
+    if (args.length !== 3) { process.stderr.write(uiText('security.recoveryUsage') + '\n'); return 2; }
+    try { const { recoverFile } = await import('../tools/file-recovery.js'); await recoverFile(args[1]!, args[2]!); process.stdout.write(uiText('security.recovered') + '\n'); return 0; }
+    catch (error) { process.stderr.write((error instanceof Error ? error.message : uiText('security.recoveryFailed')) + '\n'); return 1; }
+  }
   if (args[0] === 'memory') { const {runMemoryCommand} = await import('./commands/memory.js'); return runMemoryCommand(args.slice(1)); }
   if (args[0] === "privacy") {
     const { runPrivacyCommand } = await import("./commands/privacy.js");

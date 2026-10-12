@@ -100,7 +100,7 @@ for (const file of files) {
     if (entries.length)
         changes.push({ file, entries });
 }
-const allowed = new Set(['/plan ', 'node:module', 'Implement the following plan, which the user approved and explicitly started with /plan execute. Inspect current files and project rules before editing, respect current permissions, and verify the result.\n\nTitle: {p0}\n\n{p1}', 'profile ', 'trust ', 'revoke ', 'remember ', 'Continue working toward the active session goal. Call get_goal first, then proceed until the objective is verified complete.', 'Continue working toward the restored active session goal. Call get_goal first and proceed until the objective is verified complete.']);
+const allowed = new Set(['/plan ', 'node:module', 'Implement the following plan, which the user approved and explicitly started with /plan execute. Inspect current files and project rules before editing, respect current permissions, and verify the result.\n\nTitle: {p0}\n\n{p1}', 'profile ', 'mode ', 'trust ', 'revoke ', 'remember ', 'Continue working toward the active session goal. Call get_goal first, then proceed until the objective is verified complete.', 'Continue working toward the restored active session goal. Call get_goal first and proceed until the objective is verified complete.']);
 // These are parser grammar, a module specifier, and model instructions; they are not host UI.
 const remaining = changes.flatMap(({ file, entries }) => entries.filter(entry => !allowed.has(entry.en)).map(entry => ({ file, entry })));
 if (invalidCalls)

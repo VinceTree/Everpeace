@@ -19,6 +19,7 @@ node --version
 pnpm --version
 git --version
 pnpm install --frozen-lockfile
+pnpm files:build
 pnpm dev
 ```
 
@@ -44,6 +45,12 @@ Windows TUI 手工验收仍需真实 Windows Terminal。通过 WSL 调用 Node �
 [pnpm-workspace.yaml](../pnpm-workspace.yaml) 指定 [node-pty 补丁](../patches/node-pty@1.1.0.patch)，修复 Windows 控制台取消竞态及 socket/worker 清理；pnpm 安装构建准入只允许 `node-pty`。不要删除补丁或放开全部依赖安装脚本来规避安装问题。使用仓库与 pnpm 安装才能应用这些补丁；作为其他项目的 npm 依赖安装不会自动继承它们。
 
 独立产物改用 `pnpm build` 后的 `pnpm pack:release --output <空目录>`。打包器按 [原生依赖固定身份](../scripts/release/native-packages.json) 下载并校验上游 tarball，在独占 staging 应用补丁，将 node-pty 与精确 node-addon-api、平台 prebuild、源码和 MIT 许可证一并 bundle。补丁同时覆盖 console helper 异常、PTY socket/worker 释放，以及输出代理关闭后的 EPIPE/ECONNRESET：停止向已关闭代理写入，继续排空 Conpty，其他错误仍上报；[安装目录回归](../tests/unit/tools/node-pty-worker.test.ts) 使用真实 stream 验证错误与尾部排空。没有消费者补丁 hook，不复制开发机 build/Release；正式候选要求 Ubuntu 24.04 x64 打包，在已校验 staging 通过上游构建脚本编译 Linux PTY，并按摘要记录和封装 prebuild，保留 Windows/macOS 上游 prebuild。构建机需要 Python/make/C++，其他 Linux 环境尚未验收；Windows 本地包仅作开发。普通 npm/pnpm pack 的 prepack 明确拒绝未准备的产物，使用专用入口。收据绑定候选/脏状态、源码及 lockfile 摘要、补丁与 tarball 摘要；正式候选要求干净且准确提交匹配。
+
+## 安全文件原生组件
+
+Windows 本地 NTFS 文件工具需要 C++ 辅助程序。安装 MinGW-w64 g++ 或 Visual Studio C++ Build Tools 后运行 `pnpm files:build`；程序不查询其他可执行文件作为运行时回退。`pnpm test` 的 pretest 会构建生产和独立故障注入程序。`pnpm files:verify` 执行原生竞争用例；构建后 `pnpm files:smoke` 核对实际安装路径。干净源码安装会复制 native 源码并重新编译，不复用开发机二进制。故障注入程序不进入分发包。
+
+其他平台/文件系统的安全文件能力当前明确不可用。源码静态检查、协议测试或平台跳过不证明这些平台已具有该能力；正式原生交付仍不能跳过完整门禁。行为与限制见 [安全加固](architecture/SECURITY_HARDENING.md)。
 
 ## 开发与检查命令
 
@@ -219,5 +226,7 @@ Oxlint JSON 配置见 [.oxlintrc.json](../.oxlintrc.json)，[官方配置说明]
 ## 持续安全与扩展验收
 
 `pnpm security:scan <新绝对证据目录>` 运行完整锁文件审计、固定摘要 Gitleaks 和 Syft、SPDX 许可证检查；失败或缺失报告拒绝。共享 security workflow 进入 PR Required checks、候选 Release 和每日主分支扫描。公开测试秘密只用精确文件/摘要例外。Release 聚合候选、锁、包、消费者 SBOM 和许可证报告，不复用旧候选。
+
+当前文件后端只接受 Windows 本地 NTFS。Windows CI 执行完整四门禁；Linux CI 的 `test:portable` 只覆盖可移植隐私、网络、供应商和能力拒绝，不代表文件原生验收。构建后运行 `files:smoke`，`files:verify` 验证真实句柄竞争；`install:clean` 在干净源码副本重新编译组件。正式打包必须携带已核验 Windows worker 与摘要，未完成跨平台组件传递时拒绝缺组件包。
 
 `pnpm benchmark:prove-expanded <新绝对证据目录>` 对九项固定目录逐项证明正常基线、缺陷和参考修复，零模型请求；上游任务需首次只读克隆。全量 test 中使用已绑定源码的离线 helper 控制场景，TypeScript 旧编译器 API 仅用于外置评分器。Python 协议用例需要本机 Python 3（Windows 为 `python`，Linux 为 `python3`）；共享 CI 显式安装 Python 3.12，并在测试前核对可执行程序。冷启动探测上限 30 s、准备阶段上限 60 s，不放宽取消验收的 2 s 上限。真实终端回归通过 owned PTY 对 Web/cost/doctor 执行确认、取消和 resize，不访问付费服务。详见 [安全与诊断契约](architecture/SECURITY_AND_DIAGNOSTICS.md)。

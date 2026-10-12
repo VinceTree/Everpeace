@@ -360,6 +360,16 @@ export class TeamRuntime implements TeamAgentBridge {
       member.record.state = "cancelled"; await this.event(member.record); this.schedule();
     });
   }
+  transferDestinations(): string {
+    return JSON.stringify([this.options.model, ...this.options.models].map(model => ({ model: model.model_name, provider: new URL(model.base_url).origin })));
+  }
+  async stopForSensitiveContext(exceptMemberId?: string): Promise<void> {
+    const members = [...this.#members.values()].filter(member => member.record.agentId !== exceptMemberId && ['running', 'queued'].includes(member.record.state));
+    for (const member of members) member.controller.abort(Object.assign(new Error('Sensitive context requires renewed member authorization'), { memberOnly: true }));
+    const results = await Promise.allSettled(members.map(member => member.completion));
+    for (const result of results) if (result.status === 'rejected') throw result.reason;
+    for (const member of members) { member.record.state = 'cancelled'; await this.event(member.record); }
+  }
   async cleanupMember(id: string): Promise<void> {
     await this.maintenance(async () => {
       const member = this.member(id);

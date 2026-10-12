@@ -18,8 +18,8 @@ export interface CommandPrefixRule {
 export interface PermissionPolicy {
   mode: PermissionMode;
   web: boolean;
-  /** Omitted means the selected native profile controls shell networking. */
-  shellNetwork?: "deny";
+  /** Omitted denies model-shell networking outside explicit full-access. allow requires per-command approval. */
+  shellNetwork?: "deny" | "allow";
   commandRules?: readonly CommandPrefixRule[];
 }
 
@@ -57,7 +57,7 @@ function isPolicy(value: unknown): value is PermissionPolicy {
   const record = value as Record<string, unknown>;
   if (record.mode !== "read-only" && record.mode !== "ask" && record.mode !== "workspace-write" && record.mode !== "full-access") return false;
   if (typeof record.web !== "boolean") return false;
-  if (record.shellNetwork !== undefined && record.shellNetwork !== "deny") return false;
+  if (record.shellNetwork !== undefined && record.shellNetwork !== "deny" && record.shellNetwork !== "allow") return false;
   if (record.commandRules !== undefined && (!Array.isArray(record.commandRules) || !record.commandRules.every((rule) => {
     if (!rule || typeof rule !== "object" || Array.isArray(rule)) return false;
     const item = rule as Record<string, unknown>;
@@ -67,14 +67,14 @@ function isPolicy(value: unknown): value is PermissionPolicy {
   return true;
 }
 
-function normalizePolicy(policy: PermissionPolicy): PermissionPolicy {
+function normalizePolicy(policy: PermissionPolicy, defaultDeny = false): PermissionPolicy {
   const rules = (policy.commandRules ?? [])
     .map((rule) => ({ prefix: rule.prefix.trim(), action: rule.action }))
     .filter((rule) => rule.prefix.length > 0);
   return {
     mode: policy.mode,
     web: policy.web,
-    ...(policy.shellNetwork === "deny" ? { shellNetwork: "deny" as const } : {}),
+    ...(policy.shellNetwork ? { shellNetwork: policy.shellNetwork } : defaultDeny && policy.mode !== "full-access" ? { shellNetwork: "deny" as const } : {}),
     ...(rules.length ? { commandRules: rules } : {}),
   };
 }
@@ -96,7 +96,7 @@ export async function loadPermissionPolicy(
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
       const record = parsed as Partial<StoredPermissionPolicy>;
       if (record.version !== POLICY_VERSION || !isPolicy(record.policy)) continue;
-      const next = normalizePolicy(record.policy);
+      const next = normalizePolicy(record.policy, index === 0);
       if (index === 0) {
         result = next;
       } else {
@@ -150,7 +150,7 @@ export async function savePermissionPolicy(
 export function defaultPermissions(): PermissionPolicy {
   // Codex's useful default is autonomous work in the current workspace. The
   // explicit `ask` profile remains available for command-by-command review.
-  return { mode: "workspace-write", web: true };
+  return { mode: "workspace-write", web: true, shellNetwork: "deny" };
 }
 
 export function bashPermission(policy: PermissionPolicy): "deny" | "ask" | "allow" {

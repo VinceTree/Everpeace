@@ -42,6 +42,7 @@ function commandText(result: GitCommandResult, args: readonly string[]): string 
 }
 
 export interface CaptureWorkspaceSnapshotOptions {
+  omitDiff?: boolean;
   signal?: AbortSignal;
   now?: () => number;
 }
@@ -66,7 +67,7 @@ export async function captureWorkspaceSnapshot(
       runGit(["rev-parse", "HEAD"], workspacePath, options.signal),
       runGit(["branch", "--show-current"], workspacePath, options.signal),
       runGit(["status", "--porcelain=v1"], workspacePath, options.signal),
-      runGit(["diff", "--binary", "--no-ext-diff"], workspacePath, options.signal),
+      options.omitDiff ? Promise.resolve({ exitCode: 0, stdout: '', stderr: '' }) : runGit(["diff", "--binary", "--no-ext-diff"], workspacePath, options.signal),
     ]);
     const failures = commands.filter((result) => result.status === "rejected");
     const failure = failures.find((result) => result.reason instanceof ProcessCleanupError) ?? failures[0];

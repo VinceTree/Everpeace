@@ -145,7 +145,7 @@ export function createDefaultTuiDependencies(
   };
   const skills = new SkillCatalog(process.cwd());
   const skillManager = new SkillManager({ workspacePath: process.cwd(), catalog: skills });
-  const mcp = new McpRuntime({ workspacePath: process.cwd(), version });
+  const mcp = new McpRuntime({ workspacePath: process.cwd(), version, permissions: () => activeAgent?.permissions ?? defaultPermissions() });
   const learnedMemoryStore = new LearnedMemoryStore();
   const auxiliaryExecutor = new AuxiliaryRequestExecutor(() => activeAgent?.performance);
   let activeLearnedMemory: LearnedMemoryRuntime | undefined;
@@ -172,6 +172,8 @@ export function createDefaultTuiDependencies(
     return auxiliaryExecutor.execute(purpose, run, scopeSignal, signal, undefined, model ? costContext(model) : undefined);
   };
   return {
+    previewMcpIsolation: (name, mode) => mcp.previewIsolation(name, mode),
+    setMcpIsolation: (name, mode) => mcp.setIsolation(name, mode),
     configureWeb: (provider, key) => webSettings.configure(provider, key),
     configureCost: (modelId, price) => costSettings.configure(modelId, price),
     async getCostStatus(modelId) {
@@ -442,8 +444,9 @@ export function createDefaultTuiDependencies(
     loadPermissions(workspacePath) {
       return loadPermissionPolicy(workspacePath);
     },
-    savePermissions(workspacePath, policy, scope = "user") {
-      return savePermissionPolicy(policy, workspacePath, { scope });
+    async savePermissions(workspacePath, policy, scope = "user") {
+      await savePermissionPolicy(policy, workspacePath, { scope });
+      await mcp.close();
     },
     runBash(command, policy: PermissionPolicy, signal, onOutput, timeoutMs) {
       const cwd = process.cwd();

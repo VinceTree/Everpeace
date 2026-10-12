@@ -11,11 +11,12 @@ import { defaultRegistryPath } from './model-registry.js';
 import { defaultMemoryDirectory } from '../memory/learned-memory.js';
 import { readToolOutputReferences } from './session-outputs.js';
 
-interface PrivacySettings { version: 1; retentionDays: number | null; lastCleanupDay?: string }
+interface PrivacySettings { version: 1; retentionDays: number | null; lastCleanupDay?: string; configured?: boolean }
 export interface CleanupPreview { version: 1; token: string; at: string; directoryDigest: string; retentionDays: number | null; candidates: Array<{ id: string; fingerprint: string; bytes: number }>; excluded: Array<{ id: string; reason: string }>; invalidRecords: number }
 const daysValid = (value: unknown): value is number | null => value === null || typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= 36_500;
 function validSettings(value: unknown): value is PrivacySettings {
   return value !== null && typeof value === "object" && "version" in value && value.version === 1 && "retentionDays" in value && daysValid(value.retentionDays)
+    && (!("configured" in value) || typeof value.configured === "boolean")
     && (!("lastCleanupDay" in value) || typeof value.lastCleanupDay === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(value.lastCleanupDay));
 }
 function validPreview(value: unknown): value is CleanupPreview {
@@ -29,7 +30,7 @@ export class SessionPrivacy {
   readonly settings: UserSettingsStore<PrivacySettings>;
   readonly #preview: UserSettingsStore<{ version: 1; preview?: CleanupPreview }>;
   constructor(readonly store: SessionStore, settingsPath?: string, readonly now: () => Date = () => new Date()) {
-    this.settings = new UserSettingsStore("privacy.json", validSettings, () => ({ version: 1, retentionDays: null }), settingsPath);
+    this.settings = new UserSettingsStore("privacy.json", validSettings, () => ({ version: 1, retentionDays: 30, configured: false }), settingsPath);
     this.#preview = new UserSettingsStore("privacy-preview.json", (v): v is { version: 1; preview?: CleanupPreview } => v !== null && typeof v === "object" && "version" in v && v.version === 1 && (!("preview" in v) || validPreview(v.preview)), () => ({ version: 1 }), `${this.settings.path}.preview`);
   }
   #directoryDigest(): string { return createHash("sha256").update(path.resolve(this.store.directory)).digest("hex"); }
@@ -71,7 +72,7 @@ export class SessionPrivacy {
     const preview = await this.#consume(token);
     const currentPreview = await this.preview(preview.retentionDays, false);
     if (JSON.stringify([preview.candidates, preview.excluded, preview.invalidRecords]) !== JSON.stringify([currentPreview.candidates, currentPreview.excluded, currentPreview.invalidRecords])) throw new Error("Session cleanup preview changed; preview again");
-    await this.settings.update((current) => ({ ...current, retentionDays: preview.retentionDays }));
+    await this.settings.update((current) => ({ ...current, retentionDays: preview.retentionDays, configured: true }));
   }
   async cleanup(token: string): Promise<{ deleted: number; failed: number; excluded: number }> {
     const preview = await this.#consume(token);
@@ -92,7 +93,7 @@ export class SessionPrivacy {
   async autoCleanup(): Promise<{ deleted: number; failed: number; excluded: number } | undefined> {
     const day = this.now().toISOString().slice(0, 10); let claimed = false; let retentionDays: number | null = null;
     await this.settings.update((current) => {
-      if (current.retentionDays === null || current.lastCleanupDay === day) return current;
+      if (current.configured === false || current.retentionDays === null || current.lastCleanupDay === day) return current;
       claimed = true; retentionDays = current.retentionDays; return { ...current, lastCleanupDay: day };
     });
     if (!claimed) return;
@@ -148,6 +149,6 @@ export class SessionPrivacy {
   async describe(): Promise<string> {
     const settings = await this.settings.read();
     const config = path.dirname(defaultRegistryPath());
-    return [`Session storage: ${this.store.directory}`, `Tool attachments: ${path.join(this.store.directory,'outputs')} (owned by their Session)`, `Retention: ${settings.retentionDays === null ? "forever (default)" : settings.retentionDays + " days since last persisted activity"}`, `Privacy policy: ${this.settings.path}`, `Team snapshots and recovery journals: ${path.join(os.tmpdir(), "everpeace-teams")} (retained until explicit team cleanup; inspect via /team; excluded from Session retention)`, `Learned Memory: ${defaultMemoryDirectory()} (project entries: 90 days; user entries: until reviewed or removed; /memory inspect, disable, delete or clear)`, `Model registry: ${defaultRegistryPath()} (metadata until model removal)`, 'Credentials: operating-system Keyring, service Everpeace; remove using everpeace logout', `Input history: ${path.join(config,'input-history.json')} (separate retention; remove this file while the app is closed)`, 'Exports: stored at the destination you choose, retained until you delete that file.', "Persisted: user/assistant text, model context, tool interactions, usage and bounded redacted attachments (16 × 2 MiB/session).", "Context can contain source code, paths, customer data and unrecognized secrets.", "Default export: diagnostic summary; no conversation, source, tool bodies, paths or reasoning.", "Cleanup excludes active, unknown and retained-team sessions. Failures can be retried with a new preview.", "Memory, keyring credentials, input history and exported files have separate storage and are not removed by Session cleanup.", "Deletion removes application files; it does not erase backups, disk remnants or external copies."].join("\n");
+    return [`Session storage: ${this.store.directory}`, `Tool attachments: ${path.join(this.store.directory,'outputs')} (owned by their Session)`, `Retention: ${settings.retentionDays === null ? "forever (explicit or legacy choice)" : settings.retentionDays + " days since last persisted activity"}`, `Privacy policy: ${this.settings.path}${settings.configured === false ? " (first setup required; recommended 30 days; automatic cleanup inactive)" : ""}`, `Team snapshots and recovery journals: ${path.join(os.tmpdir(), "everpeace-teams")} (retained until explicit team cleanup; inspect via /team; excluded from Session retention)`, `Learned Memory: ${defaultMemoryDirectory()} (project entries: 90 days; user entries: until reviewed or removed; /memory inspect, disable, delete or clear)`, `Model registry: ${defaultRegistryPath()} (metadata until model removal)`, 'Credentials: operating-system Keyring, service Everpeace; remove using everpeace logout', `Input history: ${path.join(config,'input-history.json')} (linked entries are removed with their Session; legacy unlinked entries require /history clear)`, 'Exports: stored at the destination you choose, retained until you delete that file.', "Persisted: user/assistant text, model context, tool interactions, usage and bounded redacted attachments (16 × 2 MiB/session).", "Context can contain source code, paths, customer data and unrecognized secrets.", "Default export: diagnostic summary; no conversation, source, tool bodies, paths or reasoning.", "Cleanup excludes active, unknown and retained-team sessions. Failures can be retried with a new preview.", "Memory, keyring credentials, legacy unlinked input history and exported files have separate storage and are not removed by Session cleanup.", "Deletion removes application files; it does not erase backups, disk remnants or external copies."].join("\n");
   }
 }

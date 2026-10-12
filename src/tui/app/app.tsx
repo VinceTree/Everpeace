@@ -1,3 +1,4 @@
+import { sensitiveText, sensitiveDigest } from "../../permissions/sensitive-access.js";
 import {localizeHostReport} from '../../localization/reports.js';
 import {uiText,translateHostText} from '../../localization/messages.js';
 import {subscribeLanguage,currentLanguage,changeLanguage,isLanguagePreference}from'../../localization/language.js';
@@ -163,7 +164,7 @@ type View =
 type CommandView = Exclude<View, { kind: "chat" }>;
 
 interface PendingConfirmation {
-  kind: "bash" | "patch" | "web" | "mcp" | "goal";
+  kind: "bash" | "patch" | "web" | "mcp" | "goal" | "verification_basis";
   request: string;
   resolve(accepted: boolean): void;
 }
@@ -357,6 +358,7 @@ export function EverpeaceApp({
   const [lastTaskStartedAt,setLastTaskStartedAt]=useState<number>();
   const titleControllers = useRef(new Set<AbortController>());
   const confirmationRef = useRef<PendingConfirmation | undefined>(undefined);
+  const verificationBasisReview = useRef<(summary: string, signal?: AbortSignal) => Promise<boolean>>(() => Promise.resolve(false));
   const permissions = useRef(defaultPermissions());
   const permissionsReady = useRef<Promise<void>>(Promise.resolve());
   const terminalCommandRunning = useRef(false);
@@ -433,6 +435,8 @@ export function EverpeaceApp({
   const [terminalOutput, setTerminalOutput] = useState<string>();
   const [agentTerminalPreview, setAgentTerminalPreview] = useState<BashOutputPreview>();
   const [activeCommand, setActiveCommand] = useState<{ command: string; shell: string; source: "model" | "user"; cancelling?: boolean }>();
+  const sensitiveInputGrants = useRef(new Map<string, string>());
+  const skipInputHistory = useRef(false);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [resumedInputHistory, setResumedInputHistory] = useState<string[]>();
   const editorRef = useRef(createComposerState());
@@ -512,6 +516,8 @@ export function EverpeaceApp({
     let ownerSessionId=coordinator.sessionId;
     const runtimeOptions = {
       workspacePath: workflowWorkspace,
+      confirmVerificationBasis: (summary: string, signal?: AbortSignal) => verificationBasisReview.current(summary, signal),
+      permissionRevision: () => permissionPolicyRevision(permissions.current),
       ...(initialState ? { initialState } : {}),
       onState: async (state: WorkflowState) => {
         if(owner===workflowRuntime.current)ownerSessionId??=coordinator.sessionId;
@@ -685,6 +691,7 @@ export function EverpeaceApp({
   }, []);
   const requestBashConfirmation = useCallback((request: string, signal?: AbortSignal) => requestApproval("bash", request, signal), [requestApproval]);
   const requestPatchConfirmation = useCallback((request: string, signal?: AbortSignal) => requestApproval("patch", request, signal), [requestApproval]);
+  verificationBasisReview.current = (summary, signal) => requestApproval("verification_basis", summary, signal);
   const requestWebConfirmation = useCallback((request: string, signal?: AbortSignal) => requestApproval("web", request, signal), [requestApproval]);
   const requestMcpConfirmation = useCallback((request: string, signal?: AbortSignal) => requestApproval("mcp", request, signal), [requestApproval]);
   const requestGoalConfirmation = useCallback((request: string, signal?: AbortSignal) => requestApproval("goal", request, signal), [requestApproval]);
@@ -850,7 +857,9 @@ export function EverpeaceApp({
         },
       },
       interaction: {
+        takeSensitiveInputAuthorization(digest) { const allowed = sensitiveInputGrants.current.get(digest) === permissionPolicyRevision(permissions.current); sensitiveInputGrants.current.delete(digest); return allowed; },
         confirm(_kind, tool, prompt, signal) {
+          if (tool === "verification_basis") return requestApproval("verification_basis", prompt, signal);
           if (tool === "bash") return requestBashConfirmation(prompt, signal);
           if (tool === "patch") return requestPatchConfirmation(prompt, signal);
           if (tool === "web") return requestWebConfirmation(prompt, signal);
@@ -885,7 +894,7 @@ export function EverpeaceApp({
         },
       },
     }),
-    [append, clearLiveAssistant, dependencies.sessionStore, ensureWorkflow, executeBash, executeVerification, queueAssistantDelta, requestBashConfirmation, requestGoalConfirmation, requestMcpConfirmation, requestPatchConfirmation, requestUserInput, requestWebConfirmation, reviewPlan, workspacePath],
+    [append, clearLiveAssistant, dependencies.sessionStore, ensureWorkflow, executeBash, executeVerification, queueAssistantDelta, requestApproval, requestBashConfirmation, requestGoalConfirmation, requestMcpConfirmation, requestPatchConfirmation, requestUserInput, requestWebConfirmation, reviewPlan, workspacePath],
   );
 
   useEffect(() => {
@@ -1388,11 +1397,7 @@ export function EverpeaceApp({
         resumeGoalPending.current = !pendingForkResume && loaded.goal?.status === "active" && loaded.workflow?.phase !== "blocked";
         onReplayOutput(() => {
           setTimeline(restoredTimeline);
-          setResumedInputHistory(loaded.timeline.flatMap((entry) => {
-            if (entry.kind === "user") return [entry.text];
-            if (entry.kind === "output" && entry.command?.source === "user") return [`!${entry.command.command}`];
-            return [];
-          }));
+          setResumedInputHistory(undefined);
           editorRef.current = createComposerState();
           historyNavigationRef.current = { index: undefined, draft: "" };
           setTimelineEpoch((current) => current + 1);
@@ -2053,6 +2058,14 @@ export function EverpeaceApp({
       });
   }, [activeModel, agent, appendTransient, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad]);
 
+  const reviewMcpIsolation = useCallback(async (name: string, mode: 'sandbox' | 'host') => {
+    if (!dependencies.previewMcpIsolation || !dependencies.setMcpIsolation) return;
+    const preview = await dependencies.previewMcpIsolation(name, mode);
+    enterCommandView({ kind: 'action-confirm', text: preview.summary + '\n' + uiText('security.mcpModeHelp'), startLabel: uiText('security.mcpModeConfirm'), cancel: returnToChat,
+      start: () => { void dependencies.setMcpIsolation!(name, mode).then(() => openInfo('/mcp', uiText('security.mcpModeSaved'))).catch(error => openInfo('/mcp', error instanceof Error ? error.message : String(error), 'error')); },
+    });
+  }, [dependencies, enterCommandView, returnToChat, openInfo]);
+
   const runChat = useCallback(
     async (
       text: string,
@@ -2061,9 +2074,28 @@ export function EverpeaceApp({
       taskSource: WorkflowTaskSource = "user",
       attachments: readonly FileAttachment[] = [],
       executeApprovedPlan = false,
+      inputHistoryText?: string,
     ) => {
       await permissionsReady.current;
       if (directController.current) return;
+      if (dependencies.privacy && (await dependencies.privacy.settings.read()).configured === false) {
+        const preview = await dependencies.privacy.preview(30, false);
+        const result = await requestUserInput({ questions: [{ id: 'session_retention', header: uiText('privacy.retentionHeader'), question: uiText('privacy.retentionChoice', { p0: preview.candidates.length, p1: preview.excluded.length }), options: [
+          { label: uiText('privacy.days30'), description: uiText('privacy.days30Help') },
+          { label: uiText('privacy.days7'), description: uiText('privacy.days7Help') },
+          { label: uiText('privacy.forever'), description: uiText('privacy.foreverHelp') },
+        ] }] });
+        if (result.__cancelled) return;
+        const chosen = result.session_retention;
+        const days = chosen === uiText('privacy.days30') ? 30 : chosen === uiText('privacy.days7') ? 7 : chosen === uiText('privacy.forever') ? null : Number(chosen);
+        const selected = await dependencies.privacy.preview(days);
+        const review = await requestUserInput({ questions: [{ id: 'retention_review', header: uiText('privacy.retentionHeader'), question: uiText('privacy.retentionReview', { p0: days ?? uiText('privacy.forever'), p1: selected.candidates.length, p2: selected.excluded.length }), options: [
+          { label: uiText('privacy.savePolicy'), description: uiText('privacy.savePolicyHelp') },
+          { label: uiText('security.reject'), description: uiText('privacy.keepExisting') },
+        ] }] });
+        if (review.__cancelled || review.retention_review !== uiText('privacy.savePolicy')) return;
+        await dependencies.privacy.configure(selected.token);
+      }
       if (!agent || !activeModel) {
         append("error", uiText('m805ea5bb295f'));
         return;
@@ -2139,6 +2171,9 @@ export function EverpeaceApp({
         }
       }
 
+      if (inputHistoryText !== undefined && coordinator.sessionId) {
+        await dependencies.inputHistory?.append(inputHistoryText, { sessionId: coordinator.sessionId }).catch(() => appendTransient('error', uiText('m807d2bac6f8f')));
+      }
       if (!timelineRecorded) append("user", text);
       const metadata = resolveModelStatusMetadata(activeModel.base_url, activeModel.model_name);
       const waitingTarget = metadata.provider === "OpenAI-compatible"
@@ -2267,7 +2302,7 @@ export function EverpeaceApp({
         }
       }
     },
-    [activeModel, agent, agentMode, append, appendTransient, clearLiveAssistant, clearQueuedGuidance, dependencies.sessionStore, ensureWorkflow, executeVerification, requestSettings, returnQueuedGuidanceToDraft, startTitleGeneration, workspacePath],
+    [activeModel, agent, agentMode, append, appendTransient, clearLiveAssistant, clearQueuedGuidance, dependencies, ensureWorkflow, executeVerification, requestSettings, returnQueuedGuidanceToDraft, startTitleGeneration, workspacePath],
   );
 
   useEffect(() => {
@@ -2484,14 +2519,37 @@ directController.current = new AbortController();setLastTaskStartedAt(Date.now()
     (input: string): boolean | Promise<boolean> => {
       const parsed = parseTuiInput(input);
       if (parsed.kind === "empty") return false;
+      const sensitivePayload = parsed.kind === 'chat' ? parsed.text : parsed.kind === 'slash' && parsed.command === '/plan' ? parsed.args ?? '' : '';
+      if (sensitiveText(sensitivePayload) && !sensitiveInputGrants.current.has(sensitiveDigest(sensitivePayload))) {
+        return (async () => {
+          const revision = permissionPolicyRevision(permissions.current);
+          const result = await requestUserInput({ questions: [{ id: 'sensitive_input', header: uiText('security.sensitive'), question: uiText('security.originalHelp'), options: [uiText('security.mask'), uiText('security.original'), uiText('security.reject')].map(label => ({ label, description: label })) }] });
+          if (revision !== permissionPolicyRevision(permissions.current) || result.__cancelled || result.sensitive_input === uiText('security.reject')) return false;
+          if (result.sensitive_input === uiText('security.original')) sensitiveInputGrants.current.set(sensitiveDigest(sensitivePayload), revision);
+          else { const { redactSecretsPreservingLayout } = await import('../../util/redact-secrets.js'); input = redactSecretsPreservingLayout(input); }
+          skipInputHistory.current = true;
+          return handleSubmit(input);
+        })();
+      }
+      if (parsed.kind === 'slash' && parsed.command === '/history' && parsed.args === 'no-save') {
+        skipInputHistory.current = true; appendTransient('system', uiText('privacy.noHistory')); return true;
+      }
+      if (parsed.kind === 'slash' && parsed.command === '/history' && parsed.args === 'clear') {
+        return (async () => { await dependencies.inputHistory?.clear(); setInputHistory([]); setResumedInputHistory([]); return true; })();
+      }
       const submitResolved = (attachments: readonly FileAttachment[]): boolean => {
+        const saveHistory = !skipInputHistory.current && !sensitiveText(input);
+        const historyInTask = parsed.kind === 'chat' && !coordinator.activeTask || parsed.kind === 'slash' && parsed.command === '/plan' && !!parsed.args && !['execute', 'exit'].includes(parsed.args);
+        if (saveHistory) {
         setInputHistory((current) => current.at(-1) === input ? current : [...current, input].slice(-1000));
         setResumedInputHistory((current) => current === undefined ? undefined : current.at(-1) === input ? current : [...current, input].slice(-1000));
-        void dependencies.inputHistory?.append(input).catch(() => appendTransient("error", uiText('m807d2bac6f8f')));
+        if (!historyInTask) void dependencies.inputHistory?.append(input, coordinator.sessionId ? { sessionId: coordinator.sessionId } : {}).catch(() => appendTransient("error", uiText('m807d2bac6f8f')));
+        }
+        skipInputHistory.current = false;
 
         if (parsed.kind === "chat") {
           if (coordinator.activeTask) queueGuidance(parsed.text, attachments);
-          else void runChat(parsed.text, false, agentMode, "user", attachments);
+          else void runChat(parsed.text, false, agentMode, "user", attachments, false, saveHistory ? input : undefined);
           return true;
         }
         if (parsed.kind === "bash") {
@@ -2550,7 +2608,12 @@ directController.current = new AbortController();setLastTaskStartedAt(Date.now()
         if (parsed.command === "/permissions") enterCommandView({ kind: "permissions" });
         if (parsed.command === "/mcp") {
           const args = parsed.args?.trim() ?? "";
-          if (args.startsWith("trust ")) {
+          if (args.startsWith('mode ')) {
+            const [, name, mode] = args.split(/\s+/u);
+            if (coordinator.activeTask || directController.current) appendTransient('system', uiText('mfbddd6f152ac'));
+            else if (name && (mode === 'sandbox' || mode === 'host')) void reviewMcpIsolation(name, mode).catch(error => openInfo('/mcp', error instanceof Error ? error.message : String(error), 'error'));
+            else openInfo('/mcp', uiText('security.mcpModeUsage'), 'error');
+          } else if (args.startsWith("trust ")) {
             if (coordinator.activeTask || directController.current) appendTransient("system", uiText('mfbddd6f152ac'));
             else void reviewMcpTrust(args.slice(6).trim());
           } else if (args.startsWith("revoke ")) {
@@ -2593,7 +2656,7 @@ directController.current = new AbortController();setLastTaskStartedAt(Date.now()
             appendTransient("system", uiText('mdcfb041122d5'));
           } else {
             setAgentMode("plan");
-            void runChat(args, false, "plan");
+            void runChat(args, false, "plan", "user", [], false, saveHistory ? input : undefined);
           }
         }
         if (parsed.command === "/goal") handleGoal(parsed.args?.trim() ?? "");
@@ -2835,6 +2898,7 @@ directController.current = new AbortController();setLastTaskStartedAt(Date.now()
           <TerminalSetup onBack={returnToChat} />
         ) : view.kind === "permissions" ? (
           <PermissionsPicker
+            plan={agentMode === "plan"}
             policy={permissions.current}
             workspace={workspacePath}
             onChange={(policy) => {
@@ -2845,8 +2909,10 @@ directController.current = new AbortController();setLastTaskStartedAt(Date.now()
                   permissions.current = dependencies.loadPermissions
                     ? await dependencies.loadPermissions(workspacePath)
                     : policy;
-                } catch {
-                  // Keep the prior effective policy when persistence or reload fails.
+                } catch (error) {
+                  if (dependencies.loadPermissions) permissions.current = await dependencies.loadPermissions(workspacePath);
+                  if (error instanceof ProcessCleanupError) await ensureWorkflow().recordCleanupFailure(error);
+                  // Persistence errors preserve the current effective stored policy.
                 } finally {
                   returnToChat();
                 }
@@ -2858,8 +2924,10 @@ directController.current = new AbortController();setLastTaskStartedAt(Date.now()
                   coordinator.cancelTask(new Error(uiText('m71bcaf700a0c')));
                   await dependencies.savePermissions?.(workspacePath, policy, "project");
                   if (dependencies.loadPermissions) permissions.current = await dependencies.loadPermissions(workspacePath);
-                } catch {
-                  // Keep the prior effective policy when persistence or reload fails.
+                } catch (error) {
+                  if (dependencies.loadPermissions) permissions.current = await dependencies.loadPermissions(workspacePath);
+                  if (error instanceof ProcessCleanupError) await ensureWorkflow().recordCleanupFailure(error);
+                  // Persistence errors preserve the current effective stored policy.
                 } finally {
                   returnToChat();
                 }

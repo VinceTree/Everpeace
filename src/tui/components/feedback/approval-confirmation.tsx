@@ -5,7 +5,7 @@ import React from "react";
 import { HighlightedCommand, RichOutput } from "../../rendering/rich-text.js";
 
 export interface ApprovalConfirmationProps {
-  kind: "bash" | "patch" | "web" | "mcp" | "goal";
+  kind: "bash" | "patch" | "web" | "mcp" | "goal" | "verification_basis";
   request: string;
   onConfirm(): void;
   onCancel(): void;
@@ -19,6 +19,7 @@ export function ApprovalConfirmation({
   onCancel,
   inputHandledByPrompt = false,
 }: ApprovalConfirmationProps) {
+  const isVerification = kind === "verification_basis";
   const isBash = kind === "bash";
   const isPatch = kind === "patch";
   const isMcp = kind === "mcp";
@@ -27,11 +28,11 @@ export function ApprovalConfirmation({
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
       <Text color="yellow">
-        {isBash ? uiText('medfbff3286cb', {p0: shell}) : isPatch ? uiText('m8b4018da6a61') : isMcp ? uiText('m35ad3d7a6630') : isGoal ? uiText('maae9dc7063da') : uiText('ma51d760b6e4f')}
+        {isVerification ? uiText('security.verificationHeader') : isBash ? uiText('medfbff3286cb', {p0: shell}) : isPatch ? uiText('m8b4018da6a61') : isMcp ? uiText('m35ad3d7a6630') : isGoal ? uiText('maae9dc7063da') : uiText('ma51d760b6e4f')}
       </Text>
       {isBash ? <HighlightedCommand command={request} shell={shell} /> : isPatch ? <RichOutput text={request} /> : <Text wrap="truncate-end">{request}</Text>}
       <Box>
-        <Text>{isBash ? uiText('m29c33691ecb3') : isPatch ? uiText('m42219adcf198') : isMcp ? uiText('m2a0af6a0010c') : isGoal ? uiText('m0af9f38d3ebc') : uiText('mdab1a62e2569')}</Text>
+        <Text>{isVerification ? uiText('security.verificationConfirm') : isBash ? uiText('m29c33691ecb3') : isPatch ? uiText('m42219adcf198') : isMcp ? uiText('m2a0af6a0010c') : isGoal ? uiText('m0af9f38d3ebc') : uiText('mdab1a62e2569')}</Text>
         {inputHandledByPrompt ? <Text>{uiText('me7bb53e4fecb')}</Text> : <ConfirmInput defaultChoice="cancel" onConfirm={onConfirm} onCancel={onCancel} />}
       </Box>
       {inputHandledByPrompt ? <Text dimColor>{uiText('m28f01d0dca4a')}</Text> : null}

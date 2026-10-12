@@ -1,6 +1,7 @@
-import { constants, promises as fs } from "node:fs";
+import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
+import { promises as fs } from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { safeReadFile, safeCommitFile, SafeFileError } from "./safe-files.js";
 import { isProtectedPatchPath } from "./sandbox-policy.js";
 import { decodeTextFile, encodeTextFile, sha256Bytes, type TextFileVersion } from "./file-version.js";
 
@@ -13,6 +14,9 @@ export type ApplyPatchAction = "create" | "update" | "delete";
 export interface ApplyPatchOptions {
   /** Set only by the host after the user selected full access; never model arguments. */
   allowProtectedPaths?: boolean;
+  signal?: AbortSignal;
+  /** Host-only final policy check/fault injection; never accepted from model arguments. */
+  beforeCommit?(relativePath: string): Promise<void>;
 }
 
 export interface ApplyPatchOperation {
@@ -26,6 +30,8 @@ export interface ApplyPatchOperation {
     matchMode?: "exact" | "line_whitespace";
   };
   expectedSha256?: string;
+  /** Host observation/preview binding; never accepted from model JSON. */
+  observedIdentity?: string;
 }
 
 export type ApplyPatchErrorCode =
@@ -36,12 +42,18 @@ export type ApplyPatchErrorCode =
   | "REPLACEMENT_AMBIGUOUS"
   | "REPLACEMENT_UNCHANGED"
   | "PATCH_MISMATCH"
-  | "PATCH_FAILED";
+  | "PATCH_FAILED"
+  | "FILE_CONFLICT"
+  | "FILE_ACCESS_UNAVAILABLE";
 
 export interface ApplyPatchFileResult {
   path: string;
   action: ApplyPatchAction;
   status: "applied" | "failed";
+  beforeSha256?: string | null;
+  afterSha256?: string | null;
+  beforeFileIdentity?: string | null;
+  afterFileIdentity?: string | null;
   error?: string;
   matchMode?: "exact" | "line_whitespace";
   matchedLines?: { start: number; end: number };
@@ -54,6 +66,7 @@ export interface ApplyPatchResult {
   rolledBack?: boolean;
   rollbackConflicts?: string[];
   rollbackErrors?: string[];
+  recoveryPath?: string;
   error?: string;
   errorCode?: ApplyPatchErrorCode;
   remedy?: string;
@@ -64,6 +77,7 @@ export interface ApplyPatchPreviewFile {
   action: ApplyPatchAction;
   beforeSha256: string | null;
   afterSha256: string | null;
+  beforeFileIdentity?: string | null;
   diff: string;
   matchMode?: "exact" | "line_whitespace";
   matchedLines?: { start: number; end: number };
@@ -135,7 +149,7 @@ export const APPLY_PATCH_TOOL_DEFINITION = {
   strict: true,
 } as const;
 
-function parseOperation(value: unknown): ApplyPatchOperation {
+function parseOperation(value: unknown, host = false): ApplyPatchOperation {
   if (!value || typeof value !== "object" || Array.isArray(value)) patchError("INVALID_ARGUMENTS", "Each patch operation must be an object");
   const record = value as Record<string, unknown>;
   if (typeof record.path !== "string" || !record.path.trim() || record.path.includes("\0")) patchError("INVALID_ARGUMENTS", "Patch path must be a non-empty workspace-relative string");
@@ -155,7 +169,8 @@ function parseOperation(value: unknown): ApplyPatchOperation {
     replace = { oldText: replacement.oldText, newText: replacement.newText, ...(replacement.matchMode === undefined ? {} : { matchMode: replacement.matchMode }) };
   }
   if (record.expectedSha256 !== undefined && record.expectedSha256 !== null && (typeof record.expectedSha256 !== "string" || !/^[a-f0-9]{64}$/iu.test(record.expectedSha256))) patchError("INVALID_ARGUMENTS", "expectedSha256 must be a SHA-256 hex digest");
-  if (Object.keys(record).some((key) => !["path", "action", "content", "patch", "replace", "expectedSha256"].includes(key))) patchError("INVALID_ARGUMENTS", "Patch operation contains unsupported fields");
+  if (record.observedIdentity !== undefined && (!host || typeof record.observedIdentity !== 'string' || !/^\d+:\d+:\d+$/u.test(record.observedIdentity))) patchError('INVALID_ARGUMENTS', 'Invalid host file identity');
+  if (Object.keys(record).some((key) => !["path", "action", "content", "patch", "replace", "expectedSha256", ...(host ? ['observedIdentity'] : [])].includes(key))) patchError("INVALID_ARGUMENTS", "Patch operation contains unsupported fields");
   return {
     path: record.path,
     action: record.action,
@@ -163,6 +178,7 @@ function parseOperation(value: unknown): ApplyPatchOperation {
     ...(typeof record.patch === "string" ? { patch: record.patch } : {}),
     ...(replace ? { replace } : {}),
     ...(typeof record.expectedSha256 === "string" ? { expectedSha256: record.expectedSha256.toLowerCase() } : {}),
+    ...(host && typeof record.observedIdentity === 'string' ? { observedIdentity: record.observedIdentity } : {}),
   };
 }
 
@@ -173,7 +189,7 @@ export function parseApplyPatchArguments(argumentsJson: string): ApplyPatchOpera
   if (Object.keys(value as Record<string, unknown>).some((key) => key !== "operations")) patchError("INVALID_ARGUMENTS", "apply_patch contains unsupported fields");
   const operations = (value as { operations: unknown[] }).operations;
   if (operations.length === 0 || operations.length > MAX_OPERATIONS) patchError("INVALID_ARGUMENTS", `apply_patch accepts 1-${MAX_OPERATIONS} operations`);
-  return operations.map(parseOperation);
+  return operations.map(operation => parseOperation(operation));
 }
 
 function applyUnifiedPatch(original: string, patch: string): string {
@@ -281,47 +297,24 @@ async function assertSafeTarget(root: string, target: string): Promise<void> {
   }
 }
 
-async function readTarget(target: string): Promise<{ exists: false } | ({ exists: true } & TextFileVersion)> {
-  try {
-    const stat = await fs.lstat(target);
-    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Patch target must be a regular file");
-    if (stat.size > MAX_FILE_BYTES) throw new Error("Patch target exceeds the 512 KiB limit");
-    const handle = await fs.open(target, constants.O_RDONLY);
-    try { return { exists: true, ...decodeTextFile(await handle.readFile()) }; } finally { await handle.close(); }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { exists: false };
-    throw error;
-  }
-}
-
-async function atomicWrite(target: string, content: Uint8Array): Promise<void> {
-  if (content.byteLength > MAX_FILE_BYTES) throw new Error("Patched file exceeds the 512 KiB limit");
-  const temporary = `${target}.everpeace-${randomUUID()}.tmp`;
-  await fs.writeFile(temporary, content, { flag: "wx" });
-  try { await fs.rename(temporary, target); } catch (error) { await fs.rm(temporary, { force: true }); throw error; }
-}
-
-async function exclusiveCreate(target: string, content: Uint8Array): Promise<void> {
-  if (content.byteLength > MAX_FILE_BYTES) throw new Error("Patched file exceeds the 512 KiB limit");
-  const handle = await fs.open(target, "wx");
-  try { await handle.writeFile(content); }
-  catch (error) { await handle.close(); await fs.rm(target, { force: true }); throw error; }
-  await handle.close();
-}
-
-async function sameTargetVersion(target: string, expected: { exists: boolean; bytes?: Uint8Array }): Promise<boolean> {
-  const current = await readTarget(target);
-  return current.exists === expected.exists && (!current.exists || (expected.bytes !== undefined && current.sha256 === sha256Bytes(expected.bytes)));
+type ObservedTextVersion = TextFileVersion & { identity: string; attributes?: number };
+async function readTarget(target: string, workspace: string): Promise<{ exists: false } | ({ exists: true } & ObservedTextVersion)> {
+  const value = await safeReadFile(workspace, path.relative(workspace, target));
+  if (!value.exists) return { exists: false };
+  if (value.bytes.length > MAX_FILE_BYTES) throw new Error("Patch target exceeds the 512 KiB limit");
+  if (!value.identity) throw new SafeFileError('FILE_ACCESS_UNAVAILABLE');
+  return { exists: true, ...decodeTextFile(value.bytes), identity: value.identity, ...(value.attributes === undefined ? {} : { attributes: value.attributes }) };
 }
 
 interface PreparedPatch {
   operation: ApplyPatchOperation;
   target: string;
-  before: { exists: false } | ({ exists: true } & TextFileVersion);
+  before: { exists: false } | ({ exists: true } & ObservedTextVersion);
   after?: Buffer;
   afterText?: string;
   matchMode?: "exact" | "line_whitespace";
   matchedLines?: { start: number; end: number };
+  afterIdentity?: string;
 }
 
 async function preparePatch(
@@ -330,18 +323,13 @@ async function preparePatch(
   options: ApplyPatchOptions,
 ): Promise<{ prepared: PreparedPatch[] } | { error: string; errorCode?: ApplyPatchErrorCode; remedy?: string }> {
   if (operations.length === 0 || operations.length > MAX_OPERATIONS) return { error: `apply_patch accepts 1-${MAX_OPERATIONS} operations`, errorCode: "INVALID_ARGUMENTS" };
-  let root: string;
-  try {
-    root = await fs.realpath(workspace);
-  } catch (error) {
-    return { error: error instanceof Error ? error.message : String(error) };
-  }
+  const root = path.resolve(workspace);
   const prepared: PreparedPatch[] = [];
   const seen = new Set<string>();
   let patchBytes = 0;
   try {
     for (const rawOperation of operations) {
-      const operation = parseOperation(rawOperation);
+      const operation = parseOperation(rawOperation, true);
       patchBytes += Buffer.byteLength(operation.content ?? operation.patch ?? operation.replace?.oldText ?? "", "utf8")
         + Buffer.byteLength(operation.replace?.newText ?? "", "utf8");
       if (patchBytes > MAX_PATCH_BYTES) throw new Error("Patch batch exceeds the 512 KiB limit");
@@ -353,10 +341,11 @@ async function preparePatch(
       const key = path.relative(root, target).toLowerCase();
       if (seen.has(key)) throw new Error(`Duplicate patch path: ${operation.path}`);
       seen.add(key);
-      const before = await readTarget(target);
+      const before = await readTarget(target, root);
       if (operation.action === "create" && before.exists) throw new Error(`File already exists: ${operation.path}`);
       if (operation.action !== "create" && !before.exists) throw new Error(`File does not exist: ${operation.path}`);
       if (operation.expectedSha256 && (!before.exists || before.sha256 !== operation.expectedSha256)) patchError("STALE_VERSION", `File changed since it was read: ${operation.path}`, "Read the file again before retrying the edit.");
+      if (operation.observedIdentity && (!before.exists || before.identity !== operation.observedIdentity)) patchError('STALE_VERSION', `File object changed since it was observed: ${operation.path}`, 'Read and review the current file again.');
       let after: string | undefined;
       let match: ReturnType<typeof locateReplacement> | undefined;
       if (operation.action === "create") {
@@ -381,9 +370,10 @@ async function preparePatch(
     }
     return { prepared };
   } catch (error) {
+    if (error instanceof ResourceCleanupError || options.signal?.aborted) throw error;
     return error instanceof ApplyPatchError
       ? { error: error.message, errorCode: error.code, ...(error.remedy ? { remedy: error.remedy } : {}) }
-      : { error: error instanceof Error ? error.message : String(error), errorCode: "PATCH_FAILED" };
+      : { error: error instanceof Error ? error.message : String(error), errorCode: error instanceof SafeFileError ? error.code : "PATCH_FAILED" };
   }
 }
 
@@ -411,6 +401,7 @@ export async function previewApplyPatch(
     action: item.operation.action,
     beforeSha256: item.before.exists ? item.before.sha256 : null,
     afterSha256: item.after === undefined ? null : sha256Bytes(item.after),
+    beforeFileIdentity: item.before.exists ? item.before.identity : null,
     diff: diffFor(item),
     ...(item.matchMode ? { matchMode: item.matchMode, matchedLines: item.matchedLines! } : {}),
   }));
@@ -429,12 +420,12 @@ export async function runApplyPatch(
   const applied: PreparedPatch[] = [];
   try {
     for (const item of prepared) {
-      if (!(await sameTargetVersion(item.target, item.before))) patchError("STALE_VERSION", `File changed after the patch was prepared: ${item.operation.path}`, "Read the file again before retrying the edit.");
-      if (item.operation.action === "delete") await fs.unlink(item.target);
-      else if (item.operation.action === "create") await exclusiveCreate(item.target, item.after!);
-      else await atomicWrite(item.target, item.after!);
+      options.signal?.throwIfAborted();
+      await options.beforeCommit?.(item.operation.path);
+      const committed = await safeCommitFile(workspace, item.operation.path, item.before.exists ? item.before.bytes : undefined, item.after, options.signal, undefined, item.before.exists ? item.before.identity : undefined);
+      if (committed.identity) item.afterIdentity = committed.identity;
       applied.push(item);
-      files.push({ path: item.operation.path, action: item.operation.action, status: "applied", ...(item.matchMode ? { matchMode: item.matchMode, matchedLines: item.matchedLines! } : {}) });
+      files.push({ path: item.operation.path, action: item.operation.action, status: "applied", beforeSha256: item.before.exists ? item.before.sha256 : null, afterSha256: item.after === undefined ? null : sha256Bytes(item.after), beforeFileIdentity: item.before.exists ? item.before.identity : null, afterFileIdentity: item.afterIdentity ?? null, ...(item.matchMode ? { matchMode: item.matchMode, matchedLines: item.matchedLines! } : {}) });
     }
     return {
       status: "applied",
@@ -442,29 +433,26 @@ export async function runApplyPatch(
       diffSummary: prepared.map(({ operation }) => `${operation.action} ${operation.path}`).join("\n"),
     };
   } catch (error) {
+    if (error instanceof ResourceCleanupError) throw error;
     const rollbackConflicts: string[] = [];
     const rollbackErrors: string[] = [];
     for (const item of [...applied].reverse()) {
       try {
-        const expectedAfter = { exists: item.after !== undefined, ...(item.after === undefined ? {} : { bytes: item.after }) };
-        if (!(await sameTargetVersion(item.target, expectedAfter))) {
-          rollbackConflicts.push(item.operation.path);
-          continue;
-        }
-        if (item.before.exists) await atomicWrite(item.target, item.before.bytes);
-        else await fs.rm(item.target, { force: true });
+        await safeCommitFile(workspace, item.operation.path, item.after, item.before.exists ? item.before.bytes : undefined, undefined, item.before.exists ? item.before.attributes : undefined, item.afterIdentity);
       } catch (rollbackError) {
-        rollbackErrors.push(`${item.operation.path}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+        if (rollbackError instanceof ResourceCleanupError) throw rollbackError;
+        if (rollbackError instanceof SafeFileError && (rollbackError.code === "STALE_VERSION" || rollbackError.code === "FILE_CONFLICT")) rollbackConflicts.push(item.operation.path);
+        else rollbackErrors.push(`${item.operation.path}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
       }
     }
     return {
       status: "failed",
       files,
-      rolledBack: rollbackConflicts.length === 0 && rollbackErrors.length === 0,
+      rolledBack: !options.signal?.aborted && rollbackConflicts.length === 0 && rollbackErrors.length === 0 && !(error instanceof SafeFileError && (error.recoveryPath || error.code === "FILE_ACCESS_UNAVAILABLE")),
       ...(rollbackConflicts.length > 0 ? { rollbackConflicts } : {}),
       ...(rollbackErrors.length > 0 ? { rollbackErrors } : {}),
       error: error instanceof Error ? error.message : String(error),
-      ...(error instanceof ApplyPatchError ? { errorCode: error.code, ...(error.remedy ? { remedy: error.remedy } : {}) } : { errorCode: "PATCH_FAILED" as const }),
+      ...(error instanceof ApplyPatchError ? { errorCode: error.code, ...(error.remedy ? { remedy: error.remedy } : {}) } : error instanceof SafeFileError ? { errorCode: error.code, ...(error.recoveryPath ? { recoveryPath: error.recoveryPath } : {}) } : { errorCode: "PATCH_FAILED" as const }),
     };
   }
 }

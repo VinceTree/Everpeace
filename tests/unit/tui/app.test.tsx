@@ -78,7 +78,8 @@ test("privacy confirmation defaults to cancel and perf remains a local command",
     await tick(); view.stdin.write("/privacy retention 90"); await tick(); view.stdin.write("\r");
     await waitFor(() => (view.lastFrame() ?? "").includes("Set retention to 90 days"));
     await new Promise<void>((resolve) => setTimeout(resolve, 30));
-    view.stdin.write("\r"); await tick(); assert.equal((await privacy.settings.read()).retentionDays, null);
+    view.stdin.write("\r"); await tick(); assert.equal((await privacy.settings.read()).retentionDays, 30);
+    assert.equal((await privacy.settings.read()).configured, false);
     await waitFor(() => !(view.lastFrame() ?? "").includes("Set retention to 90 days"));
     view.stdin.write("/privacy retention 90"); await tick(); view.stdin.write("\r");
     await waitFor(() => (view.lastFrame() ?? "").includes("Set retention to 90 days"));
@@ -1177,6 +1178,7 @@ test("active turns show provider-aware English sampling and tool phases", async 
   await tick();
   view.stdin.write("\r");
   await waitFor(() => /Waiting for DeepSeek \(\d+s • ctrl\+c to interrupt\)/u.test(view.lastFrame() ?? ""));
+  await waitFor(() => typeof continueToTools === "function");
   continueToTools?.();
   await waitFor(() => /Working \(\d+s • ctrl\+c to interrupt\)/u.test(view.lastFrame() ?? ""));
   finishTurn?.();
@@ -3060,7 +3062,7 @@ test("/resume restores transcript, workspace, context, and continues the same se
 
   view.stdin.write("\u001b[A");
   await waitFor(() => !(view.lastFrame() ?? "").includes("Ask Everpeace"));
-  assert.match((view.lastFrame() ?? "").split("\n").filter((line) => line.trimStart().startsWith("›")).at(-1) ?? "", /before restart/);
+  assert.doesNotMatch((view.lastFrame() ?? "").split("\n").filter((line) => line.trimStart().startsWith("›")).at(-1) ?? "", /before restart/);
   view.stdin.write("\u001b[B");
   await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
   view.stdin.write("continue now");

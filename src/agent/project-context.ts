@@ -1,3 +1,5 @@
+import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
+import { safeReadFile } from "../tools/safe-files.js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -50,8 +52,10 @@ async function readWorkspaceFile(workspacePath: string, name: string, maximumByt
     if (!inside(root, target)) return undefined;
     const stat = await fs.stat(target);
     if (!stat.isFile() || stat.size > maximumBytes) return undefined;
-    return await fs.readFile(target, "utf8");
-  } catch {
+    const value = await safeReadFile(workspacePath, name);
+    return value.exists && value.bytes.length <= maximumBytes ? value.bytes.toString("utf8") : undefined;
+  } catch (error) {
+    if (error instanceof ResourceCleanupError) throw error;
     return undefined;
   }
 }
@@ -81,6 +85,7 @@ async function targetDirectory(root: string, requested: string): Promise<string>
     const stat = await fs.stat(lexical);
     return stat.isDirectory() ? lexical : path.dirname(lexical);
   } catch (error) {
+    if (error instanceof ResourceCleanupError) throw error;
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     return path.dirname(lexical);
   }
@@ -99,7 +104,7 @@ function directoryChain(root: string, directory: string): string[] {
   return chain;
 }
 
-async function readRule(root: string, directory: string): Promise<{ entry?: ProjectRuleEntry; diagnostic?: ProjectRuleDiagnostic }> {
+async function readRule(root: string, directory: string, workspacePath: string): Promise<{ entry?: ProjectRuleEntry; diagnostic?: ProjectRuleDiagnostic }> {
   const candidate = path.join(directory, "AGENTS.md");
   const display = normalizedRelative(root, candidate);
   try {
@@ -108,7 +113,9 @@ async function readRule(root: string, directory: string): Promise<{ entry?: Proj
     const stat = await fs.stat(resolved);
     if (!stat.isFile()) return {};
     if (stat.size > MAX_RULES_BYTES) return { diagnostic: { path: display, reason: "oversized" } };
-    const bytes = await fs.readFile(resolved);
+    const value = await safeReadFile(workspacePath, display);
+    if (!value.exists) return {};
+    const bytes = value.bytes;
     return {
       entry: {
         path: display,
@@ -118,6 +125,7 @@ async function readRule(root: string, directory: string): Promise<{ entry?: Proj
       },
     };
   } catch (error) {
+    if (error instanceof ResourceCleanupError) throw error;
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
     return { diagnostic: { path: display, reason: "unreadable" } };
   }
@@ -157,7 +165,7 @@ export async function loadProjectRuleSnapshot(
       context: "",
     };
   }
-  const manifestSummary = packageSummary(await readWorkspaceFile(root, "package.json", MAX_MANIFEST_BYTES));
+  const manifestSummary = packageSummary(await readWorkspaceFile(workspacePath, "package.json", MAX_MANIFEST_BYTES));
   const uniqueTargets = [...new Set(targets.length === 0 ? ["."] : targets)];
   const byPath = new Map<string, ProjectRuleEntry>();
   const diagnostics = new Map<string, ProjectRuleDiagnostic>();
@@ -174,7 +182,7 @@ export async function loadProjectRuleSnapshot(
     const scope = normalizedRelative(root, directory);
     const paths: string[] = [];
     for (const candidateDirectory of directoryChain(root, directory)) {
-      const loaded = await readRule(root, candidateDirectory);
+      const loaded = await readRule(root, candidateDirectory, workspacePath);
       if (loaded.diagnostic) diagnostics.set(loaded.diagnostic.path, loaded.diagnostic);
       if (loaded.entry) {
         byPath.set(loaded.entry.path, loaded.entry);

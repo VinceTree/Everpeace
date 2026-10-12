@@ -73,6 +73,7 @@ export async function runVerificationSuite(
   run: (command: string, signal?: AbortSignal, timeoutMs?: number) => Promise<BashResult>,
   signal?: AbortSignal,
   evidenceContext?: EvidenceContext,
+  authorize?: (signal?: AbortSignal) => Promise<boolean>,
 ): Promise<VerificationSuiteResult> {
   const before = evidenceContext ? await captureEvidenceReports(evidenceContext.workspacePath) : undefined;
   const withEvidence = async (suite: VerificationSuiteResult): Promise<VerificationSuiteResult> => {
@@ -91,6 +92,7 @@ export async function runVerificationSuite(
   const results: VerificationResult[] = [];
   for (let index = 0; index < commands.length; index += 1) {
     signal?.throwIfAborted();
+    if (authorize && !(await authorize(signal))) return withEvidence({ status: 'unavailable', results, skipped: commands.slice(index).map(command => ({ ...command })), reason: 'Verification execution basis needs fresh user authorization' });
     const result = await runVerificationCommand(commands[index]!, run, signal);
     results.push(result);
     if (!result.passed) {

@@ -19,7 +19,7 @@ import {
 
 test("workspace-write is the friction-free current-workspace default", () => {
   const policy = defaultPermissions();
-  assert.deepEqual(policy, { mode: "workspace-write", web: true });
+  assert.deepEqual(policy, { mode: "workspace-write", web: true, shellNetwork: "deny" });
   assert.equal(bashPermission(policy), "allow");
   assert.equal(webPermission(policy), "allow");
   assert.equal(mcpPermission(policy), "ask");
@@ -127,7 +127,7 @@ test("permission policy paths are stable and persist without credentials", async
     await savePermissionPolicy({ mode: "ask", web: false, commandRules: [{ prefix: "pnpm test", action: "allow" }] }, root, { userPath, scope: "user" });
     await savePermissionPolicy({ mode: "workspace-write", web: true }, root, { projectPath, scope: "project" });
     const loaded = await loadPermissionPolicy(root, { userPath, projectPath });
-    assert.deepEqual(loaded, { mode: "ask", web: false, commandRules: [{ prefix: "pnpm test", action: "allow" }] });
+    assert.deepEqual(loaded, { mode: "ask", web: false, shellNetwork: "deny", commandRules: [{ prefix: "pnpm test", action: "allow" }] });
     assert.doesNotMatch(await fs.readFile(userPath, "utf8"), /api[_-]?key|token|secret/iu);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -143,7 +143,7 @@ test("permission policy writes serialize and leave no temporary files", async ()
       savePermissionPolicy({ mode: "read-only", web: false }, root, { userPath, scope: "user" }),
     ]);
     const loaded = await loadPermissionPolicy(root, { userPath, projectPath: path.join(root, "missing-project.json") });
-    assert.deepEqual(loaded, { mode: "read-only", web: false });
+    assert.deepEqual(loaded, { mode: "read-only", web: false, shellNetwork: "deny" });
     assert.deepEqual(await fs.readdir(root), ["user.json"]);
   } finally {
     await fs.rm(root, { recursive: true, force: true });

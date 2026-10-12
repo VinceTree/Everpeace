@@ -59,12 +59,15 @@ test("path normalization never permits an outside read", async () => temporary(a
   await propertyCheck("path-normalization", fc.asyncProperty(fc.constantFrom("inside.txt", "./inside.txt", "../outside.txt", "./../outside.txt", "../authorized/../../outside.txt", "..\\outside.txt"), async (name) => {
     let result: unknown; let failure: unknown;
     try { result = await runFileTool("read_file", JSON.stringify({ path: name }), workspace); } catch (error) { failure = error; }
-    if (["inside.txt", "./inside.txt"].includes(name)) { assert.equal(failure, undefined); assert.match(JSON.stringify(result), /inside/u); }
+    if (["inside.txt", "./inside.txt"].includes(name)) {
+      if (process.platform === 'win32') { assert.equal(failure, undefined); assert.match(JSON.stringify(result), /inside/u); }
+      else assert.equal((failure as { code?: string })?.code, 'FILE_ACCESS_UNAVAILABLE');
+    }
     assert.ok(!JSON.stringify(result ?? "").includes("outside-secret"));
   }));
 }));
 
-test("directory replacement between preview and write cannot modify a link target", async () => temporary(async (root) => {
+test("directory replacement between preview and write cannot modify a link target", { skip: process.platform !== 'win32' }, async () => temporary(async (root) => {
   const workspace = path.join(root, "authorized"); const outside = path.join(root, "outside"); const directory = path.join(workspace, "dir");
   await fs.mkdir(workspace); await fs.mkdir(outside); await fs.writeFile(path.join(outside, "a.txt"), "canary\n");
   await propertyCheck("directory-replacement", fc.asyncProperty(fc.boolean(), async (replace) => {

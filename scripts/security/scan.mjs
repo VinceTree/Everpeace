@@ -14,7 +14,7 @@ await fs.mkdir(output, { recursive: true });
 const staging = await fs.mkdtemp(path.join(tmpdir(), "everpeace-security-source-"));
 try {
   // Copy only maintained Git files; do not scan users' untracked fixtures or private logs.
-  const files = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "src", "tests", "scripts", ".github", ".gitleaks.toml", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"], { encoding: "utf8" }).split("\0").filter(Boolean);
+  const files = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "src", "native", "tests", "scripts", ".github", ".gitleaks.toml", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"], { encoding: "utf8" }).split("\0").filter(Boolean);
   for (const file of files) {
     const destination = path.join(staging, file);
     await fs.mkdir(path.dirname(destination), { recursive: true });

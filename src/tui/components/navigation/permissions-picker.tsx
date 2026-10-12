@@ -7,12 +7,13 @@ import { CommandSurface } from "../screens/command-surface.js";
 
 function setShellNetwork(policy: PermissionPolicy, deny: boolean): PermissionPolicy {
   const { shellNetwork: _shellNetwork, ...rest } = policy;
-  return deny ? { ...rest, shellNetwork: "deny" } : rest;
+  return { ...rest, shellNetwork: deny ? "deny" : "allow" };
 }
 
-export function PermissionsPicker({ policy, workspace, onChange, onSaveProject, onBack }: {
+export function PermissionsPicker({ policy, workspace, plan = false, onChange, onSaveProject, onBack }: {
   policy: PermissionPolicy;
   workspace: string;
+  plan?: boolean;
   onChange(policy: PermissionPolicy): void;
   onSaveProject?(policy: PermissionPolicy): void;
   onBack(): void;
@@ -41,6 +42,7 @@ export function PermissionsPicker({ policy, workspace, onChange, onSaveProject, 
   }
   return (
     <CommandSurface title="/permissions" onBack={confirmFull ? () => setConfirmFull(false) : onBack}>
+      <Text>{uiText("security.permissionBoundaries", { p0: plan || policy.mode === "read-only" ? uiText("security.readonly") : uiText("security.editable"), p1: policy.web ? uiText("security.enabled") : uiText("security.disabled") })}</Text>
       <Text>{uiText('m6d155e134de0')}{policy.mode}</Text>
       <Text wrap="truncate-middle">{uiText('m1096e6487ef2')}{workspace}</Text>
       <Text>{uiText('m258a6e042c80')}</Text>

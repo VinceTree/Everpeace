@@ -164,3 +164,6 @@ test-me/
 question/
 *.tsbuildinfo
 *.log
+
+# Native file helper build outputs
+native/files/bin/

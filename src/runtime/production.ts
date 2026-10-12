@@ -51,6 +51,7 @@ import {
 import type { SessionGoal } from "../storage/session-store.js";
 import type { TaskProgress } from "../workflow/task-progress.js";
 import { projectWorkflowContext } from "../workflow/model-context.js";
+import { uiText } from '../localization/messages.js';
 import { POLICY_DENIED_REMEDY } from "../tools/tool-feedback.js";
 import { hasOpaqueProviderContext, resolveProviderCapabilities } from "../providers/capabilities.js";
 import { SearchSettingsStore } from "../tools/search-provider.js";
@@ -171,7 +172,7 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
   const client = providerClient(provider);
   const skills = options.skills === undefined ? new SkillCatalog(options.workspacePath) : options.skills ?? undefined;
   const ownedMcp = options.mcp === undefined
-    ? new McpRuntime({ workspacePath: options.workspacePath, ...(options.version ? { version: options.version } : {}) })
+    ? new McpRuntime({ workspacePath: options.workspacePath, permissions: () => options.io.getPermissions?.() ?? defaultPermissions(), ...(options.version ? { version: options.version } : {}) })
     : undefined;
   const mcp = options.mcp === undefined ? ownedMcp : options.mcp ?? undefined;
   const learnedMemoryStore = options.learnedMemoryStore === undefined
@@ -214,6 +215,7 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     : undefined;
   const restore = options.restore;
   let team: TeamRuntime | undefined;
+  let familySensitive = false;
   let approvalQueue = Promise.resolve();
   const confirmMember = (confirm: (() => Promise<boolean>) | undefined): Promise<boolean> => {
     const result = approvalQueue.then(() => confirm?.() ?? false);
@@ -221,6 +223,12 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     return result;
   };
   const rootIO: AgentIO = options.team ? { ...options.io,
+    hasSensitiveContext: () => familySensitive,
+    notifySensitiveContext: async () => { familySensitive = true; },
+    ...(options.io.requestUserInput ? { requestUserInput: (request: Parameters<NonNullable<AgentIO['requestUserInput']>>[0], signal?: AbortSignal) => {
+      const result = approvalQueue.then(() => { signal?.throwIfAborted(); return options.io.requestUserInput!(request, signal); });
+      approvalQueue = result.then(() => {}, () => {}); return result;
+    } } : {}),
     ...(options.io.setGoal ? { setGoal: async (goal) => { await options.io.setGoal!(goal); team?.restrictGoal(goal); } } : {}),
     confirmBash: (prompt, signal) => confirmMember(() => options.io.confirmBash(prompt, signal ?? team?.signal())),
     confirmPatch: (prompt, signal) => confirmMember(() => options.io.confirmPatch?.(prompt, signal ?? team?.signal()) ?? Promise.resolve(false)),
@@ -238,15 +246,15 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     };
     if (execution.workspace) await verifyTeamIsolation(execution.workspace, getPolicy(), execution.signal);
     const model = execution.model;
-    const session = await options.sessionStore.create({ title: `[${execution.member.task.role}] ${execution.member.task.goal.slice(0, 80)}`, titlePending: false, workspacePath, model: { id: model.id, model_name: model.model_name, base_url: model.base_url, ...(model.responses_profile ? { responses_profile: model.responses_profile } : {}) } });
+    const session = await options.sessionStore.create({ title: familySensitive || agent.hasSensitiveContext ? uiText('security.teamSensitiveTitle') : `[${execution.member.task.role}] ${execution.member.task.goal.slice(0, 80)}`, titlePending: false, workspacePath, model: { id: model.id, model_name: model.model_name, base_url: model.base_url, ...(model.responses_profile ? { responses_profile: model.responses_profile } : {}) } });
     await execution.onSession(session.id);
     let summary = "";
     let memberHandle: ProductionAgentHandle | undefined;
     let interaction: { kind: "approval" | "question"; tool: string; prompt?: string } | undefined;
-    const workflow = new CodingWorkflowRuntime({ workspacePath, onState: (state) => options.sessionStore.setWorkflow(session.id, state) });
+    const workflow = new CodingWorkflowRuntime({ workspacePath, confirmVerificationBasis: (summary, signal) => options.io.confirmPatch?.(summary, signal) ?? Promise.resolve(false), permissionRevision: () => permissionPolicyRevision(options.io.getPermissions?.() ?? defaultPermissions()), onState: (state) => options.sessionStore.setWorkflow(session.id, state) });
     const sourceRoot = execution.workspace?.gitRoot ?? options.workspacePath;
     const executeNative = createProductionCommandExecutor({ workspacePath, policy: getPolicy, onProcessStarted: (ms) => { agent.recordPerformanceTiming("sandbox_startup", ms); memberHandle?.agent.recordPerformanceTiming("sandbox_startup", ms); }, ...(execution.workspace ? { isolation: { deniedRoots: [sourceRoot, teamWorkspaceRoot(), ...(within(sourceRoot, execution.workspace.commonGitDir) ? [] : [execution.workspace.commonGitDir])], writableRoot: workspacePath, traversalRoots: workspaceTraversalRoots(execution.workspace) } } : {}) });
-    const label = `[Team ${execution.member.agentId} / ${execution.member.task.role}] ${workspacePath}\n`;
+    const label = `[Team ${execution.member.agentId} / ${execution.member.task.role}] ${workspacePath}\nModel: ${JSON.stringify(model.model_name)} at ${new URL(model.base_url).origin}; Session ${session.id}\n`;
     const execute: ProductionCommandExecutor = async (command, signal, timeoutMs, onOutput) => {
       const policy = getPolicy(); const revision = permissionPolicyRevision(policy);
       const permission = commandPermission(command, policy);
@@ -266,13 +274,23 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     const io = createProductionWorkflowAgentIO({ workspacePath, policy: getPolicy, workflow, execute: executeNative, executeVerification: execute,
       session: { getId: () => session.id },
       interaction: {
-        confirm: (_kind, tool, prompt) => confirmMember(() => tool === "patch" ? options.io.confirmPatch?.(label + prompt, execution.signal) ?? Promise.resolve(false) : tool === "web" ? options.io.confirmWeb?.(label + prompt, execution.signal) ?? Promise.resolve(false) : options.io.confirmBash(label + prompt, execution.signal)),
-        requestUserInput: async () => { interaction = { kind: "question", tool: "request_user_input", prompt: label + "Member needs clarification; ask the root Agent to resolve it." }; return {}; },
+        confirm: (_kind, tool, prompt) => confirmMember(() => (tool === "patch" || tool === "verification_basis") ? options.io.confirmPatch?.(label + prompt, execution.signal) ?? Promise.resolve(false) : tool === "web" ? options.io.confirmWeb?.(label + prompt, execution.signal) ?? Promise.resolve(false) : options.io.confirmBash(label + prompt, execution.signal)),
+        requestUserInput: async request => {
+          if (request.questions[0]?.id === 'sensitive_access' && options.io.requestUserInput) {
+            const result = approvalQueue.then(() => { execution.signal.throwIfAborted(); return options.io.requestUserInput!({ ...request, questions: request.questions.map(question => ({ ...question, question: label + question.question })) }, execution.signal); });
+            approvalQueue = result.then(() => {}, () => {}); return result;
+          }
+          interaction = { kind: "question", tool: "request_user_input", prompt: label + "Member needs clarification; ask the root Agent to resolve it." }; return {};
+        },
         takeInteractionRequired: () => interaction ?? options.io.takeInteractionRequired?.(),
       },
       output: { assistant: async (text) => { summary = text; await options.sessionStore.appendTimeline(session.id, { kind: "assistant", text }); } },
     });
     try {
+      io.hasSensitiveContext = () => familySensitive || agent.hasSensitiveContext;
+      io.inheritedSensitiveInput = true;
+      io.sensitiveInputSource = `member model ${model.model_name} at ${new URL(model.base_url).origin}; member Session ${session.id}`;
+      io.notifySensitiveContext = async () => { if (!familySensitive && !agent.hasSensitiveContext) { familySensitive = true; await agent.activateSensitiveContext(execution.member.agentId); } else familySensitive = true; };
       memberHandle = createProductionAgent({ model, workspacePath, io, sessionStore: options.sessionStore, sessionId: () => session.id, mcp: null, learnedMemoryStore: null, codeNavigation: null, requestAttemptLedger: execution.ledger,
         sharedPerformance: agent.performance,
         costSettingsStore: costSettings, costWarningTracker: costTracker, costResetOnTask: false,
@@ -475,7 +493,7 @@ export function createProductionCommandExecutor(options: ProductionCommandExecut
   };
 }
 
-type ConfirmationTool = "bash" | "patch" | "web" | "mcp" | "goal";
+type ConfirmationTool = "bash" | "patch" | "web" | "mcp" | "goal" | "verification_basis";
 
 export interface ProductionWorkflowSessionBridge {
   getId?(): string | undefined;
@@ -486,6 +504,7 @@ export interface ProductionWorkflowSessionBridge {
 }
 
 export interface ProductionWorkflowInteractionBridge {
+  takeSensitiveInputAuthorization?: AgentIO["takeSensitiveInputAuthorization"];
   confirm?(kind: "approval", tool: ConfirmationTool, prompt: string, signal?: AbortSignal): Promise<boolean>;
   requestUserInput?: AgentIO["requestUserInput"];
   reviewPlan?: AgentIO["reviewPlan"];
@@ -512,7 +531,9 @@ export interface ProductionWorkflowAgentIOOptions {
 }
 
 function workflowFrom(options: ProductionWorkflowAgentIOOptions): CodingWorkflowRuntime {
-  return typeof options.workflow === "function" ? options.workflow() : options.workflow;
+  const workflow = typeof options.workflow === "function" ? options.workflow() : options.workflow;
+  if (options.interaction?.confirm) workflow.configureVerificationBasisReview((prompt, signal) => options.interaction!.confirm!('approval', 'verification_basis', prompt, signal), () => permissionPolicyRevision(options.policy()), summary => options.output?.tool?.(summary));
+  return workflow;
 }
 
 /**
@@ -536,6 +557,7 @@ export function createProductionWorkflowAgentIO(options: ProductionWorkflowAgent
     confirmWeb: (request, signal) => confirm("web", request, signal),
     confirmMcp: (request, signal) => confirm("mcp", request, signal),
     confirmGoal: (request, signal) => confirm("goal", request, signal),
+    ...(interaction?.takeSensitiveInputAuthorization ? { takeSensitiveInputAuthorization: interaction.takeSensitiveInputAuthorization } : {}),
     ...(interaction?.requestUserInput ? { requestUserInput: interaction.requestUserInput } : {}),
     ...(interaction?.reviewPlan ? { reviewPlan: interaction.reviewPlan } : {}),
     ...(interaction?.takeInteractionRequired ? { takeInteractionRequired: interaction.takeInteractionRequired } : {}),
@@ -574,7 +596,7 @@ export function createProductionWorkflowAgentIO(options: ProductionWorkflowAgent
       if (policy.mode === "read-only") {
         return { status: "rejected", files: [], error: "The read-only profile does not allow file edits", errorCode: "POLICY_DENIED", remedy: POLICY_DENIED_REMEDY };
       }
-      return runApplyPatch(operations, options.workspacePath, { allowProtectedPaths: policy.mode === "full-access" });
+      return runApplyPatch(operations, options.workspacePath, { allowProtectedPaths: policy.mode === "full-access", ...(signal ? { signal } : {}) });
     },
     afterPatchApplied(operations: readonly ApplyPatchOperation[], result: ApplyPatchResult, signal?: AbortSignal) {
       return workflowFrom(options).afterPatch(operations, result, options.executeVerification ?? options.execute, signal);

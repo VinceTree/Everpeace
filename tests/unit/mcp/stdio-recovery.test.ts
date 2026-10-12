@@ -44,7 +44,7 @@ async function fixture(t: TestContext, mode: "disconnect" | "initialize_timeout"
     async loadConfig() {
       return [{
         name: "fixture", enabled: true,
-        transport: { type: "stdio", command: process.execPath, args: ["--import", "tsx", fixturePath, mode, logPath] },
+        transport: { type: "stdio", isolation: "host", command: process.execPath, args: ["--import", "tsx", fixturePath, mode, logPath] },
         // This deadline includes Node/tsx/SDK cold startup on hosted Windows.
         // Generation 1 deliberately never initializes in timeout mode, so a
         // longer deadline preserves the timeout assertion without timing out

@@ -43,11 +43,15 @@ export interface WebFetchResult {
 }
 
 export interface WebToolExecutor {
-  search(query: string, signal?: AbortSignal): Promise<WebSearchResult>;
-  fetch(url: string, signal?: AbortSignal): Promise<WebFetchResult>;
+  /** Frozen destinations of the selected search operation, including fallbacks. */
+  searchDestinations?: readonly string[];
+  supportsRedirectAuthorization?: boolean;
+  search(query: string, signal?: AbortSignal, authorizeRedirect?: (url: string) => Promise<boolean>): Promise<WebSearchResult>;
+  fetch(url: string, signal?: AbortSignal, authorizeRedirect?: (url: string) => Promise<boolean>): Promise<WebFetchResult>;
 }
 
 export interface WebToolOptions {
+  authorizeRedirect?: (url: string) => Promise<boolean>;
   env?: NodeJS.ProcessEnv;
   fetch?: FetchLike;
   lookup?: HostLookup;
@@ -339,7 +343,9 @@ async function fetchPublicSearch(requestedUrl: URL, options: WebToolOptions, hea
       return { text: (await readLimitedText(response, SEARCH_RESPONSE_LIMIT)).text };
     });
     if ("text" in result) return result.text!;
-    currentUrl = new URL(result.location!, currentUrl);
+    const redirected = new URL(result.location!, currentUrl);
+    if (options.authorizeRedirect && !(await options.authorizeRedirect(redirected.href))) throw new Error('Redirect destination needs fresh authorization');
+    currentUrl = redirected;
   }
   throw new Error("Search exceeded the redirect limit");
 }
@@ -414,7 +420,9 @@ export async function fetchWebPage(
       };
     });
     if (!("location" in result)) return result;
-    currentUrl = new URL(result.location, currentUrl);
+    const redirected = new URL(result.location, currentUrl);
+    if (options.authorizeRedirect && !(await options.authorizeRedirect(redirected.href))) throw new Error('Redirect destination needs fresh authorization');
+    currentUrl = redirected;
   }
 
   throw new Error("Web page exceeded the redirect limit");
@@ -422,11 +430,13 @@ export async function fetchWebPage(
 
 export function createWebToolExecutor(options: WebToolOptions = {}): WebToolExecutor {
   return {
-    search(query, signal) {
-      return searchWeb(query, { ...options, ...(signal ? { signal } : {}) });
+    supportsRedirectAuthorization: true,
+    searchDestinations: options.searchProvider?.name === 'brave' ? ['https://api.search.brave.com/res/v1/llm/context'] : [...BING_SEARCH_ENDPOINTS.map(engine => engine.url), DUCKDUCKGO_SEARCH_ENDPOINT],
+    search(query, signal, authorizeRedirect) {
+      return searchWeb(query, { ...options, ...(signal ? { signal } : {}), ...(authorizeRedirect ? { authorizeRedirect } : {}) });
     },
-    fetch(url, signal) {
-      return fetchWebPage(url, { ...options, ...(signal ? { signal } : {}) });
+    fetch(url, signal, authorizeRedirect) {
+      return fetchWebPage(url, { ...options, ...(signal ? { signal } : {}), ...(authorizeRedirect ? { authorizeRedirect } : {}) });
     },
   };
 }

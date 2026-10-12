@@ -90,15 +90,10 @@ test("a failed batch never rolls a whitespace edit back over a concurrent user c
     const second = path.join(alias, "second.ts");
     await fs.writeFile(file, "\tvalue\n");
     await fs.writeFile(second, "before\n");
-    // The host canonicalizes the workspace (including Windows TEMP short names).
-    const canonicalSecond = await fs.realpath(second);
-    const rename = fs.rename.bind(fs);
-    context.mock.method(fs, "rename", async (from: string, to: string) => {
-      if (to === canonicalSecond) { await fs.writeFile(file, "user edit\n"); throw new Error("fixture second write failure"); }
-      return rename(from, to);
-    });
     try {
-      const result = await runApplyPatch([operation("  value", "new", "line_whitespace"), { path: "second.ts", action: "update", content: "after\n" }], alias);
+      const result = await runApplyPatch([operation("  value", "new", "line_whitespace"), { path: "second.ts", action: "update", content: "after\n" }], root, { async beforeCommit(relative) {
+        if (relative === 'second.ts') { await fs.writeFile(file, 'user edit\n'); throw new Error('fixture second write failure'); }
+      } });
       assert.equal(result.status, "failed");
       assert.equal(result.rolledBack, false);
       assert.deepEqual(result.rollbackConflicts, ["file.ts"]);
