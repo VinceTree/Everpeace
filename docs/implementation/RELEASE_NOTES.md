@@ -13,7 +13,7 @@ Real experiments did **not** meet promotion gates: repair 46/120 planned passes;
 
 Windows source checks and installation smoke were rerun. See [the candidate handoff](https://github.com/VinceTree/Everpeace/blob/v0.6.0-rc.1/docs/HANDOFF.md) for exact receipts, skips and CI status, and [the acceptance report](https://github.com/VinceTree/Everpeace/blob/v0.6.0-rc.1/docs/implementation/REPORT.md) for each item.
 
-**Distribution:** tagged source plus sanitized evidence only. No npm publication or portable native package is claimed. Linux/local dedicated native coverage remains pending unless explicitly recorded by new CI evidence; existing formal-package gates remain enforced.
+**Distribution:** tagged source plus sanitized evidence only. No npm publication or portable native package is claimed. Hosted Windows/Linux source checks passed; local WSL and dedicated native delivery coverage remain pending. Existing formal-package gates remain enforced.
 
 ---
 

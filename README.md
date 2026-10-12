@@ -1,6 +1,6 @@
 # Everpeace
 
-**Candidate 0.6.0-rc.1.** Windows source checks are verified; Linux and the portable native package remain pending. Repair/team model comparisons have insufficient evidence and do not enable a new default. [Candidate evidence and usage](docs/implementation/REPORT.md).
+**Candidate 0.6.0-rc.1.** Windows source and hosted Windows/Linux checks are verified; portable native delivery remains pending. Repair/team model comparisons have insufficient evidence and do not enable a new default. [Candidate evidence and usage](docs/implementation/REPORT.md).
 
 **Plan, edit and verify your Node.js / TypeScript project from the terminal.**
 

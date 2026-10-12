@@ -1,6 +1,6 @@
 # Everpeace
 
-**候选版本 0.6.0-rc.1。** Windows 源码检查已验证；Linux 与跨平台原生安装包待验证。修复及团队模型对照证据不足，不调整默认策略。[候选证据与使用说明](docs/implementation/REPORT.md)。
+**候选版本 0.6.0-rc.1。** 本机 Windows 及 GitHub Windows/Linux 源码检查已验证；跨平台原生安装包待验证。修复及团队模型对照证据不足，不调整默认策略。[候选证据与使用说明](docs/implementation/REPORT.md)。
 
 **在终端中规划、修改并验证你的 Node.js / TypeScript 项目。**
 
