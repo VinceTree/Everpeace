@@ -1,0 +1,8 @@
+diff --git a/src/plugin/duration/index.js b/src/plugin/duration/index.js
+--- a/src/plugin/duration/index.js
++++ b/src/plugin/duration/index.js
+@@ -228,3 +228,3 @@
+   clone() {
+-    return this
++    return wrapper(this.$ms, this)
+   }

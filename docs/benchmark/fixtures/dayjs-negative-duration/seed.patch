@@ -1,0 +1,8 @@
+diff --git a/src/plugin/duration/index.js b/src/plugin/duration/index.js
+--- a/src/plugin/duration/index.js
++++ b/src/plugin/duration/index.js
+@@ -36,3 +36,3 @@
+ const roundNumber = number =>
+-  (isNegative(number) ? Math.ceil(number) : Math.floor(number))
++  Math.floor(number)
+ const absolute = number => Math.abs(number)

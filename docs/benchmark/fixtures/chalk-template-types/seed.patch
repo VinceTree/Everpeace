@@ -1,0 +1,6 @@
+diff --git a/source/index.d.ts b/source/index.d.ts
+--- a/source/index.d.ts
++++ b/source/index.d.ts
+@@ -37 +37 @@
+-	(...text: unknown[]): string;
++	(...text: string[]): string;

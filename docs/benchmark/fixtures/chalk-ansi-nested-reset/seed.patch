@@ -1,0 +1,6 @@
+diff --git a/source/index.js b/source/index.js
+--- a/source/index.js
++++ b/source/index.js
+@@ -181 +181 @@
+-			string = stringReplaceAll(string, styler.close, styler.open);
++			string = stringReplaceAll(string, styler.close, openAll);

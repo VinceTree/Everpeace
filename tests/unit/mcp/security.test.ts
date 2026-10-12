@@ -172,7 +172,8 @@ test("independent processes serialize trust updates and reject stale approvals",
 
 test("non-loopback HTTP and URL credentials fail before any client or credential request", async (t) => {
   const urls = ["http://example.com/mcp", "http://10.0.0.1/mcp", "http://local.example/mcp", "https://user:password@example.com/mcp"];
-  for (const url of urls) for (const http_headers of [{}, { Authorization: "Bearer fixture-token" }, { "X-Api-Key": "fixture-token" }]) {
+  const headers: Array<Record<string, string>> = [{}, { Authorization: "Bearer fixture-token" }, { "X-Api-Key": "fixture-token" }];
+  for (const url of urls) for (const http_headers of headers) {
     let factories = 0;
     const runtime = new McpRuntime({ workspacePath: process.cwd(), trustStore: approvedMcpFixture(), async loadConfig() { return [{ name: "http", enabled: true, transport: { type: "streamable_http", url, http_headers } }]; }, async clientFactory() { factories++; throw new Error("must not connect"); } });
     t.after(() => runtime.close()); assert.equal((await runtime.ensureReady()).servers[0]?.state, "failed"); assert.equal(factories, 0);

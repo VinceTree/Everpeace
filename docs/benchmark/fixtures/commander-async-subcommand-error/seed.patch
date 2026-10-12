@@ -1,0 +1,6 @@
+diff --git a/lib/command.js b/lib/command.js
+--- a/lib/command.js
++++ b/lib/command.js
+@@ -1113 +1113 @@
+-    await this._parseCommand([], userArgs);
++    this._parseCommand([], userArgs);

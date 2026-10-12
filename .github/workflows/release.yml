@@ -1,0 +1,216 @@
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Full commit SHA already on main
+        required: true
+        type: string
+      failure_drill:
+        description: Fail a real Windows test and verify that publishing is blocked
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  candidate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Freeze and validate candidate
+        id: candidate
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate }}
+        run: node scripts/release/candidate.mjs
+  validate:
+    needs: [candidate]
+    uses: ./.github/workflows/validate.yml
+    with:
+      sha: ${{ needs.candidate.outputs.sha }}
+      inject_windows_failure: ${{ inputs.failure_drill }}
+  package:
+    needs: [candidate, validate, security]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
+      digest: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.candidate.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.22.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - id: pack
+        run: pnpm pack:release --output "$RUNNER_TEMP/candidate-package"
+        env:
+          CANDIDATE_SHA: ${{ needs.candidate.outputs.sha }}
+      - id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: candidate-package
+          path: ${{ runner.temp }}/candidate-package/*
+          if-no-files-found: error
+  consumers:
+    needs: [candidate, package]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.candidate.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.22.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.package.outputs.artifact }}
+          path: candidate-package
+          merge-multiple: true
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm install:consumer candidate-package
+        env:
+          CANDIDATE_SHA: ${{ needs.candidate.outputs.sha }}
+          PACKAGE_SHA256: ${{ needs.package.outputs.digest }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: consumer-${{ matrix.os }}
+          path: candidate-package/consumer-*
+          if-no-files-found: error
+  security:
+    needs: [candidate]
+    uses: ./.github/workflows/security.yml
+    with:
+      sha: ${{ needs.candidate.outputs.sha }}
+  evidence:
+    needs: [candidate, package, consumers, security]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.candidate.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.22.0
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: candidate-evidence
+          merge-multiple: true
+      - run: node scripts/security/receipt.mjs candidate-evidence
+        env:
+          CANDIDATE_SHA: ${{ needs.candidate.outputs.sha }}
+          PACKAGE_SHA256: ${{ needs.package.outputs.digest }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verified-evidence
+          path: candidate-evidence/*
+          if-no-files-found: error
+  availability:
+    needs: [candidate, validate]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: node scripts/release/runner-availability.mjs
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_READ_TOKEN }}
+  native:
+    needs: [candidate, availability]
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/windows-native.yml
+    with:
+      sha: ${{ needs.candidate.outputs.sha }}
+    secrets:
+      RUNNER_READ_TOKEN: ${{ secrets.RUNNER_READ_TOKEN }}
+  gate:
+    if: always()
+    needs: [candidate, validate, package, consumers, security, evidence, availability, native]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: node scripts/release/gate.mjs candidate validate package consumers security evidence availability native
+        env:
+          CHECK_RESULTS: ${{ toJSON(needs) }}
+  publish:
+    if: github.event.inputs.failure_drill != 'true'
+    needs: [candidate, package, consumers, security, evidence, native, gate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.candidate.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-evidence
+          path: candidate-package
+          merge-multiple: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.22.0
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/release/publish.mjs candidate-package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.candidate.outputs.sha }}
+          PACKAGE_SHA256: ${{ needs.package.outputs.digest }}
+          CHECK_RESULTS: ${{ toJSON(needs) }}
+  drill:
+    if: always() && inputs.failure_drill
+    needs: [candidate, validate, package, consumers, native, gate, publish]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Assert failure prevented all publishing
+        env:
+          VALIDATION: ${{ needs.validate.result }}
+          GATE: ${{ needs.gate.result }}
+          PUBLISH: ${{ needs.publish.result }}
+        run: |
+          test "$VALIDATION" = failure
+          test "$GATE" = failure
+          test "$PUBLISH" = skipped

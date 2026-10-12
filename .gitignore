@@ -7,3 +7,4 @@ NUL
 test-me/
 question/
 *.tsbuildinfo
+*.log

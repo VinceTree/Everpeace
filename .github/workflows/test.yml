@@ -1,0 +1,25 @@
+name: Test
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml
+  security:
+    uses: ./.github/workflows/security.yml
+  required:
+    name: Required checks
+    if: always()
+    needs: [validate, security]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require the entire platform matrix
+        env:
+          RESULT: ${{ needs.validate.result }}
+          SECURITY: ${{ needs.security.result }}
+        run: |
+          test "$RESULT" = success
+          test "$SECURITY" = success

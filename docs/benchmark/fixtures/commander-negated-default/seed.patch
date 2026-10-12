@@ -1,0 +1,12 @@
+diff --git a/lib/command.js b/lib/command.js
+--- a/lib/command.js
++++ b/lib/command.js
+@@ -1124,7 +1124,7 @@ export class Command extends EventEmitter {
+         .filter(
+           (option) =>
+             option.negate &&
+-            option.defaultValue === undefined &&
++            option.defaultValue !== undefined &&
+             this.getOptionValue(option.attributeName()) === undefined,
+         )
+         .forEach((option) => {

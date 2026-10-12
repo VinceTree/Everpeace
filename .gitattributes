@@ -1,0 +1,4 @@
+tests/fixtures/expanded/** text eol=lf
+tests/fixtures/web-content/** text eol=lf
+patches/** text eol=lf
+docs/benchmark/EXPANDED_TASKS.json text eol=lf
