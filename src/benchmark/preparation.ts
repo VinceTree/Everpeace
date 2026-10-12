@@ -133,6 +133,7 @@ export async function prepareBenchmarkFixture(
       await cp(source, destination, { recursive: true, errorOnExist: true, force: false });
       if (await captureFixtureTreeDigest(destination) !== task.source.fixtureDigest) throw new Error(`Synthetic copy identity mismatch: ${task.id}`);
       await checkedGit(["init", "--quiet"], destination, options.signal);
+      await checkedGit(['config','core.autocrlf','false'],destination,options.signal);
     } else {
       await checkedGit(["clone", "--quiet", "--no-checkout", "--filter=blob:none", "-c", "core.autocrlf=false", "--", task.source.repositoryUrl, destination], undefined, options.signal);
       await checkedGit(["checkout", "--quiet", "--detach", task.source.commit], destination, options.signal);
@@ -161,6 +162,12 @@ export async function prepareBenchmarkFixture(
           ?? (pristine.timedOut ? "Verification timed out" : pristine.cancelled ? "Verification was cancelled" : `exited with ${pristine.exitCode ?? "unknown"}`);
         throw new Error(`Benchmark ${task.id} pinned source did not pass its pristine assertion: ${reason}`);
       }
+    }
+    if(task.source.sourceType==='synthetic') {
+      // A pristine commit makes scope scoring and isolated Git worktrees
+      // available without claiming an upstream revision for synthetic input.
+      await checkedGit(['-c','core.hooksPath=','add','--all'],destination,options.signal);
+      await checkedGit(['-c','core.hooksPath=','-c','user.name=Everpeace Fixture','-c','user.email=fixture@localhost','commit','--quiet','-m','Frozen pristine synthetic fixture'],destination,options.signal);
     }
     await applyPatch(fixturePath(options.fixtureRoot, task.fixture.seedPatch), destination, options.signal);
     return preparedTask;
