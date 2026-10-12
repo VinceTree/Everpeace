@@ -40,7 +40,7 @@
 
 ## 提交与后续
 
-提交使用 `[skip publish]`，保持测试启用。Release workflow 只接受 main 的显式 dispatch，源码 push 不触发发布。提交与远端结果在交付时回填；GitHub CLI 当前未登录，不把无法查询的远端 CI 当作成功。
+提交使用 `[skip publish]`，保持测试启用。Release workflow 只接受 main 的显式 dispatch，源码 push 不触发发布。功能提交 b2d1f7965699a35d9ecd4a04714829768596bb22 已推送 origin/codex/public-contract-core-experience；本次后续提交仅回填交接收据。GitHub CLI 当前未登录，远端 CI 未查询，不作为通过证据。
 
 后续：其他平台原生后端、正式包组件传递与消费者安装、取得新授权后的真实模型安全评测。扫描不能证明不存在未知业务秘密；显式 host/full-access、可写映射/内核以及同用户恶意替换已安装组件不在本轮已验证保证内。
 
