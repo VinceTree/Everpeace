@@ -37,4 +37,6 @@ Windows x64、本地 NTFS、Node 22.19.0、pnpm 10.30.3、MinGW-w64、Windows bu
 
 ## 提交与远端
 
-交付使用 `[skip publish]`，不使用 `[skip ci]`；Release 工作流只有 main 上显式 workflow_dispatch。Test 工作流仅 PR/main push 触发，当前功能分支 push 不自动触发它，不能声称远端 CI 通过。提交推送完成后补充源码提交及远端核验结果。
+修复提交 `ca4b9bcf1046b3de93a157666eb636705f2d6700`：`fix bounded cleanup and durable edit recovery [skip publish]`，包含候选号、实现、回归和文档。已普通 fast-forward 推送到 `origin/codex/public-contract-core-experience`，随后 `git ls-remote` 核验该分支指向相同 SHA；此后只追加本交接收据，未改实施源码。
+
+交付使用 `[skip publish]`，不使用 `[skip ci]`；Release 工作流只有 main 上显式 workflow_dispatch。Test 工作流仅 PR/main push 触发，当前功能分支 push 不自动触发它，不能声称远端 CI 通过。本轮没有 tag、Release 或 npm 发布。
