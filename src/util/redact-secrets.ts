@@ -1,7 +1,7 @@
-import { redactAdditionalSecrets } from "./sensitive-scan.js";
+import { redactAdditionalSecrets, isPublicCredentialExpression } from "./sensitive-scan.js";
 
 function redactPrivateKeys(value: string): string {
-  return value.replace(/-----BEGIN [^-]+-----[\s\S]*?(?:-----END [^-]+-----|$)/giu, (secret) =>
+  return value.replace(/-----BEGIN (?:[A-Z ]*PRIVATE KEY|OPENSSH PRIVATE KEY)-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/giu, (secret) =>
     secret.replace(/[^\r\n]+/gu, (line) => `${line.match(/^[\t ]*/u)?.[0] ?? ""}[private key redacted]`),
   );
 }
@@ -31,6 +31,7 @@ function redactPlainSecrets(value: string, preserveValueQuotes: boolean): string
   return redacted.replace(/(["']?(?:api[_ -]?key|access[_ -]?token|auth[_ -]?token|password|passwd|secret|private[_ -]?key)["']?\s*[:=]\s*)(?!["']?\[(?:secret|private key) redacted\])("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[^\s,;"'}]+)/giu,
     (_secret, prefix: string, credential: string) => {
       const quote = credential[0] === '"' || credential[0] === "'" ? credential[0] : "";
+      if (!quote && isPublicCredentialExpression(credential)) return `${prefix}${credential}`;
       const body = quote ? credential.slice(1, -1) : credential;
       const replacement = body.replace(/[^\r\n]+/gu, (line) => `${line.match(/^[\t ]*/u)?.[0] ?? ""}[secret redacted]`);
       return `${prefix}${quote}${replacement || "[secret redacted]"}${quote}`;

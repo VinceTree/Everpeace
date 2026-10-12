@@ -144,3 +144,15 @@ vite.config.ts.timestamp-*
 
 # Owned native acceptance output (publish evidence is uploaded by CI)
 native-evidence/
+
+# Restored local toolchain and private evaluation artifacts
+node_modules/
+dist/
+.cache/
+artifacts/
+reports/
+NUL
+test-me/
+question/
+*.tsbuildinfo
+*.log

@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "classification": "superseded_infrastructure_run",
+  "reason": "Synthetic fixture preparation did not create a pristine Git HEAD. Scope scoring was unknown and team isolation could not start. Results are retained; a new frozen campaign uses committed pristine sources.",
+  "planned": 120,
+  "completed": 7,
+  "knownInputTokens": 653238,
+  "knownOutputTokens": 41803,
+  "inFlightUsage": "unknown at process-tree termination",
+  "meteringComplete": false,
+  "remaining": "not scored; full original plan remains in campaign-plan.json"
+}

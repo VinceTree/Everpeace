@@ -17,5 +17,14 @@
     ],
     "reason": "Literal fake private-key markers used to test redaction; no usable credential.",
     "review": "Reviewed exact file bytes during security boundary implementation; any changed content requires review."
+  },
+  {
+    "rule": "private-key",
+    "file": "tests/unit/util/sensitive-boundaries.test.ts",
+    "sha256": [
+      "6cdc843357242cb46f4cc968d1b9eb2f4800ea049befb58a9f7087e692abaf1e"
+    ],
+    "reason": "Synthetic PEM markers followed by repeated A/Q characters, plus fake token prefixes, used only to verify multiline and truncated redaction; not usable private keys.",
+    "review": "Reviewed full test source and exact historical/current bytes; any content change requires a new exact hash review."
   }
 ]

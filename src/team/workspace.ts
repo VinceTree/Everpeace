@@ -4,12 +4,14 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { decodeTextFile, encodeTextFile, sha256Bytes } from "../tools/file-version.js";
+import { decodeTextFile, encodeTextFile } from "../tools/file-version.js";
 import { isProtectedPatchPath } from "../tools/sandbox-policy.js";
 import type { ApplyPatchOperation } from "../tools/apply-patch.js";
+import { inspectTeamFile, copyTeamFile, safeTeamPath, TEAM_FILE_LIMIT, TEAM_TOTAL_LIMIT, type FileArtifact } from './file-artifacts.js';
+import type { TeamByteOperation } from './byte-integration.js';
 
 const MAX_FILES = 10_000;
-const MAX_BYTES = 64 * 1024 * 1024;
+const MAX_BYTES = TEAM_TOTAL_LIMIT;
 export interface TeamWorkspaceRecord { version: 1 | 2; source: string; workspace: string; owner: string; commonGitDir: string; baseline: Record<string, string | null>; gitRoot?: string; workspaceRoot?: string; workspacePrefix?: string; }
 export function within(root: string, target: string): boolean {
   const relative = path.relative(path.resolve(root), path.resolve(target));
@@ -55,7 +57,7 @@ async function bytes(root: string, name: string): Promise<Buffer | null> {
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
   }
   const stat = await fs.lstat(current);
-  if (!stat.isFile() || stat.size > 16 * 1024 * 1024) throw new Error(`Team snapshot cannot capture this file: ${name}`);
+  if (!stat.isFile() || stat.size > TEAM_FILE_LIMIT) throw new Error(`Team snapshot cannot capture this file: ${name}`);
   const content = await fs.readFile(current);
   const after = await fs.lstat(current);
   if (after.isSymbolicLink() || !after.isFile() || stat.size !== after.size || stat.mtimeMs !== after.mtimeMs || stat.ino !== after.ino) throw new Error(`File changed while taking team snapshot: ${name}`);
@@ -80,7 +82,7 @@ export async function createTeamWorkspace(sourcePath: string, signal?: AbortSign
   const workspaceRoot = path.join(owner, "w");
   const workspace = path.join(workspaceRoot, prefix);
   const baseline: Record<string, string | null> = Object.create(null) as Record<string, string | null>;
-  const contents = new Map<string, Buffer | null>();
+  const contents = new Map<string, FileArtifact | null>();
   let total = 0;
   const headFiles = (await git(root, ["ls-tree", "-r", "--full-tree", "--name-only", "-z", head, "--", prefix || "."], signal)).split("\0").filter(Boolean).map((name) => prefix ? name.slice(prefix.length + 1) : name);
   const currentFiles = await names(source, signal);
@@ -88,16 +90,16 @@ export async function createTeamWorkspace(sourcePath: string, signal?: AbortSign
   if (listed.length > MAX_FILES) throw new Error("Team snapshot has too many files");
   for (const name of listed) {
     signal?.throwIfAborted();
-    const content = await bytes(source, name);
-    total += content?.length ?? 0;
+    const content = await inspectTeamFile(source, name, signal);
+    total += content?.size ?? 0;
     if (total > MAX_BYTES) throw new Error("Team snapshot exceeded its byte limit; narrow the project before parallel coding");
-    contents.set(name, content); baseline[name] = content === null ? null : sha256Bytes(content);
+    contents.set(name, content); baseline[name] = content?.hash ?? null;
   }
   // Recheck names and raw bytes; an incomplete or racing snapshot is never used.
   if (JSON.stringify(await names(source, signal)) !== JSON.stringify(currentFiles)) throw new Error("Workspace file list changed during snapshot");
   for (const [name] of contents) {
-    const current = await bytes(source, name);
-    if ((current === null ? null : sha256Bytes(current)) !== baseline[name]) throw new Error(`Workspace changed during snapshot: ${name}`);
+    const current = await inspectTeamFile(source, name, signal);
+    if ((current?.hash ?? null) !== baseline[name]) throw new Error(`Workspace changed during snapshot: ${name}`);
   }
   if ((await git(source, ["rev-parse", "--verify", "HEAD"], signal)).trim() !== head) throw new Error("Git HEAD changed during snapshot");
   const record: TeamWorkspaceRecord = { version: 2, source, workspace, owner, commonGitDir, baseline, gitRoot: root, workspaceRoot, workspacePrefix: prefix };
@@ -107,6 +109,16 @@ export async function createTeamWorkspace(sourcePath: string, signal?: AbortSign
   for (const directory of [teamWorkspaceRoot(), path.join(teamWorkspaceRoot(), "records")]) if ((await fs.lstat(directory)).isSymbolicLink()) throw new Error("Team workspace storage must not follow links");
   await fs.mkdir(owner);
   await fs.writeFile(workspaceOwnershipFile(owner), ownershipText, { flag: "wx", mode: 0o600 });
+  // Freeze bytes before publishing ownership. The callback can persist team
+  // state inside the source, or advance HEAD; neither may alter this snapshot.
+  const snapshotRoot=await safeTeamPath(owner,'snapshot');await fs.mkdir(snapshotRoot);
+  for(const [name,artifact] of contents) {
+    if(!artifact)continue;
+    const staged=await safeTeamPath(snapshotRoot,name,true);await copyTeamFile(source,name,staged,artifact,signal);
+  }
+  if(JSON.stringify(await names(source,signal))!==JSON.stringify(currentFiles))throw new Error('Source file list changed while freezing snapshot bytes');
+  for(const [name] of contents)if((await inspectTeamFile(source,name,signal))?.hash!==(baseline[name]??undefined))throw new Error('Source changed while freezing snapshot bytes');
+  if((await git(source,['rev-parse','--verify','HEAD'],signal)).trim()!==head)throw new Error('Source HEAD changed before snapshot ownership was published');
   // Failed creation retains its ownership marker and partial files for explicit cleanup.
   await onOwned?.(record);
   await git(source, ["worktree", "add", "--detach", "--no-checkout", workspaceRoot, head], signal);
@@ -116,7 +128,7 @@ export async function createTeamWorkspace(sourcePath: string, signal?: AbortSign
     signal?.throwIfAborted();
     const target = path.join(workspace, name);
     if (content === null) await fs.rm(target, { force: true });
-    else { await fs.mkdir(path.dirname(target), { recursive: true }); await fs.writeFile(target, content); }
+    else { await safeTeamPath(workspace, name, true); const staged=await inspectTeamFile(snapshotRoot,name,signal); if(!staged||staged.hash!==baseline[name])throw new Error('Frozen snapshot bytes changed'); await copyTeamFile(snapshotRoot, name, target, staged, signal); }
   }
   return record;
 }
@@ -151,36 +163,46 @@ export async function validateTeamResume(record: TeamWorkspaceRecord, scopes: st
   const candidates = new Set([...Object.keys(record.baseline), ...await names(record.source)]);
   for (const file of candidates) {
     if (!inScope(file, scopes)) continue;
-    const current = await bytes(record.source, file); const child = await bytes(record.workspace, file);
-    const hash = current === null ? null : sha256Bytes(current);
-    if (hash !== (record.baseline[file] ?? null) && hash !== (child === null ? null : sha256Bytes(child))) conflicts.push(file);
+    const current = await inspectTeamFile(record.source, file); const child = await inspectTeamFile(record.workspace, file);
+    const hash = current?.hash ?? null;
+    if (hash !== (record.baseline[file] ?? null) && hash !== (child?.hash ?? null)) conflicts.push(file);
   }
   return conflicts;
 }
-export async function workspaceOperations(record: TeamWorkspaceRecord, allowedPaths: string[], signal?: AbortSignal): Promise<{ operations: ApplyPatchOperation[]; conflicts: string[]; changedPaths: string[]; targetHashes: Record<string, string | null> }> {
+export async function workspaceOperations(record: TeamWorkspaceRecord, allowedPaths: string[], signal?: AbortSignal): Promise<{ operations: ApplyPatchOperation[]; byteOperations: TeamByteOperation[]; conflicts: string[]; changedPaths: string[]; targetHashes: Record<string, string | null> }> {
   await loadTeamWorkspace(record.workspace, record.source);
   const operations: ApplyPatchOperation[] = []; const conflicts: string[] = []; const changedPaths: string[] = [];
   const targetHashes: Record<string, string | null> = Object.create(null) as Record<string, string | null>;
+  const raw: TeamByteOperation[] = []; let requiresBytes = false; let totalBytes = 0;
   const candidates = new Set([...Object.keys(record.baseline), ...await names(record.workspace, signal)]);
   for (const name of candidates) {
     signal?.throwIfAborted();
-    const after = await bytes(record.workspace, name);
-    const afterHash = after === null ? null : sha256Bytes(after);
+    const artifact = await inspectTeamFile(record.workspace, name, signal);
+    const afterHash = artifact?.hash ?? null;
     const beforeHash = record.baseline[name] ?? null;
     if (beforeHash === afterHash) continue;
     changedPaths.push(name); targetHashes[name] = afterHash;
     if (isProtectedPatchPath(name) || !inScope(name, allowedPaths)) { conflicts.push(name); continue; }
-    const current = await bytes(record.source, name);
-    const currentHash = current === null ? null : sha256Bytes(current);
+    const currentArtifact = await inspectTeamFile(record.source, name, signal);
+    const currentHash = currentArtifact?.hash ?? null;
     if (currentHash === afterHash) continue;
     if (currentHash !== beforeHash) { conflicts.push(name); continue; }
+    const action = artifact === null ? 'delete' : currentArtifact === null ? 'create' : 'update';
+    raw.push({path:name,action,beforeHash,afterHash}); totalBytes += artifact?.size ?? 0;
+    if(totalBytes>TEAM_TOTAL_LIMIT) throw new Error('Team integration exceeds its byte limit');
+    if((artifact?.size??0)>512*1024||(currentArtifact?.size??0)>512*1024) { requiresBytes=true; continue; }
+    const after = artifact ? await bytes(record.workspace, name) : null;
+    const current = currentArtifact ? await bytes(record.source, name) : null;
     if (after === null) { operations.push({ path: name, action: "delete", expectedSha256: beforeHash! }); continue; }
-    const text = decodeTextFile(after);
-    if (current !== null && !encodeTextFile(text.text, decodeTextFile(current)).equals(after)) { conflicts.push(name); continue; }
-    operations.push({ path: name, action: current === null ? "create" : "update", content: current === null && text.hasBom ? `\ufeff${text.text}` : text.text, ...(beforeHash ? { expectedSha256: beforeHash } : {}) });
+    try {
+      const text = decodeTextFile(after);
+      if (current !== null && !encodeTextFile(text.text, decodeTextFile(current)).equals(after)) { requiresBytes=true; continue; }
+      operations.push({ path: name, action: current === null ? "create" : "update", content: current === null && text.hasBom ? `\ufeff${text.text}` : text.text, ...(beforeHash ? { expectedSha256: beforeHash } : {}) });
+    } catch { requiresBytes=true; }
   }
-  if (operations.length > 20 || operations.reduce((size, operation) => size + Buffer.byteLength(operation.content ?? ""), 0) > 512 * 1024) throw new Error("Member changes exceed apply_patch limits; delegate a smaller task");
-  return { operations, conflicts, changedPaths, targetHashes };
+  if(raw.length>20) throw new Error('Member changes exceed the 20-file integration limit');
+  if(operations.reduce((size, operation) => size + Buffer.byteLength(operation.content ?? ""), 0) > 512 * 1024) requiresBytes=true;
+  return { operations: requiresBytes ? [] : operations, byteOperations: requiresBytes ? raw : [], conflicts, changedPaths, targetHashes };
 }
 export async function removeTeamWorkspace(record: TeamWorkspaceRecord): Promise<void> {
   await loadTeamWorkspace(record.workspace, record.source, true);

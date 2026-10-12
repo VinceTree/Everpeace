@@ -9,7 +9,7 @@ import { LearnedMemoryStore, memoryEntryRevision } from "../../../src/memory/lea
 test("each real provider fallback rechecks cross-store Memory revocation", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "ep-memory-request-"));
   const store = new LearnedMemoryStore({ directory: root }), other = new LearnedMemoryStore({ directory: root });
-  await store.append("project", root, [{ lesson: "EXPIRED_PRIVATE_LESSON", applyWhen: "fixture" }]);
+  await store.append("project", root, [{ lesson: "EXPIRED_PRIVATE_LESSON", applyWhen: "fixture", reviewedAt: new Date().toISOString() }]);
   const entry = (await store.read("project", root))[0]!; const requests: string[] = [];
   const agent = new ReactAgent({ model: "fixture", workspacePath: root,
     learnedMemory: { async loadPrompt() { return (await store.snapshot(root, "fixture")).text; }, scheduleCapture() {}, async remember() {}, status: () => store.status(root), async setEnabled() {}, async clear() {} },

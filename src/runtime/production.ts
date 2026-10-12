@@ -1,4 +1,5 @@
 import { isolatedCommand, verifyTeamIsolation } from "../team/isolation.js";
+import { realpath } from 'node:fs/promises';
 import { sanitizeExecOutput } from "../cli/exec-output.js";
 import { TeamRuntime, type MemberExecution } from "../team/runtime.js";
 import { TeamStore } from "../team/store.js";
@@ -297,6 +298,7 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     team = new TeamRuntime({ config: { ...options.team, ...(suppliedBudget === undefined ? {} : { tokenBudget: Math.min(suppliedBudget, options.team.tokenBudget ?? suppliedBudget) }) }, model: options.model, models: options.teamModels ?? [options.model], workspacePath: options.workspacePath, sessionId: options.sessionId, io: rootIO, ...(options.teamStore ? { store: options.teamStore } : {}), executeMember,
       readEvidence: async (member) => { if (!member.sessionId) return []; const saved = await options.sessionStore.load(member.sessionId); if (saved.summary.workspace_path !== (member.sessionWorkspacePath ?? member.workspacePath ?? options.workspacePath)) throw new Error("Member evidence workspace does not match ownership"); return saved.timeline.filter((entry) => entry.kind === "output").slice(-8).map((entry) => ({ sessionId: member.sessionId, text: sanitizeExecOutput("text" in entry ? entry.text : "", 2048) })); },
       ...(options.onTeamEvent ? { onEvent: options.onTeamEvent } : {}),
+      onIntegrationTiming: durationMs => agent.recordPerformanceTiming('team_integration', durationMs),
       persistReference: async (snapshot) => { const id = options.sessionId(); if (id) await options.sessionStore.setTeam(id, { teamId: snapshot.teamId, state: snapshot.state, members: snapshot.members.map(({ agentId, taskId, sessionId, state }) => ({ agentId, taskId, ...(sessionId ? { sessionId } : {}), state })) }); },
       onMemberUsage: async (usage) => { if (restore?.onMemberUsage) await restore.onMemberUsage(usage); else { const id = options.sessionId(); if (id) await options.sessionStore.appendUsage(id, usage, { preserveContext: true }); } await team?.recordGoalUsage(usage); },
     });
@@ -545,6 +547,24 @@ export function createProductionWorkflowAgentIO(options: ProductionWorkflowAgent
       return previewApplyPatch(operations, options.workspacePath, {
         allowProtectedPaths: options.policy().mode === "full-access",
       });
+    },
+    async runTeamByteIntegration(record, operations, scopes, integrationId, signal) {
+      const revision = permissionPolicyRevision(options.policy());
+      const guard = () => { const policy = options.policy(); if (policy.mode === 'read-only' || permissionPolicyRevision(policy) !== revision) throw new Error('Byte integration permission changed'); };
+      guard();
+      if (await realpath(options.workspacePath) !== record.source) throw new Error('Byte integration workspace changed');
+      const { integrateTeamBytes } = await import('../team/byte-integration.js');
+      const result = await integrateTeamBytes(record, operations, scopes, integrationId, guard, signal);
+      await workflowFrom(options).observeShellExecution();
+      if (result.status === 'applied') await workflowFrom(options).afterPatch(operations.map(o => ({path:o.path,action:o.action})), result, options.executeVerification ?? options.execute, signal);
+      return result;
+    },
+    async recoverTeamByteIntegration(record, scopes, integrationId, signal) {
+      const revision=permissionPolicyRevision(options.policy());
+      const guard=()=>{if(options.policy().mode==='read-only'||permissionPolicyRevision(options.policy())!==revision)throw new Error('Recovery permission changed');};
+      guard();if(await realpath(options.workspacePath)!==record.source)throw new Error('Recovery workspace changed');
+      const {recoverTeamIntegration}=await import('../team/byte-integration.js');
+      const result=await recoverTeamIntegration(record,integrationId,scopes,guard,signal);await workflowFrom(options).observeShellExecution();return result;
     },
     async runApplyPatch(operations: readonly ApplyPatchOperation[], signal?: AbortSignal): Promise<ApplyPatchResult> {
       const workflow = workflowFrom(options);

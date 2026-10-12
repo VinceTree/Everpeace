@@ -1,0 +1,14 @@
+diff --git a/a.mjs b/a.mjs
+index bd7b091..5684f53 100644
+--- a/a.mjs
++++ b/a.mjs
+@@ -1 +1 @@
+-export function transform(value) { return value.trim(); }
++export function transform(value) { return value.trim( }
+diff --git a/b.mjs b/b.mjs
+index b1de41d..a5d5403 100644
+--- a/b.mjs
++++ b/b.mjs
+@@ -1 +1 @@
+-export function transform(value) { return value.toUpperCase(); }
++export function transform(value) return value.toUpperCase(); }

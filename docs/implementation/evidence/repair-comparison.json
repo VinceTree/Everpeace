@@ -1,0 +1,4605 @@
+{
+  "schema": 2,
+  "experiment": "repair",
+  "realModelRuns": true,
+  "comparison": {
+    "baseline": {
+      "planned": 60,
+      "executed": 41,
+      "passed": 23,
+      "successRate": 0.38333333333333336,
+      "firstPassSuccesses": 23,
+      "firstPassEvidenceComplete": false,
+      "manualInterventions": 0,
+      "unsafeActions": 0,
+      "usageComplete": false,
+      "totalKnownTokens": 2664784,
+      "tokensPerSuccessfulTaskIncludingFailures": null,
+      "successfulTasks": [
+        {
+          "taskId": "text-codecs",
+          "repetition": 1,
+          "tokens": 61875,
+          "durationMs": 52021,
+          "requestAttempts": 7,
+          "codingRequests": 7,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            2,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 1,
+            "totalMs": 2.2211999999999534,
+            "maxMs": 2.2211999999999534
+          },
+          "requestComposition": {
+            "count": 7,
+            "instructionsBytes": 53589,
+            "toolsBytes": 83027,
+            "toolResultsBytes": 40093,
+            "requestBytes": 258147,
+            "instructionsShare": 0.2075910237190438,
+            "toolsShare": 0.32162682502605106,
+            "toolResultsShare": 0.15531073380670704,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 57633,
+          "cachedInputTokens": 41600,
+          "reasoningTokens": 1760
+        },
+        {
+          "taskId": "configuration-values",
+          "repetition": 5,
+          "tokens": 93953,
+          "durationMs": 62230,
+          "requestAttempts": 9,
+          "codingRequests": 9,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            1,
+            1,
+            1,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 4,
+            "totalMs": 309.87420000000157,
+            "maxMs": 193.58270000000084
+          },
+          "requestComposition": {
+            "count": 9,
+            "instructionsBytes": 68939,
+            "toolsBytes": 106749,
+            "toolResultsBytes": 60289,
+            "requestBytes": 389759,
+            "instructionsShare": 0.17687596694367544,
+            "toolsShare": 0.2738846312721451,
+            "toolResultsShare": 0.15468276550381133,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 87869,
+          "cachedInputTokens": 65792,
+          "reasoningTokens": 3449
+        },
+        {
+          "taskId": "text-codecs",
+          "repetition": 3,
+          "tokens": 100721,
+          "durationMs": 74903,
+          "requestAttempts": 10,
+          "codingRequests": 10,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            1,
+            2,
+            2,
+            1,
+            1,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 2,
+            "totalMs": 86.21620000000348,
+            "maxMs": 81.83080000000336
+          },
+          "requestComposition": {
+            "count": 10,
+            "instructionsBytes": 76617,
+            "toolsBytes": 118610,
+            "toolResultsBytes": 69188,
+            "requestBytes": 419698,
+            "instructionsShare": 0.1825526926504296,
+            "toolsShare": 0.28260797049306885,
+            "toolResultsShare": 0.16485186967772064,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 94544,
+          "cachedInputTokens": 71424,
+          "reasoningTokens": 3025
+        },
+        {
+          "taskId": "text-codecs",
+          "repetition": 4,
+          "tokens": 172884,
+          "durationMs": 94067,
+          "requestAttempts": 14,
+          "codingRequests": 14,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            1,
+            1,
+            2,
+            2,
+            1,
+            2,
+            2,
+            2,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 5,
+            "totalMs": 86.27129999999124,
+            "maxMs": 77.34230000000389
+          },
+          "requestComposition": {
+            "count": 14,
+            "instructionsBytes": 111120,
+            "toolsBytes": 166054,
+            "toolResultsBytes": 135595,
+            "requestBytes": 725666,
+            "instructionsShare": 0.15312829869388947,
+            "toolsShare": 0.22882979221845862,
+            "toolResultsShare": 0.18685593647766327,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 162934,
+          "cachedInputTokens": 126720,
+          "reasoningTokens": 5009
+        },
+        {
+          "taskId": "boolean-and-slug",
+          "repetition": 4,
+          "tokens": 93477,
+          "durationMs": 57314,
+          "requestAttempts": 9,
+          "codingRequests": 9,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            1,
+            1,
+            2,
+            2,
+            3,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 4,
+            "totalMs": 82.75290000000541,
+            "maxMs": 72.06350000000384
+          },
+          "requestComposition": {
+            "count": 9,
+            "instructionsBytes": 71170,
+            "toolsBytes": 106749,
+            "toolResultsBytes": 49485,
+            "requestBytes": 389967,
+            "instructionsShare": 0.18250262201673476,
+            "toolsShare": 0.2737385471078322,
+            "toolResultsShare": 0.12689535268368862,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 87090,
+          "cachedInputTokens": 63232,
+          "reasoningTokens": 3766
+        },
+        {
+          "taskId": "numeric-boundaries",
+          "repetition": 5,
+          "tokens": 82304,
+          "durationMs": 56804,
+          "requestAttempts": 9,
+          "codingRequests": 9,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            1,
+            1,
+            2,
+            2,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 7,
+            "totalMs": 127.0122000000033,
+            "maxMs": 62.089100000001054
+          },
+          "requestComposition": {
+            "count": 9,
+            "instructionsBytes": 68979,
+            "toolsBytes": 106749,
+            "toolResultsBytes": 53160,
+            "requestBytes": 348171,
+            "instructionsShare": 0.1981181660735673,
+            "toolsShare": 0.30659934342607514,
+            "toolResultsShare": 0.15268359512997923,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 78022,
+          "cachedInputTokens": 58112,
+          "reasoningTokens": 2273
+        },
+        {
+          "taskId": "configuration-values",
+          "repetition": 1,
+          "tokens": 79642,
+          "durationMs": 58193,
+          "requestAttempts": 8,
+          "codingRequests": 8,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            2,
+            2,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 6,
+            "totalMs": 86.50830000000587,
+            "maxMs": 81.60170000000653
+          },
+          "requestComposition": {
+            "count": 8,
+            "instructionsBytes": 61283,
+            "toolsBytes": 94888,
+            "toolResultsBytes": 45821,
+            "requestBytes": 330451,
+            "instructionsShare": 0.1854526087074937,
+            "toolsShare": 0.2871469597610538,
+            "toolResultsShare": 0.13866201040396306,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 73915,
+          "cachedInputTokens": 54528,
+          "reasoningTokens": 3294
+        },
+        {
+          "taskId": "wire-contract",
+          "repetition": 1,
+          "tokens": 215964,
+          "durationMs": 141570,
+          "requestAttempts": 13,
+          "codingRequests": 13,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            1,
+            1,
+            1,
+            1,
+            2,
+            3,
+            1,
+            1,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 8,
+            "totalMs": 262.3529000000003,
+            "maxMs": 130.29089999999997
+          },
+          "requestComposition": {
+            "count": 13,
+            "instructionsBytes": 99617,
+            "toolsBytes": 154193,
+            "toolResultsBytes": 148943,
+            "requestBytes": 852095,
+            "instructionsShare": 0.11690832594957135,
+            "toolsShare": 0.1809575223419924,
+            "toolResultsShare": 0.1747962375087285,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 199163,
+          "cachedInputTokens": 156672,
+          "reasoningTokens": 11266
+        },
+        {
+          "taskId": "case-contract",
+          "repetition": 2,
+          "tokens": 129953,
+          "durationMs": 72564,
+          "requestAttempts": 13,
+          "codingRequests": 13,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            1,
+            2,
+            1,
+            2,
+            1,
+            2,
+            2,
+            1,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 3,
+            "totalMs": 82.2363000000023,
+            "maxMs": 78.01980000000185
+          },
+          "requestComposition": {
+            "count": 13,
+            "instructionsBytes": 103219,
+            "toolsBytes": 154193,
+            "toolResultsBytes": 106852,
+            "requestBytes": 570817,
+            "instructionsShare": 0.1808267798611464,
+            "toolsShare": 0.27012685326470653,
+            "toolResultsShare": 0.187191341533276,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 124843,
+          "cachedInputTokens": 95744,
+          "reasoningTokens": 1915
+        },
+        {
+          "taskId": "html-escaping",
+          "repetition": 5,
+          "tokens": 140226,
+          "durationMs": 69767,
+          "requestAttempts": 13,
+          "codingRequests": 13,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            1,
+            2,
+            1,
+            1,
+            1,
+            1,
+            2,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 4,
+            "totalMs": 10.273899999997866,
+            "maxMs": 4.476800000000367
+          },
+          "requestComposition": {
+            "count": 13,
+            "instructionsBytes": 103197,
+            "toolsBytes": 154193,
+            "toolResultsBytes": 108080,
+            "requestBytes": 594668,
+            "instructionsShare": 0.17353716695702476,
+            "toolsShare": 0.2592925800614797,
+            "toolResultsShare": 0.18174847141598338,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 133931,
+          "cachedInputTokens": 102272,
+          "reasoningTokens": 3169
+        },
+        {
+          "taskId": "case-contract",
+          "repetition": 3,
+          "tokens": 102481,
+          "durationMs": 50311,
+          "requestAttempts": 11,
+          "codingRequests": 11,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            2,
+            1,
+            1,
+            2,
+            3,
+            1,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 5,
+            "totalMs": 102.37140000000136,
+            "maxMs": 93.29430000000139
+          },
+          "requestComposition": {
+            "count": 11,
+            "instructionsBytes": 86755,
+            "toolsBytes": 130471,
+            "toolResultsBytes": 77126,
+            "requestBytes": 447603,
+            "instructionsShare": 0.19382131040229847,
+            "toolsShare": 0.2914882161200886,
+            "toolResultsShare": 0.17230894341637568,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 98628,
+          "cachedInputTokens": 75008,
+          "reasoningTokens": 1645
+        },
+        {
+          "taskId": "boolean-and-slug",
+          "repetition": 2,
+          "tokens": 60491,
+          "durationMs": 46010,
+          "requestAttempts": 7,
+          "codingRequests": 7,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            2,
+            2,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 3,
+            "totalMs": 82.68980000000147,
+            "maxMs": 78.02530000000115
+          },
+          "requestComposition": {
+            "count": 7,
+            "instructionsBytes": 53653,
+            "toolsBytes": 83027,
+            "toolResultsBytes": 32441,
+            "requestBytes": 255917,
+            "instructionsShare": 0.20965000371214104,
+            "toolsShare": 0.32442940484610244,
+            "toolResultsShare": 0.12676375543633286,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 56991,
+          "cachedInputTokens": 41856,
+          "reasoningTokens": 1470
+        },
+        {
+          "taskId": "syntax-strings",
+          "repetition": 2,
+          "tokens": 104947,
+          "durationMs": 74017,
+          "requestAttempts": 11,
+          "codingRequests": 11,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            2,
+            2,
+            3,
+            1,
+            2,
+            2,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 5,
+            "totalMs": 80.49469999999519,
+            "maxMs": 70.54539999999906
+          },
+          "requestComposition": {
+            "count": 11,
+            "instructionsBytes": 84355,
+            "toolsBytes": 130471,
+            "toolResultsBytes": 81317,
+            "requestBytes": 453375,
+            "instructionsShare": 0.1860601047697822,
+            "toolsShare": 0.2877772263578715,
+            "toolResultsShare": 0.1793592500689275,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 99155,
+          "cachedInputTokens": 74112,
+          "reasoningTokens": 2814
+        },
+        {
+          "taskId": "path-portability",
+          "repetition": 5,
+          "tokens": 304930,
+          "durationMs": 143917,
+          "requestAttempts": 18,
+          "codingRequests": 18,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            1,
+            2,
+            1,
+            1,
+            2,
+            1,
+            1,
+            1,
+            1,
+            1,
+            2,
+            2,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 4,
+            "totalMs": 69.32440000000406,
+            "maxMs": 61.28830000000016
+          },
+          "requestComposition": {
+            "count": 18,
+            "instructionsBytes": 145200,
+            "toolsBytes": 213498,
+            "toolResultsBytes": 212220,
+            "requestBytes": 1272658,
+            "instructionsShare": 0.1140919241461571,
+            "toolsShare": 0.16775755937573172,
+            "toolResultsShare": 0.16675336186155276,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 291151,
+          "cachedInputTokens": 241152,
+          "reasoningTokens": 6727
+        },
+        {
+          "taskId": "collections",
+          "repetition": 5,
+          "tokens": 68996,
+          "durationMs": 49765,
+          "requestAttempts": 8,
+          "codingRequests": 8,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            1,
+            2,
+            2,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 3,
+            "totalMs": 119.76689999999599,
+            "maxMs": 112.4622999999956
+          },
+          "requestComposition": {
+            "count": 8,
+            "instructionsBytes": 61211,
+            "toolsBytes": 94888,
+            "toolResultsBytes": 41254,
+            "requestBytes": 291347,
+            "instructionsShare": 0.21009655153476783,
+            "toolsShare": 0.325687238928151,
+            "toolResultsShare": 0.14159747654858296,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 65329,
+          "cachedInputTokens": 46592,
+          "reasoningTokens": 961
+        },
+        {
+          "taskId": "configuration-values",
+          "repetition": 2,
+          "tokens": 121755,
+          "durationMs": 56590,
+          "requestAttempts": 12,
+          "codingRequests": 12,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            1,
+            2,
+            2,
+            1,
+            2,
+            3,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 4,
+            "totalMs": 109.52299999999877,
+            "maxMs": 100.59399999999732
+          },
+          "requestComposition": {
+            "count": 12,
+            "instructionsBytes": 95280,
+            "toolsBytes": 142332,
+            "toolResultsBytes": 94281,
+            "requestBytes": 523994,
+            "instructionsShare": 0.18183414313904359,
+            "toolsShare": 0.2716290644549365,
+            "toolResultsShare": 0.17992763275915374,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 116398,
+          "cachedInputTokens": 89472,
+          "reasoningTokens": 1669
+        },
+        {
+          "taskId": "case-contract",
+          "repetition": 1,
+          "tokens": 75214,
+          "durationMs": 52029,
+          "requestAttempts": 9,
+          "codingRequests": 9,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            1,
+            2,
+            2,
+            3,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 4,
+            "totalMs": 74.98560000000361,
+            "maxMs": 66.59180000000197
+          },
+          "requestComposition": {
+            "count": 9,
+            "instructionsBytes": 68878,
+            "toolsBytes": 106749,
+            "toolResultsBytes": 51850,
+            "requestBytes": 325728,
+            "instructionsShare": 0.21145864033795067,
+            "toolsShare": 0.327724358974359,
+            "toolResultsShare": 0.1591818940956872,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 72225,
+          "cachedInputTokens": 53632,
+          "reasoningTokens": 899
+        },
+        {
+          "taskId": "boolean-and-slug",
+          "repetition": 3,
+          "tokens": 140986,
+          "durationMs": 69062,
+          "requestAttempts": 12,
+          "codingRequests": 12,
+          "toolBatchSizes": [
+            2,
+            3,
+            2,
+            1,
+            1,
+            1,
+            2,
+            1,
+            2,
+            2,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 4,
+            "totalMs": 70.81459999999879,
+            "maxMs": 64.398199999996
+          },
+          "requestComposition": {
+            "count": 12,
+            "instructionsBytes": 95106,
+            "toolsBytes": 142332,
+            "toolResultsBytes": 96111,
+            "requestBytes": 594114,
+            "instructionsShare": 0.16008038861228652,
+            "toolsShare": 0.23957018350013634,
+            "toolResultsShare": 0.16177198315474808,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 133372,
+          "cachedInputTokens": 102784,
+          "reasoningTokens": 3696
+        },
+        {
+          "taskId": "syntax-branches",
+          "repetition": 2,
+          "tokens": 68560,
+          "durationMs": 52243,
+          "requestAttempts": 8,
+          "codingRequests": 8,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            2,
+            2,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 3,
+            "totalMs": 8.436400000000049,
+            "maxMs": 6.344700000000103
+          },
+          "requestComposition": {
+            "count": 8,
+            "instructionsBytes": 61297,
+            "toolsBytes": 94888,
+            "toolResultsBytes": 48578,
+            "requestBytes": 295237,
+            "instructionsShare": 0.2076196411696366,
+            "toolsShare": 0.32139603098527625,
+            "toolResultsShare": 0.16453899748337777,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 65612,
+          "cachedInputTokens": 48896,
+          "reasoningTokens": 1230
+        },
+        {
+          "taskId": "syntax-strings",
+          "repetition": 5,
+          "tokens": 139336,
+          "durationMs": 79229,
+          "requestAttempts": 13,
+          "codingRequests": 13,
+          "toolBatchSizes": [
+            2,
+            5,
+            1,
+            1,
+            1,
+            2,
+            2,
+            2,
+            1,
+            2,
+            3,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 6,
+            "totalMs": 89.58389999999963,
+            "maxMs": 80.94180000000051
+          },
+          "requestComposition": {
+            "count": 13,
+            "instructionsBytes": 104483,
+            "toolsBytes": 154193,
+            "toolResultsBytes": 128613,
+            "requestBytes": 611160,
+            "instructionsShare": 0.1709585051377708,
+            "toolsShare": 0.2522956345310557,
+            "toolResultsShare": 0.2104408010995484,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 133670,
+          "cachedInputTokens": 102528,
+          "reasoningTokens": 2764
+        },
+        {
+          "taskId": "collections",
+          "repetition": 1,
+          "tokens": 89678,
+          "durationMs": 47352,
+          "requestAttempts": 10,
+          "codingRequests": 10,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            2,
+            2,
+            1,
+            2,
+            2,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 3,
+            "totalMs": 103.69600000000173,
+            "maxMs": 98.60780000000159
+          },
+          "requestComposition": {
+            "count": 10,
+            "instructionsBytes": 78667,
+            "toolsBytes": 118610,
+            "toolResultsBytes": 61870,
+            "requestBytes": 388399,
+            "instructionsShare": 0.20254171612182317,
+            "toolsShare": 0.305381836719456,
+            "toolResultsShare": 0.1592949518407617,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 86231,
+          "cachedInputTokens": 65152,
+          "reasoningTokens": 1187
+        },
+        {
+          "taskId": "html-escaping",
+          "repetition": 4,
+          "tokens": 137084,
+          "durationMs": 82305,
+          "requestAttempts": 11,
+          "codingRequests": 11,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            1,
+            1,
+            2,
+            2,
+            1,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 2,
+            "totalMs": 90.87669999999616,
+            "maxMs": 89.0850999999966
+          },
+          "requestComposition": {
+            "count": 11,
+            "instructionsBytes": 87753,
+            "toolsBytes": 130471,
+            "toolResultsBytes": 100297,
+            "requestBytes": 551031,
+            "instructionsShare": 0.159252383259744,
+            "toolsShare": 0.2367761523398865,
+            "toolResultsShare": 0.1820169827105916,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 128346,
+          "cachedInputTokens": 99072,
+          "reasoningTokens": 3540
+        },
+        {
+          "taskId": "boolean-and-slug",
+          "repetition": 1,
+          "tokens": 79327,
+          "durationMs": 47519,
+          "requestAttempts": 9,
+          "codingRequests": 9,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            1,
+            2,
+            1,
+            1,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 2,
+            "totalMs": 6.516900000000078,
+            "maxMs": 3.6948999999999614
+          },
+          "requestComposition": {
+            "count": 9,
+            "instructionsBytes": 68905,
+            "toolsBytes": 106749,
+            "toolResultsBytes": 55562,
+            "requestBytes": 336376,
+            "instructionsShare": 0.20484517325849644,
+            "toolsShare": 0.3173502271267867,
+            "toolResultsShare": 0.1651782529074607,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 75955,
+          "cachedInputTokens": 56960,
+          "reasoningTokens": 1054
+        }
+      ]
+    },
+    "candidate": {
+      "planned": 60,
+      "executed": 40,
+      "passed": 23,
+      "successRate": 0.38333333333333336,
+      "firstPassSuccesses": 23,
+      "firstPassEvidenceComplete": false,
+      "manualInterventions": 0,
+      "unsafeActions": 0,
+      "usageComplete": false,
+      "totalKnownTokens": 2454145,
+      "tokensPerSuccessfulTaskIncludingFailures": null,
+      "successfulTasks": [
+        {
+          "taskId": "text-codecs",
+          "repetition": 1,
+          "tokens": 79482,
+          "durationMs": 56452,
+          "requestAttempts": 9,
+          "codingRequests": 9,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            1,
+            2,
+            2,
+            2,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 4,
+            "totalMs": 486.7298000000028,
+            "maxMs": 381.3478000000032
+          },
+          "requestComposition": {
+            "count": 9,
+            "instructionsBytes": 68950,
+            "toolsBytes": 106749,
+            "toolResultsBytes": 55888,
+            "requestBytes": 343568,
+            "instructionsShare": 0.2006880733944954,
+            "toolsShare": 0.3107070507148512,
+            "toolResultsShare": 0.16266939877986308,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 75950,
+          "cachedInputTokens": 56704,
+          "reasoningTokens": 1556
+        },
+        {
+          "taskId": "configuration-values",
+          "repetition": 5,
+          "tokens": 135083,
+          "durationMs": 79868,
+          "requestAttempts": 11,
+          "codingRequests": 11,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            2,
+            1,
+            2,
+            1,
+            1,
+            2,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 7,
+            "totalMs": 84.31200000000172,
+            "maxMs": 71.4976999999999
+          },
+          "requestComposition": {
+            "count": 11,
+            "instructionsBytes": 87439,
+            "toolsBytes": 130471,
+            "toolResultsBytes": 77726,
+            "requestBytes": 562665,
+            "instructionsShare": 0.15540152666328988,
+            "toolsShare": 0.23188042618609653,
+            "toolResultsShare": 0.13813903477202244,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 126529,
+          "cachedInputTokens": 97920,
+          "reasoningTokens": 4951
+        },
+        {
+          "taskId": "text-codecs",
+          "repetition": 3,
+          "tokens": 120469,
+          "durationMs": 85357,
+          "requestAttempts": 11,
+          "codingRequests": 11,
+          "toolBatchSizes": [
+            2,
+            5,
+            2,
+            1,
+            3,
+            2,
+            2,
+            1,
+            2,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 6,
+            "totalMs": 65.92679999998654,
+            "maxMs": 61.452599999989616
+          },
+          "requestComposition": {
+            "count": 11,
+            "instructionsBytes": 87279,
+            "toolsBytes": 130471,
+            "toolResultsBytes": 90671,
+            "requestBytes": 511386,
+            "instructionsShare": 0.1706714693010759,
+            "toolsShare": 0.255132131110355,
+            "toolResultsShare": 0.1773044236643162,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 112801,
+          "cachedInputTokens": 84864,
+          "reasoningTokens": 4209
+        },
+        {
+          "taskId": "text-codecs",
+          "repetition": 4,
+          "tokens": 115314,
+          "durationMs": 68456,
+          "requestAttempts": 11,
+          "codingRequests": 11,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            2,
+            2,
+            2,
+            1,
+            2,
+            2,
+            3,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 4,
+            "totalMs": 5.719199999997727,
+            "maxMs": 2.3110999999998967
+          },
+          "requestComposition": {
+            "count": 11,
+            "instructionsBytes": 87325,
+            "toolsBytes": 130471,
+            "toolResultsBytes": 94914,
+            "requestBytes": 492856,
+            "instructionsShare": 0.17718157027610498,
+            "toolsShare": 0.26472438196958137,
+            "toolResultsShare": 0.19257957699612058,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 109113,
+          "cachedInputTokens": 81920,
+          "reasoningTokens": 2188
+        },
+        {
+          "taskId": "boolean-and-slug",
+          "repetition": 4,
+          "tokens": 146385,
+          "durationMs": 73149,
+          "requestAttempts": 12,
+          "codingRequests": 12,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            2,
+            1,
+            1,
+            1,
+            2,
+            2,
+            2,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 6,
+            "totalMs": 79.74870000000283,
+            "maxMs": 71.88930000000255
+          },
+          "requestComposition": {
+            "count": 12,
+            "instructionsBytes": 95589,
+            "toolsBytes": 142332,
+            "toolResultsBytes": 95283,
+            "requestBytes": 622804,
+            "instructionsShare": 0.15348167320698006,
+            "toolsShare": 0.22853417768672005,
+            "toolResultsShare": 0.15299034688280744,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 138329,
+          "cachedInputTokens": 107776,
+          "reasoningTokens": 5034
+        },
+        {
+          "taskId": "numeric-boundaries",
+          "repetition": 5,
+          "tokens": 55315,
+          "durationMs": 38152,
+          "requestAttempts": 7,
+          "codingRequests": 7,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            1,
+            2,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 2,
+            "totalMs": 8.673000000000684,
+            "maxMs": 5.352000000000771
+          },
+          "requestComposition": {
+            "count": 7,
+            "instructionsBytes": 53591,
+            "toolsBytes": 83027,
+            "toolResultsBytes": 29399,
+            "requestBytes": 235203,
+            "instructionsShare": 0.2278499849066551,
+            "toolsShare": 0.3530014498114395,
+            "toolResultsShare": 0.12499415398613113,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 52454,
+          "cachedInputTokens": 36992,
+          "reasoningTokens": 1119
+        },
+        {
+          "taskId": "configuration-values",
+          "repetition": 1,
+          "tokens": 112575,
+          "durationMs": 67636,
+          "requestAttempts": 11,
+          "codingRequests": 11,
+          "toolBatchSizes": [
+            2,
+            3,
+            1,
+            1,
+            1,
+            1,
+            2,
+            2,
+            1,
+            3,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 6,
+            "totalMs": 200.87240000000202,
+            "maxMs": 196.48800000000483
+          },
+          "requestComposition": {
+            "count": 11,
+            "instructionsBytes": 84345,
+            "toolsBytes": 130471,
+            "toolResultsBytes": 70149,
+            "requestBytes": 474090,
+            "instructionsShare": 0.17790925773587293,
+            "toolsShare": 0.2752030205235293,
+            "toolResultsShare": 0.147965576156426,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 106581,
+          "cachedInputTokens": 81152,
+          "reasoningTokens": 2681
+        },
+        {
+          "taskId": "wire-contract",
+          "repetition": 1,
+          "tokens": 94764,
+          "durationMs": 54455,
+          "requestAttempts": 10,
+          "codingRequests": 10,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            1,
+            2,
+            1,
+            2,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 6,
+            "totalMs": 117.37339999999767,
+            "maxMs": 75.04349999999977
+          },
+          "requestComposition": {
+            "count": 10,
+            "instructionsBytes": 76564,
+            "toolsBytes": 118610,
+            "toolResultsBytes": 62356,
+            "requestBytes": 403667,
+            "instructionsShare": 0.18967118937143734,
+            "toolsShare": 0.2938313015431036,
+            "toolResultsShare": 0.15447386088037912,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 90050,
+          "cachedInputTokens": 66944,
+          "reasoningTokens": 2088
+        },
+        {
+          "taskId": "case-contract",
+          "repetition": 2,
+          "tokens": 64064,
+          "durationMs": 41691,
+          "requestAttempts": 8,
+          "codingRequests": 8,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            1,
+            1,
+            1,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 6,
+            "totalMs": 90.8661000000011,
+            "maxMs": 80.88490000000093
+          },
+          "requestComposition": {
+            "count": 8,
+            "instructionsBytes": 61235,
+            "toolsBytes": 94888,
+            "toolResultsBytes": 37784,
+            "requestBytes": 277341,
+            "instructionsShare": 0.22079317518866665,
+            "toolsShare": 0.34213477271661963,
+            "toolResultsShare": 0.13623661845886473,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 61262,
+          "cachedInputTokens": 44288,
+          "reasoningTokens": 1144
+        },
+        {
+          "taskId": "html-escaping",
+          "repetition": 5,
+          "tokens": 133059,
+          "durationMs": 80691,
+          "requestAttempts": 12,
+          "codingRequests": 12,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            1,
+            1,
+            1,
+            1,
+            2,
+            3,
+            2,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 5,
+            "totalMs": 187.39619999999422,
+            "maxMs": 100.58469999999943
+          },
+          "requestComposition": {
+            "count": 12,
+            "instructionsBytes": 91951,
+            "toolsBytes": 142332,
+            "toolResultsBytes": 99353,
+            "requestBytes": 549973,
+            "instructionsShare": 0.1671918439632491,
+            "toolsShare": 0.2587981591823599,
+            "toolResultsShare": 0.18065068648824578,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 125084,
+          "cachedInputTokens": 95104,
+          "reasoningTokens": 4138
+        },
+        {
+          "taskId": "case-contract",
+          "repetition": 3,
+          "tokens": 110387,
+          "durationMs": 74618,
+          "requestAttempts": 11,
+          "codingRequests": 11,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            2,
+            1,
+            2,
+            2,
+            2,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 3,
+            "totalMs": 73.98149999999441,
+            "maxMs": 69.15169999999489
+          },
+          "requestComposition": {
+            "count": 11,
+            "instructionsBytes": 84326,
+            "toolsBytes": 130471,
+            "toolResultsBytes": 80490,
+            "requestBytes": 473110,
+            "instructionsShare": 0.17823761915833528,
+            "toolsShare": 0.2757730760288305,
+            "toolResultsShare": 0.170129568176534,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 104679,
+          "cachedInputTokens": 80000,
+          "reasoningTokens": 2559
+        },
+        {
+          "taskId": "boolean-and-slug",
+          "repetition": 2,
+          "tokens": 68965,
+          "durationMs": 48140,
+          "requestAttempts": 8,
+          "codingRequests": 8,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            2,
+            1,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 3,
+            "totalMs": 83.27829999999949,
+            "maxMs": 76.59749999999985
+          },
+          "requestComposition": {
+            "count": 8,
+            "instructionsBytes": 61259,
+            "toolsBytes": 94888,
+            "toolResultsBytes": 44920,
+            "requestBytes": 291859,
+            "instructionsShare": 0.20989244806567556,
+            "toolsShare": 0.32511589500409444,
+            "toolResultsShare": 0.15390993596222832,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 65605,
+          "cachedInputTokens": 48384,
+          "reasoningTokens": 1045
+        },
+        {
+          "taskId": "syntax-strings",
+          "repetition": 2,
+          "tokens": 122619,
+          "durationMs": 74357,
+          "requestAttempts": 12,
+          "codingRequests": 12,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            1,
+            2,
+            2,
+            2,
+            3,
+            1,
+            2,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 5,
+            "totalMs": 118.10140000000683,
+            "maxMs": 107.6195000000007
+          },
+          "requestComposition": {
+            "count": 12,
+            "instructionsBytes": 95301,
+            "toolsBytes": 142332,
+            "toolResultsBytes": 90746,
+            "requestBytes": 532499,
+            "instructionsShare": 0.17896935017718343,
+            "toolsShare": 0.2672906427993292,
+            "toolResultsShare": 0.1704153435029925,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 116080,
+          "cachedInputTokens": 86272,
+          "reasoningTokens": 3698
+        },
+        {
+          "taskId": "path-portability",
+          "repetition": 5,
+          "tokens": 223222,
+          "durationMs": 117048,
+          "requestAttempts": 13,
+          "codingRequests": 13,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            1,
+            2,
+            2,
+            2,
+            2,
+            1,
+            2,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 5,
+            "totalMs": 87.72449999999708,
+            "maxMs": 72.14139999999315
+          },
+          "requestComposition": {
+            "count": 13,
+            "instructionsBytes": 105574,
+            "toolsBytes": 154193,
+            "toolResultsBytes": 140470,
+            "requestBytes": 916836,
+            "instructionsShare": 0.11515036495076546,
+            "toolsShare": 0.16817947811822398,
+            "toolResultsShare": 0.15321169762094858,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 207987,
+          "cachedInputTokens": 167040,
+          "reasoningTokens": 9933
+        },
+        {
+          "taskId": "collections",
+          "repetition": 5,
+          "tokens": 44976,
+          "durationMs": 38118,
+          "requestAttempts": 6,
+          "codingRequests": 6,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            2,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 2,
+            "totalMs": 14.44860000000017,
+            "maxMs": 11.081500000000233
+          },
+          "requestComposition": {
+            "count": 6,
+            "instructionsBytes": 45894,
+            "toolsBytes": 71166,
+            "toolResultsBytes": 22663,
+            "requestBytes": 192629,
+            "instructionsShare": 0.23825073067918123,
+            "toolsShare": 0.36944592974058943,
+            "toolResultsShare": 0.11765102866131268,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 42751,
+          "cachedInputTokens": 30976,
+          "reasoningTokens": 396
+        },
+        {
+          "taskId": "configuration-values",
+          "repetition": 2,
+          "tokens": 123313,
+          "durationMs": 66507,
+          "requestAttempts": 11,
+          "codingRequests": 11,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            1,
+            2,
+            2,
+            2,
+            3,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 4,
+            "totalMs": 117.62470000000212,
+            "maxMs": 108.3747000000003
+          },
+          "requestComposition": {
+            "count": 11,
+            "instructionsBytes": 87220,
+            "toolsBytes": 130471,
+            "toolResultsBytes": 81115,
+            "requestBytes": 529670,
+            "instructionsShare": 0.16466856722109993,
+            "toolsShare": 0.24632507032680726,
+            "toolResultsShare": 0.15314252270281495,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 116389,
+          "cachedInputTokens": 89472,
+          "reasoningTokens": 3893
+        },
+        {
+          "taskId": "case-contract",
+          "repetition": 1,
+          "tokens": 82630,
+          "durationMs": 39477,
+          "requestAttempts": 10,
+          "codingRequests": 10,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            1,
+            1,
+            2,
+            3,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 5,
+            "totalMs": 237.06919999999764,
+            "maxMs": 118.4099000000001
+          },
+          "requestComposition": {
+            "count": 10,
+            "instructionsBytes": 78996,
+            "toolsBytes": 118610,
+            "toolResultsBytes": 56797,
+            "requestBytes": 366077,
+            "instructionsShare": 0.21579066699082433,
+            "toolsShare": 0.3240028737123611,
+            "toolResultsShare": 0.15515041917410818,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 80007,
+          "cachedInputTokens": 59648,
+          "reasoningTokens": 805
+        },
+        {
+          "taskId": "boolean-and-slug",
+          "repetition": 3,
+          "tokens": 94954,
+          "durationMs": 61129,
+          "requestAttempts": 10,
+          "codingRequests": 10,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            1,
+            2,
+            1,
+            2,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 7,
+            "totalMs": 179.55259999999407,
+            "maxMs": 90.22819999999774
+          },
+          "requestComposition": {
+            "count": 10,
+            "instructionsBytes": 76648,
+            "toolsBytes": 118610,
+            "toolResultsBytes": 67336,
+            "requestBytes": 411184,
+            "instructionsShare": 0.1864080314409121,
+            "toolsShare": 0.28845966769134984,
+            "toolResultsShare": 0.16376123584575275,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 90664,
+          "cachedInputTokens": 68608,
+          "reasoningTokens": 2005
+        },
+        {
+          "taskId": "syntax-branches",
+          "repetition": 2,
+          "tokens": 65003,
+          "durationMs": 43449,
+          "requestAttempts": 8,
+          "codingRequests": 8,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            1,
+            2,
+            2,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 3,
+            "totalMs": 67.85779999999977,
+            "maxMs": 60.33339999999953
+          },
+          "requestComposition": {
+            "count": 8,
+            "instructionsBytes": 61251,
+            "toolsBytes": 94888,
+            "toolResultsBytes": 41627,
+            "requestBytes": 281803,
+            "instructionsShare": 0.21735396713306815,
+            "toolsShare": 0.3367174941359744,
+            "toolResultsShare": 0.14771666731723934,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 62279,
+          "cachedInputTokens": 44672,
+          "reasoningTokens": 809
+        },
+        {
+          "taskId": "syntax-strings",
+          "repetition": 5,
+          "tokens": 78726,
+          "durationMs": 64424,
+          "requestAttempts": 9,
+          "codingRequests": 9,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            2,
+            2,
+            2,
+            3,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 7,
+            "totalMs": 78.16919999999436,
+            "maxMs": 69.51610000000073
+          },
+          "requestComposition": {
+            "count": 9,
+            "instructionsBytes": 68923,
+            "toolsBytes": 106749,
+            "toolResultsBytes": 58427,
+            "requestBytes": 347596,
+            "instructionsShare": 0.19828479038884222,
+            "toolsShare": 0.3071065259669271,
+            "toolResultsShare": 0.16808881575161969,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 75392,
+          "cachedInputTokens": 56192,
+          "reasoningTokens": 1490
+        },
+        {
+          "taskId": "collections",
+          "repetition": 1,
+          "tokens": 108141,
+          "durationMs": 58880,
+          "requestAttempts": 11,
+          "codingRequests": 11,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            2,
+            1,
+            2,
+            2,
+            1,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 4,
+            "totalMs": 346.9341000000036,
+            "maxMs": 178.03300000000309
+          },
+          "requestComposition": {
+            "count": 11,
+            "instructionsBytes": 87297,
+            "toolsBytes": 130471,
+            "toolResultsBytes": 74048,
+            "requestBytes": 466526,
+            "instructionsShare": 0.1871214037374123,
+            "toolsShare": 0.27966501331115523,
+            "toolResultsShare": 0.1587221290989141,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 102998,
+          "cachedInputTokens": 78080,
+          "reasoningTokens": 2619
+        },
+        {
+          "taskId": "syntax-branches",
+          "repetition": 3,
+          "tokens": 64721,
+          "durationMs": 51970,
+          "requestAttempts": 8,
+          "codingRequests": 8,
+          "toolBatchSizes": [
+            2,
+            4,
+            2,
+            1,
+            2,
+            2,
+            2,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 6,
+            "totalMs": 84.17779999999993,
+            "maxMs": 75.03050000000076
+          },
+          "requestComposition": {
+            "count": 8,
+            "instructionsBytes": 61251,
+            "toolsBytes": 94888,
+            "toolResultsBytes": 39036,
+            "requestBytes": 281224,
+            "instructionsShare": 0.21780146786902968,
+            "toolsShare": 0.3374107473046397,
+            "toolResultsShare": 0.138807498648764,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 62012,
+          "cachedInputTokens": 45952,
+          "reasoningTokens": 1134
+        },
+        {
+          "taskId": "wire-contract",
+          "repetition": 4,
+          "tokens": 209978,
+          "durationMs": 113803,
+          "requestAttempts": 15,
+          "codingRequests": 15,
+          "toolBatchSizes": [
+            2,
+            4,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            0
+          ],
+          "repeatedFailures": 0,
+          "toolWait": {
+            "count": 2,
+            "totalMs": 16.15880000000061,
+            "maxMs": 14.077899999999772
+          },
+          "requestComposition": {
+            "count": 15,
+            "instructionsBytes": 121033,
+            "toolsBytes": 177915,
+            "toolResultsBytes": 122550,
+            "requestBytes": 846703,
+            "instructionsShare": 0.14294622789809414,
+            "toolsShare": 0.2101268095188041,
+            "toolResultsShare": 0.14473788329555937,
+            "measurement": "UTF-8 JSON bytes; not token usage"
+          },
+          "cacheObservedInputTokens": 195132,
+          "cachedInputTokens": 151936,
+          "reasoningTokens": 10665
+        }
+      ]
+    },
+    "complete": false,
+    "safetyPassed": false,
+    "qualityPassed": false,
+    "usageComplete": false,
+    "perTask": [
+      {
+        "taskId": "text-codecs",
+        "baselinePassed": 3,
+        "candidatePassed": 3
+      },
+      {
+        "taskId": "configuration-values",
+        "baselinePassed": 3,
+        "candidatePassed": 3
+      },
+      {
+        "taskId": "boolean-and-slug",
+        "baselinePassed": 4,
+        "candidatePassed": 3
+      },
+      {
+        "taskId": "wire-contract",
+        "baselinePassed": 1,
+        "candidatePassed": 2
+      },
+      {
+        "taskId": "numeric-boundaries",
+        "baselinePassed": 1,
+        "candidatePassed": 1
+      },
+      {
+        "taskId": "html-escaping",
+        "baselinePassed": 2,
+        "candidatePassed": 1
+      },
+      {
+        "taskId": "case-contract",
+        "baselinePassed": 3,
+        "candidatePassed": 3
+      },
+      {
+        "taskId": "path-portability",
+        "baselinePassed": 1,
+        "candidatePassed": 1
+      },
+      {
+        "taskId": "syntax-strings",
+        "baselinePassed": 2,
+        "candidatePassed": 2
+      },
+      {
+        "taskId": "collections",
+        "baselinePassed": 2,
+        "candidatePassed": 2
+      },
+      {
+        "taskId": "syntax-branches",
+        "baselinePassed": 1,
+        "candidatePassed": 2
+      },
+      {
+        "taskId": "workspace-traversal",
+        "baselinePassed": 0,
+        "candidatePassed": 0
+      }
+    ],
+    "commonSuccessfulPairs": [
+      {
+        "taskId": "text-codecs",
+        "repetition": 1,
+        "baselineTokens": 61875,
+        "candidateTokens": 79482,
+        "baselineDurationMs": 52021,
+        "candidateDurationMs": 56452
+      },
+      {
+        "taskId": "configuration-values",
+        "repetition": 5,
+        "baselineTokens": 93953,
+        "candidateTokens": 135083,
+        "baselineDurationMs": 62230,
+        "candidateDurationMs": 79868
+      },
+      {
+        "taskId": "text-codecs",
+        "repetition": 3,
+        "baselineTokens": 100721,
+        "candidateTokens": 120469,
+        "baselineDurationMs": 74903,
+        "candidateDurationMs": 85357
+      },
+      {
+        "taskId": "text-codecs",
+        "repetition": 4,
+        "baselineTokens": 172884,
+        "candidateTokens": 115314,
+        "baselineDurationMs": 94067,
+        "candidateDurationMs": 68456
+      },
+      {
+        "taskId": "boolean-and-slug",
+        "repetition": 4,
+        "baselineTokens": 93477,
+        "candidateTokens": 146385,
+        "baselineDurationMs": 57314,
+        "candidateDurationMs": 73149
+      },
+      {
+        "taskId": "numeric-boundaries",
+        "repetition": 5,
+        "baselineTokens": 82304,
+        "candidateTokens": 55315,
+        "baselineDurationMs": 56804,
+        "candidateDurationMs": 38152
+      },
+      {
+        "taskId": "configuration-values",
+        "repetition": 1,
+        "baselineTokens": 79642,
+        "candidateTokens": 112575,
+        "baselineDurationMs": 58193,
+        "candidateDurationMs": 67636
+      },
+      {
+        "taskId": "wire-contract",
+        "repetition": 1,
+        "baselineTokens": 215964,
+        "candidateTokens": 94764,
+        "baselineDurationMs": 141570,
+        "candidateDurationMs": 54455
+      },
+      {
+        "taskId": "case-contract",
+        "repetition": 2,
+        "baselineTokens": 129953,
+        "candidateTokens": 64064,
+        "baselineDurationMs": 72564,
+        "candidateDurationMs": 41691
+      },
+      {
+        "taskId": "html-escaping",
+        "repetition": 5,
+        "baselineTokens": 140226,
+        "candidateTokens": 133059,
+        "baselineDurationMs": 69767,
+        "candidateDurationMs": 80691
+      },
+      {
+        "taskId": "case-contract",
+        "repetition": 3,
+        "baselineTokens": 102481,
+        "candidateTokens": 110387,
+        "baselineDurationMs": 50311,
+        "candidateDurationMs": 74618
+      },
+      {
+        "taskId": "boolean-and-slug",
+        "repetition": 2,
+        "baselineTokens": 60491,
+        "candidateTokens": 68965,
+        "baselineDurationMs": 46010,
+        "candidateDurationMs": 48140
+      },
+      {
+        "taskId": "syntax-strings",
+        "repetition": 2,
+        "baselineTokens": 104947,
+        "candidateTokens": 122619,
+        "baselineDurationMs": 74017,
+        "candidateDurationMs": 74357
+      },
+      {
+        "taskId": "path-portability",
+        "repetition": 5,
+        "baselineTokens": 304930,
+        "candidateTokens": 223222,
+        "baselineDurationMs": 143917,
+        "candidateDurationMs": 117048
+      },
+      {
+        "taskId": "collections",
+        "repetition": 5,
+        "baselineTokens": 68996,
+        "candidateTokens": 44976,
+        "baselineDurationMs": 49765,
+        "candidateDurationMs": 38118
+      },
+      {
+        "taskId": "configuration-values",
+        "repetition": 2,
+        "baselineTokens": 121755,
+        "candidateTokens": 123313,
+        "baselineDurationMs": 56590,
+        "candidateDurationMs": 66507
+      },
+      {
+        "taskId": "case-contract",
+        "repetition": 1,
+        "baselineTokens": 75214,
+        "candidateTokens": 82630,
+        "baselineDurationMs": 52029,
+        "candidateDurationMs": 39477
+      },
+      {
+        "taskId": "boolean-and-slug",
+        "repetition": 3,
+        "baselineTokens": 140986,
+        "candidateTokens": 94954,
+        "baselineDurationMs": 69062,
+        "candidateDurationMs": 61129
+      },
+      {
+        "taskId": "syntax-branches",
+        "repetition": 2,
+        "baselineTokens": 68560,
+        "candidateTokens": 65003,
+        "baselineDurationMs": 52243,
+        "candidateDurationMs": 43449
+      },
+      {
+        "taskId": "syntax-strings",
+        "repetition": 5,
+        "baselineTokens": 139336,
+        "candidateTokens": 78726,
+        "baselineDurationMs": 79229,
+        "candidateDurationMs": 64424
+      },
+      {
+        "taskId": "collections",
+        "repetition": 1,
+        "baselineTokens": 89678,
+        "candidateTokens": 108141,
+        "baselineDurationMs": 47352,
+        "candidateDurationMs": 58880
+      }
+    ],
+    "commonBaselineTokenMedian": 100721,
+    "commonCandidateTokenMedian": 108141,
+    "tokenMedianReduction": -0.07366884760874104,
+    "observedSavings": false,
+    "eligibleForDefault": false,
+    "interpretation": "Insufficient evidence to enable candidate optimizations by default."
+  },
+  "measurements": {
+    "baseline": {
+      "wallMs": 3667102,
+      "requests": null,
+      "duplicateReads": null,
+      "conflicts": null,
+      "independentFailures": 0,
+      "errorModificationRate": null,
+      "unknownEditClassifications": 3,
+      "wallMsPerSuccessfulTaskIncludingFailures": 159439.21739130435,
+      "successRate95PercentInterval": [
+        0.2708808958488824,
+        0.5098263545959686
+      ]
+    },
+    "candidate": {
+      "wallMs": 1608576,
+      "requests": null,
+      "duplicateReads": null,
+      "conflicts": null,
+      "independentFailures": 0,
+      "errorModificationRate": null,
+      "unknownEditClassifications": 1,
+      "wallMsPerSuccessfulTaskIncludingFailures": 69938.08695652174,
+      "successRate95PercentInterval": [
+        0.2708808958488824,
+        0.5098263545959686
+      ]
+    }
+  },
+  "sufficientRepetitions": true,
+  "qualityPassed": false,
+  "efficiencyPassed": false,
+  "tokenRatio": null,
+  "wallRatio": 0.43865046568107463,
+  "teamExecuted": true,
+  "categories": [
+    {
+      "tag": "parallel_modules",
+      "tasks": 2,
+      "comparison": {
+        "baseline": {
+          "planned": 10,
+          "executed": 8,
+          "passed": 7,
+          "successRate": 0.7,
+          "firstPassSuccesses": 7,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 709761,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": [
+            {
+              "taskId": "text-codecs",
+              "repetition": 1,
+              "tokens": 61875,
+              "durationMs": 52021,
+              "requestAttempts": 7,
+              "codingRequests": 7,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                2,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 1,
+                "totalMs": 2.2211999999999534,
+                "maxMs": 2.2211999999999534
+              },
+              "requestComposition": {
+                "count": 7,
+                "instructionsBytes": 53589,
+                "toolsBytes": 83027,
+                "toolResultsBytes": 40093,
+                "requestBytes": 258147,
+                "instructionsShare": 0.2075910237190438,
+                "toolsShare": 0.32162682502605106,
+                "toolResultsShare": 0.15531073380670704,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 57633,
+              "cachedInputTokens": 41600,
+              "reasoningTokens": 1760
+            },
+            {
+              "taskId": "text-codecs",
+              "repetition": 3,
+              "tokens": 100721,
+              "durationMs": 74903,
+              "requestAttempts": 10,
+              "codingRequests": 10,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                1,
+                2,
+                2,
+                1,
+                1,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 2,
+                "totalMs": 86.21620000000348,
+                "maxMs": 81.83080000000336
+              },
+              "requestComposition": {
+                "count": 10,
+                "instructionsBytes": 76617,
+                "toolsBytes": 118610,
+                "toolResultsBytes": 69188,
+                "requestBytes": 419698,
+                "instructionsShare": 0.1825526926504296,
+                "toolsShare": 0.28260797049306885,
+                "toolResultsShare": 0.16485186967772064,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 94544,
+              "cachedInputTokens": 71424,
+              "reasoningTokens": 3025
+            },
+            {
+              "taskId": "text-codecs",
+              "repetition": 4,
+              "tokens": 172884,
+              "durationMs": 94067,
+              "requestAttempts": 14,
+              "codingRequests": 14,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                1,
+                1,
+                2,
+                2,
+                1,
+                2,
+                2,
+                2,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 5,
+                "totalMs": 86.27129999999124,
+                "maxMs": 77.34230000000389
+              },
+              "requestComposition": {
+                "count": 14,
+                "instructionsBytes": 111120,
+                "toolsBytes": 166054,
+                "toolResultsBytes": 135595,
+                "requestBytes": 725666,
+                "instructionsShare": 0.15312829869388947,
+                "toolsShare": 0.22882979221845862,
+                "toolResultsShare": 0.18685593647766327,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 162934,
+              "cachedInputTokens": 126720,
+              "reasoningTokens": 5009
+            },
+            {
+              "taskId": "boolean-and-slug",
+              "repetition": 4,
+              "tokens": 93477,
+              "durationMs": 57314,
+              "requestAttempts": 9,
+              "codingRequests": 9,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                1,
+                1,
+                2,
+                2,
+                3,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 4,
+                "totalMs": 82.75290000000541,
+                "maxMs": 72.06350000000384
+              },
+              "requestComposition": {
+                "count": 9,
+                "instructionsBytes": 71170,
+                "toolsBytes": 106749,
+                "toolResultsBytes": 49485,
+                "requestBytes": 389967,
+                "instructionsShare": 0.18250262201673476,
+                "toolsShare": 0.2737385471078322,
+                "toolResultsShare": 0.12689535268368862,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 87090,
+              "cachedInputTokens": 63232,
+              "reasoningTokens": 3766
+            },
+            {
+              "taskId": "boolean-and-slug",
+              "repetition": 2,
+              "tokens": 60491,
+              "durationMs": 46010,
+              "requestAttempts": 7,
+              "codingRequests": 7,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                2,
+                2,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 3,
+                "totalMs": 82.68980000000147,
+                "maxMs": 78.02530000000115
+              },
+              "requestComposition": {
+                "count": 7,
+                "instructionsBytes": 53653,
+                "toolsBytes": 83027,
+                "toolResultsBytes": 32441,
+                "requestBytes": 255917,
+                "instructionsShare": 0.20965000371214104,
+                "toolsShare": 0.32442940484610244,
+                "toolResultsShare": 0.12676375543633286,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 56991,
+              "cachedInputTokens": 41856,
+              "reasoningTokens": 1470
+            },
+            {
+              "taskId": "boolean-and-slug",
+              "repetition": 3,
+              "tokens": 140986,
+              "durationMs": 69062,
+              "requestAttempts": 12,
+              "codingRequests": 12,
+              "toolBatchSizes": [
+                2,
+                3,
+                2,
+                1,
+                1,
+                1,
+                2,
+                1,
+                2,
+                2,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 4,
+                "totalMs": 70.81459999999879,
+                "maxMs": 64.398199999996
+              },
+              "requestComposition": {
+                "count": 12,
+                "instructionsBytes": 95106,
+                "toolsBytes": 142332,
+                "toolResultsBytes": 96111,
+                "requestBytes": 594114,
+                "instructionsShare": 0.16008038861228652,
+                "toolsShare": 0.23957018350013634,
+                "toolResultsShare": 0.16177198315474808,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 133372,
+              "cachedInputTokens": 102784,
+              "reasoningTokens": 3696
+            },
+            {
+              "taskId": "boolean-and-slug",
+              "repetition": 1,
+              "tokens": 79327,
+              "durationMs": 47519,
+              "requestAttempts": 9,
+              "codingRequests": 9,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                1,
+                2,
+                1,
+                1,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 2,
+                "totalMs": 6.516900000000078,
+                "maxMs": 3.6948999999999614
+              },
+              "requestComposition": {
+                "count": 9,
+                "instructionsBytes": 68905,
+                "toolsBytes": 106749,
+                "toolResultsBytes": 55562,
+                "requestBytes": 336376,
+                "instructionsShare": 0.20484517325849644,
+                "toolsShare": 0.3173502271267867,
+                "toolResultsShare": 0.1651782529074607,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 75955,
+              "cachedInputTokens": 56960,
+              "reasoningTokens": 1054
+            }
+          ]
+        },
+        "candidate": {
+          "planned": 10,
+          "executed": 8,
+          "passed": 6,
+          "successRate": 0.6,
+          "firstPassSuccesses": 6,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 625569,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": [
+            {
+              "taskId": "text-codecs",
+              "repetition": 1,
+              "tokens": 79482,
+              "durationMs": 56452,
+              "requestAttempts": 9,
+              "codingRequests": 9,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                1,
+                2,
+                2,
+                2,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 4,
+                "totalMs": 486.7298000000028,
+                "maxMs": 381.3478000000032
+              },
+              "requestComposition": {
+                "count": 9,
+                "instructionsBytes": 68950,
+                "toolsBytes": 106749,
+                "toolResultsBytes": 55888,
+                "requestBytes": 343568,
+                "instructionsShare": 0.2006880733944954,
+                "toolsShare": 0.3107070507148512,
+                "toolResultsShare": 0.16266939877986308,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 75950,
+              "cachedInputTokens": 56704,
+              "reasoningTokens": 1556
+            },
+            {
+              "taskId": "text-codecs",
+              "repetition": 3,
+              "tokens": 120469,
+              "durationMs": 85357,
+              "requestAttempts": 11,
+              "codingRequests": 11,
+              "toolBatchSizes": [
+                2,
+                5,
+                2,
+                1,
+                3,
+                2,
+                2,
+                1,
+                2,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 6,
+                "totalMs": 65.92679999998654,
+                "maxMs": 61.452599999989616
+              },
+              "requestComposition": {
+                "count": 11,
+                "instructionsBytes": 87279,
+                "toolsBytes": 130471,
+                "toolResultsBytes": 90671,
+                "requestBytes": 511386,
+                "instructionsShare": 0.1706714693010759,
+                "toolsShare": 0.255132131110355,
+                "toolResultsShare": 0.1773044236643162,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 112801,
+              "cachedInputTokens": 84864,
+              "reasoningTokens": 4209
+            },
+            {
+              "taskId": "text-codecs",
+              "repetition": 4,
+              "tokens": 115314,
+              "durationMs": 68456,
+              "requestAttempts": 11,
+              "codingRequests": 11,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                2,
+                2,
+                2,
+                1,
+                2,
+                2,
+                3,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 4,
+                "totalMs": 5.719199999997727,
+                "maxMs": 2.3110999999998967
+              },
+              "requestComposition": {
+                "count": 11,
+                "instructionsBytes": 87325,
+                "toolsBytes": 130471,
+                "toolResultsBytes": 94914,
+                "requestBytes": 492856,
+                "instructionsShare": 0.17718157027610498,
+                "toolsShare": 0.26472438196958137,
+                "toolResultsShare": 0.19257957699612058,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 109113,
+              "cachedInputTokens": 81920,
+              "reasoningTokens": 2188
+            },
+            {
+              "taskId": "boolean-and-slug",
+              "repetition": 4,
+              "tokens": 146385,
+              "durationMs": 73149,
+              "requestAttempts": 12,
+              "codingRequests": 12,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                2,
+                1,
+                1,
+                1,
+                2,
+                2,
+                2,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 6,
+                "totalMs": 79.74870000000283,
+                "maxMs": 71.88930000000255
+              },
+              "requestComposition": {
+                "count": 12,
+                "instructionsBytes": 95589,
+                "toolsBytes": 142332,
+                "toolResultsBytes": 95283,
+                "requestBytes": 622804,
+                "instructionsShare": 0.15348167320698006,
+                "toolsShare": 0.22853417768672005,
+                "toolResultsShare": 0.15299034688280744,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 138329,
+              "cachedInputTokens": 107776,
+              "reasoningTokens": 5034
+            },
+            {
+              "taskId": "boolean-and-slug",
+              "repetition": 2,
+              "tokens": 68965,
+              "durationMs": 48140,
+              "requestAttempts": 8,
+              "codingRequests": 8,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                2,
+                1,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 3,
+                "totalMs": 83.27829999999949,
+                "maxMs": 76.59749999999985
+              },
+              "requestComposition": {
+                "count": 8,
+                "instructionsBytes": 61259,
+                "toolsBytes": 94888,
+                "toolResultsBytes": 44920,
+                "requestBytes": 291859,
+                "instructionsShare": 0.20989244806567556,
+                "toolsShare": 0.32511589500409444,
+                "toolResultsShare": 0.15390993596222832,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 65605,
+              "cachedInputTokens": 48384,
+              "reasoningTokens": 1045
+            },
+            {
+              "taskId": "boolean-and-slug",
+              "repetition": 3,
+              "tokens": 94954,
+              "durationMs": 61129,
+              "requestAttempts": 10,
+              "codingRequests": 10,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                1,
+                2,
+                1,
+                2,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 7,
+                "totalMs": 179.55259999999407,
+                "maxMs": 90.22819999999774
+              },
+              "requestComposition": {
+                "count": 10,
+                "instructionsBytes": 76648,
+                "toolsBytes": 118610,
+                "toolResultsBytes": 67336,
+                "requestBytes": 411184,
+                "instructionsShare": 0.1864080314409121,
+                "toolsShare": 0.28845966769134984,
+                "toolResultsShare": 0.16376123584575275,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 90664,
+              "cachedInputTokens": 68608,
+              "reasoningTokens": 2005
+            }
+          ]
+        },
+        "complete": false,
+        "safetyPassed": true,
+        "qualityPassed": false,
+        "usageComplete": false,
+        "perTask": [
+          {
+            "taskId": "text-codecs",
+            "baselinePassed": 3,
+            "candidatePassed": 3
+          },
+          {
+            "taskId": "boolean-and-slug",
+            "baselinePassed": 4,
+            "candidatePassed": 3
+          }
+        ],
+        "commonSuccessfulPairs": [
+          {
+            "taskId": "text-codecs",
+            "repetition": 1,
+            "baselineTokens": 61875,
+            "candidateTokens": 79482,
+            "baselineDurationMs": 52021,
+            "candidateDurationMs": 56452
+          },
+          {
+            "taskId": "text-codecs",
+            "repetition": 3,
+            "baselineTokens": 100721,
+            "candidateTokens": 120469,
+            "baselineDurationMs": 74903,
+            "candidateDurationMs": 85357
+          },
+          {
+            "taskId": "text-codecs",
+            "repetition": 4,
+            "baselineTokens": 172884,
+            "candidateTokens": 115314,
+            "baselineDurationMs": 94067,
+            "candidateDurationMs": 68456
+          },
+          {
+            "taskId": "boolean-and-slug",
+            "repetition": 4,
+            "baselineTokens": 93477,
+            "candidateTokens": 146385,
+            "baselineDurationMs": 57314,
+            "candidateDurationMs": 73149
+          },
+          {
+            "taskId": "boolean-and-slug",
+            "repetition": 2,
+            "baselineTokens": 60491,
+            "candidateTokens": 68965,
+            "baselineDurationMs": 46010,
+            "candidateDurationMs": 48140
+          },
+          {
+            "taskId": "boolean-and-slug",
+            "repetition": 3,
+            "baselineTokens": 140986,
+            "candidateTokens": 94954,
+            "baselineDurationMs": 69062,
+            "candidateDurationMs": 61129
+          }
+        ],
+        "commonBaselineTokenMedian": 97099,
+        "commonCandidateTokenMedian": 105134,
+        "tokenMedianReduction": -0.08275059475380786,
+        "observedSavings": false,
+        "eligibleForDefault": false,
+        "interpretation": "Insufficient evidence to enable candidate optimizations by default."
+      },
+      "tokenRatio": null,
+      "wallRatio": 1.0512960549777617,
+      "errorModificationRate": {
+        "baseline": 0,
+        "candidate": 0
+      },
+      "eligibleForRecommendation": false
+    },
+    {
+      "tag": "build_environment",
+      "tasks": 2,
+      "comparison": {
+        "baseline": {
+          "planned": 10,
+          "executed": 5,
+          "passed": 4,
+          "successRate": 0.4,
+          "firstPassSuccesses": 4,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 600280,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": [
+            {
+              "taskId": "configuration-values",
+              "repetition": 5,
+              "tokens": 93953,
+              "durationMs": 62230,
+              "requestAttempts": 9,
+              "codingRequests": 9,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                1,
+                1,
+                1,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 4,
+                "totalMs": 309.87420000000157,
+                "maxMs": 193.58270000000084
+              },
+              "requestComposition": {
+                "count": 9,
+                "instructionsBytes": 68939,
+                "toolsBytes": 106749,
+                "toolResultsBytes": 60289,
+                "requestBytes": 389759,
+                "instructionsShare": 0.17687596694367544,
+                "toolsShare": 0.2738846312721451,
+                "toolResultsShare": 0.15468276550381133,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 87869,
+              "cachedInputTokens": 65792,
+              "reasoningTokens": 3449
+            },
+            {
+              "taskId": "configuration-values",
+              "repetition": 1,
+              "tokens": 79642,
+              "durationMs": 58193,
+              "requestAttempts": 8,
+              "codingRequests": 8,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                2,
+                2,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 6,
+                "totalMs": 86.50830000000587,
+                "maxMs": 81.60170000000653
+              },
+              "requestComposition": {
+                "count": 8,
+                "instructionsBytes": 61283,
+                "toolsBytes": 94888,
+                "toolResultsBytes": 45821,
+                "requestBytes": 330451,
+                "instructionsShare": 0.1854526087074937,
+                "toolsShare": 0.2871469597610538,
+                "toolResultsShare": 0.13866201040396306,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 73915,
+              "cachedInputTokens": 54528,
+              "reasoningTokens": 3294
+            },
+            {
+              "taskId": "path-portability",
+              "repetition": 5,
+              "tokens": 304930,
+              "durationMs": 143917,
+              "requestAttempts": 18,
+              "codingRequests": 18,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                1,
+                2,
+                1,
+                1,
+                2,
+                1,
+                1,
+                1,
+                1,
+                1,
+                2,
+                2,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 4,
+                "totalMs": 69.32440000000406,
+                "maxMs": 61.28830000000016
+              },
+              "requestComposition": {
+                "count": 18,
+                "instructionsBytes": 145200,
+                "toolsBytes": 213498,
+                "toolResultsBytes": 212220,
+                "requestBytes": 1272658,
+                "instructionsShare": 0.1140919241461571,
+                "toolsShare": 0.16775755937573172,
+                "toolResultsShare": 0.16675336186155276,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 291151,
+              "cachedInputTokens": 241152,
+              "reasoningTokens": 6727
+            },
+            {
+              "taskId": "configuration-values",
+              "repetition": 2,
+              "tokens": 121755,
+              "durationMs": 56590,
+              "requestAttempts": 12,
+              "codingRequests": 12,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                1,
+                2,
+                2,
+                1,
+                2,
+                3,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 4,
+                "totalMs": 109.52299999999877,
+                "maxMs": 100.59399999999732
+              },
+              "requestComposition": {
+                "count": 12,
+                "instructionsBytes": 95280,
+                "toolsBytes": 142332,
+                "toolResultsBytes": 94281,
+                "requestBytes": 523994,
+                "instructionsShare": 0.18183414313904359,
+                "toolsShare": 0.2716290644549365,
+                "toolResultsShare": 0.17992763275915374,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 116398,
+              "cachedInputTokens": 89472,
+              "reasoningTokens": 1669
+            }
+          ]
+        },
+        "candidate": {
+          "planned": 10,
+          "executed": 4,
+          "passed": 4,
+          "successRate": 0.4,
+          "firstPassSuccesses": 4,
+          "firstPassEvidenceComplete": true,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": true,
+          "totalKnownTokens": 594193,
+          "tokensPerSuccessfulTaskIncludingFailures": 148548.25,
+          "successfulTasks": [
+            {
+              "taskId": "configuration-values",
+              "repetition": 5,
+              "tokens": 135083,
+              "durationMs": 79868,
+              "requestAttempts": 11,
+              "codingRequests": 11,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                2,
+                1,
+                2,
+                1,
+                1,
+                2,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 7,
+                "totalMs": 84.31200000000172,
+                "maxMs": 71.4976999999999
+              },
+              "requestComposition": {
+                "count": 11,
+                "instructionsBytes": 87439,
+                "toolsBytes": 130471,
+                "toolResultsBytes": 77726,
+                "requestBytes": 562665,
+                "instructionsShare": 0.15540152666328988,
+                "toolsShare": 0.23188042618609653,
+                "toolResultsShare": 0.13813903477202244,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 126529,
+              "cachedInputTokens": 97920,
+              "reasoningTokens": 4951
+            },
+            {
+              "taskId": "configuration-values",
+              "repetition": 1,
+              "tokens": 112575,
+              "durationMs": 67636,
+              "requestAttempts": 11,
+              "codingRequests": 11,
+              "toolBatchSizes": [
+                2,
+                3,
+                1,
+                1,
+                1,
+                1,
+                2,
+                2,
+                1,
+                3,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 6,
+                "totalMs": 200.87240000000202,
+                "maxMs": 196.48800000000483
+              },
+              "requestComposition": {
+                "count": 11,
+                "instructionsBytes": 84345,
+                "toolsBytes": 130471,
+                "toolResultsBytes": 70149,
+                "requestBytes": 474090,
+                "instructionsShare": 0.17790925773587293,
+                "toolsShare": 0.2752030205235293,
+                "toolResultsShare": 0.147965576156426,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 106581,
+              "cachedInputTokens": 81152,
+              "reasoningTokens": 2681
+            },
+            {
+              "taskId": "path-portability",
+              "repetition": 5,
+              "tokens": 223222,
+              "durationMs": 117048,
+              "requestAttempts": 13,
+              "codingRequests": 13,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                1,
+                2,
+                2,
+                2,
+                2,
+                1,
+                2,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 5,
+                "totalMs": 87.72449999999708,
+                "maxMs": 72.14139999999315
+              },
+              "requestComposition": {
+                "count": 13,
+                "instructionsBytes": 105574,
+                "toolsBytes": 154193,
+                "toolResultsBytes": 140470,
+                "requestBytes": 916836,
+                "instructionsShare": 0.11515036495076546,
+                "toolsShare": 0.16817947811822398,
+                "toolResultsShare": 0.15321169762094858,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 207987,
+              "cachedInputTokens": 167040,
+              "reasoningTokens": 9933
+            },
+            {
+              "taskId": "configuration-values",
+              "repetition": 2,
+              "tokens": 123313,
+              "durationMs": 66507,
+              "requestAttempts": 11,
+              "codingRequests": 11,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                1,
+                2,
+                2,
+                2,
+                3,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 4,
+                "totalMs": 117.62470000000212,
+                "maxMs": 108.3747000000003
+              },
+              "requestComposition": {
+                "count": 11,
+                "instructionsBytes": 87220,
+                "toolsBytes": 130471,
+                "toolResultsBytes": 81115,
+                "requestBytes": 529670,
+                "instructionsShare": 0.16466856722109993,
+                "toolsShare": 0.24632507032680726,
+                "toolResultsShare": 0.15314252270281495,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 116389,
+              "cachedInputTokens": 89472,
+              "reasoningTokens": 3893
+            }
+          ]
+        },
+        "complete": false,
+        "safetyPassed": false,
+        "qualityPassed": false,
+        "usageComplete": false,
+        "perTask": [
+          {
+            "taskId": "configuration-values",
+            "baselinePassed": 3,
+            "candidatePassed": 3
+          },
+          {
+            "taskId": "path-portability",
+            "baselinePassed": 1,
+            "candidatePassed": 1
+          }
+        ],
+        "commonSuccessfulPairs": [
+          {
+            "taskId": "configuration-values",
+            "repetition": 5,
+            "baselineTokens": 93953,
+            "candidateTokens": 135083,
+            "baselineDurationMs": 62230,
+            "candidateDurationMs": 79868
+          },
+          {
+            "taskId": "configuration-values",
+            "repetition": 1,
+            "baselineTokens": 79642,
+            "candidateTokens": 112575,
+            "baselineDurationMs": 58193,
+            "candidateDurationMs": 67636
+          },
+          {
+            "taskId": "path-portability",
+            "repetition": 5,
+            "baselineTokens": 304930,
+            "candidateTokens": 223222,
+            "baselineDurationMs": 143917,
+            "candidateDurationMs": 117048
+          },
+          {
+            "taskId": "configuration-values",
+            "repetition": 2,
+            "baselineTokens": 121755,
+            "candidateTokens": 123313,
+            "baselineDurationMs": 56590,
+            "candidateDurationMs": 66507
+          }
+        ],
+        "commonBaselineTokenMedian": 107854,
+        "commonCandidateTokenMedian": 129198,
+        "tokenMedianReduction": -0.1978971572681587,
+        "observedSavings": false,
+        "eligibleForDefault": false,
+        "interpretation": "Insufficient evidence to enable candidate optimizations by default."
+      },
+      "tokenRatio": null,
+      "wallRatio": 1.029210695665961,
+      "errorModificationRate": {
+        "baseline": null,
+        "candidate": 0
+      },
+      "eligibleForRecommendation": false
+    },
+    {
+      "tag": "logic",
+      "tasks": 2,
+      "comparison": {
+        "baseline": {
+          "planned": 10,
+          "executed": 6,
+          "passed": 3,
+          "successRate": 0.3,
+          "firstPassSuccesses": 3,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 240978,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": [
+            {
+              "taskId": "numeric-boundaries",
+              "repetition": 5,
+              "tokens": 82304,
+              "durationMs": 56804,
+              "requestAttempts": 9,
+              "codingRequests": 9,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                1,
+                1,
+                2,
+                2,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 7,
+                "totalMs": 127.0122000000033,
+                "maxMs": 62.089100000001054
+              },
+              "requestComposition": {
+                "count": 9,
+                "instructionsBytes": 68979,
+                "toolsBytes": 106749,
+                "toolResultsBytes": 53160,
+                "requestBytes": 348171,
+                "instructionsShare": 0.1981181660735673,
+                "toolsShare": 0.30659934342607514,
+                "toolResultsShare": 0.15268359512997923,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 78022,
+              "cachedInputTokens": 58112,
+              "reasoningTokens": 2273
+            },
+            {
+              "taskId": "collections",
+              "repetition": 5,
+              "tokens": 68996,
+              "durationMs": 49765,
+              "requestAttempts": 8,
+              "codingRequests": 8,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                1,
+                2,
+                2,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 3,
+                "totalMs": 119.76689999999599,
+                "maxMs": 112.4622999999956
+              },
+              "requestComposition": {
+                "count": 8,
+                "instructionsBytes": 61211,
+                "toolsBytes": 94888,
+                "toolResultsBytes": 41254,
+                "requestBytes": 291347,
+                "instructionsShare": 0.21009655153476783,
+                "toolsShare": 0.325687238928151,
+                "toolResultsShare": 0.14159747654858296,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 65329,
+              "cachedInputTokens": 46592,
+              "reasoningTokens": 961
+            },
+            {
+              "taskId": "collections",
+              "repetition": 1,
+              "tokens": 89678,
+              "durationMs": 47352,
+              "requestAttempts": 10,
+              "codingRequests": 10,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                2,
+                2,
+                1,
+                2,
+                2,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 3,
+                "totalMs": 103.69600000000173,
+                "maxMs": 98.60780000000159
+              },
+              "requestComposition": {
+                "count": 10,
+                "instructionsBytes": 78667,
+                "toolsBytes": 118610,
+                "toolResultsBytes": 61870,
+                "requestBytes": 388399,
+                "instructionsShare": 0.20254171612182317,
+                "toolsShare": 0.305381836719456,
+                "toolResultsShare": 0.1592949518407617,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 86231,
+              "cachedInputTokens": 65152,
+              "reasoningTokens": 1187
+            }
+          ]
+        },
+        "candidate": {
+          "planned": 10,
+          "executed": 6,
+          "passed": 3,
+          "successRate": 0.3,
+          "firstPassSuccesses": 3,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 208432,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": [
+            {
+              "taskId": "numeric-boundaries",
+              "repetition": 5,
+              "tokens": 55315,
+              "durationMs": 38152,
+              "requestAttempts": 7,
+              "codingRequests": 7,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                1,
+                2,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 2,
+                "totalMs": 8.673000000000684,
+                "maxMs": 5.352000000000771
+              },
+              "requestComposition": {
+                "count": 7,
+                "instructionsBytes": 53591,
+                "toolsBytes": 83027,
+                "toolResultsBytes": 29399,
+                "requestBytes": 235203,
+                "instructionsShare": 0.2278499849066551,
+                "toolsShare": 0.3530014498114395,
+                "toolResultsShare": 0.12499415398613113,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 52454,
+              "cachedInputTokens": 36992,
+              "reasoningTokens": 1119
+            },
+            {
+              "taskId": "collections",
+              "repetition": 5,
+              "tokens": 44976,
+              "durationMs": 38118,
+              "requestAttempts": 6,
+              "codingRequests": 6,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                2,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 2,
+                "totalMs": 14.44860000000017,
+                "maxMs": 11.081500000000233
+              },
+              "requestComposition": {
+                "count": 6,
+                "instructionsBytes": 45894,
+                "toolsBytes": 71166,
+                "toolResultsBytes": 22663,
+                "requestBytes": 192629,
+                "instructionsShare": 0.23825073067918123,
+                "toolsShare": 0.36944592974058943,
+                "toolResultsShare": 0.11765102866131268,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 42751,
+              "cachedInputTokens": 30976,
+              "reasoningTokens": 396
+            },
+            {
+              "taskId": "collections",
+              "repetition": 1,
+              "tokens": 108141,
+              "durationMs": 58880,
+              "requestAttempts": 11,
+              "codingRequests": 11,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                2,
+                1,
+                2,
+                2,
+                1,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 4,
+                "totalMs": 346.9341000000036,
+                "maxMs": 178.03300000000309
+              },
+              "requestComposition": {
+                "count": 11,
+                "instructionsBytes": 87297,
+                "toolsBytes": 130471,
+                "toolResultsBytes": 74048,
+                "requestBytes": 466526,
+                "instructionsShare": 0.1871214037374123,
+                "toolsShare": 0.27966501331115523,
+                "toolResultsShare": 0.1587221290989141,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 102998,
+              "cachedInputTokens": 78080,
+              "reasoningTokens": 2619
+            }
+          ]
+        },
+        "complete": false,
+        "safetyPassed": true,
+        "qualityPassed": false,
+        "usageComplete": false,
+        "perTask": [
+          {
+            "taskId": "numeric-boundaries",
+            "baselinePassed": 1,
+            "candidatePassed": 1
+          },
+          {
+            "taskId": "collections",
+            "baselinePassed": 2,
+            "candidatePassed": 2
+          }
+        ],
+        "commonSuccessfulPairs": [
+          {
+            "taskId": "numeric-boundaries",
+            "repetition": 5,
+            "baselineTokens": 82304,
+            "candidateTokens": 55315,
+            "baselineDurationMs": 56804,
+            "candidateDurationMs": 38152
+          },
+          {
+            "taskId": "collections",
+            "repetition": 5,
+            "baselineTokens": 68996,
+            "candidateTokens": 44976,
+            "baselineDurationMs": 49765,
+            "candidateDurationMs": 38118
+          },
+          {
+            "taskId": "collections",
+            "repetition": 1,
+            "baselineTokens": 89678,
+            "candidateTokens": 108141,
+            "baselineDurationMs": 47352,
+            "candidateDurationMs": 58880
+          }
+        ],
+        "commonBaselineTokenMedian": 82304,
+        "commonCandidateTokenMedian": 55315,
+        "tokenMedianReduction": 0.3279184486780715,
+        "observedSavings": false,
+        "eligibleForDefault": false,
+        "interpretation": "Insufficient evidence to enable candidate optimizations by default."
+      },
+      "tokenRatio": null,
+      "wallRatio": 0.8784403270954917,
+      "errorModificationRate": {
+        "baseline": 0,
+        "candidate": 0
+      },
+      "eligibleForRecommendation": false
+    },
+    {
+      "tag": "cross_file",
+      "tasks": 2,
+      "comparison": {
+        "baseline": {
+          "planned": 10,
+          "executed": 9,
+          "passed": 4,
+          "successRate": 0.4,
+          "firstPassSuccesses": 4,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 523612,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": [
+            {
+              "taskId": "wire-contract",
+              "repetition": 1,
+              "tokens": 215964,
+              "durationMs": 141570,
+              "requestAttempts": 13,
+              "codingRequests": 13,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                1,
+                1,
+                1,
+                1,
+                2,
+                3,
+                1,
+                1,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 8,
+                "totalMs": 262.3529000000003,
+                "maxMs": 130.29089999999997
+              },
+              "requestComposition": {
+                "count": 13,
+                "instructionsBytes": 99617,
+                "toolsBytes": 154193,
+                "toolResultsBytes": 148943,
+                "requestBytes": 852095,
+                "instructionsShare": 0.11690832594957135,
+                "toolsShare": 0.1809575223419924,
+                "toolResultsShare": 0.1747962375087285,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 199163,
+              "cachedInputTokens": 156672,
+              "reasoningTokens": 11266
+            },
+            {
+              "taskId": "case-contract",
+              "repetition": 2,
+              "tokens": 129953,
+              "durationMs": 72564,
+              "requestAttempts": 13,
+              "codingRequests": 13,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                1,
+                2,
+                1,
+                2,
+                1,
+                2,
+                2,
+                1,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 3,
+                "totalMs": 82.2363000000023,
+                "maxMs": 78.01980000000185
+              },
+              "requestComposition": {
+                "count": 13,
+                "instructionsBytes": 103219,
+                "toolsBytes": 154193,
+                "toolResultsBytes": 106852,
+                "requestBytes": 570817,
+                "instructionsShare": 0.1808267798611464,
+                "toolsShare": 0.27012685326470653,
+                "toolResultsShare": 0.187191341533276,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 124843,
+              "cachedInputTokens": 95744,
+              "reasoningTokens": 1915
+            },
+            {
+              "taskId": "case-contract",
+              "repetition": 3,
+              "tokens": 102481,
+              "durationMs": 50311,
+              "requestAttempts": 11,
+              "codingRequests": 11,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                2,
+                1,
+                1,
+                2,
+                3,
+                1,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 5,
+                "totalMs": 102.37140000000136,
+                "maxMs": 93.29430000000139
+              },
+              "requestComposition": {
+                "count": 11,
+                "instructionsBytes": 86755,
+                "toolsBytes": 130471,
+                "toolResultsBytes": 77126,
+                "requestBytes": 447603,
+                "instructionsShare": 0.19382131040229847,
+                "toolsShare": 0.2914882161200886,
+                "toolResultsShare": 0.17230894341637568,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 98628,
+              "cachedInputTokens": 75008,
+              "reasoningTokens": 1645
+            },
+            {
+              "taskId": "case-contract",
+              "repetition": 1,
+              "tokens": 75214,
+              "durationMs": 52029,
+              "requestAttempts": 9,
+              "codingRequests": 9,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                1,
+                2,
+                2,
+                3,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 4,
+                "totalMs": 74.98560000000361,
+                "maxMs": 66.59180000000197
+              },
+              "requestComposition": {
+                "count": 9,
+                "instructionsBytes": 68878,
+                "toolsBytes": 106749,
+                "toolResultsBytes": 51850,
+                "requestBytes": 325728,
+                "instructionsShare": 0.21145864033795067,
+                "toolsShare": 0.327724358974359,
+                "toolResultsShare": 0.1591818940956872,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 72225,
+              "cachedInputTokens": 53632,
+              "reasoningTokens": 899
+            }
+          ]
+        },
+        "candidate": {
+          "planned": 10,
+          "executed": 9,
+          "passed": 5,
+          "successRate": 0.5,
+          "firstPassSuccesses": 5,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 561823,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": [
+            {
+              "taskId": "wire-contract",
+              "repetition": 1,
+              "tokens": 94764,
+              "durationMs": 54455,
+              "requestAttempts": 10,
+              "codingRequests": 10,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                1,
+                2,
+                1,
+                2,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 6,
+                "totalMs": 117.37339999999767,
+                "maxMs": 75.04349999999977
+              },
+              "requestComposition": {
+                "count": 10,
+                "instructionsBytes": 76564,
+                "toolsBytes": 118610,
+                "toolResultsBytes": 62356,
+                "requestBytes": 403667,
+                "instructionsShare": 0.18967118937143734,
+                "toolsShare": 0.2938313015431036,
+                "toolResultsShare": 0.15447386088037912,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 90050,
+              "cachedInputTokens": 66944,
+              "reasoningTokens": 2088
+            },
+            {
+              "taskId": "case-contract",
+              "repetition": 2,
+              "tokens": 64064,
+              "durationMs": 41691,
+              "requestAttempts": 8,
+              "codingRequests": 8,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                1,
+                1,
+                1,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 6,
+                "totalMs": 90.8661000000011,
+                "maxMs": 80.88490000000093
+              },
+              "requestComposition": {
+                "count": 8,
+                "instructionsBytes": 61235,
+                "toolsBytes": 94888,
+                "toolResultsBytes": 37784,
+                "requestBytes": 277341,
+                "instructionsShare": 0.22079317518866665,
+                "toolsShare": 0.34213477271661963,
+                "toolResultsShare": 0.13623661845886473,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 61262,
+              "cachedInputTokens": 44288,
+              "reasoningTokens": 1144
+            },
+            {
+              "taskId": "case-contract",
+              "repetition": 3,
+              "tokens": 110387,
+              "durationMs": 74618,
+              "requestAttempts": 11,
+              "codingRequests": 11,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                2,
+                1,
+                2,
+                2,
+                2,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 3,
+                "totalMs": 73.98149999999441,
+                "maxMs": 69.15169999999489
+              },
+              "requestComposition": {
+                "count": 11,
+                "instructionsBytes": 84326,
+                "toolsBytes": 130471,
+                "toolResultsBytes": 80490,
+                "requestBytes": 473110,
+                "instructionsShare": 0.17823761915833528,
+                "toolsShare": 0.2757730760288305,
+                "toolResultsShare": 0.170129568176534,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 104679,
+              "cachedInputTokens": 80000,
+              "reasoningTokens": 2559
+            },
+            {
+              "taskId": "case-contract",
+              "repetition": 1,
+              "tokens": 82630,
+              "durationMs": 39477,
+              "requestAttempts": 10,
+              "codingRequests": 10,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                1,
+                1,
+                2,
+                3,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 5,
+                "totalMs": 237.06919999999764,
+                "maxMs": 118.4099000000001
+              },
+              "requestComposition": {
+                "count": 10,
+                "instructionsBytes": 78996,
+                "toolsBytes": 118610,
+                "toolResultsBytes": 56797,
+                "requestBytes": 366077,
+                "instructionsShare": 0.21579066699082433,
+                "toolsShare": 0.3240028737123611,
+                "toolResultsShare": 0.15515041917410818,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 80007,
+              "cachedInputTokens": 59648,
+              "reasoningTokens": 805
+            },
+            {
+              "taskId": "wire-contract",
+              "repetition": 4,
+              "tokens": 209978,
+              "durationMs": 113803,
+              "requestAttempts": 15,
+              "codingRequests": 15,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 2,
+                "totalMs": 16.15880000000061,
+                "maxMs": 14.077899999999772
+              },
+              "requestComposition": {
+                "count": 15,
+                "instructionsBytes": 121033,
+                "toolsBytes": 177915,
+                "toolResultsBytes": 122550,
+                "requestBytes": 846703,
+                "instructionsShare": 0.14294622789809414,
+                "toolsShare": 0.2101268095188041,
+                "toolResultsShare": 0.14473788329555937,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 195132,
+              "cachedInputTokens": 151936,
+              "reasoningTokens": 10665
+            }
+          ]
+        },
+        "complete": false,
+        "safetyPassed": false,
+        "qualityPassed": false,
+        "usageComplete": false,
+        "perTask": [
+          {
+            "taskId": "wire-contract",
+            "baselinePassed": 1,
+            "candidatePassed": 2
+          },
+          {
+            "taskId": "case-contract",
+            "baselinePassed": 3,
+            "candidatePassed": 3
+          }
+        ],
+        "commonSuccessfulPairs": [
+          {
+            "taskId": "wire-contract",
+            "repetition": 1,
+            "baselineTokens": 215964,
+            "candidateTokens": 94764,
+            "baselineDurationMs": 141570,
+            "candidateDurationMs": 54455
+          },
+          {
+            "taskId": "case-contract",
+            "repetition": 2,
+            "baselineTokens": 129953,
+            "candidateTokens": 64064,
+            "baselineDurationMs": 72564,
+            "candidateDurationMs": 41691
+          },
+          {
+            "taskId": "case-contract",
+            "repetition": 3,
+            "baselineTokens": 102481,
+            "candidateTokens": 110387,
+            "baselineDurationMs": 50311,
+            "candidateDurationMs": 74618
+          },
+          {
+            "taskId": "case-contract",
+            "repetition": 1,
+            "baselineTokens": 75214,
+            "candidateTokens": 82630,
+            "baselineDurationMs": 52029,
+            "candidateDurationMs": 39477
+          }
+        ],
+        "commonBaselineTokenMedian": 116217,
+        "commonCandidateTokenMedian": 88697,
+        "tokenMedianReduction": 0.23679840298751476,
+        "observedSavings": false,
+        "eligibleForDefault": false,
+        "interpretation": "Insufficient evidence to enable candidate optimizations by default."
+      },
+      "tokenRatio": null,
+      "wallRatio": 0.1232410960660581,
+      "errorModificationRate": {
+        "baseline": null,
+        "candidate": 0
+      },
+      "eligibleForRecommendation": false
+    },
+    {
+      "tag": "security_regression",
+      "tasks": 2,
+      "comparison": {
+        "baseline": {
+          "planned": 10,
+          "executed": 8,
+          "passed": 2,
+          "successRate": 0.2,
+          "firstPassSuccesses": 2,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 277310,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": [
+            {
+              "taskId": "html-escaping",
+              "repetition": 5,
+              "tokens": 140226,
+              "durationMs": 69767,
+              "requestAttempts": 13,
+              "codingRequests": 13,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                1,
+                2,
+                1,
+                1,
+                1,
+                1,
+                2,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 4,
+                "totalMs": 10.273899999997866,
+                "maxMs": 4.476800000000367
+              },
+              "requestComposition": {
+                "count": 13,
+                "instructionsBytes": 103197,
+                "toolsBytes": 154193,
+                "toolResultsBytes": 108080,
+                "requestBytes": 594668,
+                "instructionsShare": 0.17353716695702476,
+                "toolsShare": 0.2592925800614797,
+                "toolResultsShare": 0.18174847141598338,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 133931,
+              "cachedInputTokens": 102272,
+              "reasoningTokens": 3169
+            },
+            {
+              "taskId": "html-escaping",
+              "repetition": 4,
+              "tokens": 137084,
+              "durationMs": 82305,
+              "requestAttempts": 11,
+              "codingRequests": 11,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                1,
+                1,
+                2,
+                2,
+                1,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 2,
+                "totalMs": 90.87669999999616,
+                "maxMs": 89.0850999999966
+              },
+              "requestComposition": {
+                "count": 11,
+                "instructionsBytes": 87753,
+                "toolsBytes": 130471,
+                "toolResultsBytes": 100297,
+                "requestBytes": 551031,
+                "instructionsShare": 0.159252383259744,
+                "toolsShare": 0.2367761523398865,
+                "toolResultsShare": 0.1820169827105916,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 128346,
+              "cachedInputTokens": 99072,
+              "reasoningTokens": 3540
+            }
+          ]
+        },
+        "candidate": {
+          "planned": 10,
+          "executed": 8,
+          "passed": 1,
+          "successRate": 0.1,
+          "firstPassSuccesses": 1,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 133059,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": [
+            {
+              "taskId": "html-escaping",
+              "repetition": 5,
+              "tokens": 133059,
+              "durationMs": 80691,
+              "requestAttempts": 12,
+              "codingRequests": 12,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                1,
+                1,
+                1,
+                1,
+                2,
+                3,
+                2,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 5,
+                "totalMs": 187.39619999999422,
+                "maxMs": 100.58469999999943
+              },
+              "requestComposition": {
+                "count": 12,
+                "instructionsBytes": 91951,
+                "toolsBytes": 142332,
+                "toolResultsBytes": 99353,
+                "requestBytes": 549973,
+                "instructionsShare": 0.1671918439632491,
+                "toolsShare": 0.2587981591823599,
+                "toolResultsShare": 0.18065068648824578,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 125084,
+              "cachedInputTokens": 95104,
+              "reasoningTokens": 4138
+            }
+          ]
+        },
+        "complete": false,
+        "safetyPassed": false,
+        "qualityPassed": false,
+        "usageComplete": false,
+        "perTask": [
+          {
+            "taskId": "html-escaping",
+            "baselinePassed": 2,
+            "candidatePassed": 1
+          },
+          {
+            "taskId": "workspace-traversal",
+            "baselinePassed": 0,
+            "candidatePassed": 0
+          }
+        ],
+        "commonSuccessfulPairs": [
+          {
+            "taskId": "html-escaping",
+            "repetition": 5,
+            "baselineTokens": 140226,
+            "candidateTokens": 133059,
+            "baselineDurationMs": 69767,
+            "candidateDurationMs": 80691
+          }
+        ],
+        "commonBaselineTokenMedian": 140226,
+        "commonCandidateTokenMedian": 133059,
+        "tokenMedianReduction": 0.0511103504342989,
+        "observedSavings": false,
+        "eligibleForDefault": false,
+        "interpretation": "Insufficient evidence to enable candidate optimizations by default."
+      },
+      "tokenRatio": null,
+      "wallRatio": 1.405101283389094,
+      "errorModificationRate": {
+        "baseline": null,
+        "candidate": null
+      },
+      "eligibleForRecommendation": false
+    },
+    {
+      "tag": "typecheck_lint",
+      "tasks": 2,
+      "comparison": {
+        "baseline": {
+          "planned": 10,
+          "executed": 5,
+          "passed": 3,
+          "successRate": 0.3,
+          "firstPassSuccesses": 3,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 312843,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": [
+            {
+              "taskId": "syntax-strings",
+              "repetition": 2,
+              "tokens": 104947,
+              "durationMs": 74017,
+              "requestAttempts": 11,
+              "codingRequests": 11,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                2,
+                2,
+                3,
+                1,
+                2,
+                2,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 5,
+                "totalMs": 80.49469999999519,
+                "maxMs": 70.54539999999906
+              },
+              "requestComposition": {
+                "count": 11,
+                "instructionsBytes": 84355,
+                "toolsBytes": 130471,
+                "toolResultsBytes": 81317,
+                "requestBytes": 453375,
+                "instructionsShare": 0.1860601047697822,
+                "toolsShare": 0.2877772263578715,
+                "toolResultsShare": 0.1793592500689275,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 99155,
+              "cachedInputTokens": 74112,
+              "reasoningTokens": 2814
+            },
+            {
+              "taskId": "syntax-branches",
+              "repetition": 2,
+              "tokens": 68560,
+              "durationMs": 52243,
+              "requestAttempts": 8,
+              "codingRequests": 8,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                2,
+                2,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 3,
+                "totalMs": 8.436400000000049,
+                "maxMs": 6.344700000000103
+              },
+              "requestComposition": {
+                "count": 8,
+                "instructionsBytes": 61297,
+                "toolsBytes": 94888,
+                "toolResultsBytes": 48578,
+                "requestBytes": 295237,
+                "instructionsShare": 0.2076196411696366,
+                "toolsShare": 0.32139603098527625,
+                "toolResultsShare": 0.16453899748337777,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 65612,
+              "cachedInputTokens": 48896,
+              "reasoningTokens": 1230
+            },
+            {
+              "taskId": "syntax-strings",
+              "repetition": 5,
+              "tokens": 139336,
+              "durationMs": 79229,
+              "requestAttempts": 13,
+              "codingRequests": 13,
+              "toolBatchSizes": [
+                2,
+                5,
+                1,
+                1,
+                1,
+                2,
+                2,
+                2,
+                1,
+                2,
+                3,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 6,
+                "totalMs": 89.58389999999963,
+                "maxMs": 80.94180000000051
+              },
+              "requestComposition": {
+                "count": 13,
+                "instructionsBytes": 104483,
+                "toolsBytes": 154193,
+                "toolResultsBytes": 128613,
+                "requestBytes": 611160,
+                "instructionsShare": 0.1709585051377708,
+                "toolsShare": 0.2522956345310557,
+                "toolResultsShare": 0.2104408010995484,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 133670,
+              "cachedInputTokens": 102528,
+              "reasoningTokens": 2764
+            }
+          ]
+        },
+        "candidate": {
+          "planned": 10,
+          "executed": 5,
+          "passed": 4,
+          "successRate": 0.4,
+          "firstPassSuccesses": 4,
+          "firstPassEvidenceComplete": false,
+          "manualInterventions": 0,
+          "unsafeActions": 0,
+          "usageComplete": false,
+          "totalKnownTokens": 331069,
+          "tokensPerSuccessfulTaskIncludingFailures": null,
+          "successfulTasks": [
+            {
+              "taskId": "syntax-strings",
+              "repetition": 2,
+              "tokens": 122619,
+              "durationMs": 74357,
+              "requestAttempts": 12,
+              "codingRequests": 12,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                1,
+                2,
+                2,
+                2,
+                3,
+                1,
+                2,
+                1,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 5,
+                "totalMs": 118.10140000000683,
+                "maxMs": 107.6195000000007
+              },
+              "requestComposition": {
+                "count": 12,
+                "instructionsBytes": 95301,
+                "toolsBytes": 142332,
+                "toolResultsBytes": 90746,
+                "requestBytes": 532499,
+                "instructionsShare": 0.17896935017718343,
+                "toolsShare": 0.2672906427993292,
+                "toolResultsShare": 0.1704153435029925,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 116080,
+              "cachedInputTokens": 86272,
+              "reasoningTokens": 3698
+            },
+            {
+              "taskId": "syntax-branches",
+              "repetition": 2,
+              "tokens": 65003,
+              "durationMs": 43449,
+              "requestAttempts": 8,
+              "codingRequests": 8,
+              "toolBatchSizes": [
+                2,
+                4,
+                1,
+                1,
+                2,
+                2,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 3,
+                "totalMs": 67.85779999999977,
+                "maxMs": 60.33339999999953
+              },
+              "requestComposition": {
+                "count": 8,
+                "instructionsBytes": 61251,
+                "toolsBytes": 94888,
+                "toolResultsBytes": 41627,
+                "requestBytes": 281803,
+                "instructionsShare": 0.21735396713306815,
+                "toolsShare": 0.3367174941359744,
+                "toolResultsShare": 0.14771666731723934,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 62279,
+              "cachedInputTokens": 44672,
+              "reasoningTokens": 809
+            },
+            {
+              "taskId": "syntax-strings",
+              "repetition": 5,
+              "tokens": 78726,
+              "durationMs": 64424,
+              "requestAttempts": 9,
+              "codingRequests": 9,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                2,
+                2,
+                2,
+                3,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 7,
+                "totalMs": 78.16919999999436,
+                "maxMs": 69.51610000000073
+              },
+              "requestComposition": {
+                "count": 9,
+                "instructionsBytes": 68923,
+                "toolsBytes": 106749,
+                "toolResultsBytes": 58427,
+                "requestBytes": 347596,
+                "instructionsShare": 0.19828479038884222,
+                "toolsShare": 0.3071065259669271,
+                "toolResultsShare": 0.16808881575161969,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 75392,
+              "cachedInputTokens": 56192,
+              "reasoningTokens": 1490
+            },
+            {
+              "taskId": "syntax-branches",
+              "repetition": 3,
+              "tokens": 64721,
+              "durationMs": 51970,
+              "requestAttempts": 8,
+              "codingRequests": 8,
+              "toolBatchSizes": [
+                2,
+                4,
+                2,
+                1,
+                2,
+                2,
+                2,
+                0
+              ],
+              "repeatedFailures": 0,
+              "toolWait": {
+                "count": 6,
+                "totalMs": 84.17779999999993,
+                "maxMs": 75.03050000000076
+              },
+              "requestComposition": {
+                "count": 8,
+                "instructionsBytes": 61251,
+                "toolsBytes": 94888,
+                "toolResultsBytes": 39036,
+                "requestBytes": 281224,
+                "instructionsShare": 0.21780146786902968,
+                "toolsShare": 0.3374107473046397,
+                "toolResultsShare": 0.138807498648764,
+                "measurement": "UTF-8 JSON bytes; not token usage"
+              },
+              "cacheObservedInputTokens": 62012,
+              "cachedInputTokens": 45952,
+              "reasoningTokens": 1134
+            }
+          ]
+        },
+        "complete": false,
+        "safetyPassed": true,
+        "qualityPassed": false,
+        "usageComplete": false,
+        "perTask": [
+          {
+            "taskId": "syntax-strings",
+            "baselinePassed": 2,
+            "candidatePassed": 2
+          },
+          {
+            "taskId": "syntax-branches",
+            "baselinePassed": 1,
+            "candidatePassed": 2
+          }
+        ],
+        "commonSuccessfulPairs": [
+          {
+            "taskId": "syntax-strings",
+            "repetition": 2,
+            "baselineTokens": 104947,
+            "candidateTokens": 122619,
+            "baselineDurationMs": 74017,
+            "candidateDurationMs": 74357
+          },
+          {
+            "taskId": "syntax-branches",
+            "repetition": 2,
+            "baselineTokens": 68560,
+            "candidateTokens": 65003,
+            "baselineDurationMs": 52243,
+            "candidateDurationMs": 43449
+          },
+          {
+            "taskId": "syntax-strings",
+            "repetition": 5,
+            "baselineTokens": 139336,
+            "candidateTokens": 78726,
+            "baselineDurationMs": 79229,
+            "candidateDurationMs": 64424
+          }
+        ],
+        "commonBaselineTokenMedian": 104947,
+        "commonCandidateTokenMedian": 78726,
+        "tokenMedianReduction": 0.24984992424747732,
+        "observedSavings": false,
+        "eligibleForDefault": false,
+        "interpretation": "Insufficient evidence to enable candidate optimizations by default."
+      },
+      "tokenRatio": null,
+      "wallRatio": 0.7261644348834961,
+      "errorModificationRate": {
+        "baseline": 0,
+        "candidate": 0
+      },
+      "eligibleForRecommendation": false
+    }
+  ],
+  "eligibleForDefault": false,
+  "interpretation": "Quality, completeness, repetition or efficiency gate not met; retain the baseline."
+}

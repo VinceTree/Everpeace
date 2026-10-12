@@ -1,0 +1,14 @@
+diff --git a/a.mjs b/a.mjs
+index 2ad3821..77776ac 100644
+--- a/a.mjs
++++ b/a.mjs
+@@ -1 +1 @@
+-export function transform(value) { return !value||value.startsWith('/')||value.includes(':')||value.includes('\\')||value.split('/').includes('..')?null:value; }
++export function transform(value) { return value.startsWith('/')?null:value; }
+diff --git a/b.mjs b/b.mjs
+index 7d5cfec..c9e47f2 100644
+--- a/b.mjs
++++ b/b.mjs
+@@ -1 +1 @@
+-export function transform(value) { try{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password?u.href:null;}catch{return null;} }
++export function transform(value) { try{const u=new URL(value);return u.protocol==='https:'?u.href:null;}catch{return null;} }

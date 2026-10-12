@@ -45,15 +45,17 @@ export interface VerificationSuiteResult {
 
 /** Reported project evidence is distinct from a host-owned independent scorer. */
 export interface VerificationEvidence {
-  version: 1;
+  version: 1 | 2;
   projectChecks: "none" | "static_or_build" | "test_entry";
   tests: { state: "reported" | "unknown"; count?: number; skipped?: number; assertions: "unknown" };
   coverage: { state: "unknown" | "uncovered" | "partial" | "covered"; changedFiles: number; measuredFiles: number };
+  changedLines?: { state: "unknown" | "uncovered" | "partial" | "covered"; total: number; measured: number; covered: number };
   independent: "not_run" | "passed" | "failed";
   source: "project_checks" | "supplemental_check";
   modifiedTests: boolean;
   workspaceRevision?: string;
   reportDigests: string[];
+  independentSource?: { id: string; digest: string };
 }
 
 export type WorkflowResultClassification = "verified" | "unverified" | "failed" | "no_changes";

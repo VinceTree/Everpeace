@@ -1,0 +1,10 @@
+{
+  "name": "case-contract",
+  "type": "module",
+  "scripts": {
+    "typecheck": "node project-check.mjs",
+    "lint": "node project-check.mjs",
+    "test": "node project-check.mjs",
+    "build": "node project-check.mjs"
+  }
+}

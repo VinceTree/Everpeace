@@ -1,0 +1,14 @@
+diff --git a/a.mjs b/a.mjs
+index d1d27cc..82e4fb9 100644
+--- a/a.mjs
++++ b/a.mjs
+@@ -1 +1 @@
+-export function transform(value) { return [...value].reverse().join(''); }
++export function transform(value) { return value.split('').reverse().join(''); }
+diff --git a/b.mjs b/b.mjs
+index b31a98a..5c278e4 100644
+--- a/b.mjs
++++ b/b.mjs
+@@ -1 +1 @@
+-export function transform(value) { return decodeURIComponent(value.replaceAll('+',' ')); }
++export function transform(value) { return decodeURIComponent(value); }

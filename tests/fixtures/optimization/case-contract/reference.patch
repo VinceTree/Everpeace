@@ -1,0 +1,14 @@
+diff --git b/a.mjs a/a.mjs
+index bd7b091..1864f55 100644
+--- b/a.mjs
++++ a/a.mjs
+@@ -1 +1 @@
+-export function transform(value) { return value.trim(); }
++export function transform(value) { return value.trim().toLowerCase(); }
+diff --git b/b.mjs a/b.mjs
+index 597a5a5..3e2e0c6 100644
+--- b/b.mjs
++++ a/b.mjs
+@@ -1 +1 @@
+-import {transform as normalize} from './a.mjs'; export function transform(value) { const key=normalize(value); return {key,valid:value.length>0}; }
++import {transform as normalize} from './a.mjs'; export function transform(value) { const key=normalize(value); return {key,valid:key.length>0}; }

@@ -1,0 +1,14 @@
+diff --git a/a.mjs b/a.mjs
+index 21667b0..ad9e139 100644
+--- a/a.mjs
++++ b/a.mjs
+@@ -1 +1 @@
+-export function transform(value) { return Math.abs(value); }
++export function transform(value) { return Math.abs(value);
+diff --git a/b.mjs b/b.mjs
+index 97f8426..c4d6d3a 100644
+--- a/b.mjs
++++ b/b.mjs
+@@ -1 +1 @@
+-export function transform(value) { return value * 2; }
++export function transform(value) { return (value * 2; }

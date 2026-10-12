@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "evaluationDigest": "2a6c44c685f793f5695e728804f28ff23f0191f0e2cb52654056362bda617c2a",
+  "records": [
+    {
+      "task": "syntax-branches",
+      "healthy": true,
+      "seeded": false,
+      "reference": true
+    },
+    {
+      "task": "syntax-strings",
+      "healthy": true,
+      "seeded": false,
+      "reference": true
+    },
+    {
+      "task": "numeric-boundaries",
+      "healthy": true,
+      "seeded": false,
+      "reference": true
+    },
+    {
+      "task": "collections",
+      "healthy": true,
+      "seeded": false,
+      "reference": true
+    },
+    {
+      "task": "wire-contract",
+      "healthy": true,
+      "seeded": false,
+      "reference": true
+    },
+    {
+      "task": "case-contract",
+      "healthy": true,
+      "seeded": false,
+      "reference": true
+    },
+    {
+      "task": "text-codecs",
+      "healthy": true,
+      "seeded": false,
+      "reference": true
+    },
+    {
+      "task": "boolean-and-slug",
+      "healthy": true,
+      "seeded": false,
+      "reference": true
+    },
+    {
+      "task": "path-portability",
+      "healthy": true,
+      "seeded": false,
+      "reference": true
+    },
+    {
+      "task": "configuration-values",
+      "healthy": true,
+      "seeded": false,
+      "reference": true
+    },
+    {
+      "task": "html-escaping",
+      "healthy": true,
+      "seeded": false,
+      "reference": true
+    },
+    {
+      "task": "workspace-traversal",
+      "healthy": true,
+      "seeded": false,
+      "reference": true
+    }
+  ]
+}

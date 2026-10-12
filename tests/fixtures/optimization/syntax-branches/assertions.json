@@ -1,0 +1,37 @@
+{
+  "contract": "a.transform returns the absolute value of a finite number; b.transform doubles a finite number.",
+  "acceptance": {
+    "a": [
+      [
+        -3,
+        3
+      ],
+      [
+        0,
+        0
+      ],
+      [
+        2,
+        2
+      ]
+    ],
+    "b": [
+      [
+        3,
+        6
+      ],
+      [
+        0,
+        0
+      ],
+      [
+        -2,
+        -4
+      ]
+    ]
+  },
+  "regression": {
+    "a": [],
+    "b": []
+  }
+}

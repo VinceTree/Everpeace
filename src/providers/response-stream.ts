@@ -1,6 +1,6 @@
 import type OpenAI from "openai";
 import { Stream } from "openai/core/streaming";
-import type { ResponseStreamLike } from "../agent/react-agent.js";
+import type { ResponseStreamLike } from "../agent/model-protocol.js";
 import { ModelStreamCleanupError } from "../agent/response-errors.js";
 
 /** Retain body ownership independently of the SDK's abort-aware SSE iterator. */

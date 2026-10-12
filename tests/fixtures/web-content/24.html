@@ -1,0 +1,1535 @@
+<!doctype html><html><head><title>URL</title></head><body><main>Navigation account subscription portal: this is an intentionally synthetic teaser.</main><main><nav>Navigation account subscription portal</nav><article id="documentation"><h1>URL</h1>
+<!--introduced_in=v0.10.0--><blockquote>
+<p>Stability: 2 - Stable</p>
+</blockquote>
+<!-- source_link=lib/url.js --><p>The <code>node:url</code> module provides utilities for URL resolution and parsing. It can
+be accessed using:</p>
+<pre><code class="language-mjs">import url from &#39;node:url&#39;;
+</code></pre>
+<pre><code class="language-cjs">const url = require(&#39;node:url&#39;);
+</code></pre>
+<h2>URL strings and URL objects</h2>
+<p>A URL string is a structured string containing multiple meaningful components.
+When parsed, a URL object is returned containing properties for each of these
+components.</p>
+<p>The <code>node:url</code> module provides two APIs for working with URLs: a legacy API that
+is Node.js specific, and a newer API that implements the same
+<a href="https://url.spec.whatwg.org/">WHATWG URL Standard</a> used by web browsers.</p>
+<p>A comparison between the WHATWG and legacy APIs is provided below. Above the URL
+<code>&#39;https://user:pass@sub.example.com:8080/p/a/t/h?query=string#hash&#39;</code>, properties
+of an object returned by the legacy <code>url.parse()</code> are shown. Below it are
+properties of a WHATWG <code>URL</code> object.</p>
+<p>WHATWG URL&#39;s <code>origin</code> property includes <code>protocol</code> and <code>host</code>, but not
+<code>username</code> or <code>password</code>.</p>
+<pre><code class="language-text">┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                              href                                              │
+├──────────┬──┬─────────────────────┬────────────────────────┬───────────────────────────┬───────┤
+│ protocol │  │        auth         │          host          │           path            │ hash  │
+│          │  │                     ├─────────────────┬──────┼──────────┬────────────────┤       │
+│          │  │                     │    hostname     │ port │ pathname │     search     │       │
+│          │  │                     │                 │      │          ├─┬──────────────┤       │
+│          │  │                     │                 │      │          │ │    query     │       │
+&quot;  https:   //    user   :   pass   @ sub.example.com : 8080   /p/a/t/h  ?  query=string   #hash &quot;
+│          │  │          │          │    hostname     │ port │          │                │       │
+│          │  │          │          ├─────────────────┴──────┤          │                │       │
+│ protocol │  │ username │ password │          host          │          │                │       │
+├──────────┴──┼──────────┴──────────┼────────────────────────┤          │                │       │
+│   origin    │                     │         origin         │ pathname │     search     │ hash  │
+├─────────────┴─────────────────────┴────────────────────────┴──────────┴────────────────┴───────┤
+│                                              href                                              │
+└────────────────────────────────────────────────────────────────────────────────────────────────┘
+(All spaces in the &quot;&quot; line should be ignored. They are purely for formatting.)
+</code></pre>
+<p>Parsing the URL string using the WHATWG API:</p>
+<pre><code class="language-js">const myURL =
+  new URL(&#39;https://user:pass@sub.example.com:8080/p/a/t/h?query=string#hash&#39;);
+</code></pre>
+<p>Parsing the URL string using the legacy API:</p>
+<pre><code class="language-mjs">import url from &#39;node:url&#39;;
+const myURL =
+  url.parse(&#39;https://user:pass@sub.example.com:8080/p/a/t/h?query=string#hash&#39;);
+</code></pre>
+<pre><code class="language-cjs">const url = require(&#39;node:url&#39;);
+const myURL =
+  url.parse(&#39;https://user:pass@sub.example.com:8080/p/a/t/h?query=string#hash&#39;);
+</code></pre>
+<h3>Constructing a URL from component parts and getting the constructed string</h3>
+<p>It is possible to construct a WHATWG URL from component parts using either the
+property setters or a template literal string:</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://example.org&#39;);
+myURL.pathname = &#39;/a/b/c&#39;;
+myURL.search = &#39;?d=e&#39;;
+myURL.hash = &#39;#fgh&#39;;
+</code></pre>
+<pre><code class="language-js">const pathname = &#39;/a/b/c&#39;;
+const search = &#39;?d=e&#39;;
+const hash = &#39;#fgh&#39;;
+const myURL = new URL(`https://example.org${pathname}${search}${hash}`);
+</code></pre>
+<p>To get the constructed URL string, use the <code>href</code> property accessor:</p>
+<pre><code class="language-js">console.log(myURL.href);
+</code></pre>
+<h2>The WHATWG URL API</h2>
+<h3>Class: <code>URL</code></h3>
+<!-- YAML
+added:
+  - v7.0.0
+  - v6.13.0
+changes:
+  - version: v10.0.0
+    pr-url: https://github.com/nodejs/node/pull/18281
+    description: The class is now available on the global object.
+--><p>Browser-compatible <code>URL</code> class, implemented by following the WHATWG URL
+Standard. <a href="https://url.spec.whatwg.org/#example-url-parsing">Examples of parsed URLs</a> may be found in the Standard itself.
+The <code>URL</code> class is also available on the global object.</p>
+<p>In accordance with browser conventions, all properties of <code>URL</code> objects
+are implemented as getters and setters on the class prototype, rather than as
+data properties on the object itself. Thus, unlike <a href="#legacy-urlobject">legacy <code>urlObject</code></a>s,
+using the <code>delete</code> keyword on any properties of <code>URL</code> objects (e.g. <code>delete myURL.protocol</code>, <code>delete myURL.pathname</code>, etc) has no effect but will still
+return <code>true</code>.</p>
+<h4><code>new URL(input[, base])</code></h4>
+<!-- YAML
+changes:
+  - version:
+    - v20.0.0
+    - v18.17.0
+    pr-url: https://github.com/nodejs/node/pull/47339
+    description: ICU requirement is removed.
+--><ul>
+<li><code>input</code> {string} The absolute or relative input URL to parse. If <code>input</code>
+is relative, then <code>base</code> is required. If <code>input</code> is absolute, the <code>base</code>
+is ignored. If <code>input</code> is not a string, it is <a href="https://tc39.es/ecma262/#sec-tostring">converted to a string</a> first.</li>
+<li><code>base</code> {string} The base URL to resolve against if the <code>input</code> is not
+absolute. If <code>base</code> is not a string, it is <a href="https://tc39.es/ecma262/#sec-tostring">converted to a string</a> first.</li>
+</ul>
+<p>Creates a new <code>URL</code> object by parsing the <code>input</code> relative to the <code>base</code>. If
+<code>base</code> is passed as a string, it will be parsed equivalent to <code>new URL(base)</code>.</p>
+<pre><code class="language-js">const myURL = new URL(&#39;/foo&#39;, &#39;https://example.org/&#39;);
+// https://example.org/foo
+</code></pre>
+<p>The URL constructor is accessible as a property on the global object.
+It can also be imported from the built-in url module:</p>
+<pre><code class="language-mjs">import { URL } from &#39;node:url&#39;;
+console.log(URL === globalThis.URL); // Prints &#39;true&#39;.
+</code></pre>
+<pre><code class="language-cjs">console.log(URL === require(&#39;node:url&#39;).URL); // Prints &#39;true&#39;.
+</code></pre>
+<p>A <code>TypeError</code> will be thrown if the <code>input</code> or <code>base</code> are not valid URLs. Note
+that an effort will be made to coerce the given values into strings. For
+instance:</p>
+<pre><code class="language-js">const myURL = new URL({ toString: () =&gt; &#39;https://example.org/&#39; });
+// https://example.org/
+</code></pre>
+<p>Unicode characters appearing within the host name of <code>input</code> will be
+automatically converted to ASCII using the <a href="https://tools.ietf.org/html/rfc5891#section-4.4">Punycode</a> algorithm.</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://測試&#39;);
+// https://xn--g6w251d/
+</code></pre>
+<p>In cases where it is not known in advance if <code>input</code> is an absolute URL
+and a <code>base</code> is provided, it is advised to validate that the <code>origin</code> of
+the <code>URL</code> object is what is expected.</p>
+<pre><code class="language-js">let myURL = new URL(&#39;http://Example.com/&#39;, &#39;https://example.org/&#39;);
+// http://example.com/
+
+myURL = new URL(&#39;https://Example.com/&#39;, &#39;https://example.org/&#39;);
+// https://example.com/
+
+myURL = new URL(&#39;foo://Example.com/&#39;, &#39;https://example.org/&#39;);
+// foo://Example.com/
+
+myURL = new URL(&#39;http:Example.com/&#39;, &#39;https://example.org/&#39;);
+// http://example.com/
+
+myURL = new URL(&#39;https:Example.com/&#39;, &#39;https://example.org/&#39;);
+// https://example.org/Example.com/
+
+myURL = new URL(&#39;foo:Example.com/&#39;, &#39;https://example.org/&#39;);
+// foo:Example.com/
+</code></pre>
+<h4><code>url.hash</code></h4>
+<ul>
+<li>Type: {string}</li>
+</ul>
+<p>Gets and sets the fragment portion of the URL.</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://example.org/foo#bar&#39;);
+console.log(myURL.hash);
+// Prints #bar
+
+myURL.hash = &#39;baz&#39;;
+console.log(myURL.href);
+// Prints https://example.org/foo#baz
+</code></pre>
+<p>Invalid URL characters included in the value assigned to the <code>hash</code> property
+are <a href="#percent-encoding-in-urls">percent-encoded</a>. The selection of which characters to
+percent-encode may vary somewhat from what the <a href="#urlparseurlstring-parsequerystring-slashesdenotehost"><code>url.parse()</code></a> and
+<a href="#urlformaturlobject"><code>url.format()</code></a> methods would produce.</p>
+<h4><code>url.host</code></h4>
+<ul>
+<li>Type: {string}</li>
+</ul>
+<p>Gets and sets the host portion of the URL.</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://example.org:81/foo&#39;);
+console.log(myURL.host);
+// Prints example.org:81
+
+myURL.host = &#39;example.com:82&#39;;
+console.log(myURL.href);
+// Prints https://example.com:82/foo
+</code></pre>
+<p>Invalid host values assigned to the <code>host</code> property are ignored.</p>
+<h4><code>url.hostname</code></h4>
+<ul>
+<li>Type: {string}</li>
+</ul>
+<p>Gets and sets the host name portion of the URL. The key difference between
+<code>url.host</code> and <code>url.hostname</code> is that <code>url.hostname</code> does <em>not</em> include the
+port.</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://example.org:81/foo&#39;);
+console.log(myURL.hostname);
+// Prints example.org
+
+// Setting the hostname does not change the port
+myURL.hostname = &#39;example.com&#39;;
+console.log(myURL.href);
+// Prints https://example.com:81/foo
+
+// Use myURL.host to change the hostname and port
+myURL.host = &#39;example.org:82&#39;;
+console.log(myURL.href);
+// Prints https://example.org:82/foo
+</code></pre>
+<p>Invalid host name values assigned to the <code>hostname</code> property are ignored.</p>
+<h4><code>url.href</code></h4>
+<ul>
+<li>Type: {string}</li>
+</ul>
+<p>Gets and sets the serialized URL.</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://example.org/foo&#39;);
+console.log(myURL.href);
+// Prints https://example.org/foo
+
+myURL.href = &#39;https://example.com/bar&#39;;
+console.log(myURL.href);
+// Prints https://example.com/bar
+</code></pre>
+<p>Getting the value of the <code>href</code> property is equivalent to calling
+<a href="#urltostring"><code>url.toString()</code></a>.</p>
+<p>Setting the value of this property to a new value is equivalent to creating a
+new <code>URL</code> object using <a href="#new-urlinput-base"><code>new URL(value)</code></a>. Each of the <code>URL</code>
+object&#39;s properties will be modified.</p>
+<p>If the value assigned to the <code>href</code> property is not a valid URL, a <code>TypeError</code>
+will be thrown.</p>
+<h4><code>url.origin</code></h4>
+<!-- YAML
+changes:
+  - version: v15.0.0
+    pr-url: https://github.com/nodejs/node/pull/33325
+    description: The scheme "gopher" is no longer special and `url.origin` now
+                 returns `'null'` for it.
+--><ul>
+<li>Type: {string}</li>
+</ul>
+<p>Gets the read-only serialization of the URL&#39;s origin.</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://example.org/foo/bar?baz&#39;);
+console.log(myURL.origin);
+// Prints https://example.org
+</code></pre>
+<pre><code class="language-js">const idnURL = new URL(&#39;https://測試&#39;);
+console.log(idnURL.origin);
+// Prints https://xn--g6w251d
+
+console.log(idnURL.hostname);
+// Prints xn--g6w251d
+</code></pre>
+<h4><code>url.password</code></h4>
+<ul>
+<li>Type: {string}</li>
+</ul>
+<p>Gets and sets the password portion of the URL.</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://abc:xyz@example.com&#39;);
+console.log(myURL.password);
+// Prints xyz
+
+myURL.password = &#39;123&#39;;
+console.log(myURL.href);
+// Prints https://abc:123@example.com/
+</code></pre>
+<p>Invalid URL characters included in the value assigned to the <code>password</code> property
+are <a href="#percent-encoding-in-urls">percent-encoded</a>. The selection of which characters to
+percent-encode may vary somewhat from what the <a href="#urlparseurlstring-parsequerystring-slashesdenotehost"><code>url.parse()</code></a> and
+<a href="#urlformaturlobject"><code>url.format()</code></a> methods would produce.</p>
+<h4><code>url.pathname</code></h4>
+<ul>
+<li>Type: {string}</li>
+</ul>
+<p>Gets and sets the path portion of the URL.</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://example.org/abc/xyz?123&#39;);
+console.log(myURL.pathname);
+// Prints /abc/xyz
+
+myURL.pathname = &#39;/abcdef&#39;;
+console.log(myURL.href);
+// Prints https://example.org/abcdef?123
+</code></pre>
+<p>Invalid URL characters included in the value assigned to the <code>pathname</code>
+property are <a href="#percent-encoding-in-urls">percent-encoded</a>. The selection of which characters
+to percent-encode may vary somewhat from what the <a href="#urlparseurlstring-parsequerystring-slashesdenotehost"><code>url.parse()</code></a> and
+<a href="#urlformaturlobject"><code>url.format()</code></a> methods would produce.</p>
+<h4><code>url.port</code></h4>
+<!-- YAML
+changes:
+  - version: v15.0.0
+    pr-url: https://github.com/nodejs/node/pull/33325
+    description: The scheme "gopher" is no longer special.
+--><ul>
+<li>Type: {string}</li>
+</ul>
+<p>Gets and sets the port portion of the URL.</p>
+<p>The port value may be a number or a string containing a number in the range
+<code>0</code> to <code>65535</code> (inclusive). Setting the value to the default port of the
+<code>URL</code> objects given <code>protocol</code> will result in the <code>port</code> value becoming
+the empty string (<code>&#39;&#39;</code>).</p>
+<p>The port value can be an empty string in which case the port depends on
+the protocol/scheme:</p>
+<table>
+<thead>
+<tr>
+<th>protocol</th>
+<th>port</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>&quot;ftp&quot;</td>
+<td>21</td>
+</tr>
+<tr>
+<td>&quot;file&quot;</td>
+<td></td>
+</tr>
+<tr>
+<td>&quot;http&quot;</td>
+<td>80</td>
+</tr>
+<tr>
+<td>&quot;https&quot;</td>
+<td>443</td>
+</tr>
+<tr>
+<td>&quot;ws&quot;</td>
+<td>80</td>
+</tr>
+<tr>
+<td>&quot;wss&quot;</td>
+<td>443</td>
+</tr>
+</tbody></table>
+<p>Upon assigning a value to the port, the value will first be converted to a
+string using <code>.toString()</code>.</p>
+<p>If that string is invalid but it begins with a number, the leading number is
+assigned to <code>port</code>.
+If the number lies outside the range denoted above, it is ignored.</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://example.org:8888&#39;);
+console.log(myURL.port);
+// Prints 8888
+
+// Default ports are automatically transformed to the empty string
+// (HTTPS protocol&#39;s default port is 443)
+myURL.port = &#39;443&#39;;
+console.log(myURL.port);
+// Prints the empty string
+console.log(myURL.href);
+// Prints https://example.org/
+
+myURL.port = 1234;
+console.log(myURL.port);
+// Prints 1234
+console.log(myURL.href);
+// Prints https://example.org:1234/
+
+// Completely invalid port strings are ignored
+myURL.port = &#39;abcd&#39;;
+console.log(myURL.port);
+// Prints 1234
+
+// Leading numbers are treated as a port number
+myURL.port = &#39;5678abcd&#39;;
+console.log(myURL.port);
+// Prints 5678
+
+// Non-integers are truncated
+myURL.port = 1234.5678;
+console.log(myURL.port);
+// Prints 1234
+
+// Out-of-range numbers which are not represented in scientific notation
+// will be ignored.
+myURL.port = 1e10; // 10000000000, will be range-checked as described below
+console.log(myURL.port);
+// Prints 1234
+</code></pre>
+<p>Numbers which contain a decimal point,
+such as floating-point numbers or numbers in scientific notation,
+are not an exception to this rule.
+Leading numbers up to the decimal point will be set as the URL&#39;s port,
+assuming they are valid:</p>
+<pre><code class="language-js">myURL.port = 4.567e21;
+console.log(myURL.port);
+// Prints 4 (because it is the leading number in the string &#39;4.567e21&#39;)
+</code></pre>
+<h4><code>url.protocol</code></h4>
+<ul>
+<li>Type: {string}</li>
+</ul>
+<p>Gets and sets the protocol portion of the URL.</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://example.org&#39;);
+console.log(myURL.protocol);
+// Prints https:
+
+myURL.protocol = &#39;ftp&#39;;
+console.log(myURL.href);
+// Prints ftp://example.org/
+</code></pre>
+<p>Invalid URL protocol values assigned to the <code>protocol</code> property are ignored.</p>
+<h5>Special schemes</h5>
+<!-- YAML
+changes:
+  - version: v15.0.0
+    pr-url: https://github.com/nodejs/node/pull/33325
+    description: The scheme "gopher" is no longer special.
+--><p>The <a href="https://url.spec.whatwg.org/">WHATWG URL Standard</a> considers a handful of URL protocol schemes to be
+<em>special</em> in terms of how they are parsed and serialized. When a URL is
+parsed using one of these special protocols, the <code>url.protocol</code> property
+may be changed to another special protocol but cannot be changed to a
+non-special protocol, and vice versa.</p>
+<p>For instance, changing from <code>http</code> to <code>https</code> works:</p>
+<pre><code class="language-js">const u = new URL(&#39;http://example.org&#39;);
+u.protocol = &#39;https&#39;;
+console.log(u.href);
+// https://example.org/
+</code></pre>
+<p>However, changing from <code>http</code> to a hypothetical <code>fish</code> protocol does not
+because the new protocol is not special.</p>
+<pre><code class="language-js">const u = new URL(&#39;http://example.org&#39;);
+u.protocol = &#39;fish&#39;;
+console.log(u.href);
+// http://example.org/
+</code></pre>
+<p>Likewise, changing from a non-special protocol to a special protocol is also
+not permitted:</p>
+<pre><code class="language-js">const u = new URL(&#39;fish://example.org&#39;);
+u.protocol = &#39;http&#39;;
+console.log(u.href);
+// fish://example.org
+</code></pre>
+<p>According to the WHATWG URL Standard, special protocol schemes are <code>ftp</code>,
+<code>file</code>, <code>http</code>, <code>https</code>, <code>ws</code>, and <code>wss</code>.</p>
+<h4><code>url.search</code></h4>
+<ul>
+<li>Type: {string}</li>
+</ul>
+<p>Gets and sets the serialized query portion of the URL.</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://example.org/abc?123&#39;);
+console.log(myURL.search);
+// Prints ?123
+
+myURL.search = &#39;abc=xyz&#39;;
+console.log(myURL.href);
+// Prints https://example.org/abc?abc=xyz
+</code></pre>
+<p>Any invalid URL characters appearing in the value assigned the <code>search</code>
+property will be <a href="#percent-encoding-in-urls">percent-encoded</a>. The selection of which
+characters to percent-encode may vary somewhat from what the <a href="#urlparseurlstring-parsequerystring-slashesdenotehost"><code>url.parse()</code></a>
+and <a href="#urlformaturlobject"><code>url.format()</code></a> methods would produce.</p>
+<h4><code>url.searchParams</code></h4>
+<ul>
+<li>Type: {URLSearchParams}</li>
+</ul>
+<p>Gets the <a href="#class-urlsearchparams"><code>URLSearchParams</code></a> object representing the query parameters of the
+URL. This property is read-only but the <code>URLSearchParams</code> object it provides
+can be used to mutate the URL instance; to replace the entirety of query
+parameters of the URL, use the <a href="#urlsearch"><code>url.search</code></a> setter. See
+<a href="#class-urlsearchparams"><code>URLSearchParams</code></a> documentation for details.</p>
+<p>Use care when using <code>.searchParams</code> to modify the <code>URL</code> because,
+per the WHATWG specification, the <code>URLSearchParams</code> object uses
+different rules to determine which characters to percent-encode. For
+instance, the <code>URL</code> object will not percent encode the ASCII tilde (<code>~</code>)
+character, while <code>URLSearchParams</code> will always encode it:</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://example.org/abc?foo=~bar&#39;);
+
+console.log(myURL.search);  // prints ?foo=~bar
+
+// Modify the URL via searchParams...
+myURL.searchParams.sort();
+
+console.log(myURL.search);  // prints ?foo=%7Ebar
+</code></pre>
+<h4><code>url.username</code></h4>
+<ul>
+<li>Type: {string}</li>
+</ul>
+<p>Gets and sets the username portion of the URL.</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://abc:xyz@example.com&#39;);
+console.log(myURL.username);
+// Prints abc
+
+myURL.username = &#39;123&#39;;
+console.log(myURL.href);
+// Prints https://123:xyz@example.com/
+</code></pre>
+<p>Any invalid URL characters appearing in the value assigned the <code>username</code>
+property will be <a href="#percent-encoding-in-urls">percent-encoded</a>. The selection of which
+characters to percent-encode may vary somewhat from what the <a href="#urlparseurlstring-parsequerystring-slashesdenotehost"><code>url.parse()</code></a>
+and <a href="#urlformaturlobject"><code>url.format()</code></a> methods would produce.</p>
+<h4><code>url.toString()</code></h4>
+<ul>
+<li>Returns: {string}</li>
+</ul>
+<p>The <code>toString()</code> method on the <code>URL</code> object returns the serialized URL. The
+value returned is equivalent to that of <a href="#urlhref"><code>url.href</code></a> and <a href="#urltojson"><code>url.toJSON()</code></a>.</p>
+<h4><code>url.toJSON()</code></h4>
+<!-- YAML
+added:
+  - v7.7.0
+  - v6.13.0
+--><ul>
+<li>Returns: {string}</li>
+</ul>
+<p>The <code>toJSON()</code> method on the <code>URL</code> object returns the serialized URL. The
+value returned is equivalent to that of <a href="#urlhref"><code>url.href</code></a> and
+<a href="#urltostring"><code>url.toString()</code></a>.</p>
+<p>This method is automatically called when an <code>URL</code> object is serialized
+with <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/stringify"><code>JSON.stringify()</code></a>.</p>
+<pre><code class="language-js">const myURLs = [
+  new URL(&#39;https://www.example.com&#39;),
+  new URL(&#39;https://test.example.org&#39;),
+];
+console.log(JSON.stringify(myURLs));
+// Prints [&quot;https://www.example.com/&quot;,&quot;https://test.example.org/&quot;]
+</code></pre>
+<h4><code>URL.createObjectURL(blob)</code></h4>
+<!-- YAML
+added: v16.7.0
+changes:
+ - version: v22.17.0
+   pr-url: https://github.com/nodejs/node/pull/57513
+   description: Marking the API stable.
+--><ul>
+<li><code>blob</code> {Blob}</li>
+<li>Returns: {string}</li>
+</ul>
+<p>Creates a <code>&#39;blob:nodedata:...&#39;</code> URL string that represents the given {Blob}
+object and can be used to retrieve the <code>Blob</code> later.</p>
+<pre><code class="language-js">const {
+  Blob,
+  resolveObjectURL,
+} = require(&#39;node:buffer&#39;);
+
+const blob = new Blob([&#39;hello&#39;]);
+const id = URL.createObjectURL(blob);
+
+// later...
+
+const otherBlob = resolveObjectURL(id);
+console.log(otherBlob.size);
+</code></pre>
+<p>The data stored by the registered {Blob} will be retained in memory until
+<code>URL.revokeObjectURL()</code> is called to remove it.</p>
+<p><code>Blob</code> objects are registered within the current thread. If using Worker
+Threads, <code>Blob</code> objects registered within one Worker will not be available
+to other workers or the main thread.</p>
+<h4><code>URL.revokeObjectURL(id)</code></h4>
+<!-- YAML
+added: v16.7.0
+changes:
+ - version: v22.17.0
+   pr-url: https://github.com/nodejs/node/pull/57513
+   description: Marking the API stable.
+--><ul>
+<li><code>id</code> {string} A <code>&#39;blob:nodedata:...</code> URL string returned by a prior call to
+<code>URL.createObjectURL()</code>.</li>
+</ul>
+<p>Removes the stored {Blob} identified by the given ID. Attempting to revoke a
+ID that isn&#39;t registered will silently fail.</p>
+<h4><code>URL.canParse(input[, base])</code></h4>
+<!-- YAML
+added:
+  - v19.9.0
+  - v18.17.0
+--><ul>
+<li><code>input</code> {string} The absolute or relative input URL to parse. If <code>input</code>
+is relative, then <code>base</code> is required. If <code>input</code> is absolute, the <code>base</code>
+is ignored. If <code>input</code> is not a string, it is <a href="https://tc39.es/ecma262/#sec-tostring">converted to a string</a> first.</li>
+<li><code>base</code> {string} The base URL to resolve against if the <code>input</code> is not
+absolute. If <code>base</code> is not a string, it is <a href="https://tc39.es/ecma262/#sec-tostring">converted to a string</a> first.</li>
+<li>Returns: {boolean}</li>
+</ul>
+<p>Checks if an <code>input</code> relative to the <code>base</code> can be parsed to a <code>URL</code>.</p>
+<pre><code class="language-js">const isValid = URL.canParse(&#39;/foo&#39;, &#39;https://example.org/&#39;); // true
+
+const isNotValid = URL.canParse(&#39;/foo&#39;); // false
+</code></pre>
+<h4><code>URL.parse(input[, base])</code></h4>
+<!-- YAML
+added: v22.1.0
+--><ul>
+<li><code>input</code> {string} The absolute or relative input URL to parse. If <code>input</code>
+is relative, then <code>base</code> is required. If <code>input</code> is absolute, the <code>base</code>
+is ignored. If <code>input</code> is not a string, it is <a href="https://tc39.es/ecma262/#sec-tostring">converted to a string</a> first.</li>
+<li><code>base</code> {string} The base URL to resolve against if the <code>input</code> is not
+absolute. If <code>base</code> is not a string, it is <a href="https://tc39.es/ecma262/#sec-tostring">converted to a string</a> first.</li>
+<li>Returns: {URL|null}</li>
+</ul>
+<p>Parses a string as a URL. If <code>base</code> is provided, it will be used as the base
+URL for the purpose of resolving non-absolute <code>input</code> URLs. Returns <code>null</code>
+if the parameters can&#39;t be resolved to a valid URL.</p>
+<h3>Class: <code>URLSearchParams</code></h3>
+<!-- YAML
+added:
+  - v7.5.0
+  - v6.13.0
+changes:
+  - version: v10.0.0
+    pr-url: https://github.com/nodejs/node/pull/18281
+    description: The class is now available on the global object.
+--><p>The <code>URLSearchParams</code> API provides read and write access to the query of a
+<code>URL</code>. The <code>URLSearchParams</code> class can also be used standalone with one of the
+four following constructors.
+The <code>URLSearchParams</code> class is also available on the global object.</p>
+<p>The WHATWG <code>URLSearchParams</code> interface and the <a href="querystring.md"><code>querystring</code></a> module have
+similar purpose, but the purpose of the <a href="querystring.md"><code>querystring</code></a> module is more
+general, as it allows the customization of delimiter characters (<code>&amp;</code> and <code>=</code>).
+On the other hand, this API is designed purely for URL query strings.</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://example.org/?abc=123&#39;);
+console.log(myURL.searchParams.get(&#39;abc&#39;));
+// Prints 123
+
+myURL.searchParams.append(&#39;abc&#39;, &#39;xyz&#39;);
+console.log(myURL.href);
+// Prints https://example.org/?abc=123&amp;abc=xyz
+
+myURL.searchParams.delete(&#39;abc&#39;);
+myURL.searchParams.set(&#39;a&#39;, &#39;b&#39;);
+console.log(myURL.href);
+// Prints https://example.org/?a=b
+
+const newSearchParams = new URLSearchParams(myURL.searchParams);
+// The above is equivalent to
+// const newSearchParams = new URLSearchParams(myURL.search);
+
+newSearchParams.append(&#39;a&#39;, &#39;c&#39;);
+console.log(myURL.href);
+// Prints https://example.org/?a=b
+console.log(newSearchParams.toString());
+// Prints a=b&amp;a=c
+
+// newSearchParams.toString() is implicitly called
+myURL.search = newSearchParams;
+console.log(myURL.href);
+// Prints https://example.org/?a=b&amp;a=c
+newSearchParams.delete(&#39;a&#39;);
+console.log(myURL.href);
+// Prints https://example.org/?a=b&amp;a=c
+</code></pre>
+<h4><code>new URLSearchParams()</code></h4>
+<p>Instantiate a new empty <code>URLSearchParams</code> object.</p>
+<h4><code>new URLSearchParams(string)</code></h4>
+<ul>
+<li><code>string</code> {string} A query string</li>
+</ul>
+<p>Parse the <code>string</code> as a query string, and use it to instantiate a new
+<code>URLSearchParams</code> object. A leading <code>&#39;?&#39;</code>, if present, is ignored.</p>
+<pre><code class="language-js">let params;
+
+params = new URLSearchParams(&#39;user=abc&amp;query=xyz&#39;);
+console.log(params.get(&#39;user&#39;));
+// Prints &#39;abc&#39;
+console.log(params.toString());
+// Prints &#39;user=abc&amp;query=xyz&#39;
+
+params = new URLSearchParams(&#39;?user=abc&amp;query=xyz&#39;);
+console.log(params.toString());
+// Prints &#39;user=abc&amp;query=xyz&#39;
+</code></pre>
+<h4><code>new URLSearchParams(obj)</code></h4>
+<!-- YAML
+added:
+  - v7.10.0
+  - v6.13.0
+--><ul>
+<li><code>obj</code> {Object} An object representing a collection of key-value pairs</li>
+</ul>
+<p>Instantiate a new <code>URLSearchParams</code> object with a query hash map. The key and
+value of each property of <code>obj</code> are always coerced to strings.</p>
+<p>Unlike <a href="querystring.md"><code>querystring</code></a> module, duplicate keys in the form of array values are
+not allowed. Arrays are stringified using <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toString"><code>array.toString()</code></a>, which simply
+joins all array elements with commas.</p>
+<pre><code class="language-js">const params = new URLSearchParams({
+  user: &#39;abc&#39;,
+  query: [&#39;first&#39;, &#39;second&#39;],
+});
+console.log(params.getAll(&#39;query&#39;));
+// Prints [ &#39;first,second&#39; ]
+console.log(params.toString());
+// Prints &#39;user=abc&amp;query=first%2Csecond&#39;
+</code></pre>
+<h4><code>new URLSearchParams(iterable)</code></h4>
+<!-- YAML
+added:
+  - v7.10.0
+  - v6.13.0
+--><ul>
+<li><code>iterable</code> {Iterable} An iterable object whose elements are key-value pairs</li>
+</ul>
+<p>Instantiate a new <code>URLSearchParams</code> object with an iterable map in a way that
+is similar to {Map}&#39;s constructor. <code>iterable</code> can be an <code>Array</code> or any
+iterable object. That means <code>iterable</code> can be another <code>URLSearchParams</code>, in
+which case the constructor will simply create a clone of the provided
+<code>URLSearchParams</code>. Elements of <code>iterable</code> are key-value pairs, and can
+themselves be any iterable object.</p>
+<p>Duplicate keys are allowed.</p>
+<pre><code class="language-js">let params;
+
+// Using an array
+params = new URLSearchParams([
+  [&#39;user&#39;, &#39;abc&#39;],
+  [&#39;query&#39;, &#39;first&#39;],
+  [&#39;query&#39;, &#39;second&#39;],
+]);
+console.log(params.toString());
+// Prints &#39;user=abc&amp;query=first&amp;query=second&#39;
+
+// Using a Map object
+const map = new Map();
+map.set(&#39;user&#39;, &#39;abc&#39;);
+map.set(&#39;query&#39;, &#39;xyz&#39;);
+params = new URLSearchParams(map);
+console.log(params.toString());
+// Prints &#39;user=abc&amp;query=xyz&#39;
+
+// Using a generator function
+function* getQueryPairs() {
+  yield [&#39;user&#39;, &#39;abc&#39;];
+  yield [&#39;query&#39;, &#39;first&#39;];
+  yield [&#39;query&#39;, &#39;second&#39;];
+}
+params = new URLSearchParams(getQueryPairs());
+console.log(params.toString());
+// Prints &#39;user=abc&amp;query=first&amp;query=second&#39;
+
+// Each key-value pair must have exactly two elements
+new URLSearchParams([
+  [&#39;user&#39;, &#39;abc&#39;, &#39;error&#39;],
+]);
+// Throws TypeError [ERR_INVALID_TUPLE]:
+//        Each query pair must be an iterable [name, value] tuple
+</code></pre>
+<h4><code>urlSearchParams.append(name, value)</code></h4>
+<ul>
+<li><code>name</code> {string}</li>
+<li><code>value</code> {string}</li>
+</ul>
+<p>Append a new name-value pair to the query string.</p>
+<h4><code>urlSearchParams.delete(name[, value])</code></h4>
+<!-- YAML
+changes:
+  - version:
+      - v20.2.0
+      - v18.18.0
+    pr-url: https://github.com/nodejs/node/pull/47885
+    description: Add support for optional `value` argument.
+--><ul>
+<li><code>name</code> {string}</li>
+<li><code>value</code> {string}</li>
+</ul>
+<p>If <code>value</code> is provided, removes all name-value pairs
+where name is <code>name</code> and value is <code>value</code>..</p>
+<p>If <code>value</code> is not provided, removes all name-value pairs whose name is <code>name</code>.</p>
+<h4><code>urlSearchParams.entries()</code></h4>
+<ul>
+<li>Returns: {Iterator}</li>
+</ul>
+<p>Returns an ES6 <code>Iterator</code> over each of the name-value pairs in the query.
+Each item of the iterator is a JavaScript <code>Array</code>. The first item of the <code>Array</code>
+is the <code>name</code>, the second item of the <code>Array</code> is the <code>value</code>.</p>
+<p>Alias for <a href="#urlsearchparamssymboliterator"><code>urlSearchParams[Symbol.iterator]()</code></a>.</p>
+<h4><code>urlSearchParams.forEach(fn[, thisArg])</code></h4>
+<!-- YAML
+changes:
+  - version: v18.0.0
+    pr-url: https://github.com/nodejs/node/pull/41678
+    description: Passing an invalid callback to the `fn` argument
+                 now throws `ERR_INVALID_ARG_TYPE` instead of
+                 `ERR_INVALID_CALLBACK`.
+--><ul>
+<li><code>fn</code> {Function} Invoked for each name-value pair in the query</li>
+<li><code>thisArg</code> {Object} To be used as <code>this</code> value for when <code>fn</code> is called</li>
+</ul>
+<p>Iterates over each name-value pair in the query and invokes the given function.</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://example.org/?a=b&amp;c=d&#39;);
+myURL.searchParams.forEach((value, name, searchParams) =&gt; {
+  console.log(name, value, myURL.searchParams === searchParams);
+});
+// Prints:
+//   a b true
+//   c d true
+</code></pre>
+<h4><code>urlSearchParams.get(name)</code></h4>
+<ul>
+<li><code>name</code> {string}</li>
+<li>Returns: {string | null} A string or <code>null</code> if there is no name-value pair
+with the given <code>name</code>.</li>
+</ul>
+<p>Returns the value of the first name-value pair whose name is <code>name</code>. If there
+are no such pairs, <code>null</code> is returned.</p>
+<h4><code>urlSearchParams.getAll(name)</code></h4>
+<ul>
+<li><code>name</code> {string}</li>
+<li>Returns: {string[]}</li>
+</ul>
+<p>Returns the values of all name-value pairs whose name is <code>name</code>. If there are
+no such pairs, an empty array is returned.</p>
+<h4><code>urlSearchParams.has(name[, value])</code></h4>
+<!-- YAML
+changes:
+  - version:
+      - v20.2.0
+      - v18.18.0
+    pr-url: https://github.com/nodejs/node/pull/47885
+    description: Add support for optional `value` argument.
+--><ul>
+<li><code>name</code> {string}</li>
+<li><code>value</code> {string}</li>
+<li>Returns: {boolean}</li>
+</ul>
+<p>Checks if the <code>URLSearchParams</code> object contains key-value pair(s) based on
+<code>name</code> and an optional <code>value</code> argument.</p>
+<p>If <code>value</code> is provided, returns <code>true</code> when name-value pair with
+same <code>name</code> and <code>value</code> exists.</p>
+<p>If <code>value</code> is not provided, returns <code>true</code> if there is at least one name-value
+pair whose name is <code>name</code>.</p>
+<h4><code>urlSearchParams.keys()</code></h4>
+<ul>
+<li>Returns: {Iterator}</li>
+</ul>
+<p>Returns an ES6 <code>Iterator</code> over the names of each name-value pair.</p>
+<pre><code class="language-js">const params = new URLSearchParams(&#39;foo=bar&amp;foo=baz&#39;);
+for (const name of params.keys()) {
+  console.log(name);
+}
+// Prints:
+//   foo
+//   foo
+</code></pre>
+<h4><code>urlSearchParams.set(name, value)</code></h4>
+<ul>
+<li><code>name</code> {string}</li>
+<li><code>value</code> {string}</li>
+</ul>
+<p>Sets the value in the <code>URLSearchParams</code> object associated with <code>name</code> to
+<code>value</code>. If there are any pre-existing name-value pairs whose names are <code>name</code>,
+set the first such pair&#39;s value to <code>value</code> and remove all others. If not,
+append the name-value pair to the query string.</p>
+<pre><code class="language-js">const params = new URLSearchParams();
+params.append(&#39;foo&#39;, &#39;bar&#39;);
+params.append(&#39;foo&#39;, &#39;baz&#39;);
+params.append(&#39;abc&#39;, &#39;def&#39;);
+console.log(params.toString());
+// Prints foo=bar&amp;foo=baz&amp;abc=def
+
+params.set(&#39;foo&#39;, &#39;def&#39;);
+params.set(&#39;xyz&#39;, &#39;opq&#39;);
+console.log(params.toString());
+// Prints foo=def&amp;abc=def&amp;xyz=opq
+</code></pre>
+<h4><code>urlSearchParams.size</code></h4>
+<!-- YAML
+added:
+ - v19.8.0
+ - v18.16.0
+--><p>The total number of parameter entries.</p>
+<h4><code>urlSearchParams.sort()</code></h4>
+<!-- YAML
+added:
+  - v7.7.0
+  - v6.13.0
+--><p>Sort all existing name-value pairs in-place by their names. Sorting is done
+with a <a href="https://en.wikipedia.org/wiki/Sorting_algorithm#Stability">stable sorting algorithm</a>, so relative order between name-value pairs
+with the same name is preserved.</p>
+<p>This method can be used, in particular, to increase cache hits.</p>
+<pre><code class="language-js">const params = new URLSearchParams(&#39;query[]=abc&amp;type=search&amp;query[]=123&#39;);
+params.sort();
+console.log(params.toString());
+// Prints query%5B%5D=abc&amp;query%5B%5D=123&amp;type=search
+</code></pre>
+<h4><code>urlSearchParams.toString()</code></h4>
+<ul>
+<li>Returns: {string}</li>
+</ul>
+<p>Returns the search parameters serialized as a string, with characters
+percent-encoded where necessary.</p>
+<h4><code>urlSearchParams.values()</code></h4>
+<ul>
+<li>Returns: {Iterator}</li>
+</ul>
+<p>Returns an ES6 <code>Iterator</code> over the values of each name-value pair.</p>
+<h4><code>urlSearchParams[Symbol.iterator]()</code></h4>
+<ul>
+<li>Returns: {Iterator}</li>
+</ul>
+<p>Returns an ES6 <code>Iterator</code> over each of the name-value pairs in the query string.
+Each item of the iterator is a JavaScript <code>Array</code>. The first item of the <code>Array</code>
+is the <code>name</code>, the second item of the <code>Array</code> is the <code>value</code>.</p>
+<p>Alias for <a href="#urlsearchparamsentries"><code>urlSearchParams.entries()</code></a>.</p>
+<pre><code class="language-js">const params = new URLSearchParams(&#39;foo=bar&amp;xyz=baz&#39;);
+for (const [name, value] of params) {
+  console.log(name, value);
+}
+// Prints:
+//   foo bar
+//   xyz baz
+</code></pre>
+<h3><code>url.domainToASCII(domain)</code></h3>
+<!-- YAML
+added:
+  - v7.4.0
+  - v6.13.0
+changes:
+  - version:
+    - v20.0.0
+    - v18.17.0
+    pr-url: https://github.com/nodejs/node/pull/47339
+    description: ICU requirement is removed.
+--><ul>
+<li><code>domain</code> {string}</li>
+<li>Returns: {string}</li>
+</ul>
+<p>Returns the <a href="https://tools.ietf.org/html/rfc5891#section-4.4">Punycode</a> ASCII serialization of the <code>domain</code>. If <code>domain</code> is an
+invalid domain, the empty string is returned.</p>
+<p>It performs the inverse operation to <a href="#urldomaintounicodedomain"><code>url.domainToUnicode()</code></a>.</p>
+<pre><code class="language-mjs">import url from &#39;node:url&#39;;
+
+console.log(url.domainToASCII(&#39;español.com&#39;));
+// Prints xn--espaol-zwa.com
+console.log(url.domainToASCII(&#39;中文.com&#39;));
+// Prints xn--fiq228c.com
+console.log(url.domainToASCII(&#39;xn--iñvalid.com&#39;));
+// Prints an empty string
+</code></pre>
+<pre><code class="language-cjs">const url = require(&#39;node:url&#39;);
+
+console.log(url.domainToASCII(&#39;español.com&#39;));
+// Prints xn--espaol-zwa.com
+console.log(url.domainToASCII(&#39;中文.com&#39;));
+// Prints xn--fiq228c.com
+console.log(url.domainToASCII(&#39;xn--iñvalid.com&#39;));
+// Prints an empty string
+</code></pre>
+<h3><code>url.domainToUnicode(domain)</code></h3>
+<!-- YAML
+added:
+  - v7.4.0
+  - v6.13.0
+changes:
+  - version:
+    - v20.0.0
+    - v18.17.0
+    pr-url: https://github.com/nodejs/node/pull/47339
+    description: ICU requirement is removed.
+--><ul>
+<li><code>domain</code> {string}</li>
+<li>Returns: {string}</li>
+</ul>
+<p>Returns the Unicode serialization of the <code>domain</code>. If <code>domain</code> is an invalid
+domain, the empty string is returned.</p>
+<p>It performs the inverse operation to <a href="#urldomaintoasciidomain"><code>url.domainToASCII()</code></a>.</p>
+<pre><code class="language-mjs">import url from &#39;node:url&#39;;
+
+console.log(url.domainToUnicode(&#39;xn--espaol-zwa.com&#39;));
+// Prints español.com
+console.log(url.domainToUnicode(&#39;xn--fiq228c.com&#39;));
+// Prints 中文.com
+console.log(url.domainToUnicode(&#39;xn--iñvalid.com&#39;));
+// Prints an empty string
+</code></pre>
+<pre><code class="language-cjs">const url = require(&#39;node:url&#39;);
+
+console.log(url.domainToUnicode(&#39;xn--espaol-zwa.com&#39;));
+// Prints español.com
+console.log(url.domainToUnicode(&#39;xn--fiq228c.com&#39;));
+// Prints 中文.com
+console.log(url.domainToUnicode(&#39;xn--iñvalid.com&#39;));
+// Prints an empty string
+</code></pre>
+<h3><code>url.fileURLToPath(url[, options])</code></h3>
+<!-- YAML
+added: v10.12.0
+changes:
+  - version: v22.1.0
+    pr-url: https://github.com/nodejs/node/pull/52509
+    description: The `options` argument can now be used to
+                 determine how to parse the `path` argument.
+--><ul>
+<li><code>url</code> {URL | string} The file URL string or URL object to convert to a path.</li>
+<li><code>options</code> {Object}<ul>
+<li><code>windows</code> {boolean|undefined} <code>true</code> if the <code>path</code> should be
+return as a windows filepath, <code>false</code> for posix, and
+<code>undefined</code> for the system default.
+<strong>Default:</strong> <code>undefined</code>.</li>
+</ul>
+</li>
+<li>Returns: {string} The fully-resolved platform-specific Node.js file path.</li>
+</ul>
+<p>This function ensures the correct decodings of percent-encoded characters as
+well as ensuring a cross-platform valid absolute path string.</p>
+<pre><code class="language-mjs">import { fileURLToPath } from &#39;node:url&#39;;
+
+const __filename = fileURLToPath(import.meta.url);
+
+new URL(&#39;file:///C:/path/&#39;).pathname;      // Incorrect: /C:/path/
+fileURLToPath(&#39;file:///C:/path/&#39;);         // Correct:   C:\path\ (Windows)
+
+new URL(&#39;file://nas/foo.txt&#39;).pathname;    // Incorrect: /foo.txt
+fileURLToPath(&#39;file://nas/foo.txt&#39;);       // Correct:   \\nas\foo.txt (Windows)
+
+new URL(&#39;file:///你好.txt&#39;).pathname;      // Incorrect: /%E4%BD%A0%E5%A5%BD.txt
+fileURLToPath(&#39;file:///你好.txt&#39;);         // Correct:   /你好.txt (POSIX)
+
+new URL(&#39;file:///hello world&#39;).pathname;   // Incorrect: /hello%20world
+fileURLToPath(&#39;file:///hello world&#39;);      // Correct:   /hello world (POSIX)
+</code></pre>
+<pre><code class="language-cjs">const { fileURLToPath } = require(&#39;node:url&#39;);
+new URL(&#39;file:///C:/path/&#39;).pathname;      // Incorrect: /C:/path/
+fileURLToPath(&#39;file:///C:/path/&#39;);         // Correct:   C:\path\ (Windows)
+
+new URL(&#39;file://nas/foo.txt&#39;).pathname;    // Incorrect: /foo.txt
+fileURLToPath(&#39;file://nas/foo.txt&#39;);       // Correct:   \\nas\foo.txt (Windows)
+
+new URL(&#39;file:///你好.txt&#39;).pathname;      // Incorrect: /%E4%BD%A0%E5%A5%BD.txt
+fileURLToPath(&#39;file:///你好.txt&#39;);         // Correct:   /你好.txt (POSIX)
+
+new URL(&#39;file:///hello world&#39;).pathname;   // Incorrect: /hello%20world
+fileURLToPath(&#39;file:///hello world&#39;);      // Correct:   /hello world (POSIX)
+</code></pre>
+<h3><code>url.fileURLToPathBuffer(url[, options])</code></h3>
+<!--
+added: v22.18.0
+--><ul>
+<li><code>url</code> {URL | string} The file URL string or URL object to convert to a path.</li>
+<li><code>options</code> {Object}<ul>
+<li><code>windows</code> {boolean|undefined} <code>true</code> if the <code>path</code> should be
+return as a windows filepath, <code>false</code> for posix, and
+<code>undefined</code> for the system default.
+<strong>Default:</strong> <code>undefined</code>.</li>
+</ul>
+</li>
+<li>Returns: {Buffer} The fully-resolved platform-specific Node.js file path
+as a {Buffer}.</li>
+</ul>
+<p>Like <code>url.fileURLToPath(...)</code> except that instead of returning a string
+representation of the path, a <code>Buffer</code> is returned. This conversion is
+helpful when the input URL contains percent-encoded segments that are
+not valid UTF-8 / Unicode sequences.</p>
+<h3><code>url.format(URL[, options])</code></h3>
+<!-- YAML
+added: v7.6.0
+--><ul>
+<li><code>URL</code> {URL} A <a href="#the-whatwg-url-api">WHATWG URL</a> object</li>
+<li><code>options</code> {Object}<ul>
+<li><code>auth</code> {boolean} <code>true</code> if the serialized URL string should include the
+username and password, <code>false</code> otherwise. <strong>Default:</strong> <code>true</code>.</li>
+<li><code>fragment</code> {boolean} <code>true</code> if the serialized URL string should include the
+fragment, <code>false</code> otherwise. <strong>Default:</strong> <code>true</code>.</li>
+<li><code>search</code> {boolean} <code>true</code> if the serialized URL string should include the
+search query, <code>false</code> otherwise. <strong>Default:</strong> <code>true</code>.</li>
+<li><code>unicode</code> {boolean} <code>true</code> if Unicode characters appearing in the host
+component of the URL string should be encoded directly as opposed to being
+Punycode encoded. <strong>Default:</strong> <code>false</code>.</li>
+</ul>
+</li>
+<li>Returns: {string}</li>
+</ul>
+<p>Returns a customizable serialization of a URL <code>String</code> representation of a
+<a href="#the-whatwg-url-api">WHATWG URL</a> object.</p>
+<p>The URL object has both a <code>toString()</code> method and <code>href</code> property that return
+string serializations of the URL. These are not, however, customizable in
+any way. The <code>url.format(URL[, options])</code> method allows for basic customization
+of the output.</p>
+<pre><code class="language-mjs">import url from &#39;node:url&#39;;
+const myURL = new URL(&#39;https://a:b@測試?abc#foo&#39;);
+
+console.log(myURL.href);
+// Prints https://a:b@xn--g6w251d/?abc#foo
+
+console.log(myURL.toString());
+// Prints https://a:b@xn--g6w251d/?abc#foo
+
+console.log(url.format(myURL, { fragment: false, unicode: true, auth: false }));
+// Prints &#39;https://測試/?abc&#39;
+</code></pre>
+<pre><code class="language-cjs">const url = require(&#39;node:url&#39;);
+const myURL = new URL(&#39;https://a:b@測試?abc#foo&#39;);
+
+console.log(myURL.href);
+// Prints https://a:b@xn--g6w251d/?abc#foo
+
+console.log(myURL.toString());
+// Prints https://a:b@xn--g6w251d/?abc#foo
+
+console.log(url.format(myURL, { fragment: false, unicode: true, auth: false }));
+// Prints &#39;https://測試/?abc&#39;
+</code></pre>
+<h3><code>url.pathToFileURL(path[, options])</code></h3>
+<!-- YAML
+added: v10.12.0
+changes:
+  - version: v22.1.0
+    pr-url: https://github.com/nodejs/node/pull/52509
+    description: The `options` argument can now be used to
+                 determine how to return the `path` value.
+--><ul>
+<li><code>path</code> {string} The path to convert to a File URL.</li>
+<li><code>options</code> {Object}<ul>
+<li><code>windows</code> {boolean|undefined} <code>true</code> if the <code>path</code> should be
+treated as a windows filepath, <code>false</code> for posix, and
+<code>undefined</code> for the system default.
+<strong>Default:</strong> <code>undefined</code>.</li>
+</ul>
+</li>
+<li>Returns: {URL} The file URL object.</li>
+</ul>
+<p>This function ensures that <code>path</code> is resolved absolutely, and that the URL
+control characters are correctly encoded when converting into a File URL.</p>
+<pre><code class="language-mjs">import { pathToFileURL } from &#39;node:url&#39;;
+
+new URL(&#39;/foo#1&#39;, &#39;file:&#39;);           // Incorrect: file:///foo#1
+pathToFileURL(&#39;/foo#1&#39;);              // Correct:   file:///foo%231 (POSIX)
+
+new URL(&#39;/some/path%.c&#39;, &#39;file:&#39;);    // Incorrect: file:///some/path%.c
+pathToFileURL(&#39;/some/path%.c&#39;);       // Correct:   file:///some/path%25.c (POSIX)
+</code></pre>
+<pre><code class="language-cjs">const { pathToFileURL } = require(&#39;node:url&#39;);
+new URL(__filename);                  // Incorrect: throws (POSIX)
+new URL(__filename);                  // Incorrect: C:\... (Windows)
+pathToFileURL(__filename);            // Correct:   file:///... (POSIX)
+pathToFileURL(__filename);            // Correct:   file:///C:/... (Windows)
+
+new URL(&#39;/foo#1&#39;, &#39;file:&#39;);           // Incorrect: file:///foo#1
+pathToFileURL(&#39;/foo#1&#39;);              // Correct:   file:///foo%231 (POSIX)
+
+new URL(&#39;/some/path%.c&#39;, &#39;file:&#39;);    // Incorrect: file:///some/path%.c
+pathToFileURL(&#39;/some/path%.c&#39;);       // Correct:   file:///some/path%25.c (POSIX)
+</code></pre>
+<h3><code>url.urlToHttpOptions(url)</code></h3>
+<!-- YAML
+added:
+  - v15.7.0
+  - v14.18.0
+changes:
+  - version:
+    - v19.9.0
+    - v18.17.0
+    pr-url: https://github.com/nodejs/node/pull/46989
+    description: The returned object will also contain all the own enumerable
+                 properties of the `url` argument.
+--><ul>
+<li><code>url</code> {URL} The <a href="#the-whatwg-url-api">WHATWG URL</a> object to convert to an options object.</li>
+<li>Returns: {Object} Options object<ul>
+<li><code>protocol</code> {string} Protocol to use.</li>
+<li><code>hostname</code> {string} A domain name or IP address of the server to issue the
+request to.</li>
+<li><code>hash</code> {string} The fragment portion of the URL.</li>
+<li><code>search</code> {string} The serialized query portion of the URL.</li>
+<li><code>pathname</code> {string} The path portion of the URL.</li>
+<li><code>path</code> {string} Request path. Should include query string if any.
+E.G. <code>&#39;/index.html?page=12&#39;</code>. An exception is thrown when the request path
+contains illegal characters. Currently, only spaces are rejected but that
+may change in the future.</li>
+<li><code>href</code> {string} The serialized URL.</li>
+<li><code>port</code> {number} Port of remote server.</li>
+<li><code>auth</code> {string} Basic authentication i.e. <code>&#39;user:password&#39;</code> to compute an
+Authorization header.</li>
+</ul>
+</li>
+</ul>
+<p>This utility function converts a URL object into an ordinary options object as
+expected by the <a href="http.md#httprequestoptions-callback"><code>http.request()</code></a> and <a href="https.md#httpsrequestoptions-callback"><code>https.request()</code></a> APIs.</p>
+<pre><code class="language-mjs">import { urlToHttpOptions } from &#39;node:url&#39;;
+const myURL = new URL(&#39;https://a:b@測試?abc#foo&#39;);
+
+console.log(urlToHttpOptions(myURL));
+/*
+{
+  protocol: &#39;https:&#39;,
+  hostname: &#39;xn--g6w251d&#39;,
+  hash: &#39;#foo&#39;,
+  search: &#39;?abc&#39;,
+  pathname: &#39;/&#39;,
+  path: &#39;/?abc&#39;,
+  href: &#39;https://a:b@xn--g6w251d/?abc#foo&#39;,
+  auth: &#39;a:b&#39;
+}
+*/
+</code></pre>
+<pre><code class="language-cjs">const { urlToHttpOptions } = require(&#39;node:url&#39;);
+const myURL = new URL(&#39;https://a:b@測試?abc#foo&#39;);
+
+console.log(urlToHttpOptions(myURL));
+/*
+{
+  protocol: &#39;https:&#39;,
+  hostname: &#39;xn--g6w251d&#39;,
+  hash: &#39;#foo&#39;,
+  search: &#39;?abc&#39;,
+  pathname: &#39;/&#39;,
+  path: &#39;/?abc&#39;,
+  href: &#39;https://a:b@xn--g6w251d/?abc#foo&#39;,
+  auth: &#39;a:b&#39;
+}
+*/
+</code></pre>
+<h2>Legacy URL API</h2>
+<!-- YAML
+changes:
+  - version:
+      - v15.13.0
+      - v14.17.0
+    pr-url: https://github.com/nodejs/node/pull/37784
+    description: Deprecation revoked. Status changed to "Legacy".
+  - version: v11.0.0
+    pr-url: https://github.com/nodejs/node/pull/22715
+    description: This API is deprecated.
+--><blockquote>
+<p>Stability: 3 - Legacy: Use the WHATWG URL API instead.</p>
+</blockquote>
+<h3>Legacy <code>urlObject</code></h3>
+<!-- YAML
+changes:
+  - version:
+      - v15.13.0
+      - v14.17.0
+    pr-url: https://github.com/nodejs/node/pull/37784
+    description: Deprecation revoked. Status changed to "Legacy".
+  - version: v11.0.0
+    pr-url: https://github.com/nodejs/node/pull/22715
+    description: The Legacy URL API is deprecated. Use the WHATWG URL API.
+--><p>The legacy <code>urlObject</code> (<code>require(&#39;node:url&#39;).Url</code> or
+<code>import { Url } from &#39;node:url&#39;</code>) is
+created and returned by the <code>url.parse()</code> function.</p>
+<h4><code>urlObject.auth</code></h4>
+<p>The <code>auth</code> property is the username and password portion of the URL, also
+referred to as <em>userinfo</em>. This string subset follows the <code>protocol</code> and
+double slashes (if present) and precedes the <code>host</code> component, delimited by <code>@</code>.
+The string is either the username, or it is the username and password separated
+by <code>:</code>.</p>
+<p>For example: <code>&#39;user:pass&#39;</code>.</p>
+<h4><code>urlObject.hash</code></h4>
+<p>The <code>hash</code> property is the fragment identifier portion of the URL including the
+leading <code>#</code> character.</p>
+<p>For example: <code>&#39;#hash&#39;</code>.</p>
+<h4><code>urlObject.host</code></h4>
+<p>The <code>host</code> property is the full lower-cased host portion of the URL, including
+the <code>port</code> if specified.</p>
+<p>For example: <code>&#39;sub.example.com:8080&#39;</code>.</p>
+<h4><code>urlObject.hostname</code></h4>
+<p>The <code>hostname</code> property is the lower-cased host name portion of the <code>host</code>
+component <em>without</em> the <code>port</code> included.</p>
+<p>For example: <code>&#39;sub.example.com&#39;</code>.</p>
+<h4><code>urlObject.href</code></h4>
+<p>The <code>href</code> property is the full URL string that was parsed with both the
+<code>protocol</code> and <code>host</code> components converted to lower-case.</p>
+<p>For example: <code>&#39;http://user:pass@sub.example.com:8080/p/a/t/h?query=string#hash&#39;</code>.</p>
+<h4><code>urlObject.path</code></h4>
+<p>The <code>path</code> property is a concatenation of the <code>pathname</code> and <code>search</code>
+components.</p>
+<p>For example: <code>&#39;/p/a/t/h?query=string&#39;</code>.</p>
+<p>No decoding of the <code>path</code> is performed.</p>
+<h4><code>urlObject.pathname</code></h4>
+<p>The <code>pathname</code> property consists of the entire path section of the URL. This
+is everything following the <code>host</code> (including the <code>port</code>) and before the start
+of the <code>query</code> or <code>hash</code> components, delimited by either the ASCII question
+mark (<code>?</code>) or hash (<code>#</code>) characters.</p>
+<p>For example: <code>&#39;/p/a/t/h&#39;</code>.</p>
+<p>No decoding of the path string is performed.</p>
+<h4><code>urlObject.port</code></h4>
+<p>The <code>port</code> property is the numeric port portion of the <code>host</code> component.</p>
+<p>For example: <code>&#39;8080&#39;</code>.</p>
+<h4><code>urlObject.protocol</code></h4>
+<p>The <code>protocol</code> property identifies the URL&#39;s lower-cased protocol scheme.</p>
+<p>For example: <code>&#39;http:&#39;</code>.</p>
+<h4><code>urlObject.query</code></h4>
+<p>The <code>query</code> property is either the query string without the leading ASCII
+question mark (<code>?</code>), or an object returned by the <a href="querystring.md"><code>querystring</code></a> module&#39;s
+<code>parse()</code> method. Whether the <code>query</code> property is a string or object is
+determined by the <code>parseQueryString</code> argument passed to <code>url.parse()</code>.</p>
+<p>For example: <code>&#39;query=string&#39;</code> or <code>{&#39;query&#39;: &#39;string&#39;}</code>.</p>
+<p>If returned as a string, no decoding of the query string is performed. If
+returned as an object, both keys and values are decoded.</p>
+<h4><code>urlObject.search</code></h4>
+<p>The <code>search</code> property consists of the entire &quot;query string&quot; portion of the
+URL, including the leading ASCII question mark (<code>?</code>) character.</p>
+<p>For example: <code>&#39;?query=string&#39;</code>.</p>
+<p>No decoding of the query string is performed.</p>
+<h4><code>urlObject.slashes</code></h4>
+<p>The <code>slashes</code> property is a <code>boolean</code> with a value of <code>true</code> if two ASCII
+forward-slash characters (<code>/</code>) are required following the colon in the
+<code>protocol</code>.</p>
+<h3><code>url.format(urlObject)</code></h3>
+<!-- YAML
+added: v0.1.25
+changes:
+  - version: v17.0.0
+    pr-url: https://github.com/nodejs/node/pull/38631
+    description: Now throws an `ERR_INVALID_URL` exception when Punycode
+                 conversion of a hostname introduces changes that could cause
+                 the URL to be re-parsed differently.
+  - version:
+      - v15.13.0
+      - v14.17.0
+    pr-url: https://github.com/nodejs/node/pull/37784
+    description: Deprecation revoked. Status changed to "Legacy".
+  - version: v11.0.0
+    pr-url: https://github.com/nodejs/node/pull/22715
+    description: The Legacy URL API is deprecated. Use the WHATWG URL API.
+  - version: v7.0.0
+    pr-url: https://github.com/nodejs/node/pull/7234
+    description: URLs with a `file:` scheme will now always use the correct
+                 number of slashes regardless of `slashes` option. A falsy
+                 `slashes` option with no protocol is now also respected at all
+                 times.
+--><ul>
+<li><code>urlObject</code> {Object|string} A URL object (as returned by <code>url.parse()</code> or
+constructed otherwise). If a string, it is converted to an object by passing
+it to <code>url.parse()</code>.</li>
+</ul>
+<p>The <code>url.format()</code> method returns a formatted URL string derived from
+<code>urlObject</code>.</p>
+<pre><code class="language-js">const url = require(&#39;node:url&#39;);
+url.format({
+  protocol: &#39;https&#39;,
+  hostname: &#39;example.com&#39;,
+  pathname: &#39;/some/path&#39;,
+  query: {
+    page: 1,
+    format: &#39;json&#39;,
+  },
+});
+
+// =&gt; &#39;https://example.com/some/path?page=1&amp;format=json&#39;
+</code></pre>
+<p>If <code>urlObject</code> is not an object or a string, <code>url.format()</code> will throw a
+<a href="errors.md#class-typeerror"><code>TypeError</code></a>.</p>
+<p>The formatting process operates as follows:</p>
+<ul>
+<li>A new empty string <code>result</code> is created.</li>
+<li>If <code>urlObject.protocol</code> is a string, it is appended as-is to <code>result</code>.</li>
+<li>Otherwise, if <code>urlObject.protocol</code> is not <code>undefined</code> and is not a string, an
+<a href="errors.md#class-error"><code>Error</code></a> is thrown.</li>
+<li>For all string values of <code>urlObject.protocol</code> that <em>do not end</em> with an ASCII
+colon (<code>:</code>) character, the literal string <code>:</code> will be appended to <code>result</code>.</li>
+<li>If either of the following conditions is true, then the literal string <code>//</code>
+will be appended to <code>result</code>:<ul>
+<li><code>urlObject.slashes</code> property is true;</li>
+<li><code>urlObject.protocol</code> begins with <code>http</code>, <code>https</code>, <code>ftp</code>, <code>gopher</code>, or
+<code>file</code>;</li>
+</ul>
+</li>
+<li>If the value of the <code>urlObject.auth</code> property is truthy, and either
+<code>urlObject.host</code> or <code>urlObject.hostname</code> are not <code>undefined</code>, the value of
+<code>urlObject.auth</code> will be coerced into a string and appended to <code>result</code>
+followed by the literal string <code>@</code>.</li>
+<li>If the <code>urlObject.host</code> property is <code>undefined</code> then:<ul>
+<li>If the <code>urlObject.hostname</code> is a string, it is appended to <code>result</code>.</li>
+<li>Otherwise, if <code>urlObject.hostname</code> is not <code>undefined</code> and is not a string,
+an <a href="errors.md#class-error"><code>Error</code></a> is thrown.</li>
+<li>If the <code>urlObject.port</code> property value is truthy, and <code>urlObject.hostname</code>
+is not <code>undefined</code>:<ul>
+<li>The literal string <code>:</code> is appended to <code>result</code>, and</li>
+<li>The value of <code>urlObject.port</code> is coerced to a string and appended to
+<code>result</code>.</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>Otherwise, if the <code>urlObject.host</code> property value is truthy, the value of
+<code>urlObject.host</code> is coerced to a string and appended to <code>result</code>.</li>
+<li>If the <code>urlObject.pathname</code> property is a string that is not an empty string:<ul>
+<li>If the <code>urlObject.pathname</code> <em>does not start</em> with an ASCII forward slash
+(<code>/</code>), then the literal string <code>&#39;/&#39;</code> is appended to <code>result</code>.</li>
+<li>The value of <code>urlObject.pathname</code> is appended to <code>result</code>.</li>
+</ul>
+</li>
+<li>Otherwise, if <code>urlObject.pathname</code> is not <code>undefined</code> and is not a string, an
+<a href="errors.md#class-error"><code>Error</code></a> is thrown.</li>
+<li>If the <code>urlObject.search</code> property is <code>undefined</code> and if the <code>urlObject.query</code>
+property is an <code>Object</code>, the literal string <code>?</code> is appended to <code>result</code>
+followed by the output of calling the <a href="querystring.md"><code>querystring</code></a> module&#39;s <code>stringify()</code>
+method passing the value of <code>urlObject.query</code>.</li>
+<li>Otherwise, if <code>urlObject.search</code> is a string:<ul>
+<li>If the value of <code>urlObject.search</code> <em>does not start</em> with the ASCII question
+mark (<code>?</code>) character, the literal string <code>?</code> is appended to <code>result</code>.</li>
+<li>The value of <code>urlObject.search</code> is appended to <code>result</code>.</li>
+</ul>
+</li>
+<li>Otherwise, if <code>urlObject.search</code> is not <code>undefined</code> and is not a string, an
+<a href="errors.md#class-error"><code>Error</code></a> is thrown.</li>
+<li>If the <code>urlObject.hash</code> property is a string:<ul>
+<li>If the value of <code>urlObject.hash</code> <em>does not start</em> with the ASCII hash (<code>#</code>)
+character, the literal string <code>#</code> is appended to <code>result</code>.</li>
+<li>The value of <code>urlObject.hash</code> is appended to <code>result</code>.</li>
+</ul>
+</li>
+<li>Otherwise, if the <code>urlObject.hash</code> property is not <code>undefined</code> and is not a
+string, an <a href="errors.md#class-error"><code>Error</code></a> is thrown.</li>
+<li><code>result</code> is returned.</li>
+</ul>
+<h3><code>url.parse(urlString[, parseQueryString[, slashesDenoteHost]])</code></h3>
+<!-- YAML
+added: v0.1.25
+changes:
+  - version:
+      - v19.0.0
+      - v18.13.0
+    pr-url: https://github.com/nodejs/node/pull/44919
+    description: Documentation-only deprecation.
+  - version:
+      - v15.13.0
+      - v14.17.0
+    pr-url: https://github.com/nodejs/node/pull/37784
+    description: Deprecation revoked. Status changed to "Legacy".
+  - version: v11.14.0
+    pr-url: https://github.com/nodejs/node/pull/26941
+    description: The `pathname` property on the returned URL object is now `/`
+                 when there is no path and the protocol scheme is `ws:` or
+                 `wss:`.
+  - version: v11.0.0
+    pr-url: https://github.com/nodejs/node/pull/22715
+    description: The Legacy URL API is deprecated. Use the WHATWG URL API.
+  - version: v9.0.0
+    pr-url: https://github.com/nodejs/node/pull/13606
+    description: The `search` property on the returned URL object is now `null`
+                 when no query string is present.
+--><blockquote>
+<p>Stability: 0 - Deprecated: Use the WHATWG URL API instead.</p>
+</blockquote>
+<ul>
+<li><code>urlString</code> {string} The URL string to parse.</li>
+<li><code>parseQueryString</code> {boolean} If <code>true</code>, the <code>query</code> property will always
+be set to an object returned by the <a href="querystring.md"><code>querystring</code></a> module&#39;s <code>parse()</code>
+method. If <code>false</code>, the <code>query</code> property on the returned URL object will be an
+unparsed, undecoded string. <strong>Default:</strong> <code>false</code>.</li>
+<li><code>slashesDenoteHost</code> {boolean} If <code>true</code>, the first token after the literal
+string <code>//</code> and preceding the next <code>/</code> will be interpreted as the <code>host</code>.
+For instance, given <code>//foo/bar</code>, the result would be
+<code>{host: &#39;foo&#39;, pathname: &#39;/bar&#39;}</code> rather than <code>{pathname: &#39;//foo/bar&#39;}</code>.
+<strong>Default:</strong> <code>false</code>.</li>
+</ul>
+<p>The <code>url.parse()</code> method takes a URL string, parses it, and returns a URL
+object.</p>
+<p>A <code>TypeError</code> is thrown if <code>urlString</code> is not a string.</p>
+<p>A <code>URIError</code> is thrown if the <code>auth</code> property is present but cannot be decoded.</p>
+<p><code>url.parse()</code> uses a lenient, non-standard algorithm for parsing URL
+strings. It is prone to security issues such as <a href="https://hackerone.com/reports/678487">host name spoofing</a>
+and incorrect handling of usernames and passwords. Do not use with untrusted
+input. CVEs are not issued for <code>url.parse()</code> vulnerabilities. Use the
+<a href="#the-whatwg-url-api">WHATWG URL</a> API instead.</p>
+<h3><code>url.resolve(from, to)</code></h3>
+<!-- YAML
+added: v0.1.25
+changes:
+  - version:
+      - v15.13.0
+      - v14.17.0
+    pr-url: https://github.com/nodejs/node/pull/37784
+    description: Deprecation revoked. Status changed to "Legacy".
+  - version: v11.0.0
+    pr-url: https://github.com/nodejs/node/pull/22715
+    description: The Legacy URL API is deprecated. Use the WHATWG URL API.
+  - version: v6.6.0
+    pr-url: https://github.com/nodejs/node/pull/8215
+    description: The `auth` fields are now kept intact when `from` and `to`
+                 refer to the same host.
+  - version:
+    - v6.5.0
+    - v4.6.2
+    pr-url: https://github.com/nodejs/node/pull/8214
+    description: The `port` field is copied correctly now.
+  - version: v6.0.0
+    pr-url: https://github.com/nodejs/node/pull/1480
+    description: The `auth` fields is cleared now the `to` parameter
+                 contains a hostname.
+--><ul>
+<li><code>from</code> {string} The base URL to use if <code>to</code> is a relative URL.</li>
+<li><code>to</code> {string} The target URL to resolve.</li>
+</ul>
+<p>The <code>url.resolve()</code> method resolves a target URL relative to a base URL in a
+manner similar to that of a web browser resolving an anchor tag.</p>
+<pre><code class="language-js">const url = require(&#39;node:url&#39;);
+url.resolve(&#39;/one/two/three&#39;, &#39;four&#39;);         // &#39;/one/two/four&#39;
+url.resolve(&#39;http://example.com/&#39;, &#39;/one&#39;);    // &#39;http://example.com/one&#39;
+url.resolve(&#39;http://example.com/one&#39;, &#39;/two&#39;); // &#39;http://example.com/two&#39;
+</code></pre>
+<p>To achieve the same result using the WHATWG URL API:</p>
+<pre><code class="language-js">function resolve(from, to) {
+  const resolvedUrl = new URL(to, new URL(from, &#39;resolve://&#39;));
+  if (resolvedUrl.protocol === &#39;resolve:&#39;) {
+    // `from` is a relative URL.
+    const { pathname, search, hash } = resolvedUrl;
+    return pathname + search + hash;
+  }
+  return resolvedUrl.toString();
+}
+
+resolve(&#39;/one/two/three&#39;, &#39;four&#39;);         // &#39;/one/two/four&#39;
+resolve(&#39;http://example.com/&#39;, &#39;/one&#39;);    // &#39;http://example.com/one&#39;
+resolve(&#39;http://example.com/one&#39;, &#39;/two&#39;); // &#39;http://example.com/two&#39;
+</code></pre>
+<p><a id="whatwg-percent-encoding"></a></p>
+<h2>Percent-encoding in URLs</h2>
+<p>URLs are permitted to only contain a certain range of characters. Any character
+falling outside of that range must be encoded. How such characters are encoded,
+and which characters to encode depends entirely on where the character is
+located within the structure of the URL.</p>
+<h3>Legacy API</h3>
+<p>Within the Legacy API, spaces (<code>&#39; &#39;</code>) and the following characters will be
+automatically escaped in the properties of URL objects:</p>
+<pre><code class="language-text">&lt; &gt; &quot; ` \r \n \t { } | \ ^ &#39;
+</code></pre>
+<p>For example, the ASCII space character (<code>&#39; &#39;</code>) is encoded as <code>%20</code>. The ASCII
+forward slash (<code>/</code>) character is encoded as <code>%3C</code>.</p>
+<h3>WHATWG API</h3>
+<p>The <a href="https://url.spec.whatwg.org/">WHATWG URL Standard</a> uses a more selective and fine grained approach to
+selecting encoded characters than that used by the Legacy API.</p>
+<p>The WHATWG algorithm defines four &quot;percent-encode sets&quot; that describe ranges
+of characters that must be percent-encoded:</p>
+<ul>
+<li><p>The <em>C0 control percent-encode set</em> includes code points in range U+0000 to
+U+001F (inclusive) and all code points greater than U+007E (~).</p>
+</li>
+<li><p>The <em>fragment percent-encode set</em> includes the <em>C0 control percent-encode set</em>
+and code points U+0020 SPACE, U+0022 (&quot;), U+003C (&lt;), U+003E (&gt;),
+and U+0060 (`).</p>
+</li>
+<li><p>The <em>path percent-encode set</em> includes the <em>C0 control percent-encode set</em>
+and code points U+0020 SPACE, U+0022 (&quot;), U+0023 (#), U+003C (&lt;), U+003E (&gt;),
+U+003F (?), U+0060 (`), U+007B ({), and U+007D (}).</p>
+</li>
+<li><p>The <em>userinfo encode set</em> includes the <em>path percent-encode set</em> and code
+points U+002F (/), U+003A (:), U+003B (;), U+003D (=), U+0040 (@),
+U+005B ([) to U+005E(^), and U+007C (|).</p>
+</li>
+</ul>
+<p>The <em>userinfo percent-encode set</em> is used exclusively for username and
+passwords encoded within the URL. The <em>path percent-encode set</em> is used for the
+path of most URLs. The <em>fragment percent-encode set</em> is used for URL fragments.
+The <em>C0 control percent-encode set</em> is used for host and path under certain
+specific conditions, in addition to all other cases.</p>
+<p>When non-ASCII characters appear within a host name, the host name is encoded
+using the <a href="https://tools.ietf.org/html/rfc5891#section-4.4">Punycode</a> algorithm. Note, however, that a host name <em>may</em> contain
+<em>both</em> Punycode encoded and percent-encoded characters:</p>
+<pre><code class="language-js">const myURL = new URL(&#39;https://%CF%80.example.com/foo&#39;);
+console.log(myURL.href);
+// Prints https://xn--1xa.example.com/foo
+console.log(myURL.origin);
+// Prints https://xn--1xa.example.com
+</code></pre>
+</article><aside>Footer advertising tracking</aside></main><footer>Footer advertising tracking</footer></body></html>

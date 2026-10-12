@@ -9,6 +9,24 @@ import { WorkspaceChangeTracker } from "../../../src/workflow/workspace-tracker.
 
 const run = promisify(execFile);
 
+test("workspace tracker fingerprints supported large binary changes without losing evidence", async () => {
+  await withWorkspace(async (workspace) => {
+    await run("git", ["init"], { cwd: workspace });
+    const file = path.join(workspace, "asset.bin");
+    await fs.writeFile(file, Buffer.alloc(17 * 1024 * 1024, 7));
+    const tracker = new WorkspaceChangeTracker(workspace);
+    const baseline = await tracker.begin();
+    assert.equal(baseline.complete, true);
+    const handle = await fs.open(file, "r+");
+    try { await handle.write(Buffer.from([9]), 0, 1, 16 * 1024 * 1024 + 1); }
+    finally { await handle.close(); }
+    const changed = await tracker.observe();
+    assert.equal(changed.complete, true);
+    assert.deepEqual(changed.changedPaths, ["asset.bin"]);
+    assert.notEqual(changed.revision, baseline.revision);
+  });
+});
+
 async function withWorkspace(callback: (workspace: string) => Promise<void>): Promise<void> {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-tracker-"));
   try { await callback(workspace); } finally { await fs.rm(workspace, { recursive: true, force: true }); }

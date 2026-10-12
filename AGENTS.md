@@ -32,7 +32,7 @@
 
 ## 项目基础与不可破坏的边界
 
-- Node.js 22+、TypeScript、ESM、`pnpm@10.22.0`；默认单 Agent、可选根 Agent 管理的团队协作、Responses API、React + Ink inline TUI。主方向是 DeepSeek 优先、Windows 优先、Node/TypeScript 单包个人开发。
+- Node.js 22+、TypeScript、ESM、`pnpm@10.30.3`；默认单 Agent、可选根 Agent 管理的团队协作、Responses API、React + Ink inline TUI。主方向是 DeepSeek 优先、Windows 优先、Node/TypeScript 单包个人开发。
 - 保留已有 tracked/untracked 改动。不要 reset、checkout、删除、覆盖或顺手整理无关文件；先做最小、聚焦修改。
 - 模型名保留供应商原始 ID。官方能力与未知兼容端点分开；不根据模型名或 SDK 方法存在就推断能力。API Key 只由 `AuthStorage`/系统 keyring 管理，不写入模型注册 JSON、Session、日志、测试快照或 UI。
 - 模型 shell 必须走固定原生 sandbox，启动失败不得回退宿主直跑；项目策略只能收紧权限，审批绑定权限 revision。`read-only`/`ask`、默认 `workspace-write`、二次确认的 `full-access` 语义见权限专题。用户直接 `!` 是独立宿主 PTY，不进入模型 context。
@@ -51,8 +51,8 @@
 
 - 用户可见命令、输出或安装方法变化时同时更新中英文 README。文档组织变化也要保持双语入口一致。
 - 当前版本、commit、测试数量和验证证据只在 `HANDOFF` 维护；历史移入 `docs/archive/`，不要把旧结果当新验证。固定上游参考 revision 可以保留在出处和评测材料中。
-- 没有明确授权，不付费评测、不改版本、不提交、不推送、不打 tag、不创建 Release。需要 live 评测时另行取得明确授权及 task/campaign 数值预算。
+- 没有明确授权，不付费评测、不改版本、不提交、不推送、不打 tag、不创建 Release。需要 live 评测时取得明确授权；显式 null 表示不限额，仍保留计量、超时和取消。
 - commit message 聚焦实际功能、修复、测试或文档；禁止产品名称，也禁止 `release`、`version`、“发布”、“版本”等措辞。
-- 用户要求提交/推送但不创建 Release 时，使用 Release 专用 `[skip publish]` 标记并核对 workflow；不要用 `[skip ci]` 关闭测试。只有用户明确要求时才更新 `package.json` 与双语 README 展示版本；创建 tag/Release 需要发布授权，并核对真实结果。
+- 用户要求提交/推送但不创建 Release 时，使用 Release 专用 `[skip publish]` 标记并核对 workflow；不要用 `[skip ci]` 关闭测试。只有用户明确要求时才更新 `package.json` 与双语 README 展示版本；创建 tag/Release 需要发布授权，并核对真实结果。源码预发布可明确记录未覆盖平台；正式原生安装包仍必须通过完整门禁。
 
 文档是已核对知识的索引，不是自动生成的源码镜像。事实与当前代码或测试冲突时，以当前证据为准，并在本次任务中修正文档。

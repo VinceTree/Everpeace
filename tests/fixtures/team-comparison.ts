@@ -25,7 +25,7 @@ export async function runOfflineComparison(team: boolean, failRoot = false, same
     await fs.writeFile(path.join(workspace, ".gitignore"), "block-root\nnode_modules/\n");
     for (const name of ["a", "b"]) await fs.writeFile(path.join(workspace, `${name}.ts`), `export const ${name} = 1;\n`);
     await fs.writeFile(path.join(workspace, "check.cjs"), "const fs=require('node:fs');if(fs.existsSync('block-root'))process.exit(1);for(const name of ['a','b'])if(!new RegExp('export const '+name+' = [12];').test(fs.readFileSync(name+'.ts','utf8')))process.exit(1);\n");
-    await fs.writeFile(path.join(workspace, "package.json"), JSON.stringify({ name: "offline-fixture", packageManager: "pnpm@10.22.0", scripts: { typecheck: "node check.cjs", test: "node check.cjs", build: "node check.cjs" } }));
+    await fs.writeFile(path.join(workspace, "package.json"), JSON.stringify({ name: "offline-fixture", packageManager: "pnpm@10.30.3", scripts: { typecheck: "node check.cjs", test: "node check.cjs", build: "node check.cjs" } }));
     await git(workspace, ["add", "."]); await git(workspace, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "fixture"]);
     if (failRoot) await fs.writeFile(path.join(workspace, "block-root"), "Root-only failing check; excluded from worker snapshots.\n");
     globalThis.fetch = async (_url, init) => {

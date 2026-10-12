@@ -1,0 +1,107 @@
+{
+  "schema": 1,
+  "commit": "4483a606113baf0709853a4a4d7d9ca986163169",
+  "runId": 38216807264,
+  "url": "https://github.com/VinceTree/Everpeace/actions/runs/38216807264",
+  "jobs": [
+    {
+      "name": "security / scan",
+      "conclusion": "success",
+      "url": "https://github.com/VinceTree/Everpeace/actions/runs/38216807264/job/114703345190"
+    },
+    {
+      "name": "validate / windows-2025 · Node 22",
+      "conclusion": "success",
+      "url": "https://github.com/VinceTree/Everpeace/actions/runs/38216807264/job/114703345498"
+    },
+    {
+      "name": "validate / ubuntu-24.04 · Node 22",
+      "conclusion": "success",
+      "url": "https://github.com/VinceTree/Everpeace/actions/runs/38216807264/job/114703345590"
+    },
+    {
+      "name": "Required checks",
+      "conclusion": "success",
+      "url": "https://github.com/VinceTree/Everpeace/actions/runs/38216807264/job/114704596810"
+    }
+  ],
+  "logs": [
+    {
+      "platform": "linux",
+      "sha256": "22a3481d8a085dc8b58b8bf70a8db869f10d2dd8ee9f3c6df28257f244ca75df",
+      "tests": [
+        {
+          "field": "tests",
+          "value": 1258
+        },
+        {
+          "field": "pass",
+          "value": 1249
+        },
+        {
+          "field": "fail",
+          "value": 0
+        },
+        {
+          "field": "skipped",
+          "value": 9
+        },
+        {
+          "field": "tests",
+          "value": 7
+        },
+        {
+          "field": "pass",
+          "value": 6
+        },
+        {
+          "field": "fail",
+          "value": 0
+        },
+        {
+          "field": "skipped",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "platform": "windows",
+      "sha256": "ba4ddbc8d4faa4e0908da1f320e95f4ec94fd71f92caf763ee248ec89fb5d8e1",
+      "tests": [
+        {
+          "field": "tests",
+          "value": 1258
+        },
+        {
+          "field": "pass",
+          "value": 1250
+        },
+        {
+          "field": "fail",
+          "value": 0
+        },
+        {
+          "field": "skipped",
+          "value": 8
+        },
+        {
+          "field": "tests",
+          "value": 7
+        },
+        {
+          "field": "pass",
+          "value": 7
+        },
+        {
+          "field": "fail",
+          "value": 0
+        },
+        {
+          "field": "skipped",
+          "value": 0
+        }
+      ]
+    }
+  ],
+  "interpretation": "Hosted Ubuntu/Windows source and shared security gates. Platform skips are not native acceptance. Final metadata-only documentation commit and merge will have their own checks."
+}

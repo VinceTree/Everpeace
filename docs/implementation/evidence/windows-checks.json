@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "platform": "win32",
+  "node": "v22.19.0",
+  "checks": [
+    {
+      "command": "pnpm typecheck",
+      "exitCode": 0,
+      "log": "final-typecheck.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": "pnpm lint",
+      "exitCode": 0,
+      "log": "final-lint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": "pnpm test",
+      "exitCode": 0,
+      "log": "final-test.log",
+      "sha256": "90b4c77887f7d3c2da3d475344797a46bbcd1a84d9074a69d94653c3e4a8711b"
+    },
+    {
+      "command": "pnpm build",
+      "exitCode": 0,
+      "log": "final-build.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": "pnpm install:smoke",
+      "exitCode": 0,
+      "log": "final-smoke.log",
+      "sha256": "53cbd8b6af0f7637744f12a33569a63788097bb2fae5ea2b50cf1c2be489e202"
+    },
+    {
+      "command": "pnpm install:clean",
+      "exitCode": 0,
+      "log": "final-clean-install.log",
+      "sha256": "99a317d3ff7ff2f8057b550534f639b2720ceeb39aa34c1ee2036267e5940ac5"
+    },
+    {
+      "command": "pnpm ci:verify",
+      "exitCode": 0,
+      "log": "final-workflows.log",
+      "sha256": "5fbabce48a5f8c28f75b14bab553f2aeffa2c111937aad700f895a2efa61448d"
+    }
+  ],
+  "tests": {
+    "total": 1258,
+    "passed": 1255,
+    "failed": 0,
+    "skipped": 3,
+    "cancelled": 0
+  },
+  "sourceInstallSmoke": {
+    "passed": 7,
+    "failed": 0
+  },
+  "platformSkips": "Skipped tests do not count as native/platform acceptance.",
+  "securityScan": "Initial download connection failed; retry and remote shared security gate are tracked separately."
+}

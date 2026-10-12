@@ -81,6 +81,8 @@ function parseTask(value: unknown, index: number): BenchmarkTaskCatalogEntry {
   if (raw.verification === undefined) throw new Error(`tasks[${index}].verification is required`);
   const verification = parseVerification(raw.verification, `tasks[${index}].verification`);
   const acceptance = raw.acceptance === undefined ? undefined : parseVerification(raw.acceptance, `tasks[${index}].acceptance`);
+  const regression = raw.regression === undefined ? undefined : parseVerification(raw.regression, `tasks[${index}].regression`);
+  if (raw.allowedPaths !== undefined && (!Array.isArray(raw.allowedPaths) || !raw.allowedPaths.length || raw.allowedPaths.some(p => typeof p !== 'string' || !p || p.includes('\\') || p.startsWith('/') || p.includes(':') || p.split('/').includes('..')))) throw new Error('allowedPaths must be normalized workspace-relative scopes');
   let fixture: BenchmarkTaskCatalogEntry["fixture"];
   if (raw.fixture !== undefined) {
     if (!raw.fixture || typeof raw.fixture !== "object" || Array.isArray(raw.fixture)) {
@@ -122,6 +124,8 @@ function parseTask(value: unknown, index: number): BenchmarkTaskCatalogEntry {
     ...(maxRepairAttempts === undefined ? {} : { maxRepairAttempts }),
     ...(fixture === undefined ? {} : { fixture }),
     ...(acceptance === undefined ? {} : { acceptance }),
+    ...(regression === undefined ? {} : { regression }),
+    ...(raw.allowedPaths === undefined ? {} : { allowedPaths: raw.allowedPaths as string[] }),
     verification,
   };
 }

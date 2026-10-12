@@ -1,0 +1,30 @@
+{
+  "campaignId": "optimization-team-20261012",
+  "catalogPath": "../../benchmark/OPTIMIZATION_TASKS.json",
+  "fixtureRoot": "../../../tests/fixtures/optimization",
+  "runsRoot": "../../../.cache/evaluation/workspaces",
+  "artifactsRoot": "../../../.cache/evaluation/team",
+  "sessionsRoot": "../../../.cache/evaluation/sessions/team",
+  "modelId": "e4969b4a-4e76-4829-86ba-3850451ec995",
+  "seed": 20261012,
+  "ordering": "paired",
+  "repetitions": 5,
+  "taskTokenBudget": null,
+  "campaignTokenBudget": null,
+  "harnesses": [
+    {
+      "kind": "everpeace",
+      "name": "baseline",
+      "repairStrategy": "baseline"
+    },
+    {
+      "kind": "everpeace",
+      "name": "candidate",
+      "repairStrategy": "baseline",
+      "team": {
+        "enabled": true,
+        "maxAgents": 3
+      }
+    }
+  ]
+}

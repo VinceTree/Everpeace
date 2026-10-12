@@ -199,7 +199,7 @@ test("memory policy cancels queued capture and snapshots refresh between turns",
   let requests = 0;
   try {
     const store = new LearnedMemoryStore({ directory });
-    await store.append("project", "C:\\repo", [{ lesson: "Use pnpm tests", applyWhen: "When testing this project" }]);
+    await store.append("project", "C:\\repo", [{ lesson: "Use pnpm tests", applyWhen: "When testing this project", reviewedAt: new Date().toISOString() }]);
     const runtime = new LearnedMemoryRuntime({
       store,
       model: "test-model",
@@ -231,7 +231,7 @@ test("Chinese retrieval and full timestamp metadata survive round trips", async 
   const directory = await temporaryDirectory();
   try {
     const store = new LearnedMemoryStore({ directory, now: () => new Date("2026-09-20T12:34:56.789Z") });
-    await store.append("project", "C:\\repo", [{ lesson: "中文项目使用 pnpm 执行测试", applyWhen: "修改代码后运行测试" }]);
+    await store.append("project", "C:\\repo", [{ lesson: "中文项目使用 pnpm 执行测试", applyWhen: "修改代码后运行测试", reviewedAt: "2026-09-20T12:34:56.789Z" }]);
     assert.match(await store.prompt("C:\\repo", "请检查项目测试"), /pnpm/u);
     const [entry] = await store.read("project", "C:\\repo");
     assert.equal(entry?.createdAt, "2026-09-20T12:34:56.789Z");
@@ -311,8 +311,8 @@ test("memory retrieval prefers relevant active entries and respects chat policy"
   try {
     const store = new LearnedMemoryStore({ directory, now: () => new Date("2026-09-20T12:00:00.000Z") });
     await store.append("project", "C:\\repo", [
-      { lesson: "Use the existing test style", applyWhen: "When adding tests" },
-      { lesson: "Use the release checklist", applyWhen: "When preparing a release" },
+      { lesson: "Use the existing test style", applyWhen: "When adding tests", reviewedAt: "2026-09-20T12:00:00.000Z" },
+      { lesson: "Use the release checklist", applyWhen: "When preparing a release", reviewedAt: "2026-09-20T12:00:00.000Z" },
     ]);
     const entries = await store.read("project", "C:\\repo");
     await store.updateEntry("project", "C:\\repo", entries[1]!.id, { status: "archived" });

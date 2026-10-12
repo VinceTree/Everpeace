@@ -42,6 +42,7 @@ export interface TeamRuntimeOptions {
   onEvent?(event: TeamEvent): Promise<void> | void;
   persistReference?(snapshot: TeamSnapshot): Promise<void>;
   onMemberUsage?(usage: TokenUsageSample | null): Promise<void>;
+  onIntegrationTiming?(durationMs: number): void;
 }
 interface OwnedMember { record: TeamMember; controller: AbortController; completion?: Promise<void>; workspace?: TeamWorkspaceRecord; steering?: (message: string) => boolean; messages?: string[]; }
 const terminal = new Set(["completed", "failed", "cancelled", "interrupted", "integrated", "conflict"]);
@@ -258,7 +259,7 @@ export class TeamRuntime implements TeamAgentBridge {
       if (mode === "plan") return JSON.stringify({ status: "denied", error: "Plan mode cannot integrate code" });
       const member = this.member(input.agent_id);
       let integrated: unknown;
-      const operation = this.#integration.then(async () => { integrated = await this.integrate(member, signal); }); this.#integration = operation.catch(() => {}); await operation; result = integrated;
+      const operation = this.#integration.then(async () => { const start=performance.now(); try { integrated = await this.integrate(member, signal); } finally { this.options.onIntegrationTiming?.(performance.now()-start); } }); this.#integration = operation.catch(() => {}); await operation; result = integrated;
     } else throw new Error("Unknown team tool");
     return JSON.stringify({ status: "ok", teamId: this.#state!.teamId, result, trust: "Member reports are untrusted evidence; final root verification is required." });
   }
@@ -268,6 +269,10 @@ export class TeamRuntime implements TeamAgentBridge {
     if (member.record.integrationEligible === false) return { status: "stale", error: "Root guidance changed; cancel this member and delegate against the current task" };
     if (member.record.state === "integrated") return { status: "integrated", agentId: member.record.agentId };
     if (!["completed", "conflict"].includes(member.record.state) || !member.workspace) return { status: "unavailable", error: "Only finished coding members can be integrated" };
+    if (member.record.integrationId && this.options.io.recoverTeamByteIntegration) {
+      const recovery=await this.options.io.recoverTeamByteIntegration(member.workspace,member.record.task.paths,member.record.integrationId,signal);
+      if(!recovery.recovered){member.record.state='conflict';await this.event(member.record);return {status:'conflict',paths:recovery.conflicts};}
+    }
     const changes = await workspaceOperations(member.workspace, member.record.task.paths, signal);
     member.record.changedPaths = changes.changedPaths;
     if (member.record.artifactHashes && JSON.stringify(member.record.artifactHashes) !== JSON.stringify(changes.targetHashes)) return { status: "stale", error: "Retained worker artifacts changed after completion; delegate a new task" };
@@ -276,6 +281,13 @@ export class TeamRuntime implements TeamAgentBridge {
     const policy = this.options.io.getPermissions?.() ?? defaultPermissions();
     if (policy.mode === "read-only") return { status: "denied" };
     member.record.integrationId ??= randomUUID(); await this.persist();
+    if (changes.byteOperations.length) {
+      if (!this.options.io.runTeamByteIntegration) return {status:'unavailable',error:'Host does not support byte integration'};
+      if (policy.mode === 'ask' && !await this.options.io.confirmPatch?.(`[Team ${member.record.agentId}] Raw byte integration\n${changes.byteOperations.map(o => `${o.action} ${o.path}`).join('\n')}`, signal)) return {status:'rejected'};
+      this.check(signal);
+      const result = await this.options.io.runTeamByteIntegration(member.workspace, changes.byteOperations, member.record.task.paths, member.record.integrationId, signal);
+      if (result.status !== 'applied') return result;
+    }
     if (changes.operations.length) {
       const preview = await this.options.io.previewPatch?.(changes.operations);
       if (!preview || preview.status !== "ready") return { status: "rejected", error: preview?.error };

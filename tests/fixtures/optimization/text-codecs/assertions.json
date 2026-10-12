@@ -1,0 +1,31 @@
+{
+  "contract": "a.transform reverses a string by Unicode code points, preserving astral characters; b.transform decodes + as a space before percent-decoding a form field.",
+  "acceptance": {
+    "a": [
+      [
+        "a😀b",
+        "b😀a"
+      ]
+    ],
+    "b": [
+      [
+        "a+b%2Bc",
+        "a b+c"
+      ]
+    ]
+  },
+  "regression": {
+    "a": [
+      [
+        "abc",
+        "cba"
+      ]
+    ],
+    "b": [
+      [
+        "abc",
+        "abc"
+      ]
+    ]
+  }
+}

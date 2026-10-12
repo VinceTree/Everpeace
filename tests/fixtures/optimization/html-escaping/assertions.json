@@ -1,0 +1,31 @@
+{
+  "contract": "a.transform escapes &, < and > in HTML text, in that order; b.transform also escapes double and single quotes for an HTML attribute.",
+  "acceptance": {
+    "a": [
+      [
+        "<x&>",
+        "&lt;x&amp;&gt;"
+      ]
+    ],
+    "b": [
+      [
+        "\"'<&",
+        "&quot;&#39;&lt;&amp;"
+      ]
+    ]
+  },
+  "regression": {
+    "a": [
+      [
+        "plain",
+        "plain"
+      ]
+    ],
+    "b": [
+      [
+        "plain",
+        "plain"
+      ]
+    ]
+  }
+}
