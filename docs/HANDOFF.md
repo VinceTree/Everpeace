@@ -1,6 +1,6 @@
 # 当前交接
 
-2026-10-13：完成问题 13–23 的取消、进程清理与编辑可靠性修复，源码候选 `0.6.0-rc.3`。分支 `codex/public-contract-core-experience`，起点 `97f59fbe20f28d55e971d85979e8efa764243549`，开始时工作树干净。用户授权实现、更新候选号、提交和推送；不创建 tag/Release，不调用真实模型或付费评测。原有忽略的 `question`、`test-me`、`NUL` 与私有资料保持原样。
+2026-10-13：完成问题 13–23 的取消、进程清理与编辑可靠性修复，并完成问题 24–41 的 Benchmark、Usage 和离线验收准备，源码候选 `0.6.0-rc.4`。分支 `codex/public-contract-core-experience`，起点 `97f59fbe20f28d55e971d85979e8efa764243549`，开始时工作树干净。用户已授权提交、推送、更新版本和创建 Release；不调用真实模型或付费评测。原有忽略的 `question`、`test-me`、`NUL` 与私有资料保持原样。
 
 现行契约和回归入口见 [可靠性加固](architecture/RELIABILITY_HARDENING.md)。01–12 的历史证据在 [上轮交接](archive/HANDOFF-2026-10-13-security-privacy.md)，不可作为本轮验证。
 
@@ -52,7 +52,7 @@ Windows x64、本地 NTFS、Node 22.19.0、pnpm 10.30.3、MinGW-w64、Windows bu
 - `.cache/benchmark-memory-pilot-v2/proof.json` 记录 3 个 coding sequence、每个 4 个连续任务、on/off Memory、3 次 repetition，共 72 个计划任务；只在 coding verification 与 external acceptance 都通过后捕获 Memory，提取成本进入 ledger，前序失败保留后续 skipped。离线 proof 通过，`modelRequests: 0`。
 - `.cache/benchmark-official-draft-v6/protocol.json` 记录官方 DeepSeek 端点草案 `https://api.deepseek.com`、占位 raw model/registration ID、12 个任务、每臂 5 次、正式每实验 120 runs、默认串行配对和保留失败分母。占位符继续阻止 live。
 - Everpeace official/team/performance smoke preflight 通过，并实际观察 provider boundary、high reasoning、32,768 output 和团队成员请求；这是合成 provider boundary 的启动证据，不是供应商兼容或成功率证据。
-- dsh smoke preflight 明确失败：固定 HEAD `639ed015397290b3745d163aafe02ffee4aa3f84` 正确，但现有 `C:\Users\39850\Desktop\coding-agent\deepseek-harness` 有 tracked modifications，未能证明干净部署。失败保存在 `.cache/benchmark-official-draft-v6/external/smoke/artifacts/preflight-result.json`，没有修改该 dirty worktree，也没有把失败当作通过。
+- dsh smoke preflight 明确失败：固定 HEAD `639ed015397290b3745d163aafe02ffee4aa3f84` 正确，但现有 `deepseek-harness` checkout 有 tracked modifications，未能证明干净部署。失败保存在 `.cache/benchmark-official-draft-v6/external/smoke/artifacts/preflight-result.json`，没有修改该 dirty worktree，也没有把失败当作通过。
 
 ### 代码与回归
 
@@ -61,7 +61,7 @@ Windows x64、本地 NTFS、Node 22.19.0、pnpm 10.30.3、MinGW-w64、Windows bu
 - checkout identity 现在覆盖普通 checkout 的未忽略 untracked source，以及 dsh 的 apps/packages/vendor/native 生成模块（跳过 node_modules）；fresh worker 在异常退出且已有 Usage telemetry 时保留已知 usage 并标记 incomplete。
 - 安全路径扫描继续保留 10,000 项上限；仓库 `.cache` 不作为敏感路径递归扫描对象之外的安全放宽，MCP 回归最终在无缓存干扰的证据副本中通过。
 - `pnpm exec tsx --test --test-concurrency=4 tests/unit/benchmark/*.test.ts`：80 项通过、0 失败、0 跳过。
-- 最终门禁在仓库外 fresh source snapshot `C:\Users\39850\Desktop\coding-agent\c-final-gates-20261013-v1` 串行通过：frozen install、build、typecheck、lint、全量 test（1340 项，1337 通过、3 跳过、0 失败）和 final build。收据为 `C:\Users\39850\Desktop\coding-agent\c-final-gates-20261013-v1\receipt.json`，日志为同目录各 `.log` 文件。隔离副本用于避免本地 Benchmark `.cache` 资料影响 MCP 安全路径扫描；不是新的提交或发布候选。
+- 最终门禁在仓库外的 `c-final-gates-20261013-v1` fresh source snapshot 串行通过：frozen install、build、typecheck、lint、全量 test（1340 项，1337 通过、3 跳过、0 失败）和 final build。收据为该 snapshot 的 `receipt.json`，日志为同目录各 `.log` 文件。隔离副本用于避免本地 Benchmark `.cache` 资料影响 MCP 安全路径扫描；不是新的提交或发布候选。
 
 ### 后续边界
 
