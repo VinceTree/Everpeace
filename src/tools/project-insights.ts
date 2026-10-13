@@ -1,4 +1,5 @@
-import { promises as fs } from "node:fs";
+import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
+import { safeReadFile } from "./safe-files.js";
 import path from "node:path";
 import { createHash } from "node:crypto";
 
@@ -16,13 +17,9 @@ export async function projectInsights(root: string, files: string[], signal?: Ab
     const relative = path.relative(root, target);
     if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
     try {
-      const real = await fs.realpath(target);
-      if (path.relative(target, real) !== "" || (await fs.lstat(target)).isSymbolicLink()) { incomplete = true; continue; }
-      const stat = await fs.stat(target);
-      if (!stat.isFile() || stat.size > 64 * 1024 || total + stat.size > 256 * 1024) { incomplete = true; continue; }
-      const bytes = await fs.readFile(target); total += bytes.length;
-      const after = await fs.stat(target);
-      if (after.mtimeMs !== stat.mtimeMs || after.size !== stat.size || after.ino !== stat.ino) { incomplete = true; continue; }
+      const opened = await safeReadFile(root, name, signal);
+      if (!opened.exists || opened.bytes.length > 64 * 1024 || total + opened.bytes.length > 256 * 1024) { incomplete = true; continue; }
+      const bytes = opened.bytes; total += bytes.length;
       const digest = createHash("sha256").update(bytes).digest("hex");
       const key = `${root}\0${name}`;
       let value = cache.get(key);
@@ -33,7 +30,7 @@ export async function projectInsights(root: string, files: string[], signal?: Ab
       }
       if (cache.size > 256) cache.delete(cache.keys().next().value!);
       modules.push({ path: name, sha256: value.sha256, imports: [...value.imports] });
-    } catch { signal?.throwIfAborted(); incomplete = true; }
+    } catch (error) { if (error instanceof ResourceCleanupError) throw error; signal?.throwIfAborted(); incomplete = true; }
   }
   const tests = files.filter((name) => /(?:^|\/)(?:test|tests|__tests__)\//u.test(name) || /\.(?:test|spec)\./u.test(name));
   const relationships = modules.filter((module) => !tests.includes(module.path)).flatMap((module) => {

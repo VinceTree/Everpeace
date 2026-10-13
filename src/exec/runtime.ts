@@ -1,4 +1,6 @@
 import { TeamLimitError } from "../team/ledger.js";
+import { execErrorCode } from "./errors.js";
+import { PersistenceError } from "../storage/persistence-error.js";
 import { RequestUsageIncompleteError } from "../agent/request-attempt-ledger.js";
 import { normalizeTeamOptions } from "../team/types.js";
 import { promises as fs } from "node:fs";
@@ -7,7 +9,7 @@ import type { LoopEvent } from "../agent/agent-loop.js";
 import { RequestAttemptLedger } from "../agent/request-attempt-ledger.js";
 import type { AgentIO, AgentInteractionRequired } from "../agent/react-agent.js";
 import { normalizeWorkspacePath } from "../memory/learned-memory.js";
-import { loadPermissionPolicy, type PermissionPolicy } from "../permissions/policy.js";
+import { loadPermissionPolicy, permissionPolicyRevision, type PermissionPolicy } from "../permissions/policy.js";
 import {
   createProductionAgent,
   createProductionCommandExecutor,
@@ -179,6 +181,7 @@ function configurationResult(error: unknown): ExecResult {
   return {
     exitCode: 2,
     classification: "configuration_error",
+    errorCode: "CONFIGURATION_ERROR",
     status: "configuration_error",
     usageComplete: true,
     error: errorText(error),
@@ -193,11 +196,13 @@ function runtimeResult(
   details: Partial<ExecResult> = {},
 ): ExecResult {
   const usage = ledger?.snapshot();
+  const code = execErrorCode(classification, status);
   return {
     exitCode,
     classification,
     status,
     usageComplete: usage?.complete ?? true,
+    ...(code ? { errorCode: code } : {}),
     ...(usage ? { usage } : {}),
     ...details,
   };
@@ -485,6 +490,8 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
     await sessionStore.setMemoryPolicy(sessionId, EXEC_MEMORY_POLICY);
     workflow = new CodingWorkflowRuntime({
       workspacePath,
+      confirmVerificationBasis: async (summary) => requestInteraction("approval", "verification_basis", summary),
+      permissionRevision: () => permissionPolicyRevision(policy),
       ...(restored?.workflow ? { initialState: restored.workflow } : {}),
       async onState(state) {
         await sessionStore.setWorkflow(sessionId!, state);
@@ -557,6 +564,10 @@ export async function runExec(options: ExecOptions, dependencies: ExecDependenci
       result = runtimeResult("runtime_error", 1, "cleanup_failed", ledger, {
         ...(sessionId ? { sessionId } : {}),
         error: errorText(error),
+      });
+    } else if (error instanceof PersistenceError) {
+      result = runtimeResult("runtime_error", 1, "runtime_error", ledger, {
+        ...(sessionId ? { sessionId } : {}), error: errorText(error), errorCode: "PERSISTENCE_FAILED",
       });
     } else if (error instanceof TeamLimitError || error instanceof RequestUsageIncompleteError) {
       const reason = error instanceof TeamLimitError ? error.reason : "usage_limited";

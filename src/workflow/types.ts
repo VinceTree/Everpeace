@@ -30,6 +30,7 @@ export interface VerificationResult {
   timedOut: boolean;
   skipped?: boolean;
   error?: string;
+  diagnostic?: { category:'environment'|'unknown'; missingTool?:string };
 }
 
 export type VerificationSuiteStatus = "passed" | "failed" | "unavailable";
@@ -41,6 +42,7 @@ export interface VerificationSuiteResult {
   reason?: string;
   stale?: boolean;
   evidence?: VerificationEvidence;
+  packageCoverage?: { discovered: string[]; uncovered: string[]; complete: boolean; reasons: string[] };
 }
 
 /** Reported project evidence is distinct from a host-owned independent scorer. */

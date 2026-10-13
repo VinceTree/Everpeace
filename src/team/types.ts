@@ -36,7 +36,7 @@ export interface TeamMember {
   verification?: string;
   integrationId?: string;
   error?: string;
-  errorCode?: "SANDBOX_UNAVAILABLE";
+  errorCode?: "SANDBOX_UNAVAILABLE" | `TEAM_${string}`;
   integrationEligible?: boolean;
   artifactHashes?: Record<string, string | null>;
 }
@@ -73,6 +73,8 @@ export interface TeamEvent {
   usageComplete?: boolean;
 }
 export interface TeamAgentBridge {
+  stopForSensitiveContext?(exceptMemberId?: string): Promise<void>;
+  transferDestinations?(): string;
   begin(mode: AgentMode): Promise<void>;
   setRootInput(text: string): void;
   signal(signal?: AbortSignal): AbortSignal;

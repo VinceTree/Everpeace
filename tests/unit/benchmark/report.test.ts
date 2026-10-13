@@ -15,3 +15,11 @@ test("public report preserves the planned denominator and keeps unknown usage or
   assert.throws(() => publicBenchmarkReport({ ...campaign, results: [...campaign.results, ...campaign.results] }, { realModelRuns: false }));
   assert.throws(() => publicBenchmarkReport({ ...campaign, skipped: [] }, { realModelRuns: false }));
 });
+
+test("report distinguishes run and request counts and invalidates stopped final evidence", async () => {
+  const campaign = await runBenchmarkCampaign([{ id: "one", prompt: "fixture", workspacePath: process.cwd() }], [{ name: "offline", async run() { return { requestAttempts: 3, requestAccounting: { requests: 3, unknownRequests: 0, rejectedRequests: 1, reasons: {} }, usage: { inputTokens: 5, outputTokens: 2, complete: true } }; } }], { campaignId: "count", seed: 1, repetitions: 1, liveApi: true, taskTokenBudget: 10, campaignTokenBudget: 20, async prepareRun(task) { return task; } });
+  const provenance = { realModelRuns: true, evaluationDigest: "evaluation", model: "raw-model", endpointId: "official", byAdapter: { offline: { codeDigest: "source", buildDigest: "build" } } };
+  const report = publicBenchmarkReport(campaign, provenance);
+  assert.equal(report.realModelRuns, 1); assert.deepEqual(report.requests, { sent: 3, unknown: 0, rejected: 1 });
+  assert.equal(publicBenchmarkReport({ ...campaign, stopCode: "identity_changed" }, provenance).evidence, "insufficient");
+});

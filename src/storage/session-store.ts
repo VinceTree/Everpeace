@@ -678,11 +678,13 @@ function isVerificationResult(value: unknown): value is VerificationResult {
     typeof value.stdout === "string" && typeof value.stderr === "string" &&
     typeof value.durationMs === "number" && typeof value.timedOut === "boolean" &&
     (value.skipped === undefined || typeof value.skipped === "boolean") &&
-    (value.error === undefined || typeof value.error === "string");
+    (value.error === undefined || typeof value.error === "string") &&
+    (value.diagnostic===undefined||(isRecord(value.diagnostic)&&['environment','unknown'].includes(String(value.diagnostic.category))&&(value.diagnostic.missingTool===undefined||(typeof value.diagnostic.missingTool==='string'&&/^[A-Za-z0-9_.-]+$/u.test(value.diagnostic.missingTool)))));
 }
 
 function isVerificationSuite(value: unknown): value is VerificationSuiteResult {
   if (!isRecord(value)) return false;
+  const coverage = value.packageCoverage;
   return (value.status === "passed" || value.status === "failed" || value.status === "unavailable") &&
     Array.isArray(value.results) && value.results.every(isVerificationResult) &&
     Array.isArray(value.skipped) && value.skipped.every((command) => isRecord(command) &&
@@ -690,6 +692,7 @@ function isVerificationSuite(value: unknown): value is VerificationSuiteResult {
       (command.tier === "fast" || command.tier === "full") && typeof command.timeoutMs === "number") &&
     (value.reason === undefined || typeof value.reason === "string") &&
     (value.stale === undefined || typeof value.stale === "boolean") &&
+    (coverage === undefined || isRecord(coverage) && typeof coverage.complete === 'boolean' && ['discovered', 'uncovered', 'reasons'].every(key => Array.isArray(coverage[key]) && (coverage[key] as unknown[]).length <= 100 && (coverage[key] as unknown[]).every(item => typeof item === 'string' && item.length <= 4096))) &&
     (value.evidence === undefined || isVerificationEvidence(value.evidence));
 }
 
@@ -726,6 +729,7 @@ function verificationSnapshot(verification: VerificationResult): VerificationRes
     durationMs: verification.durationMs,
     timedOut: verification.timedOut,
     ...(verification.skipped === undefined ? {} : { skipped: verification.skipped }),
+    ...(verification.diagnostic?{diagnostic:{category:verification.diagnostic.category,...(verification.diagnostic.missingTool?{missingTool:verification.diagnostic.missingTool}:{})}}:{}),
   };
 }
 
@@ -745,6 +749,7 @@ function workflowSnapshot(workflow: WorkflowState): WorkflowState {
         ...(suite.reason ? { reason: suite.reason } : {}),
         ...(suite.stale === undefined ? {} : { stale: suite.stale }),
         ...(suite.evidence ? { evidence: structuredClone(suite.evidence) } : {}),
+        ...(suite.packageCoverage ? { packageCoverage: structuredClone(suite.packageCoverage) } : {}),
       },
     }),
   };
@@ -1770,6 +1775,8 @@ export class SessionStore implements SessionStoreLike {
             this.#dropSearchCache(this.#filePath(sessionId));
             try {
               await this.#outputs.deleteSession(sessionId);
+              const { InputHistory } = await import('./input-history.js');
+              await new InputHistory(path.join(path.dirname(this.#directory), 'input-history.json')).removeSessions([sessionId]);
               await fs.rm(this.#filePath(sessionId), { force: true });
             } catch (error) { this.#deletedSessionIds.delete(sessionId); throw error; }
             this.#outputReferences.delete(sessionId);

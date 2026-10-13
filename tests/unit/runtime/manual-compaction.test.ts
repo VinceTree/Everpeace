@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { SENSITIVE_CONTEXT_MARKER } from '../../../src/permissions/sensitive-access.js';
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -230,7 +231,8 @@ test("cancellation during durable context persistence cannot report compaction s
     assert.equal(disposed, false);
   } finally { release.resolve(); await rejected; await disposal; }
   const loaded = await f.store.load(f.session.id);
-  assert.deepEqual(loaded.context, compacted);
+  assert.deepEqual(loaded.context.filter(item => item.content !== SENSITIVE_CONTEXT_MARKER), compacted);
+  assert.ok(loaded.context.some(item => item.content === SENSITIVE_CONTEXT_MARKER));
   assert.equal(loaded.usage.input_tokens, 2);
   assert.equal(loaded.usage.output_tokens, 1);
   assert.equal(loaded.usage.complete, true);

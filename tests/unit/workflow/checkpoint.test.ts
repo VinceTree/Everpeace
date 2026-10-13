@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { runApplyPatch, type ApplyPatchOperation } from "../../../src/tools/apply-patch.js";
 import { TurnCheckpoint } from "../../../src/workflow/checkpoint.js";
+import { safeReadFile, safeCommitFile } from '../../../src/tools/safe-files.js';
 
 async function withWorkspace(callback: (workspace: string) => Promise<void>): Promise<void> {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-checkpoint-"));
@@ -63,5 +64,45 @@ test("checkpoint capture rejects paths outside the workspace before reading them
     } finally {
       await fs.rm(outside, { force: true });
     }
+  });
+});
+
+test("a save between commit and checkpoint recording never becomes undo authorization", async () => {
+  await withWorkspace(async workspace => {
+    await fs.writeFile(path.join(workspace, 'file.txt'), '\ufeffbefore\r\n');
+    const operations: ApplyPatchOperation[] = [{ path: 'file.txt', action: 'update', content: 'agent\n' }];
+    const checkpoint = new TurnCheckpoint(workspace);
+    await checkpoint.capture(operations);
+    const result = await runApplyPatch(operations, workspace);
+    assert.equal(result.status, 'applied');
+    await fs.writeFile(path.join(workspace, 'file.txt'), 'later user save');
+    await checkpoint.recordApplied(operations, result);
+    assert.equal((await checkpoint.undo()).status, 'conflict');
+    assert.equal(await fs.readFile(path.join(workspace, 'file.txt'), 'utf8'), 'later user save');
+  });
+});
+
+test('uncommitted checkpoints do not undo a user deletion', async () => {
+  await withWorkspace(async workspace => {
+    await fs.writeFile(path.join(workspace, 'file.txt'), 'before');
+    const checkpoint = new TurnCheckpoint(workspace);
+    await checkpoint.capture([{ path: 'file.txt', action: 'delete' }]);
+    await fs.unlink(path.join(workspace, 'file.txt'));
+    assert.equal(checkpoint.available, false);
+    assert.equal((await checkpoint.undo()).status, 'empty');
+    await assert.rejects(fs.access(path.join(workspace, 'file.txt')));
+  });
+});
+
+test('delete undo restores raw BOM, CRLF and hidden attributes', async () => {
+  await withWorkspace(async workspace => {
+    const bytes = Buffer.from('\ufeffbefore\r\n');
+    await safeCommitFile(workspace, 'file.txt', undefined, bytes, undefined, 2);
+    const checkpoint = new TurnCheckpoint(workspace);
+    assert.equal((await applyAndRecord(checkpoint, [{ path: 'file.txt', action: 'delete' }], workspace)).status, 'applied');
+    assert.equal((await checkpoint.undo()).status, 'undone');
+    const restored = await safeReadFile(workspace, 'file.txt');
+    assert.deepEqual(restored.bytes, bytes);
+    assert.equal(restored.attributes! & 2, 2);
   });
 });

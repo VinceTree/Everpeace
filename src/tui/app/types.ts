@@ -32,6 +32,9 @@ import type { ContextInspectionSnapshot } from "../../agent/context-inspection.j
 import type { TaskProgress } from "../../workflow/task-progress.js";
 
 export interface AgentSession {
+  getPerformanceReport?(): import('../../performance/task-report.js').TaskPerformanceReport | undefined;
+  getLivePerformanceReport?(): import('../../performance/task-report.js').TaskPerformanceReport | undefined;
+  getRequestBudgetSnapshot?(): {limit:number|null;used:number;complete:boolean;inFlight:boolean}|undefined;
   recordPerformanceTiming?(operation: string, ms: number): void;
   ensureSessionActivity?(): Promise<void>;
   getTeamSnapshot?(): TeamSnapshot | undefined;
@@ -90,6 +93,8 @@ export interface TuiDependencies {
   configureWeb?(provider: "html" | "brave", key?: string): Promise<void>;
   configureCost?(modelId: string, price: import("../../status/cost.js").ModelPrice): Promise<void>;
   getCostStatus?(modelId: string): Promise<string>;
+  previewMcpIsolation?(name: string, mode: "sandbox" | "host"): Promise<{ summary: string }>;
+  setMcpIsolation?(name: string, mode: "sandbox" | "host"): Promise<void>;
   inputHistory?: InputHistoryStore;
   registry: TuiModelRegistry;
   version: string;
@@ -134,6 +139,7 @@ export interface TuiDependencies {
     signal?: AbortSignal,
     onOutput?: (output: BashOutputPreview) => void,
     timeoutMs?: number,
+      workingDirectory?: string,
   ): Promise<BashResult>;
   getTeamConfig?(): Promise<TeamOptions>;
   configureTeam?(config: TeamOptions): Promise<void>;

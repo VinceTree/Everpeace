@@ -1,3 +1,4 @@
+import { SENSITIVE_CONTEXT_MARKER } from "../../../src/permissions/sensitive-access.js";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -296,17 +297,18 @@ test("agent uses the native compaction output as the next context window", async
     io: { async confirmBash() { return true; }, async runBash() { return bashResult(""); }, writeAssistant() {} },
     async onContextCompacted(items, automatic, usage) {
       assert.equal(automatic, false);
-      assert.deepEqual(items, compacted);
+      assert.deepEqual(items.filter(item => item.content !== SENSITIVE_CONTEXT_MARKER), compacted);
       assert.deepEqual(usage, { input_tokens: 90, output_tokens: 10, total_tokens: 100 });
       saved = items.map((item) => ({ ...item }));
     },
   });
 
   const result = await agent.compact();
-  assert.deepEqual(result.items, compacted);
-  assert.deepEqual(compactInput, [{ role: "user", content: "old context" }]);
+  assert.deepEqual(result.items.filter(item => item.content !== SENSITIVE_CONTEXT_MARKER), compacted);
+  assert.ok(result.items.some(item => item.content === SENSITIVE_CONTEXT_MARKER));
+  assert.deepEqual(compactInput?.filter(item => item.content !== SENSITIVE_CONTEXT_MARKER), [{ role: "user", content: "old context" }]);
   await agent.runTurn("next question");
-  assert.deepEqual(saved, compacted);
+  assert.deepEqual(saved.filter(item => item.content !== SENSITIVE_CONTEXT_MARKER), compacted);
   assert.ok(createInputs[0]?.some((item) => item.type === "compaction"));
   assert.ok(createInputs[0]?.some((item) => item.role === "user" && item.content === "next question"));
   assert.ok(!createInputs[0]?.some((item) => item.content === "old context"));
@@ -1893,13 +1895,13 @@ test("agent restores prior context and persists each new context batch", async (
     item.role === "user"
     && String(item.content).includes('"kind":"source_context"');
   const requestInput = requests[0]?.input as Array<Record<string, unknown>>;
-  assert.deepEqual(requestInput.filter((item) => !isPersistedRuleSnapshot(item) && !isCurrentRuleContext(item)), [
+  assert.deepEqual(requestInput.filter((item) => !isPersistedRuleSnapshot(item) && !isCurrentRuleContext(item) && item.content !== SENSITIVE_CONTEXT_MARKER), [
     { role: "user", content: "before restart" },
     { type: "message", role: "assistant", content: "old answer" },
     { role: "user", content: "after restart" },
   ]);
   assert.equal(requestInput.some(isCurrentRuleContext) || String(requests[0]?.instructions).includes("Current host-maintained project rule snapshot ("), true);
-  assert.deepEqual(persisted.filter((items) => !items.every(isPersistedRuleSnapshot)), [
+  assert.deepEqual(persisted.filter((items) => !items.every(isPersistedRuleSnapshot) && !items.every(item => item.content === SENSITIVE_CONTEXT_MARKER)), [
     [{ role: "user", content: "after restart" }],
     [assistantItem],
   ]);

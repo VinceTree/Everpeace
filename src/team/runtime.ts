@@ -227,7 +227,7 @@ export class TeamRuntime implements TeamAgentBridge {
     } catch (error) {
       record.state = signal.aborted ? "cancelled" : "failed";
       record.error = error instanceof ToolFeedbackError ? `${diagnosticCategory(error.code)}: ${sanitizeExecOutput(error.message, 2048)} ${error.remedy}` : "Member stopped; inspect its Session and retained workspace for details.";
-      if (error instanceof ToolFeedbackError && error.code === "SANDBOX_UNAVAILABLE") record.errorCode = error.code;
+      if (error instanceof ToolFeedbackError && (error.code === 'SANDBOX_UNAVAILABLE' || error.code.startsWith('TEAM_'))) record.errorCode = error.code as 'SANDBOX_UNAVAILABLE' | `TEAM_${string}`;
       if (error instanceof ResourceCleanupError || error instanceof PersistenceError) throw error;
     } finally { delete owned.steering; await this.event(record); this.schedule(); }
   }
@@ -359,6 +359,16 @@ export class TeamRuntime implements TeamAgentBridge {
       await member.completion;
       member.record.state = "cancelled"; await this.event(member.record); this.schedule();
     });
+  }
+  transferDestinations(): string {
+    return JSON.stringify([this.options.model, ...this.options.models].map(model => ({ model: model.model_name, provider: new URL(model.base_url).origin })));
+  }
+  async stopForSensitiveContext(exceptMemberId?: string): Promise<void> {
+    const members = [...this.#members.values()].filter(member => member.record.agentId !== exceptMemberId && ['running', 'queued'].includes(member.record.state));
+    for (const member of members) member.controller.abort(Object.assign(new Error('Sensitive context requires renewed member authorization'), { memberOnly: true }));
+    const results = await Promise.allSettled(members.map(member => member.completion));
+    for (const result of results) if (result.status === 'rejected') throw result.reason;
+    for (const member of members) { member.record.state = 'cancelled'; await this.event(member.record); }
   }
   async cleanupMember(id: string): Promise<void> {
     await this.maintenance(async () => {

@@ -1,4 +1,6 @@
+import {uiText} from '../../localization/messages.js';
 /** Slash-command catalog, parser, and help text shared by the TUI. */
+export const getTuiHelp = ():string => uiText('help.tui');
 export const SLASH_COMMANDS = [
   "/login",
   "/model",
@@ -33,6 +35,7 @@ export const SLASH_COMMANDS = [
   "/outputs",
   "/history",
   "/terminal-setup",
+  "/language",
 ] as const;
 
 export type SlashCommand = (typeof SLASH_COMMANDS)[number];

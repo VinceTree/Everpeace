@@ -1,0 +1,34 @@
+diff --git a/source/vendor/supports-color/browser.js b/source/vendor/supports-color/browser.js
+index 9fa6888..1ffde64 100644
+--- a/source/vendor/supports-color/browser.js
++++ b/source/vendor/supports-color/browser.js
+@@ -3,7 +3,7 @@
+ const level = (() => {
+ 	if (navigator.userAgentData) {
+ 		const brand = navigator.userAgentData.brands.find(({brand}) => brand === 'Chromium');
+-		if (brand && brand.version > 93) {
++		if (brand?.version > 93) {
+ 			return 3;
+ 		}
+ 	}
+diff --git a/source/vendor/supports-color/index.js b/source/vendor/supports-color/index.js
+index a7cea61..4ce0a2d 100644
+--- a/source/vendor/supports-color/index.js
++++ b/source/vendor/supports-color/index.js
+@@ -3,6 +3,7 @@ import os from 'node:os';
+ import tty from 'node:tty';
+ 
+ // From: https://github.com/sindresorhus/has-flag/blob/main/index.js
++/// function hasFlag(flag, argv = globalThis.Deno?.args ?? process.argv) {
+ function hasFlag(flag, argv = globalThis.Deno ? globalThis.Deno.args : process.argv) {
+ 	const prefix = flag.startsWith('-') ? '' : (flag.length === 1 ? '-' : '--');
+ 	const position = argv.indexOf(prefix + flag);
+@@ -111,7 +112,7 @@ function _supportsColor(haveStream, {streamIsTTY, sniffFlags = true} = {}) {
+ 	}
+ 
+ 	if ('CI' in env) {
+-		if ('GITHUB_ACTIONS' in env) {
++		if ('GITHUB_ACTIONS' in env || 'GITEA_ACTIONS' in env) {
+ 			return 3;
+ 		}
+ 

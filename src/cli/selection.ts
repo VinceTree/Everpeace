@@ -1,3 +1,4 @@
+import {uiText} from '../localization/messages.js';
 import type { Prompter } from "./terminal.js";
 
 export function parseNumberSelection(
@@ -25,18 +26,18 @@ export async function selectOne<T>(
 ): Promise<T | undefined> {
   prompter.write(`\n${title}:\n`);
   items.forEach((item, index) => prompter.write(`  ${index + 1}. ${label(item)}\n`));
-  prompter.write("  q. Cancel\n");
+  prompter.write(uiText('m5cdf67f0be7b'));
 
   while (true) {
     const selected = parseNumberSelection(
-      await prompter.ask("\nSelect: "),
+      await prompter.ask(uiText('m188f256204ab')),
       items.length,
       false,
     );
     if (selected === undefined) return undefined;
     const item = items[selected[0] ?? -1];
     if (item !== undefined) return item;
-    prompter.write("Invalid selection. Enter a listed number or q.\n");
+    prompter.write(uiText('ma47a870a023a'));
   }
 }
 
@@ -48,16 +49,16 @@ export async function selectMany<T>(
 ): Promise<T[] | undefined> {
   prompter.write(`\n${title}:\n`);
   items.forEach((item, index) => prompter.write(`  ${index + 1}. ${label(item)}\n`));
-  prompter.write("  q. Cancel\n");
+  prompter.write(uiText('m5cdf67f0be7b'));
 
   while (true) {
     const selected = parseNumberSelection(
-      await prompter.ask("\nSelect one or more numbers (comma-separated): "),
+      await prompter.ask(uiText('m23c4caca59cb')),
       items.length,
       true,
     );
     if (selected === undefined) return undefined;
     if (selected.length > 0) return selected.map((index) => items[index]!);
-    prompter.write("Invalid selection. Use listed numbers separated by commas, or q.\n");
+    prompter.write(uiText('m161f86196870'));
   }
 }

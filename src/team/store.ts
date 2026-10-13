@@ -35,7 +35,7 @@ export class TeamStore {
     for (const member of value.members) {
       if (!member || !/^[a-f0-9-]{36}$/u.test(member.agentId) || identities.has(member.agentId) || !/^[a-f0-9-]{36}$/u.test(member.taskId) || typeof member.modelId !== "string" || !["queued", "running", "completed", "failed", "cancelled", "interrupted", "integrated", "conflict"].includes(member.state) || member.workspacePath !== undefined && typeof member.workspacePath !== "string" || member.sessionId !== undefined && typeof member.sessionId !== "string") throw new Error("Invalid team member record");
       member.task = parseTeamTask(member.task); identities.add(member.agentId);
-      if (member.errorCode !== undefined && member.errorCode !== "SANDBOX_UNAVAILABLE") throw new Error("Invalid team member diagnostic code");
+      if (member.errorCode !== undefined && member.errorCode !== "SANDBOX_UNAVAILABLE" && !['TEAM_SUBMODULE_UNSUPPORTED', 'TEAM_LFS_OBJECT_MISSING', 'TEAM_SNAPSHOT_INCOMPLETE', 'TEAM_SNAPSHOT_CHANGED', 'TEAM_RESOURCE_LIMIT'].includes(member.errorCode)) throw new Error("Invalid team member diagnostic code");
     }
     for (const member of value.members) if (member.task.dependencies.some((dependency) => !identities.has(dependency) || dependency === member.agentId)) throw new Error("Invalid persisted team dependencies");
     const visited = new Set<string>(); const stack = new Set<string>();

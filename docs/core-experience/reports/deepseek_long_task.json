@@ -1,0 +1,352 @@
+{
+  "schema": 1,
+  "baselineCommit": "1e805410b713ab90ee09040fced7137416186d0c",
+  "candidateCommit": null,
+  "definitionDigest": "bd94ae15d72fca9a9cee813be625a07a9daa0624e30a89fc5d29c4d5d777a52f",
+  "seed": 20261012,
+  "model": "deepseek-flash",
+  "modelRegistration": null,
+  "endpoint": null,
+  "parameters": null,
+  "taskTokenBudget": null,
+  "campaignTokenBudget": null,
+  "parallelPairs": 1,
+  "repetitions": 5,
+  "status": "deferred_by_user",
+  "tasks": [
+    {
+      "id": "deepseek_long_task-cross-module-protocol",
+      "scenario": "deepseek_long_task",
+      "prompt": "Repair a multi-module request/response codec.",
+      "acceptance": "Host vectors cover framing, ordering, partial input and unchanged legacy behavior.",
+      "materialStatus": "not_frozen"
+    },
+    {
+      "id": "deepseek_long_task-pipeline-migration",
+      "scenario": "deepseek_long_task",
+      "prompt": "Update a multi-stage transformation pipeline consistently.",
+      "acceptance": "Host vectors cover every stage, empty/malformed input and legacy transformations.",
+      "materialStatus": "not_frozen"
+    },
+    {
+      "id": "deepseek_long_task-stateful-index",
+      "scenario": "deepseek_long_task",
+      "prompt": "Repair a multi-file stateful index with persistence.",
+      "acceptance": "Host sequences cover rebuild/reload, duplicate operations and interrupted writes.",
+      "materialStatus": "not_frozen"
+    }
+  ],
+  "planned": [
+    {
+      "pair": 4,
+      "withinPair": 1,
+      "taskId": "deepseek_long_task-pipeline-migration",
+      "scenario": "deepseek_long_task",
+      "repetition": 3,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 4,
+      "withinPair": 2,
+      "taskId": "deepseek_long_task-pipeline-migration",
+      "scenario": "deepseek_long_task",
+      "repetition": 3,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 8,
+      "withinPair": 1,
+      "taskId": "deepseek_long_task-pipeline-migration",
+      "scenario": "deepseek_long_task",
+      "repetition": 1,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 8,
+      "withinPair": 2,
+      "taskId": "deepseek_long_task-pipeline-migration",
+      "scenario": "deepseek_long_task",
+      "repetition": 1,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 12,
+      "withinPair": 1,
+      "taskId": "deepseek_long_task-cross-module-protocol",
+      "scenario": "deepseek_long_task",
+      "repetition": 4,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 12,
+      "withinPair": 2,
+      "taskId": "deepseek_long_task-cross-module-protocol",
+      "scenario": "deepseek_long_task",
+      "repetition": 4,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 34,
+      "withinPair": 1,
+      "taskId": "deepseek_long_task-pipeline-migration",
+      "scenario": "deepseek_long_task",
+      "repetition": 2,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 34,
+      "withinPair": 2,
+      "taskId": "deepseek_long_task-pipeline-migration",
+      "scenario": "deepseek_long_task",
+      "repetition": 2,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 35,
+      "withinPair": 1,
+      "taskId": "deepseek_long_task-stateful-index",
+      "scenario": "deepseek_long_task",
+      "repetition": 3,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 35,
+      "withinPair": 2,
+      "taskId": "deepseek_long_task-stateful-index",
+      "scenario": "deepseek_long_task",
+      "repetition": 3,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 41,
+      "withinPair": 1,
+      "taskId": "deepseek_long_task-cross-module-protocol",
+      "scenario": "deepseek_long_task",
+      "repetition": 1,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 41,
+      "withinPair": 2,
+      "taskId": "deepseek_long_task-cross-module-protocol",
+      "scenario": "deepseek_long_task",
+      "repetition": 1,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 45,
+      "withinPair": 1,
+      "taskId": "deepseek_long_task-cross-module-protocol",
+      "scenario": "deepseek_long_task",
+      "repetition": 2,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 45,
+      "withinPair": 2,
+      "taskId": "deepseek_long_task-cross-module-protocol",
+      "scenario": "deepseek_long_task",
+      "repetition": 2,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 47,
+      "withinPair": 1,
+      "taskId": "deepseek_long_task-pipeline-migration",
+      "scenario": "deepseek_long_task",
+      "repetition": 5,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 47,
+      "withinPair": 2,
+      "taskId": "deepseek_long_task-pipeline-migration",
+      "scenario": "deepseek_long_task",
+      "repetition": 5,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 52,
+      "withinPair": 1,
+      "taskId": "deepseek_long_task-stateful-index",
+      "scenario": "deepseek_long_task",
+      "repetition": 1,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 52,
+      "withinPair": 2,
+      "taskId": "deepseek_long_task-stateful-index",
+      "scenario": "deepseek_long_task",
+      "repetition": 1,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 56,
+      "withinPair": 1,
+      "taskId": "deepseek_long_task-cross-module-protocol",
+      "scenario": "deepseek_long_task",
+      "repetition": 5,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 56,
+      "withinPair": 2,
+      "taskId": "deepseek_long_task-cross-module-protocol",
+      "scenario": "deepseek_long_task",
+      "repetition": 5,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 58,
+      "withinPair": 1,
+      "taskId": "deepseek_long_task-cross-module-protocol",
+      "scenario": "deepseek_long_task",
+      "repetition": 3,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 58,
+      "withinPair": 2,
+      "taskId": "deepseek_long_task-cross-module-protocol",
+      "scenario": "deepseek_long_task",
+      "repetition": 3,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 59,
+      "withinPair": 1,
+      "taskId": "deepseek_long_task-stateful-index",
+      "scenario": "deepseek_long_task",
+      "repetition": 5,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 59,
+      "withinPair": 2,
+      "taskId": "deepseek_long_task-stateful-index",
+      "scenario": "deepseek_long_task",
+      "repetition": 5,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 64,
+      "withinPair": 1,
+      "taskId": "deepseek_long_task-stateful-index",
+      "scenario": "deepseek_long_task",
+      "repetition": 4,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 64,
+      "withinPair": 2,
+      "taskId": "deepseek_long_task-stateful-index",
+      "scenario": "deepseek_long_task",
+      "repetition": 4,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 65,
+      "withinPair": 1,
+      "taskId": "deepseek_long_task-pipeline-migration",
+      "scenario": "deepseek_long_task",
+      "repetition": 4,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 65,
+      "withinPair": 2,
+      "taskId": "deepseek_long_task-pipeline-migration",
+      "scenario": "deepseek_long_task",
+      "repetition": 4,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 74,
+      "withinPair": 1,
+      "taskId": "deepseek_long_task-stateful-index",
+      "scenario": "deepseek_long_task",
+      "repetition": 2,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 74,
+      "withinPair": 2,
+      "taskId": "deepseek_long_task-stateful-index",
+      "scenario": "deepseek_long_task",
+      "repetition": 2,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    }
+  ],
+  "executed": 0,
+  "plannedCount": 30,
+  "complete": false,
+  "metrics": {
+    "success": null,
+    "errorModificationRate": null,
+    "wallMs": null,
+    "tokens": null,
+    "completeCost": null
+  },
+  "interpretation": "Task definitions only; fixtures, independent executable acceptance and model/candidate identities still need freezing. No real-model efficacy measured."
+}

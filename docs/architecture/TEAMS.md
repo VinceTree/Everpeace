@@ -1,5 +1,7 @@
 # 多 Agent 协作
 
+取消期限、Job 进程归属、持久批次恢复、allow 迁移与子包验证的现行契约见 [可靠性加固](RELIABILITY_HARDENING.md)。
+
 ## 产品与入口
 
 协作默认关闭，开启后仍由一个根 CodingTaskRunner 决定任务是否完成。TUI `/team`、CLI `exec --team` 和 SDK `runTask({ team: {} })` 共用 production 的 TeamRuntime；没有第二套 UI 调度循环。默认最多三个活动 Agent（根加两个成员），范围 1–3；根当前模型不变，explorer、worker、reviewer 可分别绑定注册 ID，未设置则继承根模型。注册、凭据、Responses profile 和请求设置先校验并冻结；不静默换模型。
@@ -18,7 +20,7 @@ HEAD 在快照前解析为不可变 commit，文件复核期间 HEAD 改变则�
 
 每个 worker 启动 Session/provider 前必须通过固定原生后端的真实隔离探测：cwd 在成员目录、本目录可写、主工作区不可写、其他成员不可读写、宿主 ownership 记录及 Git 公共 config 不可读。团队 profile 基于 read-only，仅授予自己的写目录；从宿主所有的非 Git 父目录启动，避免 Git 自动推导授权。Windows 使用成员 PSDrive，Linux 显式 cd；nonce 绑定的产物证明实际执行。探测失败关闭，无宿主执行降级。
 
-完成后宿主冻结变更清单与目标字节 hash。整合串行：范围、受保护路径、原快照和当前文件必须匹配；当前已经等于目标则幂等完成，否则冲突保留产物。仅处理 apply_patch 当前支持的文本变更，复用 preview、原字节版本、审批 revision、checkpoint 和回滚。不会覆盖用户并发修改或自动插入冲突标记。超过单批限制需要重新拆任务。
+完成后宿主冻结变更清单与目标字节 hash。整合串行：范围、受保护路径、原快照和当前文件必须匹配；当前已经等于目标则幂等完成，否则冲突保留产物。文本复用 preview、原字节版本、审批 revision 和 checkpoint；二进制及大型资源使用宿主字节路径，提交与恢复共用持久批次协调器。不会覆盖用户并发修改或自动插入冲突标记。超过单批限制需要重新拆任务。
 
 integrationId 与目标 hash 在写入前持久化；重启不盲目重放。子项目检查仅是成员证据；整合收束后根 runner 重新发现并执行 typecheck → lint → test → build，首败停止，沿用三轮修复。只有根完整验证成功才能完成 Goal、捕获成功 Memory、回收已整合工作区。
 

@@ -22,7 +22,7 @@ Git 子进程禁用 URL 重写/额外代理/credential helper/配置注入/交�
 
 ## 当前验证证据
 
-更新补丁版本后重新串行执行 **pnpm typecheck → pnpm lint → pnpm test → pnpm build**，全部通过。完整测试 **1135 项，1132 通过、3 跳过、0 失败，92562.1118 ms**。发布前日志位于 `C:\Users\39850\AppData\Local\Temp\everpeace-patch-20261010\final-{typecheck,lint,test,build}.log`，实际串行退出结果记录在该根 `local-gates.json`。`git diff --check` 另行通过。实现阶段原日志、摘要与 fixture 收据保留在 security final readiness 根，不覆盖原始证据。
+更新补丁版本后重新串行执行 **pnpm typecheck → pnpm lint → pnpm test → pnpm build**，全部通过。完整测试 **1135 项，1132 通过、3 跳过、0 失败，92562.1118 ms**。发布前日志位于 `<LOCAL_EVIDENCE>`，实际串行退出结果记录在该根 `local-gates.json`。`git diff --check` 另行通过。实现阶段原日志、摘要与 fixture 收据保留在 security final readiness 根，不覆盖原始证据。
 
 三项跳过是文件 symlink 的平台限制、Windows 临时目录 alias 的既有 clean-checkout CI 专项，以及 Unix 子进程专项。没有跳过网络、代理、真实 Git 或原生团队隔离用例。
 
@@ -36,7 +36,7 @@ Git 子进程禁用 URL 重写/额外代理/credential helper/配置注入/交�
 
 ## 冻结候选与离线评测
 
-最终准备根：`C:\Users\39850\AppData\Local\Temp\everpeace-security-readiness-final-20261010`。
+最终准备根：`<LOCAL_EVIDENCE>`。
 
 - `candidate.json`：当前 revision/source/build、准备 harness、任务/评分器与待授权配置摘要；修改输入后必须创建新候选，不能盲目继续旧配置。
 - `preflight.json`：单 Agent 1 次请求、团队 5 次请求（含两个成员），输入/输出全部计入团队总账；相同根模型、high reasoning/32768 输出上限。全部合成 Responses，阻断 socket，networkCalls=0，不读取 Key。
@@ -58,7 +58,7 @@ HTTP/HTTPS 代理来自宿主环境并作为受信任基础设施，必须忠实
 
 ## 补丁发布交付
 
-新的用户授权明确将本次变更按补丁修复交付，保持现有功能定位。补丁交付根为 `C:\Users\39850\AppData\Local\Temp\everpeace-patch-20261010`；发布前检查日志、准确源码/构建摘要、远端两平台 CI、tag 与 Release 核对结果都保留在该根，最终以 `delivery-receipt.json` 为准。
+新的用户授权明确将本次变更按补丁修复交付，保持现有功能定位。补丁交付根为 `<LOCAL_EVIDENCE>`；发布前检查日志、准确源码/构建摘要、远端两平台 CI、tag 与 Release 核对结果都保留在该根，最终以 `delivery-receipt.json` 为准。
 
 先提交含 `[skip publish]` 的修复标题并推 main，保留 Test workflow；两平台 CI 通过后显式推送与 manifest 匹配的 tag，触发现有 Release workflow，再核对正文、tag commit 与 latest 标记。补丁说明描述网络、资源清理、计量和工程门禁修复，不把离线准备包装成新产品功能或真实模型质量提升。workflow 不执行 npm publish。
 

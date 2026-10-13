@@ -1,0 +1,522 @@
+diff --git a/Readme.md b/Readme.md
+index c3241a4..769f457 100644
+--- a/Readme.md
++++ b/Readme.md
+@@ -904,6 +904,8 @@ program
+   .helpOption('-e, --HELP', 'read more information');
+ ```
+ 
++(Or use `.addHelpOption()` to add an option you construct yourself.)
++
+ ### .helpCommand()
+ 
+ A help command is added by default if your command has subcommands. You can explicitly turn on or off the implicit help command with `.helpCommand(true)` and `.helpCommand(false)`.
+diff --git a/lib/command.js b/lib/command.js
+index 7e568df..5b16e60 100644
+--- a/lib/command.js
++++ b/lib/command.js
+@@ -7,7 +7,7 @@ const process = require('process');
+ const { Argument, humanReadableArgName } = require('./argument.js');
+ const { CommanderError } = require('./error.js');
+ const { Help } = require('./help.js');
+-const { Option, splitOptionFlags, DualOptions } = require('./option.js');
++const { Option, DualOptions } = require('./option.js');
+ const { suggestSimilar } = require('./suggestSimilar');
+ 
+ class Command extends EventEmitter {
+@@ -66,11 +66,8 @@ class Command extends EventEmitter {
+     };
+ 
+     this._hidden = false;
+-    this._hasHelpOption = true;
+-    this._helpFlags = '-h, --help';
+-    this._helpDescription = 'display help for command';
+-    this._helpShortFlag = '-h';
+-    this._helpLongFlag = '--help';
++    /** @type {(Option | null | undefined)} */
++    this._helpOption = undefined; // Lazy created on demand. May be null if help option is disabled.
+     this._addImplicitHelpCommand = undefined; // undecided whether true or false yet, not inherited
+     /** @type {Command} */
+     this._helpCommand = undefined; // lazy initialised, inherited
+@@ -87,11 +84,7 @@ class Command extends EventEmitter {
+    */
+   copyInheritedSettings(sourceCommand) {
+     this._outputConfiguration = sourceCommand._outputConfiguration;
+-    this._hasHelpOption = sourceCommand._hasHelpOption;
+-    this._helpFlags = sourceCommand._helpFlags;
+-    this._helpDescription = sourceCommand._helpDescription;
+-    this._helpShortFlag = sourceCommand._helpShortFlag;
+-    this._helpLongFlag = sourceCommand._helpLongFlag;
++    this._helpOption = sourceCommand._helpOption;
+     this._helpCommand = sourceCommand._helpCommand;
+     this._helpConfiguration = sourceCommand._helpConfiguration;
+     this._exitCallback = sourceCommand._exitCallback;
+@@ -1189,7 +1182,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
+ 
+     // Fallback to parsing the help flag to invoke the help.
+     return this._dispatchSubcommand(subcommandName, [], [
+-      this._helpLongFlag || this._helpShortFlag
++      this._getHelpOption()?.long ?? this._getHelpOption()?.short ?? '--help'
+     ]);
+   }
+ 
+@@ -2001,7 +1994,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
+         return humanReadableArgName(arg);
+       });
+       return [].concat(
+-        (this.options.length || this._hasHelpOption ? '[options]' : []),
++        (this.options.length || (this._helpOption !== null) ? '[options]' : []),
+         (this.commands.length ? '[command]' : []),
+         (this.registeredArguments.length ? args : [])
+       ).join(' ');
+@@ -2122,35 +2115,69 @@ Expecting one of '${allowedValues.join("', '")}'`);
+     }
+     context.write(helpInformation);
+ 
+-    if (this._helpLongFlag) {
+-      this.emit(this._helpLongFlag); // deprecated
++    if (this._getHelpOption()?.long) {
++      this.emit(this._getHelpOption().long); // deprecated
+     }
+     this.emit('afterHelp', context);
+     this._getCommandAndAncestors().forEach(command => command.emit('afterAllHelp', context));
+   }
+ 
+   /**
+-   * You can pass in flags and a description to override the help
+-   * flags and help description for your command. Pass in false to
+-   * disable the built-in help option.
++   * You can pass in flags and a description to customise the built-in help option.
++   * Pass in false to disable the built-in help option.
+    *
+-   * @param {(string | boolean)} [flags]
++   * @example
++   * program.helpOption('-?, --help' 'show help'); // customise
++   * program.helpOption(false); // disable
++   *
++   * @param {(string | boolean)} flags
+    * @param {string} [description]
+    * @return {Command} `this` command for chaining
+    */
+ 
+   helpOption(flags, description) {
++    // Support disabling built-in help option.
+     if (typeof flags === 'boolean') {
+-      this._hasHelpOption = flags;
++      if (flags) {
++        this._helpOption = this._helpOption ?? undefined; // preserve existing option
++      } else {
++        this._helpOption = null; // disable
++      }
+       return this;
+     }
+-    this._helpFlags = flags || this._helpFlags;
+-    this._helpDescription = description || this._helpDescription;
+ 
+-    const helpFlags = splitOptionFlags(this._helpFlags);
+-    this._helpShortFlag = helpFlags.shortFlag;
+-    this._helpLongFlag = helpFlags.longFlag;
++    // Customise flags and description.
++    flags = flags ?? '-h, --help';
++    description = description ?? 'display help for command';
++    this._helpOption = this.createOption(flags, description);
++
++    return this;
++  }
+ 
++  /**
++   * Lazy create help option.
++   * Returns null if has been disabled with .helpOption(false).
++   *
++   * @returns {(Option | null)} the help option
++   * @package internal use only
++   */
++  _getHelpOption() {
++    // Lazy create help option on demand.
++    if (this._helpOption === undefined) {
++      this.helpOption(undefined, undefined);
++    }
++    return this._helpOption;
++  }
++
++  /**
++   * Supply your own option to use for the built-in help option.
++   * This is an alternative to using helpOption() to customise the flags and description etc.
++   *
++   * @param {Option} option
++   * @return {Command} `this` command for chaining
++   */
++  addHelpOption(option) {
++    this._helpOption = option;
+     return this;
+   }
+ 
+@@ -2212,8 +2239,9 @@ Expecting one of '${allowedValues.join("', '")}'`);
+    */
+ 
+   _outputHelpIfRequested(args) {
+-    const helpOption = this._hasHelpOption && args.find(arg => arg === this._helpLongFlag || arg === this._helpShortFlag);
+-    if (helpOption) {
++    const helpOption = this._getHelpOption();
++    const helpRequested = helpOption && args.find(arg => helpOption.is(arg));
++    if (helpRequested) {
+       this.outputHelp();
+       // (Do not have all displayed text available so only passing placeholder.)
+       this._exit(0, 'commander.helpDisplayed', '(outputHelp)');
+diff --git a/lib/help.js b/lib/help.js
+index 586bad8..64e358a 100644
+--- a/lib/help.js
++++ b/lib/help.js
+@@ -63,19 +63,19 @@ class Help {
+ 
+   visibleOptions(cmd) {
+     const visibleOptions = cmd.options.filter((option) => !option.hidden);
+-    // Implicit help
+-    const showShortHelpFlag = cmd._hasHelpOption && cmd._helpShortFlag && !cmd._findOption(cmd._helpShortFlag);
+-    const showLongHelpFlag = cmd._hasHelpOption && !cmd._findOption(cmd._helpLongFlag);
+-    if (showShortHelpFlag || showLongHelpFlag) {
+-      let helpOption;
+-      if (!showShortHelpFlag) {
+-        helpOption = cmd.createOption(cmd._helpLongFlag, cmd._helpDescription);
+-      } else if (!showLongHelpFlag) {
+-        helpOption = cmd.createOption(cmd._helpShortFlag, cmd._helpDescription);
+-      } else {
+-        helpOption = cmd.createOption(cmd._helpFlags, cmd._helpDescription);
++    // Built-in help option.
++    const helpOption = cmd._getHelpOption();
++    if (helpOption && !helpOption.hidden) {
++      // Automatically hide conflicting flags. Bit dubious but a historical behaviour that is convenient for single-command programs.
++      const removeShort = helpOption.short && cmd._findOption(helpOption.short);
++      const removeLong = helpOption.long && cmd._findOption(helpOption.long);
++      if (!removeShort && !removeLong) {
++        visibleOptions.push(helpOption); // no changes needed
++      } else if (helpOption.long && !removeLong) {
++        visibleOptions.push(cmd.createOption(helpOption.long, helpOption.description));
++      } else if (helpOption.short && !removeShort) {
++        visibleOptions.push(cmd.createOption(helpOption.short, helpOption.description));
+       }
+-      visibleOptions.push(helpOption);
+     }
+     if (this.sortOptions) {
+       visibleOptions.sort(this.compareOptions);
+diff --git a/lib/option.js b/lib/option.js
+index f061901..4e04704 100644
+--- a/lib/option.js
++++ b/lib/option.js
+@@ -324,5 +324,4 @@ function splitOptionFlags(flags) {
+ }
+ 
+ exports.Option = Option;
+-exports.splitOptionFlags = splitOptionFlags;
+ exports.DualOptions = DualOptions;
+diff --git a/package-lock.json b/package-lock.json
+index 94e1aa3..eaa103a 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -15,7 +15,7 @@
+         "@typescript-eslint/parser": "^6.7.5",
+         "eslint": "^8.30.0",
+         "eslint-config-standard": "^17.0.0",
+-        "eslint-config-standard-with-typescript": "^39.1.1",
++        "eslint-config-standard-with-typescript": "^40.0.0",
+         "eslint-plugin-import": "^2.26.0",
+         "eslint-plugin-jest": "^27.1.7",
+         "eslint-plugin-n": "^16.2.0",
+@@ -748,9 +748,9 @@
+       }
+     },
+     "node_modules/@eslint/js": {
+-      "version": "8.53.0",
+-      "resolved": "https://registry.npmjs.org/@eslint/js/-/js-8.53.0.tgz",
+-      "integrity": "sha512-Kn7K8dx/5U6+cT1yEhpX1w4PCSg0M+XyRILPgvwcEBjerFWCwQj5sbr3/VmxqV0JGHCBCzyd6LxypEuehypY1w==",
++      "version": "8.54.0",
++      "resolved": "https://registry.npmjs.org/@eslint/js/-/js-8.54.0.tgz",
++      "integrity": "sha512-ut5V+D+fOoWPgGGNj83GGjnntO39xDy6DWxO0wb7Jp3DcMX0TfIqdzHF85VTQkerdyGmuuMD9AKAo5KiNlf/AQ==",
+       "dev": true,
+       "engines": {
+         "node": "^12.22.0 || ^14.17.0 || >=16.0.0"
+@@ -1487,15 +1487,15 @@
+       }
+     },
+     "node_modules/@typescript-eslint/parser": {
+-      "version": "6.10.0",
+-      "resolved": "https://registry.npmjs.org/@typescript-eslint/parser/-/parser-6.10.0.tgz",
+-      "integrity": "sha512-+sZwIj+s+io9ozSxIWbNB5873OSdfeBEH/FR0re14WLI6BaKuSOnnwCJ2foUiu8uXf4dRp1UqHP0vrZ1zXGrog==",
++      "version": "6.13.1",
++      "resolved": "https://registry.npmjs.org/@typescript-eslint/parser/-/parser-6.13.1.tgz",
++      "integrity": "sha512-fs2XOhWCzRhqMmQf0eicLa/CWSaYss2feXsy7xBD/pLyWke/jCIVc2s1ikEAtSW7ina1HNhv7kONoEfVNEcdDQ==",
+       "dev": true,
+       "dependencies": {
+-        "@typescript-eslint/scope-manager": "6.10.0",
+-        "@typescript-eslint/types": "6.10.0",
+-        "@typescript-eslint/typescript-estree": "6.10.0",
+-        "@typescript-eslint/visitor-keys": "6.10.0",
++        "@typescript-eslint/scope-manager": "6.13.1",
++        "@typescript-eslint/types": "6.13.1",
++        "@typescript-eslint/typescript-estree": "6.13.1",
++        "@typescript-eslint/visitor-keys": "6.13.1",
+         "debug": "^4.3.4"
+       },
+       "engines": {
+@@ -1515,13 +1515,13 @@
+       }
+     },
+     "node_modules/@typescript-eslint/parser/node_modules/@typescript-eslint/scope-manager": {
+-      "version": "6.10.0",
+-      "resolved": "https://registry.npmjs.org/@typescript-eslint/scope-manager/-/scope-manager-6.10.0.tgz",
+-      "integrity": "sha512-TN/plV7dzqqC2iPNf1KrxozDgZs53Gfgg5ZHyw8erd6jd5Ta/JIEcdCheXFt9b1NYb93a1wmIIVW/2gLkombDg==",
++      "version": "6.13.1",
++      "resolved": "https://registry.npmjs.org/@typescript-eslint/scope-manager/-/scope-manager-6.13.1.tgz",
++      "integrity": "sha512-BW0kJ7ceiKi56GbT2KKzZzN+nDxzQK2DS6x0PiSMPjciPgd/JRQGMibyaN2cPt2cAvuoH0oNvn2fwonHI+4QUQ==",
+       "dev": true,
+       "dependencies": {
+-        "@typescript-eslint/types": "6.10.0",
+-        "@typescript-eslint/visitor-keys": "6.10.0"
++        "@typescript-eslint/types": "6.13.1",
++        "@typescript-eslint/visitor-keys": "6.13.1"
+       },
+       "engines": {
+         "node": "^16.0.0 || >=18.0.0"
+@@ -1532,9 +1532,9 @@
+       }
+     },
+     "node_modules/@typescript-eslint/parser/node_modules/@typescript-eslint/types": {
+-      "version": "6.10.0",
+-      "resolved": "https://registry.npmjs.org/@typescript-eslint/types/-/types-6.10.0.tgz",
+-      "integrity": "sha512-36Fq1PWh9dusgo3vH7qmQAj5/AZqARky1Wi6WpINxB6SkQdY5vQoT2/7rW7uBIsPDcvvGCLi4r10p0OJ7ITAeg==",
++      "version": "6.13.1",
++      "resolved": "https://registry.npmjs.org/@typescript-eslint/types/-/types-6.13.1.tgz",
++      "integrity": "sha512-gjeEskSmiEKKFIbnhDXUyiqVma1gRCQNbVZ1C8q7Zjcxh3WZMbzWVfGE9rHfWd1msQtPS0BVD9Jz9jded44eKg==",
+       "dev": true,
+       "engines": {
+         "node": "^16.0.0 || >=18.0.0"
+@@ -1545,13 +1545,13 @@
+       }
+     },
+     "node_modules/@typescript-eslint/parser/node_modules/@typescript-eslint/typescript-estree": {
+-      "version": "6.10.0",
+-      "resolved": "https://registry.npmjs.org/@typescript-eslint/typescript-estree/-/typescript-estree-6.10.0.tgz",
+-      "integrity": "sha512-ek0Eyuy6P15LJVeghbWhSrBCj/vJpPXXR+EpaRZqou7achUWL8IdYnMSC5WHAeTWswYQuP2hAZgij/bC9fanBg==",
++      "version": "6.13.1",
++      "resolved": "https://registry.npmjs.org/@typescript-eslint/typescript-estree/-/typescript-estree-6.13.1.tgz",
++      "integrity": "sha512-sBLQsvOC0Q7LGcUHO5qpG1HxRgePbT6wwqOiGLpR8uOJvPJbfs0mW3jPA3ujsDvfiVwVlWUDESNXv44KtINkUQ==",
+       "dev": true,
+       "dependencies": {
+-        "@typescript-eslint/types": "6.10.0",
+-        "@typescript-eslint/visitor-keys": "6.10.0",
++        "@typescript-eslint/types": "6.13.1",
++        "@typescript-eslint/visitor-keys": "6.13.1",
+         "debug": "^4.3.4",
+         "globby": "^11.1.0",
+         "is-glob": "^4.0.3",
+@@ -1572,12 +1572,12 @@
+       }
+     },
+     "node_modules/@typescript-eslint/parser/node_modules/@typescript-eslint/visitor-keys": {
+-      "version": "6.10.0",
+-      "resolved": "https://registry.npmjs.org/@typescript-eslint/visitor-keys/-/visitor-keys-6.10.0.tgz",
+-      "integrity": "sha512-xMGluxQIEtOM7bqFCo+rCMh5fqI+ZxV5RUUOa29iVPz1OgCZrtc7rFnz5cLUazlkPKYqX+75iuDq7m0HQ48nCg==",
++      "version": "6.13.1",
++      "resolved": "https://registry.npmjs.org/@typescript-eslint/visitor-keys/-/visitor-keys-6.13.1.tgz",
++      "integrity": "sha512-NDhQUy2tg6XGNBGDRm1XybOHSia8mcXmlbKWoQP+nm1BIIMxa55shyJfZkHpEBN62KNPLrocSM2PdPcaLgDKMQ==",
+       "dev": true,
+       "dependencies": {
+-        "@typescript-eslint/types": "6.10.0",
++        "@typescript-eslint/types": "6.13.1",
+         "eslint-visitor-keys": "^3.4.1"
+       },
+       "engines": {
+@@ -2699,15 +2699,15 @@
+       }
+     },
+     "node_modules/eslint": {
+-      "version": "8.53.0",
+-      "resolved": "https://registry.npmjs.org/eslint/-/eslint-8.53.0.tgz",
+-      "integrity": "sha512-N4VuiPjXDUa4xVeV/GC/RV3hQW9Nw+Y463lkWaKKXKYMvmRiRDAtfpuPFLN+E1/6ZhyR8J2ig+eVREnYgUsiag==",
++      "version": "8.54.0",
++      "resolved": "https://registry.npmjs.org/eslint/-/eslint-8.54.0.tgz",
++      "integrity": "sha512-NY0DfAkM8BIZDVl6PgSa1ttZbx3xHgJzSNJKYcQglem6CppHyMhRIQkBVSSMaSRnLhig3jsDbEzOjwCVt4AmmA==",
+       "dev": true,
+       "dependencies": {
+         "@eslint-community/eslint-utils": "^4.2.0",
+         "@eslint-community/regexpp": "^4.6.1",
+         "@eslint/eslintrc": "^2.1.3",
+-        "@eslint/js": "8.53.0",
++        "@eslint/js": "8.54.0",
+         "@humanwhocodes/config-array": "^0.11.13",
+         "@humanwhocodes/module-importer": "^1.0.1",
+         "@nodelib/fs.walk": "^1.2.8",
+@@ -2783,9 +2783,9 @@
+       }
+     },
+     "node_modules/eslint-config-standard-with-typescript": {
+-      "version": "39.1.1",
+-      "resolved": "https://registry.npmjs.org/eslint-config-standard-with-typescript/-/eslint-config-standard-with-typescript-39.1.1.tgz",
+-      "integrity": "sha512-t6B5Ep8E4I18uuoYeYxINyqcXb2UbC0SOOTxRtBSt2JUs+EzeXbfe2oaiPs71AIdnoWhXDO2fYOHz8df3kV84A==",
++      "version": "40.0.0",
++      "resolved": "https://registry.npmjs.org/eslint-config-standard-with-typescript/-/eslint-config-standard-with-typescript-40.0.0.tgz",
++      "integrity": "sha512-GXUJcwIXiTQaS3H4etv8a1lejVVdZYaxZNz3g7vt6GoJosQqMTurbmSC4FVGyHiGT/d1TjFr3+47A3xsHhsG+Q==",
+       "dev": true,
+       "dependencies": {
+         "@typescript-eslint/parser": "^6.4.0",
+diff --git a/package.json b/package.json
+index f60bd95..d587979 100644
+--- a/package.json
++++ b/package.json
+@@ -62,7 +62,7 @@
+     "@typescript-eslint/parser": "^6.7.5",
+     "eslint": "^8.30.0",
+     "eslint-config-standard": "^17.0.0",
+-    "eslint-config-standard-with-typescript": "^39.1.1",
++    "eslint-config-standard-with-typescript": "^40.0.0",
+     "eslint-plugin-import": "^2.26.0",
+     "eslint-plugin-jest": "^27.1.7",
+     "eslint-plugin-n": "^16.2.0",
+diff --git a/tests/command.addHelpOption.test.js b/tests/command.addHelpOption.test.js
+new file mode 100644
+index 0000000..48c8e99
+--- /dev/null
++++ b/tests/command.addHelpOption.test.js
+@@ -0,0 +1,54 @@
++const { Command, Option } = require('../');
++
++// More complete tests are in command.helpOption.test.js.
++
++describe('addHelpOption', () => {
++  let writeSpy;
++  let writeErrorSpy;
++
++  beforeAll(() => {
++    // Optional. Suppress expected output to keep test output clean.
++    writeSpy = jest.spyOn(process.stdout, 'write').mockImplementation(() => { });
++    writeErrorSpy = jest.spyOn(process.stderr, 'write').mockImplementation(() => { });
++  });
++
++  afterEach(() => {
++    writeSpy.mockClear();
++    writeErrorSpy.mockClear();
++  });
++
++  afterAll(() => {
++    writeSpy.mockRestore();
++    writeErrorSpy.mockRestore();
++  });
++
++  test('when addHelpOption has custom flags then custom short flag invokes help', () => {
++    const program = new Command();
++    program
++      .exitOverride()
++      .addHelpOption(new Option('-c,--custom-help'));
++
++    expect(() => {
++      program.parse(['-c'], { from: 'user' });
++    }).toThrow('(outputHelp)');
++  });
++
++  test('when addHelpOption has custom flags then custom long flag invokes help', () => {
++    const program = new Command();
++    program
++      .exitOverride()
++      .addHelpOption(new Option('-c,--custom-help'));
++
++    expect(() => {
++      program.parse(['--custom-help'], { from: 'user' });
++    }).toThrow('(outputHelp)');
++  });
++
++  test('when addHelpOption with hidden help option then help does not include help option', () => {
++    const program = new Command();
++    program
++      .addHelpOption(new Option('-c,--custom-help', 'help help help').hideHelp());
++    const helpInfo = program.helpInformation();
++    expect(helpInfo).not.toMatch(/help/);
++  });
++});
+diff --git a/tests/command.chain.test.js b/tests/command.chain.test.js
+index 58d8c4a..b3872f6 100644
+--- a/tests/command.chain.test.js
++++ b/tests/command.chain.test.js
+@@ -172,9 +172,16 @@ describe('Command methods that should return this for chaining', () => {
+     expect(result).toBe(program);
+   });
+ 
+-  test('when call .helpOption() then returns this', () => {
++  test('when call .helpOption(flags) then returns this', () => {
+     const program = new Command();
+-    const result = program.helpOption(false);
++    const flags = '-h, --help';
++    const result = program.helpOption(flags);
++    expect(result).toBe(program);
++  });
++
++  test('when call .addHelpOption() then returns this', () => {
++    const program = new Command();
++    const result = program.addHelpOption(new Option('-h, --help'));
+     expect(result).toBe(program);
+   });
+ 
+diff --git a/tests/command.copySettings.test.js b/tests/command.copySettings.test.js
+index de06914..1127b3c 100644
+--- a/tests/command.copySettings.test.js
++++ b/tests/command.copySettings.test.js
+@@ -31,11 +31,10 @@ describe('copyInheritedSettings property tests', () => {
+   test('when copyInheritedSettings then copies helpOption(false)', () => {
+     const source = new commander.Command();
+     const cmd = new commander.Command();
+-    expect(cmd._hasHelpOption).toBeTruthy();
+ 
+     source.helpOption(false);
+     cmd.copyInheritedSettings(source);
+-    expect(cmd._hasHelpOption).toBeFalsy();
++    expect(cmd._getHelpOption()).toBe(null);
+   });
+ 
+   test('when copyInheritedSettings then copies helpOption(flags, description)', () => {
+@@ -44,10 +43,12 @@ describe('copyInheritedSettings property tests', () => {
+ 
+     source.helpOption('-Z, --zz', 'ddd');
+     cmd.copyInheritedSettings(source);
+-    expect(cmd._helpFlags).toBe('-Z, --zz');
+-    expect(cmd._helpDescription).toBe('ddd');
+-    expect(cmd._helpShortFlag).toBe('-Z');
+-    expect(cmd._helpLongFlag).toBe('--zz');
++    expect(cmd._getHelpOption()).toBe(source._getHelpOption());
++    // const helpOption = cmd._getHelpOption();
++    // expect(helpOption.flags).toBe('-Z, --zz');
++    // expect(helpOption.description).toBe('ddd');
++    // expect(helpOption.short).toBe('-Z');
++    // expect(helpOption.long).toBe('--zz');
+   });
+ 
+   test('when copyInheritedSettings then copies custom help command', () => {
+diff --git a/typings/index.d.ts b/typings/index.d.ts
+index 7ca2c49..632511c 100644
+--- a/typings/index.d.ts
++++ b/typings/index.d.ts
+@@ -847,6 +847,12 @@ export class Command {
+    */
+   helpOption(flags?: string | boolean, description?: string): this;
+ 
++  /**
++   * Supply your own option to use for the built-in help option.
++   * This is an alternative to using helpOption() to customise the flags and description etc.
++   */
++  addHelpOption(option: Option): this;
++
+   /**
+    * Output help information and exit.
+    *
+diff --git a/typings/index.test-d.ts b/typings/index.test-d.ts
+index 2a4864a..12d621e 100644
+--- a/typings/index.test-d.ts
++++ b/typings/index.test-d.ts
+@@ -310,6 +310,9 @@ expectType<commander.Command>(program.helpOption('-h,--help', 'custom descriptio
+ expectType<commander.Command>(program.helpOption(undefined, 'custom description'));
+ expectType<commander.Command>(program.helpOption(false));
+ 
++// addHelpOption
++expectType<commander.Command>(program.addHelpOption(new commander.Option('-h,--help')));
++
+ // addHelpText
+ expectType<commander.Command>(program.addHelpText('after', 'text'));
+ expectType<commander.Command>(program.addHelpText('afterAll', 'text'));

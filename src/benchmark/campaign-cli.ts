@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile, appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
@@ -55,6 +55,8 @@ interface DshHarnessConfig {
   dshHome: string;
   profile: string;
   revision: string;
+  sourceDigest?: string;
+  buildDigest?: string;
   expected: { model: string; reasoning: "high"; maxOutputTokens: number };
 }
 
@@ -62,6 +64,7 @@ export interface CampaignConfig {
   campaignId: string;
   catalogPath: string;
   fixtureRoot: string;
+  sourceCacheRoot?: string;
   runsRoot: string;
   artifactsRoot: string;
   sessionsRoot: string;
@@ -134,10 +137,12 @@ export function parseCampaignConfig(value: unknown, configPath: string): Campaig
       },
     };
     if (harness.kind === "dsh") {
+      if ((harness.sourceDigest === undefined) !== (harness.buildDigest === undefined)) throw new Error("dsh sourceDigest and buildDigest must be provided together");
       if (shared.revision !== PINNED_DSH_REVISION) throw new Error(`harnesses[${index}].revision must be ${PINNED_DSH_REVISION}`);
       return {
         kind: "dsh",
         ...shared,
+        ...(harness.sourceDigest === undefined ? {} : { sourceDigest: sha256(harness.sourceDigest, "dsh.sourceDigest"), buildDigest: sha256(harness.buildDigest, "dsh.buildDigest") }),
         sourceRoot: resolve(root, string(harness.sourceRoot, `harnesses[${index}].sourceRoot`)),
         entryPath: resolve(root, string(harness.entryPath, `harnesses[${index}].entryPath`)),
         dshHome: resolve(root, string(harness.dshHome, `harnesses[${index}].dshHome`)),
@@ -176,10 +181,12 @@ export function parseCampaignConfig(value: unknown, configPath: string): Campaig
   if (taskIds && new Set(taskIds).size !== taskIds.length) throw new Error("taskIds must not contain duplicates");
   if (input.ordering !== undefined && input.ordering !== "random" && input.ordering !== "paired") throw new Error("Invalid ordering");
   if (input.ordering === "paired" && harnesses.length !== 2) throw new Error("Paired campaigns require two harnesses");
+  if (input.ordering === "paired" && (input.taskTokenBudget === null) !== (input.campaignTokenBudget === null)) throw new Error("Paired budgets must both be numeric or both explicitly null");
   return {
     campaignId: string(input.campaignId, "campaignId"),
     catalogPath: path("catalogPath"),
     fixtureRoot: path("fixtureRoot"),
+    ...(input.sourceCacheRoot === undefined ? {} : { sourceCacheRoot: path("sourceCacheRoot") }),
     runsRoot: path("runsRoot"),
     artifactsRoot: path("artifactsRoot"),
     sessionsRoot: path("sessionsRoot"),
@@ -263,6 +270,7 @@ async function prove(config: CampaignConfig): Promise<void> {
     const proof = await proveBenchmarkFixture(task, {
       fixtureRoot: config.fixtureRoot,
       destination: resolve(config.runsRoot, config.campaignId, "proof", task.id),
+      ...(config.sourceCacheRoot ? { sourceCache: resolve(config.sourceCacheRoot, task.id) } : {}),
     });
     process.stdout.write(`${task.id}: seed=${proof.seeded.exitCode} reference=${proof.repaired.exitCode}\n`);
   }
@@ -292,6 +300,8 @@ export async function preflight(config: CampaignConfig): Promise<void> {
         continue;
       }
       if (harness.kind === "instrumented-process") throw new Error("instrumented-process harnesses require their own credential-free preflight contract");
+      const dshIdentity = await captureBenchmarkCheckoutIdentity(harness.sourceRoot, harness.entryPath);
+      if (harness.sourceDigest && (harness.sourceDigest !== dshIdentity.sourceDigest || harness.buildDigest !== dshIdentity.buildDigest)) throw new Error("Frozen dsh deployment changed before preflight");
       const root = await mkdtemp(join(tmpdir(), "everpeace-dsh-preflight-"));
       try {
         const controller = new AbortController();
@@ -331,6 +341,8 @@ export async function preflight(config: CampaignConfig): Promise<void> {
             status: "passed",
             evidence: {
               revision: harness.revision,
+              sourceDigest: dshIdentity.sourceDigest,
+              buildDigest: dshIdentity.buildDigest,
               profile: harness.profile,
               providerBoundaryObserved: true,
               networkCalls: 0,
@@ -363,6 +375,7 @@ export async function preflight(config: CampaignConfig): Promise<void> {
 }
 
 async function live(config: CampaignConfig): Promise<void> {
+  if (config.modelId.startsWith("REQUIRES_") || config.harnesses.some(harness => harness.kind !== "everpeace" && harness.expected.model.startsWith("REQUIRES_"))) throw new Error("Draft placeholders block live execution; prepare a reviewed actual model registration and raw supplier ID");
   const registry = new ModelRegistry({ authStorage: new SystemAuthStorage() });
   const models = await registry.resolveAll();
   const matches = models.available.filter((model) => model.id === config.modelId || model.model_name === config.modelId);
@@ -416,21 +429,35 @@ async function live(config: CampaignConfig): Promise<void> {
     const identity = harness.kind === "everpeace"
       ? await captureBenchmarkCheckoutIdentity(resolve(dirname(fileURLToPath(import.meta.url)), "../.."), fileURLToPath(import.meta.url))
       : await captureBenchmarkCheckoutIdentity(harness.sourceRoot, harness.entryPath);
+    if (harness.kind === "dsh" && harness.sourceDigest && (identity.sourceDigest !== harness.sourceDigest || identity.buildDigest !== harness.buildDigest)) throw new Error("Frozen dsh deployment changed before live admission");
     identities[harness.name ?? "everpeace"] = { codeDigest: identity.sourceDigest, buildDigest: identity.buildDigest };
   }
   const evaluationDigest = await captureBenchmarkEvaluationDigest(config.catalogPath, config.fixtureRoot);
   await mkdir(config.artifactsRoot, { recursive: true });
+  await writeFile(resolve(config.artifactsRoot, "campaign-started.json"), JSON.stringify({ at: new Date().toISOString() }), { flag: "wx" });
   await writeFile(resolve(config.artifactsRoot, "campaign-plan.json"), JSON.stringify({
     campaignId: config.campaignId,
     seed: config.seed,
     ordering: config.ordering,
     model: model.model_name,
+    endpoint: normalizeBaseUrl(model.base_url),
+    profile: model.responses_profile ?? "auto",
+    requestSettings: { reasoningEffort: "high", maxOutputTokens: 32768 },
+    evaluationDigest,
+    identities,
+    environment: { platform: process.platform, arch: process.arch, node: process.version },
     taskTokenBudget: config.taskTokenBudget,
     campaignTokenBudget: config.campaignTokenBudget,
     harnesses: config.harnesses,
     plan,
-  }, null, 2), "utf8");
-  const result = await runBenchmarkCampaign(tasks, harnesses, {
+  }, null, 2), { encoding: "utf8", flag: "wx" });
+  const controller = new AbortController();
+  const cancel = () => controller.abort(new Error("Campaign cancelled"));
+  process.once("SIGINT", cancel); process.once("SIGTERM", cancel);
+  const timer = setInterval(() => { void readFile(resolve(config.artifactsRoot, "cancel.request")).then(cancel).catch(() => {}); }, 500); timer.unref();
+  let result;
+  try {
+  result = await runBenchmarkCampaign(tasks, harnesses, {
     campaignId: config.campaignId,
     seed: config.seed,
     ...(config.ordering === undefined ? {} : { ordering: config.ordering }),
@@ -438,15 +465,20 @@ async function live(config: CampaignConfig): Promise<void> {
     taskTokenBudget: config.taskTokenBudget,
     campaignTokenBudget: config.campaignTokenBudget,
     liveApi: true,
+    signal: controller.signal,
+    onResult: record => appendFile(resolve(config.artifactsRoot, "results.jsonl"), JSON.stringify(record) + "\n"),
     artifactSink: createFileBenchmarkArtifactSink(resolve(config.artifactsRoot, "runs")),
     prepareRun(task, harness, repetition) {
       return prepareBenchmarkFixture(task, {
         fixtureRoot: config.fixtureRoot,
         destination: resolve(config.runsRoot, config.campaignId, harness, task.id, String(repetition)),
+        ...(config.sourceCacheRoot ? { sourceCache: resolve(config.sourceCacheRoot, task.id) } : {}),
+        signal: controller.signal,
       });
     },
   });
-  await writeFile(resolve(config.artifactsRoot, "campaign-result.json"), JSON.stringify(result, null, 2), "utf8");
+  } finally { clearInterval(timer); process.removeListener("SIGINT", cancel); process.removeListener("SIGTERM", cancel); }
+  try {
   if (await captureBenchmarkEvaluationDigest(config.catalogPath, config.fixtureRoot) !== evaluationDigest) throw new Error("Evaluation changed during the campaign; results cannot be published as frozen evidence");
   for (const harness of config.harnesses) {
     if (harness.kind === "instrumented-process") continue;
@@ -456,6 +488,11 @@ async function live(config: CampaignConfig): Promise<void> {
     const frozen = identities[harness.name ?? "everpeace"]!;
     if (current.sourceDigest !== frozen.codeDigest || current.buildDigest !== frozen.buildDigest) throw new Error("Harness changed during the campaign; results cannot be published as frozen evidence");
   }
+  } catch {
+    result.statisticsComplete = false; result.stopCode = "identity_changed";
+    result.stopReason = "Frozen identity changed or could not be rechecked";
+  }
+  await writeFile(resolve(config.artifactsRoot, "campaign-result.json"), JSON.stringify(result, null, 2), { flag: "wx" });
   const publicReport = publicBenchmarkReport(result, { realModelRuns: true, evaluationDigest, byAdapter: identities, sourceTypes: Object.fromEntries(tasks.map((task) => [task.id, task.source?.sourceType ?? "seeded_upstream"])) });
   await writeFile(resolve(config.artifactsRoot, "public-report.json"), JSON.stringify(publicReport, null, 2) + "\n", "utf8");
   await writeFile(resolve(config.artifactsRoot, "public-report.md"), benchmarkMarkdown(publicReport), "utf8");
@@ -473,6 +510,7 @@ async function live(config: CampaignConfig): Promise<void> {
     await writeFile(resolve(config.artifactsRoot, "strategy-comparison.json"), JSON.stringify(compareAgentStrategies(result, baseline.name, candidate.name), null, 2), "utf8");
   }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  if (!result.statisticsComplete) throw new Error(result.stopReason ?? "Campaign evidence is incomplete");
 }
 
 export async function main(args = process.argv.slice(2)): Promise<number> {

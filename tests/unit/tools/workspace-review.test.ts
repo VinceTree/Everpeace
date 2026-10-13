@@ -46,7 +46,7 @@ test("workspace review separates overlapping staged, unstaged, and untracked cha
   }
 });
 
-test("workspace review resolves untracked previews from the canonical workspace root", async (context) => {
+test("workspace review rejects a workspace alias before previewing file content", async (context) => {
   const parent = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-review-canonical-"));
   try {
     const root = path.join(parent, "repository");
@@ -63,8 +63,7 @@ test("workspace review resolves untracked previews from the canonical workspace 
 
     const entry = (await listWorkspaceChanges(alias)).entries.find((candidate) => candidate.path === "new file.txt");
     assert.ok(entry);
-    const detail = await readWorkspaceChange(alias, entry);
-    assert.deepEqual({ kind: detail.contentKind, text: detail.text }, { kind: "text", text: "canonical preview\n" });
+    await assert.rejects(readWorkspaceChange(alias, entry), { code: 'POLICY_DENIED' });
   } finally {
     await fs.rm(parent, { recursive: true, force: true });
   }

@@ -1,0 +1,37 @@
+diff --git a/source/index.d.ts b/source/index.d.ts
+index ca8963b..0b4d35d 100644
+--- a/source/index.d.ts
++++ b/source/index.d.ts
+@@ -74,6 +74,8 @@ export interface ChalkInstance {
+ 	/**
+ 	Use an [8-bit unsigned number](https://en.wikipedia.org/wiki/ANSI_escape_code#8-bit) to set text color.
+ 
++	The value is downsampled to the 16-color palette on terminals that only support basic colors (level 1), so `chalk.ansi256(196)` becomes 91 (ANSI escape for bright red).
++
+ 	@example
+ 	```
+ 	import chalk from 'chalk';
+@@ -112,6 +114,8 @@ export interface ChalkInstance {
+ 	/**
+ 	Use an [8-bit unsigned number](https://en.wikipedia.org/wiki/ANSI_escape_code#8-bit) to set background color.
+ 
++	The value is downsampled to the 16-color palette on terminals that only support basic colors (level 1), so `chalk.bgAnsi256(196)` becomes 101 (ANSI escape for bright red background).
++
+ 	@example
+ 	```
+ 	import chalk from 'chalk';
+diff --git a/source/index.js b/source/index.js
+index 5e80cb3..a9a5b7c 100644
+--- a/source/index.js
++++ b/source/index.js
+@@ -88,6 +88,10 @@ const getModelAnsi = (model, level, type, ...arguments_) => {
+ 		return getModelAnsi('rgb', level, type, ...ansiStyles.hexToRgb(...arguments_));
+ 	}
+ 
++	if (model === 'ansi256' && level === 'ansi') {
++		return ansiStyles[type].ansi(ansiStyles.ansi256ToAnsi(...arguments_));
++	}
++
+ 	return ansiStyles[type][model](...arguments_);
+ };
+ 

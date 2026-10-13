@@ -1,0 +1,29 @@
+name: Bug report / 问题报告
+description: A minimal, redacted reproduction / 最小脱敏复现
+body:
+  - type: markdown
+    attributes:
+      value: "Do not paste credentials or complete Sessions. Report security issues privately through SECURITY.md. / 不要粘贴凭据或完整 Session，安全问题请走 SECURITY.md 私密渠道。"
+  - type: input
+    id: identity
+    attributes:
+      label: Package or commit / 包或 Commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS, Node, terminal, width / 系统、Node、终端、宽度
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Disposable reproduction, expected and actual behavior / 隔离复现、预期和实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostic metadata and exit code / 脱敏诊断元数据及退出码
+      description: "Use the default /privacy export. Review before attaching. Do not attach raw model/tool logs. / 使用默认 /privacy export，审阅后提交，不附原始模型或工具日志。"

@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/chalk/chalk",
+  "change": "04fdbd6d8d262ed8668cf3f2e94f647d2bc028d8",
+  "parent": "d7c4aac07e422c8ae534897b3f1707aa71a51c73",
+  "changeUrl": "https://github.com/chalk/chalk/commit/04fdbd6d8d262ed8668cf3f2e94f647d2bc028d8",
+  "license": "MIT",
+  "patchSha256": "39ffc5c89c20dc89530eb028b6ad7843acd897794f0549e5d1c97710cc54459b",
+  "category": "cross_module_refactor"
+}

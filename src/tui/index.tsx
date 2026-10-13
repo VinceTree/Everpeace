@@ -1,3 +1,4 @@
+import {uiText} from '../localization/messages.js';
 import { render } from "ink";
 import React from "react";
 import { resetTerminalModes } from "../tools/terminal.js";
@@ -48,7 +49,7 @@ export async function settleTuiLifecycle<T>(
 
 export async function runTui({ registry, dependencies }: RunTuiOptions): Promise<number> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    throw new Error("Everpeace TUI requires an interactive terminal");
+    throw new Error(uiText('m6905c8a3731f'));
   }
 
   // Recover from a previous child process or interrupted session that left

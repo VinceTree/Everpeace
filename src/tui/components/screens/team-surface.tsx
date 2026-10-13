@@ -1,3 +1,4 @@
+import {uiText} from '../../../localization/messages.js';
 import React, { useEffect, useState } from "react";
 import { Box, Text, useInput, useWindowSize } from "ink";
 import { TextInput } from "@inkjs/ui";
@@ -27,8 +28,8 @@ export function TeamSurface({ config, models, getSnapshot, busy, onConfigure, on
   const width = Math.max(1, commandScreenWidth(columns) - 4);
   useEffect(() => { const timer = setInterval(() => setSnapshot(getSnapshot()), 500); return () => clearInterval(timer); }, [getSnapshot]);
   const members = snapshot?.members ?? [];
-  const labels = [config.enabled ? "Collaboration: on" : "Collaboration: off", `Agents: ${config.maxAgents ?? 3}`, ...(["explorer", "worker", "reviewer"] as const).map((role) => `${role}: ${models.find((model) => model.id === config.models?.[role])?.name ?? "inherit root"}`), `Request token budget: ${config.tokenBudget ?? "unlimited"} (not a spending cap)`, `Request attempts: ${config.maxAttempts ?? 96}`, `Deadline: ${(config.timeoutMs ?? 1_800_000) / 60_000} min`, "Continue interrupted team", ...members.map((member) => `${member.task.role} · ${member.state} · ${member.task.goal.slice(0, 45)}`)];
-  const act = async (run: () => Promise<void>) => { setPending(true); setError(""); try { await run(); setSnapshot(getSnapshot()); } catch (failure) { setError(failure instanceof Error ? failure.message : "Team operation failed"); } finally { setPending(false); } };
+  const labels = [config.enabled ? uiText('m05f2354b669e') : uiText('m80cf05cb011f'), uiText('mfd42a384be51', {p0: config.maxAgents ?? 3}), ...(["explorer", "worker", "reviewer"] as const).map((role) => `${role}: ${models.find((model) => model.id === config.models?.[role])?.name ?? uiText('m99f57238e8a6')}`), uiText('mfde2856e423a', {p0: config.tokenBudget ?? "unlimited"}), uiText('m81ec5ddea4d4', {p0: config.maxAttempts ?? 96}), uiText('m80c86c2b4dda', {p0: (config.timeoutMs ?? 1_800_000) / 60_000}), uiText('m609609bce155'), ...members.map((member) => `${member.task.role} · ${member.state} · ${member.task.goal.slice(0, 45)}`)];
+  const act = async (run: () => Promise<void>) => { setPending(true); setError(""); try { await run(); setSnapshot(getSnapshot()); } catch (failure) { setError(failure instanceof Error ? failure.message : uiText('m4a0487b903a3')); } finally { setPending(false); } };
   const update = (next: TeamOptions) => void act(() => onConfigure(next));
   useInput((input, key) => {
     if (pending || editing) return;
@@ -40,7 +41,7 @@ export function TeamSurface({ config, models, getSnapshot, busy, onConfigure, on
     if (member && input === "d" && !busy) void act(() => onAction("cleanup", member.agentId));
     if (!key.return) return;
     if (member) { setOffset(0); setDetail(true); return; }
-    if (busy) { setError("Configuration changes are available when the task is idle."); return; }
+    if (busy) { setError(uiText('m931ab124df48')); return; }
     if (selected === 0) update({ ...config, enabled: !config.enabled });
     else if (selected === 1) update({ ...config, maxAgents: (config.maxAgents ?? 3) % 3 + 1 });
     else if (selected >= 2 && selected <= 4) {
@@ -50,12 +51,12 @@ export function TeamSurface({ config, models, getSnapshot, busy, onConfigure, on
       const routing = { ...config.models }; if (id) routing[role] = id; else delete routing[role];
       update({ ...config, models: routing });
     } else if (selected >= 5 && selected <= 7) setEditing((["tokenBudget", "maxAttempts", "timeoutMs"] as const)[selected - 5]);
-    else if (selected === 8 && snapshot) { if (snapshot.state === "finished" || snapshot.state === "running") setError("Only stopped or interrupted teams can be continued."); else void act(() => onAction("continue", snapshot.teamId)); }
+    else if (selected === 8 && snapshot) { if (snapshot.state === "finished" || snapshot.state === "running") setError(uiText('m041ed10b2825')); else void act(() => onAction("continue", snapshot.teamId)); }
   });
   const member = members[selected - 9];
   const attempts = snapshot?.usage.attempts.filter((attempt) => attempt.agentId === member?.agentId) ?? [];
   const memberTokens = attempts.reduce((sum, attempt) => sum + (attempt.usage?.input_tokens ?? 0) + (attempt.usage?.output_tokens ?? 0), 0);
-  const details = member ? `${member.agentId}\n${member.task.goal}\nAcceptance: ${member.task.acceptance}\nModel: ${member.modelId}\nKnown consumption: ${memberTokens} tokens · Metering: ${attempts.length ? attempts.some((attempt) => attempt.usage === null) ? "incomplete" : "complete so far" : "unavailable"}\nIn-flight member requests: unavailable\nScopes: ${member.task.paths.join(", ")}\nFiles: ${member.changedPaths?.join(", ") || "none reported"}\nChecks: ${member.verification ?? "not reported"}\nSession: ${member.sessionId ?? "not started"}\nWorkspace: ${member.workspacePath ?? "none retained"}\n${member.summary ?? member.error ?? "Waiting for report"}` : "";
+  const details = member ? uiText('m58c3fff826b0', {p0: member.agentId, p1: member.task.goal, p2: member.task.acceptance, p3: member.modelId, p4: memberTokens, p5: attempts.length ? attempts.some((attempt) => attempt.usage === null) ? "incomplete" : uiText('ma8494befa4c1') : "unavailable", p6: member.task.paths.join(", "), p7: member.changedPaths?.join(", ") || uiText('m3a0c7d3fe275'), p8: member.verification ?? uiText('m2087cb5f8b63'), p9: member.sessionId ?? uiText('m7a7400f46669'), p10: member.workspacePath ?? uiText('mdd19b857b9af'), p11: member.summary ?? member.error ?? uiText('ma0a6f53c8209')}) : "";
   const totalLines = details.split("\n").length;
   useEffect(() => setOffset((current) => Math.min(current, Math.max(0, totalLines - page))), [totalLines, page]);
   useEffect(() => setSelected((current) => Math.min(current, labels.length - 1)), [labels.length]);
@@ -63,15 +64,15 @@ export function TeamSurface({ config, models, getSnapshot, busy, onConfigure, on
     if (!editing) return;
     const field = editing;
     if (!value.trim() && field === "tokenBudget") { const next = { ...config }; delete next.tokenBudget; setEditing(undefined); update(next); return; }
-    const parsed = Number(value); if (!Number.isSafeInteger(parsed) || parsed < 1) { setError("Enter a positive integer."); return; }
+    const parsed = Number(value); if (!Number.isSafeInteger(parsed) || parsed < 1) { setError(uiText('mf73fcbc1acea')); return; }
     setEditing(undefined); update({ ...config, [field]: parsed });
   };
-  return <CommandSurface title="/team · Collaboration" onBack={() => { if (editing || detail) { setEditing(undefined); setDetail(false); } else onBack(); }}>
-    <Text wrap="truncate-end">{snapshot ? `${snapshot.teamId} · ${snapshot.state}` : "No team has run in this Agent."}</Text>
-    {snapshot ? <Text>Known consumption: {snapshot.usage.inputTokens + snapshot.usage.outputTokens} tokens · In-flight requests: {snapshot.openRequests} · Metering: {snapshot.usage.complete ? "complete so far" : "incomplete"}</Text> : null}
-    {detail && member ? <Box flexDirection="column"><Text dimColor>{offset + 1}-{Math.min(totalLines, offset + page)} / {totalLines} · PgUp/PgDn scroll</Text><RichOutput text={details} range={{ start: offset, count: page }} /></Box> : editing ? <Box flexDirection="column"><Text>Set {editing === "tokenBudget" ? "Request token budget" : editing}{editing === "timeoutMs" ? " in milliseconds" : ""}{editing === "tokenBudget" ? " (blank for unlimited)" : ""}</Text><TextInput onSubmit={finishEdit} /></Box> : labels.slice(Math.max(0, selected - 4), Math.max(0, selected - 4) + Math.max(1, Math.min(8, rows - 14))).map((label, index) => <Text key={index} {...(index + Math.max(0, selected - 4) === selected ? { color: "yellow" as const } : {})}>{index + Math.max(0, selected - 4) === selected ? "› " : "  "}{truncateEnd(label, width - 2)}</Text>)}
+  return <CommandSurface title={uiText('m191af9f4d83b')} onBack={() => { if (editing || detail) { setEditing(undefined); setDetail(false); } else onBack(); }}>
+    <Text wrap="truncate-end">{snapshot ? `${snapshot.teamId} · ${snapshot.state}` : uiText('m68f03b81d3d4')}</Text>
+    {snapshot ? <Text>{uiText('mfde9dd0f7189')}{snapshot.usage.inputTokens + snapshot.usage.outputTokens}{uiText('mdaaff17e8d12')}{snapshot.openRequests}{uiText('m6247b392a345')}{snapshot.usage.complete ? uiText('ma8494befa4c1') : "incomplete"}</Text> : null}
+    {detail && member ? <Box flexDirection="column"><Text dimColor>{offset + 1}-{Math.min(totalLines, offset + page)} / {totalLines}{uiText('m071e96130496')}</Text><RichOutput text={details} range={{ start: offset, count: page }} /></Box> : editing ? <Box flexDirection="column"><Text>{uiText('m617ca6384592')}{editing === "tokenBudget" ? uiText('m8c76d62e0412') : editing}{editing === "timeoutMs" ? uiText('m9a406eb7f6e6') : ""}{editing === "tokenBudget" ? uiText('m99599d7e9108') : ""}</Text><TextInput onSubmit={finishEdit} /></Box> : labels.slice(Math.max(0, selected - 4), Math.max(0, selected - 4) + Math.max(1, Math.min(8, rows - 14))).map((label, index) => <Text key={index} {...(index + Math.max(0, selected - 4) === selected ? { color: "yellow" as const } : {})}>{index + Math.max(0, selected - 4) === selected ? "› " : "  "}{truncateEnd(label, width - 2)}</Text>)}
     {error ? <Text color="red">{error}</Text> : null}
-    <Text dimColor wrap="truncate-end">{pending ? "Updating…" : "↑↓ select · Enter details/configure · c cancel · d cleanup"}</Text>
-    <Text dimColor>Member reports are evidence; root verification determines completion.</Text>
+    <Text dimColor wrap="truncate-end">{pending ? uiText('mdfe40efe921f') : uiText('m6ac9cf9eddc9')}</Text>
+    <Text dimColor>{uiText('mf02c610e5e1b')}</Text>
   </CommandSurface>;
 }

@@ -953,5 +953,5 @@ test("MCP failed initialization cannot retry after partial-client close timeout"
   clock.advance(120_000);
   await flushAsync();
   assert.equal(factories, 1);
-  await runtime.close();
+  await assert.rejects(runtime.close(), /cleanup is unresolved/u);
 });

@@ -1,5 +1,9 @@
 # Coding runtime：请求、工具循环与可信结算
 
+取消期限、Job 进程归属、持久批次恢复、allow 迁移与子包验证的现行契约见 [可靠性加固](RELIABILITY_HARDENING.md)。
+
+验证依据变化、恢复缺可信基线、敏感上下文与团队传递的当前契约见 [安全加固](SECURITY_HARDENING.md)。每项验证启动前复核脚本/生命周期/包管理器依据，未授权不能结算 Goal 或成功 Memory。
+
 模型传输/流恢复、上下文/压缩和文件观察由内部状态所有者管理；任务性能与验证证据是可选解释字段，不改变可信结算。入口及测试见 [验证与性能](VALIDATION_PRIVACY_PERFORMANCE.md)。
 
 本文说明当前生产代码的职责边界。先读根目录 [AGENTS.md](../../AGENTS.md) 和 [HANDOFF](../HANDOFF.md)，再按下表定位；不需要为普通修改重新遍历整个仓库。测试和当前源码优先于历史决策，实时版本、门禁结果和待验收事项只在 HANDOFF 维护。

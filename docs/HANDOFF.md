@@ -1,41 +1,68 @@
 # 当前交接
 
-## 当前候选与授权
+2026-10-13：完成问题 13–23 的取消、进程清理与编辑可靠性修复，并完成问题 24–41 的 Benchmark、Usage 和离线验收准备，源码候选 `0.6.0-rc.4`。分支 `codex/public-contract-core-experience`，起点 `97f59fbe20f28d55e971d85979e8efa764243549`，开始时工作树干净。用户已授权提交、推送、更新版本和创建 Release；不调用真实模型或付费评测。原有忽略的 `question`、`test-me`、`NUL` 与私有资料保持原样。
 
-当前源码候选 **0.6.0-rc.1**。用户明确授权十项优化、deepseek-flash 真实评测不限 Token/费用总额，以及提交、推送、更新版本和 GitHub Release。用户接受先在 Windows 测试，Linux 本机/云服务器检查后续进行。正式原生安装包仍保留原有完整发布门禁；本次发布为源码预发布，不把本机成功或跳过当作正式包验收。
+现行契约和回归入口见 [可靠性加固](architecture/RELIABILITY_HARDENING.md)。01–12 的历史证据在 [上轮交接](archive/HANDOFF-2026-10-13-security-privacy.md)，不可作为本轮验证。
 
-起点目录缺少 Git、根工程配置及锁文件。完整性清单在 [baseline-manifest.json](implementation/baseline-manifest.json)，恢复依据见 [RESTORATION](implementation/RESTORATION.md)。本地基线及阶段提交全部保留，随后与远端 main 的真实历史连接，不覆盖上游提交。pnpm 固定 10.30.3、依赖使用本机安装记录核验的精确版本。
+## 实施结果
 
-## 逐项交付
+- 13：流取消直达等待，consumer/body/dispatcher 使用共享期限；故障关闭请求准入，usage 保留，辅助 dispose 有界。
+- 14、15：Windows 私有 Job 在目标创建时建立归属，状态查询与独立终态收据，默认五秒故障期限；shell/PTY/Git/MCP/LSP/search/file worker 等接入，包含显式 host MCP，裸 Windows PID 拒绝终止。程序名只查询显式 PATH，IPC 启动失败清理 broker；诊断只保留进程内有界元数据。Unix 发送信号后查询组是否消失，查询失败保留故障。旧 taskkill 128 缺少后代证据，历史精确根因未定位，不能倒推历史清理成功。
+- 16：搜索总输出限制 2 MiB，超限即停止进程及后续文件，区分 output_limit/timeout。
+- 17、20：严格 hunk 数量/范围/连续性/换行校验，16 MiB 文件小修改，512 KiB 载荷及 64 MiB 批次预算，有界预览。
+- 19：原始字节、manifest、安装身份和回滚意图持久保存，patch/undo/team 共用协调器；明确 committed/rolled_back/conflict/unknown。recover-batch 显式审阅，已提交只清理，后续保存或同字节换对象拒绝覆盖。
+- 18：ask 中简单用户 allow 生效；项目限制独立求值，复杂语法询问；v1 allow 升级待显式激活。
+- 21：子包发现和覆盖债务，根没有 Node manifest 也发现嵌套包；显式 /verify --package，证据绑定 workspace revision，不随恢复重放。Git 跟踪、依据捕获与子包扫描接入任务取消。
+- 22、23：特殊快照稳定拒绝原因与 LFS 指针检测；网页静态提取/JS 未执行/可能不完整标记。
 
-十项实现、验收、迁移和复现方式见 [优化验收报告](implementation/REPORT.md)。报告分别标出已有能力、补强、测试及真实效果待验证。生产修复上限继续三轮，团队默认仍单 Agent。验证 v1/v2 增量兼容；独立功能验证只能由宿主入口绑定。Memory 来源不足可读但不注入，纠正/禁用会在下一请求前刷新。二进制整合以宿主原始字节与事务恢复为边界，64 MiB 单文件、256 MiB 快照及 10,000 文件资源限制不代表费用预算。
+13、15–18、20、21 的行为修复通过本轮离线和本机回归；14 的新清理路径已缓解旧退出码依赖，历史故障仍未定位。19、22、23 保留明确设计限制：多文件非原子、特殊团队快照安全拒绝、网页只作静态提取。
 
-## 真实评测结果
+## 本轮验收
 
-模型使用可解析凭据的 deepseek-flash 注册项；较新的另一注册项凭据不可用。密钥只经 AuthStorage 读取，没有写入源码或报告。修复/团队各计划十二任务、每臂五次、共 120 次；实际运行与全部跳过均保留。四个配对通道并发，配对内顺序随机且串行，存在同端点/同机器竞争限制。
+| 检查 | 结果与证据 |
+| --- | --- |
+| typecheck → lint → test → build | 串行全部通过，首败停止；最终 test 共 1330 项，1327 通过、3 跳过、0 失败；约 353 秒。日志 `.cache/reliability-finalized-{typecheck,lint,test,build}.log` |
+| required Windows native | 61 项通过、0 跳过、0 失败；69 条报告记录包含 8 条汇总。覆盖真实 Job 后代/owner 崩溃/IPC 拒绝、文件句柄竞争、批次强杀/原生阶段/磁盘失败注入、MCP 与团队隔离。日志 `.cache/reliability-native-final.log`，收据 `.cache/reliability-native-evidence/receipt.json` |
+| UI / docs / CI 配置 | 953 组语言键及插值、135 份文档链接、工作流固定 revision 与门禁通过；`.cache/reliability-{ui,docs,ci}-final.log` |
+| 安全与供应链 | 完整 Git 历史与维护源码秘密扫描、锁文件依赖审计、许可证与 SBOM 通过，未审阅秘密 0；`.cache/reliability-security-delivery/scan.json` |
+| 安装 | install:verify、files:smoke、process:smoke 全通过；install:clean 从新源码副本 frozen-lockfile 安装并重编译两组件、构建与 CLI/SDK/真实 PTY 7 项烟测通过。`.cache/reliability-install-clean.log` |
 
-- 修复：46 passed、32 failed、3 error、39 skipped；33 recorded runs 的 Usage 未知。
-- 团队：0 passed、28 failed、1 error、91 skipped；28 recorded runs 的 Usage 未知。
-- 两个 campaign 都因 Windows taskkill 128 清理失败停止；有失败模型请求、计量不完整与未运行项。没有达到策略门槛，不宣称效率改善，也不推荐自动开启团队。
-- Memory：90 次全部执行；无记忆 30/30、有效记忆 29/30、过期/禁用/纠正组 30/30。旧错误经验注入零次；一例解析失败且 Usage 未知，整体不能记为全通过。
-- Web：24 页固定技术文档对照，包含十二份有许可的 Node 上游快照；正文及关键代码保持，合成页面外壳不宣称通用网站效果。
+全量测试跳过项是本机不允许文件 symlink、Windows 临时目录别名专门用例和 Unix 超时子进程实测。正常搜索超限及 host MCP 停止仍检查两秒快速界限；五秒只用于故障清理，不放宽正常取消。
 
-脱敏证据见 [evidence](implementation/evidence/manifest.json)。原始计划、JSONL、模型原始记录和冻结 harness 保存在本地 .cache/evaluation；不上传原始源码/客户路径/输出。修复已知 Token 5,218,486，Memory 已知输入 350,289、输出 6,812；这些是部分已知消耗，不是完整账单。先前基础设施失败 pilot 的已知输入 653,238、输出 41,803 及在途未知用量另行保留，不从总工作记录中删除。
+原生收据核验的冻结源码摘要为 `b04e93476e36f5ecad3d2846e42b819e26e177293ba45e3feb386e6ef1498e49`，`dirty: true`，基于上述起点并包含全部修复；收据生成后只增补交接及双语说明，没有实施代码变化。日志保留在 ignored `.cache`，不提交用户私有资料，不把本地 dirty 收据当正式 Release 候选认证。前期失败及取消的门禁轮次保留为诊断日志，不能作为通过证据。
 
-## 当前检查与发布状态
+## 未验证与后续边界
 
-最终 Windows 四项检查、干净安装、安装烟测、工作流配置及安全检查正在本次候选上执行。最后结果与远端 CI/PR/Release 链接将追加在本节；旧交接收据不迁移为本次成功。当前 Linux 本机未执行：WSL 映像不可用，用户选择后续服务器验证。GitHub hosted 检查如运行，将独立记录其结果和平台跳过。
+Windows x64、本地 NTFS、Node 22.19.0、pnpm 10.30.3、MinGW-w64、Windows build 26200。真实模型零调用；真实断电、MSVC、Linux/macOS 原生和本轮人工 Windows Terminal 操作未执行。Unix 状态检查只有离线模拟回归，不将 Windows Job 保证推广到其他平台。Job 不证明服务/WMI 等外部执行代理归属；其他平台文件访问仍不可用。正式跨平台包组件传递与消费者验收沿用待办，不把源码安装当正式包证明。Windows host MCP 入口须为明确的 PE 程序，不能直接执行 cmd/bat，不回退 SDK shell。
 
-原有 question、test-me、NUL 及私有 .cache 模型产物保留。没有 npm registry 发布。上轮交接已归档到 [observability base](archive/HANDOFF-2026-10-12-observability-base.md)。
+## 提交与远端
 
-### 本次最终 Windows 收据
+修复提交 `ca4b9bcf1046b3de93a157666eb636705f2d6700`：`fix bounded cleanup and durable edit recovery [skip publish]`，包含候选号、实现、回归和文档。已普通 fast-forward 推送到 `origin/codex/public-contract-core-experience`，随后 `git ls-remote` 核验该分支指向相同 SHA；此后只追加本交接收据，未改实施源码。
 
-串行 typecheck → lint → test → build 全部通过：1258 tests，1255 pass、3 skip、0 fail、0 cancel；CLI/SDK/native PTY 安装烟测 7 pass。干净安装及工作流固定/门禁配置检查通过。命令和日志摘要见 [windows-checks.json](implementation/evidence/windows-checks.json)。安全工具初次下载连接中断不计成功，重试及远端安全结果另行追加。
+交付使用 `[skip publish]`，不使用 `[skip ci]`；Release 工作流只有 main 上显式 workflow_dispatch。Test 工作流仅 PR/main push 触发，当前功能分支 push 不自动触发它，不能声称远端 CI 通过。本轮没有 tag、Release 或 npm 发布。
 
-### 本次远端独立验收
+## 2026-10-13 Benchmark 交接（问题 24–41）
 
-[PR #10](https://github.com/VinceTree/Everpeace/pull/10) 的第二轮 [完整 CI](https://github.com/VinceTree/Everpeace/actions/runs/38216807264) 全部通过，绑定 commit 4483a606113baf0709853a4a4d7d9ca986163169。Ubuntu hosted：1258 tests、1249 pass、9 skip、0 fail；Windows hosted 结果见 [hosted-ci.json](implementation/evidence/hosted-ci.json)。security 与 Required checks 全成功。首次远端失败原样保留：Memory CLI 测试隔离变量误用 XDG_CONFIG_HOME，修正为 XDG_STATE_HOME；合成 PEM 标记增加精确历史/当前文件哈希的审查记录，不放宽扫描。
+本轮完成 Benchmark 工程、真实上游 fixture、Usage 计量和离线评测准备。没有读取 API key/keyring，没有发起真实模型请求、DeepSeek 付费调用或外部 dsh 真实编码请求；没有改版本、提交、推送、tag 或 Release。当前工作树保留本轮未提交源码、测试和文档改动。
 
-本机安全工具下载失败及 TLS 中断仍记录为未完成；远端安全扫描独立通过。Linux hosted 源码检查现在有实际证据，本机 WSL 及专用 Windows native 发布验收仍未执行。末次仅补正文展示版本及验收文档的提交继续接受同一分支保护门禁。正式原生安装包不因源码预发布绕过其门禁。
+### 已完成的离线证据
 
-本次源码预发布名称 v0.6.0-rc.1，[Release 入口](https://github.com/VinceTree/Everpeace/releases/tag/v0.6.0-rc.1) 在合并及打标签之后创建；公开附件仅含脱敏 evidence。
+- `docs/benchmark/real-fixtures/catalog.json` 冻结 Chalk、Commander、Day.js 共 12 项实际上游任务，三类各 4 项：`real_issue`、`dependency_compatibility`、`cross_module_refactor`。`.cache/benchmark-c-real-proof-v2/proof.json` 记录 12/12 的 pristine baseline pass、预期缺陷 assertion fail、reference repair pass 和独立 regression pass；`modelRequests: 0`。
+- `.cache/benchmark-c-web-v3/report.json` 记录 24 页、8 个公共技术站点计划，22 页下载成功，Fastify 2 页连接失败并保留在失败分母。包含 DOM reference、代码/link retention、JS shell 和深层正文截断控制；`annotationReview: required before any accuracy claim`，不能称为通用网页准确率。
+- `.cache/benchmark-memory-pilot-v2/proof.json` 记录 3 个 coding sequence、每个 4 个连续任务、on/off Memory、3 次 repetition，共 72 个计划任务；只在 coding verification 与 external acceptance 都通过后捕获 Memory，提取成本进入 ledger，前序失败保留后续 skipped。离线 proof 通过，`modelRequests: 0`。
+- `.cache/benchmark-official-draft-v6/protocol.json` 记录官方 DeepSeek 端点草案 `https://api.deepseek.com`、占位 raw model/registration ID、12 个任务、每臂 5 次、正式每实验 120 runs、默认串行配对和保留失败分母。占位符继续阻止 live。
+- Everpeace official/team/performance smoke preflight 通过，并实际观察 provider boundary、high reasoning、32,768 output 和团队成员请求；这是合成 provider boundary 的启动证据，不是供应商兼容或成功率证据。
+- dsh smoke preflight 明确失败：固定 HEAD `639ed015397290b3745d163aafe02ffee4aa3f84` 正确，但现有 `deepseek-harness` checkout 有 tracked modifications，未能证明干净部署。失败保存在 `.cache/benchmark-official-draft-v6/external/smoke/artifacts/preflight-result.json`，没有修改该 dirty worktree，也没有把失败当作通过。
+
+### 代码与回归
+
+- RequestAttemptLedger/RequestExecutor 保持 Unknown Usage sticky；请求数、rejected、unknown、purpose/reason 分开统计；缺少 cache usage 保持未观察，不补零；在途请求可超出 token admission，文档不将预算称为账单硬上限。
+- campaign 支持同预算 paired arms，有限预算默认串行，双臂预算不足时保留完整 pair 分母；结果、计划、storage/cleanup/isolation/identity failure 都会阻止完整统计。paired interval 按 task cluster bootstrap。
+- checkout identity 现在覆盖普通 checkout 的未忽略 untracked source，以及 dsh 的 apps/packages/vendor/native 生成模块（跳过 node_modules）；fresh worker 在异常退出且已有 Usage telemetry 时保留已知 usage 并标记 incomplete。
+- 安全路径扫描继续保留 10,000 项上限；仓库 `.cache` 不作为敏感路径递归扫描对象之外的安全放宽，MCP 回归最终在无缓存干扰的证据副本中通过。
+- `pnpm exec tsx --test --test-concurrency=4 tests/unit/benchmark/*.test.ts`：80 项通过、0 失败、0 跳过。
+- 最终门禁在仓库外的 `c-final-gates-20261013-v1` fresh source snapshot 串行通过：frozen install、build、typecheck、lint、全量 test（1340 项，1337 通过、3 跳过、0 失败）和 final build。收据为该 snapshot 的 `receipt.json`，日志为同目录各 `.log` 文件。隔离副本用于避免本地 Benchmark `.cache` 资料影响 MCP 安全路径扫描；不是新的提交或发布候选。
+
+### 后续边界
+
+仍需用户另行明确授权并提供真实供应商原始 model ID、登记 ID、数值预算和价格快照，才能执行官方兼容、smoke 或正式 120-run campaign。真实模型成功率、修复策略收益、单 Agent 对团队收益、外部 dsh 优势、成本/账单、Memory 长期净收益、复杂网站泛化和性能收益均未被本轮证明。生产默认仍是单 Agent、最多三轮修复。

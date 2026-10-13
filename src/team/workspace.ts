@@ -1,5 +1,6 @@
 import { observeProcessCompletion } from "../tools/process-completion.js";
-import { spawn } from "node:child_process";
+import { TeamWorkspaceError } from './workspace-errors.js';
+import { spawnOwned as spawn } from "../tools/owned-process.js";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -38,12 +39,12 @@ export async function git(cwd: string, args: string[], signal?: AbortSignal): Pr
   let warning = false;
   child.stdout!.setEncoding("utf8"); child.stderr!.setEncoding("utf8");
   child.stderr!.on("data", (chunk: string) => { if (/warning:|error:/iu.test(chunk)) warning = true; });
-  child.stdout!.on("data", (chunk: string) => { bytes += Buffer.byteLength(chunk); if (bytes > 2 * 1024 * 1024) { failure = new Error("Git output exceeded the snapshot limit"); owned.stop(); } else output += chunk; });
+  child.stdout!.on("data", (chunk: string) => { bytes += Buffer.byteLength(chunk); if (bytes > 2 * 1024 * 1024) { failure = new TeamWorkspaceError('resource_limit'); owned.stop(); } else output += chunk; });
   const result = await owned.completion;
   if (result.cleanupError) throw result.cleanupError;
   signal?.throwIfAborted();
   if (failure) throw failure;
-  if (warning && ["ls-files", "ls-tree"].includes(args[0] ?? "")) throw new Error("Git reported incomplete snapshot discovery; coding delegation was refused");
+  if (warning && ["ls-files", "ls-tree"].includes(args[0] ?? "")) throw new TeamWorkspaceError('snapshot_incomplete');
   if (result.error || result.timedOut || result.exitCode !== 0) throw new Error("Git operation failed; check repository and worktree availability");
   return output;
 }
@@ -66,7 +67,7 @@ async function bytes(root: string, name: string): Promise<Buffer | null> {
 async function names(root: string, signal?: AbortSignal): Promise<string[]> {
   const listed = await git(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], signal);
   const result = [...new Set(listed.split("\0").filter(Boolean))];
-  if (result.length > MAX_FILES) throw new Error("Team snapshot has too many files");
+  if (result.length > MAX_FILES) throw new TeamWorkspaceError('resource_limit');
   return result;
 }
 export async function createTeamWorkspace(sourcePath: string, signal?: AbortSignal, onOwned?: (record: TeamWorkspaceRecord) => Promise<void>): Promise<TeamWorkspaceRecord> {
@@ -76,7 +77,7 @@ export async function createTeamWorkspace(sourcePath: string, signal?: AbortSign
   const prefix = path.relative(root, source).split(path.sep).join("/");
   const head = (await git(source, ["rev-parse", "--verify", "HEAD"], signal)).trim();
   const entries = await git(source, ["ls-files", "--stage", "-z"], signal);
-  if (entries.split("\0").some((entry) => entry.startsWith("160000 "))) throw new Error("Parallel coding cannot snapshot Git submodules");
+  if (entries.split("\0").some((entry) => entry.startsWith("160000 "))) throw new TeamWorkspaceError('submodule_unsupported');
   const commonGitDir = path.resolve(source, (await git(source, ["rev-parse", "--git-common-dir"], signal)).trim());
   const owner = path.join(teamWorkspaceRoot(), randomUUID());
   const workspaceRoot = path.join(owner, "w");
@@ -87,24 +88,24 @@ export async function createTeamWorkspace(sourcePath: string, signal?: AbortSign
   const headFiles = (await git(root, ["ls-tree", "-r", "--full-tree", "--name-only", "-z", head, "--", prefix || "."], signal)).split("\0").filter(Boolean).map((name) => prefix ? name.slice(prefix.length + 1) : name);
   const currentFiles = await names(source, signal);
   const listed = [...new Set([...headFiles, ...currentFiles])];
-  if (listed.length > MAX_FILES) throw new Error("Team snapshot has too many files");
+  if (listed.length > MAX_FILES) throw new TeamWorkspaceError('resource_limit');
   for (const name of listed) {
     signal?.throwIfAborted();
     const content = await inspectTeamFile(source, name, signal);
     total += content?.size ?? 0;
-    if (total > MAX_BYTES) throw new Error("Team snapshot exceeded its byte limit; narrow the project before parallel coding");
+    if (total > MAX_BYTES) throw new TeamWorkspaceError('resource_limit');
     contents.set(name, content); baseline[name] = content?.hash ?? null;
   }
   // Recheck names and raw bytes; an incomplete or racing snapshot is never used.
-  if (JSON.stringify(await names(source, signal)) !== JSON.stringify(currentFiles)) throw new Error("Workspace file list changed during snapshot");
+  if (JSON.stringify(await names(source, signal)) !== JSON.stringify(currentFiles)) throw new TeamWorkspaceError('snapshot_changed');
   for (const [name] of contents) {
     const current = await inspectTeamFile(source, name, signal);
-    if ((current?.hash ?? null) !== baseline[name]) throw new Error(`Workspace changed during snapshot: ${name}`);
+    if ((current?.hash ?? null) !== baseline[name]) throw new TeamWorkspaceError('snapshot_changed');
   }
-  if ((await git(source, ["rev-parse", "--verify", "HEAD"], signal)).trim() !== head) throw new Error("Git HEAD changed during snapshot");
+  if ((await git(source, ["rev-parse", "--verify", "HEAD"], signal)).trim() !== head) throw new TeamWorkspaceError('snapshot_changed');
   const record: TeamWorkspaceRecord = { version: 2, source, workspace, owner, commonGitDir, baseline, gitRoot: root, workspaceRoot, workspacePrefix: prefix };
   const ownershipText = JSON.stringify(record);
-  if (Buffer.byteLength(ownershipText) > 2 * 1024 * 1024) throw new Error("Team snapshot metadata exceeded its byte limit");
+  if (Buffer.byteLength(ownershipText) > 2 * 1024 * 1024) throw new TeamWorkspaceError('resource_limit');
   await fs.mkdir(path.join(teamWorkspaceRoot(), "records"), { recursive: true });
   for (const directory of [teamWorkspaceRoot(), path.join(teamWorkspaceRoot(), "records")]) if ((await fs.lstat(directory)).isSymbolicLink()) throw new Error("Team workspace storage must not follow links");
   await fs.mkdir(owner);
@@ -116,9 +117,9 @@ export async function createTeamWorkspace(sourcePath: string, signal?: AbortSign
     if(!artifact)continue;
     const staged=await safeTeamPath(snapshotRoot,name,true);await copyTeamFile(source,name,staged,artifact,signal);
   }
-  if(JSON.stringify(await names(source,signal))!==JSON.stringify(currentFiles))throw new Error('Source file list changed while freezing snapshot bytes');
-  for(const [name] of contents)if((await inspectTeamFile(source,name,signal))?.hash!==(baseline[name]??undefined))throw new Error('Source changed while freezing snapshot bytes');
-  if((await git(source,['rev-parse','--verify','HEAD'],signal)).trim()!==head)throw new Error('Source HEAD changed before snapshot ownership was published');
+  if(JSON.stringify(await names(source,signal))!==JSON.stringify(currentFiles))throw new TeamWorkspaceError('snapshot_changed');
+  for(const [name] of contents)if((await inspectTeamFile(source,name,signal))?.hash!==(baseline[name]??undefined))throw new TeamWorkspaceError('snapshot_changed');
+  if((await git(source,['rev-parse','--verify','HEAD'],signal)).trim()!==head)throw new TeamWorkspaceError('snapshot_changed');
   // Failed creation retains its ownership marker and partial files for explicit cleanup.
   await onOwned?.(record);
   await git(source, ["worktree", "add", "--detach", "--no-checkout", workspaceRoot, head], signal);

@@ -1,6 +1,10 @@
 # 状态、持久化与终端交互
 
-`/privacy`、无模型隐私 CLI、跨进程活动租约、安全导出及 `/perf` 的持久/兼容契约见 [验证、隐私与性能](VALIDATION_PRIVACY_PERFORMANCE.md)。默认保留永久；旧 Session 缺少解释字段和安全关闭证据时不推断成功或自动删除。
+取消期限、Job 进程归属、持久批次恢复、allow 迁移与子包验证的现行契约见 [可靠性加固](RELIABILITY_HARDENING.md)。
+
+当前安全加固契约（文件后端、敏感内容、验证依据、MCP 与隐私迁移）见 [安全加固](SECURITY_HARDENING.md)，与旧说明冲突时以该契约及当前实现为准。
+
+`/privacy`、无模型隐私 CLI、跨进程活动租约、安全导出及 `/perf` 的持久/兼容契约见 [验证、隐私与性能](VALIDATION_PRIVACY_PERFORMANCE.md)。首次保留期限需确认（推荐 30 天），旧策略保留；旧 Session 缺少解释字段和安全关闭证据时不推断成功或自动删除。
 
 这份文档回答“状态归谁所有、哪些内容可以恢复、UI 修改必须守住什么”。先按 [项目路由表](PROJECT_MAP.md) 找到入口；只有修改对应行为时才读取相关源码和测试。当前交付证据、环境限制和待办见 [HANDOFF](../HANDOFF.md)。
 
@@ -147,7 +151,7 @@ workflow 提供路径列表时同时返回 `changed_paths_total` 和 `changed_pa
 
 详细目录职责见 [TUI_STRUCTURE](TUI_STRUCTURE.md)。界面始终 inline，使用终端原生 scrollback，不切换 alternate screen。主状态机拥有视图切换；展示组件不得自己创建 Agent、写 Session 或启动新任务。
 
-- 宿主界面英文；模型正文按其原始语言展示。Markdown、代码、shell 和严格 unified diff 分层高亮，超大或未知内容安全退回纯文本。
+- 宿主文案集中管理并支持中英文切换；模型正文、源码和第三方输出保持原文。状态仅投影协调器、权限、计量及清理事实，清理失败保留准入阻塞。Markdown、代码、shell 和严格 unified diff 分层高亮，超大或未知内容安全退回纯文本。
 - 等待状态包含 provider、耗时与 Ctrl+C 提示；`/status` 显示模型、供应商、实际协议、压缩/推理设置、context 占用和累计 token/cache，缺失数据明确显示未知或不完整。
 - `/status`、`/outputs`、`/history`、`/terminal-setup`、信息窗口及 picker/wizard 使用独立命令窗口；`/new`、`/clear`、`/exit` 是立即动作。
 - `/fork` 使用可取消 loading/结果窗口；任务、审批、直接命令或其他 command load 活动时拒绝。只有子日志原子发布并加载成功后才重放并切换 UI。

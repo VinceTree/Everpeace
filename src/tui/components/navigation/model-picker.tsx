@@ -1,3 +1,4 @@
+import {uiText} from '../../../localization/messages.js';
 import { Select } from "@inkjs/ui";
 import { Box, Text, useInput } from "ink";
 import React from "react";
@@ -31,7 +32,7 @@ export function ModelPicker({ title, models, onSelect, onCancel }: ModelPickerPr
           if (model) onSelect(model);
         }}
       />
-      <Text dimColor>↑↓ select · Enter confirm · Esc to return to session</Text>
+      <Text dimColor>{uiText('mf6fd12cdd98c')}</Text>
     </Box>
   );
 }

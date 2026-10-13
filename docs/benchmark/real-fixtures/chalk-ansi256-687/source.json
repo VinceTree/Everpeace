@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/chalk/chalk",
+  "change": "ff549c534c413a9225322c1ff4e5fc0d97ae5610",
+  "parent": "678e5505458d0cf40134e205aed4454e0eeac45c",
+  "changeUrl": "https://github.com/chalk/chalk/commit/ff549c534c413a9225322c1ff4e5fc0d97ae5610",
+  "license": "MIT",
+  "patchSha256": "2aa29e81288db1c269f1c4adf41080d14ff16b15f8116ba933cb6dcb32f81f6c",
+  "category": "real_issue"
+}

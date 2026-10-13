@@ -90,7 +90,7 @@ test("production failure feedback survives compaction, fork, and restart until t
     const restored = await store.load(child.id);
     assert.equal(restored.workflow?.pending_verification, true);
     assert.equal(restored.workflow?.repair_attempts, 0);
-    const resumed = new CodingWorkflowRuntime({ workspacePath, initialState: restored.workflow, onState: (state) => store.setWorkflow(sessionId, state) });
+    const resumed = new CodingWorkflowRuntime({ workspacePath, initialState: restored.workflow, async confirmVerificationBasis() { return true; }, onState: (state) => store.setWorkflow(sessionId, state) });
     let resumedCalls = 0;
     const requests: Record<string, unknown>[] = [];
     handle = createProductionAgent({ model, workspacePath, sessionStore: store, sessionId: () => sessionId,

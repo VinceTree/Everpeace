@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "kind": "synthetic-longitudinal-coding-pilot",
+  "sequences": [
+    {
+      "id": "form-processing",
+      "tasks": [
+        {"prompt": "Implement step1(value): trim and case-fold a boolean string, returning true for true, false for false, and null for anything else.", "cases": [[" TRUE ", true], ["false", false], ["yes", null]], "solution": "export function step1(value) { const text = value.trim().toLowerCase(); return text === 'true' ? true : text === 'false' ? false : null; }"},
+        {"prompt": "Implement step2(value): decode form text, treating plus as space before percent decoding. Return null on malformed percent encoding.", "cases": [["a+b%2Bc", "a b+c"], ["%E4%B8%AD", "中"], ["%ZZ", null]], "solution": "export function step2(value) { try { return decodeURIComponent(value.replaceAll('+', ' ')); } catch { return null; } }"},
+        {"prompt": "Implement step3(value): escape HTML text ampersands, less-than and greater-than without double-escaping newly generated entities.", "cases": [["<&>", "&lt;&amp;&gt;"], ["&amp;", "&amp;amp;"]], "solution": "export function step3(value) { return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;'); }"},
+        {"prompt": "Implement step4(value): use the existing form decoder and then HTML escaping. Return null if decoding fails. Preserve all earlier APIs.", "cases": [["%3C+a%26b%3E", "&lt; a&amp;b&gt;"], ["%ZZ", null]], "solution": "export function step4(value) { const decoded = step2(value); return decoded === null ? null : step3(decoded); }"}
+      ]
+    },
+    {
+      "id": "numeric-policy",
+      "tasks": [
+        {"prompt": "Implement step1([value, minimum, maximum]): clamp a finite value into a closed interval; invalid numbers or reversed bounds return null.", "cases": [[[17, 0, 10], 10], [[-1, 0, 10], 0], [[1, 3, 2], null]], "solution": "export function step1([value, minimum, maximum]) { return [value, minimum, maximum].every(Number.isFinite) && minimum <= maximum ? Math.min(maximum, Math.max(minimum, value)) : null; }"},
+        {"prompt": "Implement step2([first, last]): inclusive integer sum with both endpoints; invalid or reversed integer bounds return null.", "cases": [[[1, 4], 10], [[-2, 2], 0], [[3, 2], null]], "solution": "export function step2([first, last]) { return Number.isSafeInteger(first) && Number.isSafeInteger(last) && first <= last ? (first + last) * (last - first + 1) / 2 : null; }"},
+        {"prompt": "Implement step3(values): return the median of a nonempty finite numeric array without mutating its input; invalid input returns null.", "cases": [[[3, 1, 2], 2], [[4, 1, 2, 3], 2.5], [[], null]], "solution": "export function step3(values) { if (!values.length || !values.every(Number.isFinite)) return null; const sorted = [...values].sort((a, b) => a - b); const middle = Math.floor(sorted.length / 2); return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2; }"},
+        {"prompt": "Implement step4(values): calculate the existing median and clamp it into [0,10]; empty or invalid input returns null. Preserve all earlier APIs.", "cases": [[[20, 30, 40], 10], [[-10, -2], 0], [[], null]], "solution": "export function step4(values) { const median = step3(values); return median === null ? null : step1([median, 0, 10]); }"}
+      ]
+    },
+    {
+      "id": "record-normalization",
+      "tasks": [
+        {"prompt": "Implement step1(value): trim, lowercase and join whitespace-separated words with hyphens, preserving Unicode letters.", "cases": [[" Hello World ", "hello-world"], ["A  B", "a-b"]], "solution": "export function step1(value) { return value.trim().toLowerCase().replace(/\\s+/gu, '-'); }"},
+        {"prompt": "Implement step2(values): remove duplicate strings stably using case-insensitive comparison; preserve the first original spelling.", "cases": [[["A", "b", "a", "B"], ["A", "b"]], [[], []]], "solution": "export function step2(values) { const seen = new Set(); return values.filter(value => { const key = value.toLowerCase(); if (seen.has(key)) return false; seen.add(key); return true; }); }"},
+        {"prompt": "Implement step3(records): sort records by ascending numeric priority, preserving input order for ties without mutating the input.", "cases": [[[{"id":"b","priority":2},{"id":"a","priority":1},{"id":"c","priority":2}], [{"id":"a","priority":1},{"id":"b","priority":2},{"id":"c","priority":2}]]], "solution": "export function step3(records) { return [...records].sort((a, b) => a.priority - b.priority); }"},
+        {"prompt": "Implement step4(values): normalize each value with step1, then remove duplicates with step2. Preserve the original order and earlier APIs.", "cases": [[[" Hello World ", "hello world", "Other"], ["hello-world", "other"]]], "solution": "export function step4(values) { return step2(values.map(step1)); }"}
+      ]
+    }
+  ]
+}

@@ -26,6 +26,7 @@ export class ModelRequestRuntime {
             await open({ ...options, signal: attemptSignal }),
             async () => { eventsSeen += 1; },
             () => transportController.abort(new Error("Model stream closed by host")),
+            signal,
           );
         } finally {
           if (!transportController.signal.aborted) transportController.abort(new Error("Model stream settled"));
@@ -61,6 +62,7 @@ export class ModelRequestRuntime {
                         recovered,
                         async () => { eventsSeen += 1; },
                         () => recoveryController.abort(new Error("Recovered model stream closed by host")),
+                        signal,
                       )
                     : recovered;
                 } finally {

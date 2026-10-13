@@ -1,8 +1,17 @@
 # Architecture Decisions
 
+## 有界失败、Job 所有权和持久恢复
+
+流和进程清理采用共享截止时间；期限到达返回资源故障并关闭后续准入，不能把超时当作资源已释放。Windows 在进程创建时加入 Job，根退出不能替代后代核验；保留沙箱，不授权裸 PID 终止。多文件提交采用原始字节/身份绑定的持久批次和追加恢复意图，不承诺原子事务或硬件断电持久性。allow 用户规则与项目限制分开求值，旧 allow 激活需确认；子包覆盖证据绑定当前 workspace revision，恢复不重放。详见 [可靠性加固](RELIABILITY_HARDENING.md)。
+
+
+## 安全文件提交与敏感外传
+
+采用 Windows 原生句柄相对访问与保全原文件后排他安装，放弃单步原子替换承诺；无可靠后端的平台拒绝操作，不回退。恢复、回滚与 undo 共用原始字节版本保护。敏感读取授权与外传授权分开，恢复不沿用旧审批。stdio MCP 默认沙箱禁网，宿主模式独立确认；验证依据变化及恢复缺基线需要新授权。实现边界、兼容迁移和未测范围见 [安全加固](SECURITY_HARDENING.md)。
+
 ## 验证解释、数据生命周期与观测
 
-项目报告只提供检查/计量证据，不提升为宿主独立功能证明；覆盖未知不改变现有 verified 结算。隐私保留默认永久，启用及对话导出均绑定具体预览，自动删除必须确认安全关闭及无保留团队归属。Session 原始协议不盲目脱敏改写，诊断默认采用字段白名单。项目经验到期暂停召回，人工纠正保留来源及修订关系；每次真实请求重新校验。性能由当前任务所有者按请求身份/generation 去重，私密参数摘要只留内存。
+项目报告只提供检查/计量证据，不提升为宿主独立功能证明；覆盖未知不改变现有 verified 结算。首次隐私设置推荐 30 天，未确认前不启用自动清理；已有配置保留原策略，启用及对话导出均绑定具体预览，自动删除必须确认安全关闭及无保留团队归属。Session 原始协议不盲目脱敏改写，诊断默认采用字段白名单。项目经验到期暂停召回，人工纠正保留来源及修订关系；每次真实请求重新校验。性能由当前任务所有者按请求身份/generation 去重，私密参数摘要只留内存。
 
 团队授权子目录与 Git 根分离，快照不能扩大到整个仓库。ReactAgent 沿传输、上下文和文件观察状态抽取，仍保留准入、权限及最终清理。评测候选修复规则只能收紧 benchmark 修复数；默认三轮及单 Agent 不根据离线 fixture 改变。固定技术语料明确为许可文档的渲染快照，指标不代表全网。[详细契约与未测范围](VALIDATION_PRIVACY_PERFORMANCE.md)。
 
@@ -292,7 +301,7 @@ Responses usage 中的 `input_tokens_details.cached_tokens` 与 `cache_write_tok
 
 - 模型轮次运行时保留一个可编辑 guidance composer。用户提交的普通消息立即写入可恢复 transcript；真实 Agent 支持时会中止当前 sampling，并在已持久化上下文的安全检查点应用 guidance，工具执行中的消息等待当前工具结果落盘后生效，未启动调用补齐 `steered` output。Ctrl+C 取消时先将待处理 guidance 写入模型 context，避免遗留给未来轮次。旧 AgentSession 替身仍按 FIFO 下一轮兼容。模型 Bash 的非交互输出不会夺取输入焦点。直接 `!` 运行时仍将 stdin 独占给 PTY，Ctrl+C 取消当前命令。
 
-- TUI 自有文案使用英文；用户和 assistant 正文保持原文。已知旧 system/tool/error timeline 文案在渲染时映射为英文，持久化文件与 Responses context 均不迁移、不改写。
+- TUI 自有文案集中管理，自动选择英文/简体中文且允许切换；用户、assistant、源码与第三方正文保持原文。已知旧 system/tool/error 宿主提示仅在显示层精确映射到当前语言，持久化与 Responses context 不按关键词迁移或改写。
 - Agent loop 的 `sampling` / `tools` phase 及 `LoopEvent` 通过构造回调进入 TUI：Responses SSE 的文字 delta、审批、工具开始/结束、重试和 steering 都即时展示，兼容端点退回 buffered 阶段显示。阶段状态和增量内容不持久化；耗时小于一分钟显示秒，超过一分钟显示 `m+s`，超过一小时显示 `h+m+s`。
 - assistant timeline 以 GFM token 渲染标题、列表、强调、链接、表格和代码；代码语言由围栏或 shell 元数据确定。高亮限制为 512 KiB、10,000 行、单行 4 KiB，未知语言、越界内容或解析失败退回纯文本。原始 Markdown 仍是唯一持久化内容。
 - 模型命令、用户直接命令分别以 Ran/You ran 卡片显示；失败和取消保留文本状态而不只依赖颜色。新命令不再额外写入重复 `! command` 和成功提示，审计信息继续由 output timeline 的可选 command 元数据承担，旧 timeline 保持可读。
@@ -436,3 +445,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 - 搜索改 DOM，Brave 由用户明确选择、Keyring 保存；固定 LLM Context HTTPS、零自动付费重试、全部重定向拒绝。响应清理保留原租约实现，仅以压力验收验证。
 - doctor 分阶段证据与配置假设分开，默认取消、有限预算、未知 Usage 停后续；费用为用户价格的逐请求快照估算，按币种汇总，不承诺硬预算或在途停止计费。
 - 扩展九类固定任务，合成/上游 Issue 明确分开；公开成绩以计划分母和独立候选逐次账本为准，缺数据不推算，正式 DeepSeek 付费证据未完成。
+
+- 问题 24–41 的官方端点、原始模型 ID、Usage、串行配对、12 项实际上游任务与 Memory/web/performance pilot 独立冻结；离线 proof 和 preflight 不构成供应商兼容、成功率、成本或长期生产力证据。有限配对必须保留完整双臂预算，Unknown Usage、清理、隔离、存储和身份故障停止 admission；价格模板的 null 只能表示未知。
+
+- 问题 24–41 的官方端点、原始模型 ID、Usage、串行配对、12 项实际上游任务与 Memory/web/performance pilot 独立冻结；离线 proof 和 preflight 不构成供应商兼容、成功率、成本或长期生产力证据。有限配对必须保留完整双臂预算，Unknown Usage、清理、隔离、存储和身份故障停止 admission；价格模板的 null 只能表示未知。

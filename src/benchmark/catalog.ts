@@ -89,18 +89,22 @@ function parseTask(value: unknown, index: number): BenchmarkTaskCatalogEntry {
       throw new Error(`tasks[${index}].fixture must be an object`);
     }
     const fixtureRecord = raw.fixture as Record<string, unknown>;
-    const seedPatch = nonEmpty(fixtureRecord.seedPatch, `tasks[${index}].fixture.seedPatch`);
+    const startingState = fixtureRecord.startingState ?? "seeded";
+    if (startingState !== "seeded" && startingState !== "upstream") throw new Error("Invalid fixture startingState");
+    if (startingState === "upstream" && source.sourceType !== "upstream_issue") throw new Error("An upstream starting state requires an upstream issue source");
+    const seedPatch = startingState === "upstream" ? undefined : nonEmpty(fixtureRecord.seedPatch, `tasks[${index}].fixture.seedPatch`);
     const referencePatch = nonEmpty(fixtureRecord.referencePatch, `tasks[${index}].fixture.referencePatch`);
     const dependencyLock = fixtureRecord.dependencyLock === undefined
       ? undefined
       : nonEmpty(fixtureRecord.dependencyLock, `tasks[${index}].fixture.dependencyLock`);
-    for (const [field, path] of [["seedPatch", seedPatch], ["referencePatch", referencePatch], ...(dependencyLock === undefined ? [] : [["dependencyLock", dependencyLock] as const])] as const) {
+    for (const [field, path] of [...(seedPatch === undefined ? [] : [["seedPatch", seedPatch] as const]), ["referencePatch", referencePatch], ...(dependencyLock === undefined ? [] : [["dependencyLock", dependencyLock] as const])] as const) {
       if (path.includes("\\") || path.startsWith("/") || path.split("/").some((part) => part === ".." || part === "")) {
         throw new Error(`tasks[${index}].fixture.${field} must be a normalized relative path`);
       }
     }
     fixture = {
-      seedPatch,
+      ...(seedPatch === undefined ? {} : { seedPatch }),
+      startingState,
       referencePatch,
       ...(fixtureRecord.seedFailureContains === undefined ? {} : {
         seedFailureContains: (() => {

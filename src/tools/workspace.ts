@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { BoundedOutputBuffer } from './command-record.js';
 import { captureWorkspaceSnapshot, type CaptureWorkspaceSnapshotOptions } from "../benchmark/workspace.js";
 import { listWorkspaceChanges, readWorkspaceChange, type WorkspaceChangeIndex } from "./workspace-review.js";
 
@@ -200,11 +201,23 @@ export async function inspectWorkspace(
 }
 
 export async function workspaceStatus(workspacePath: string, signal?: AbortSignal): Promise<WorkspaceInspection> {
-  return inspectWorkspace(workspacePath, (signal ? { signal } : {}));
+  return inspectWorkspace(workspacePath, { omitDiff: true, ...(signal ? { signal } : {}) });
 }
 
 export async function workspaceDiff(workspacePath: string, signal?: AbortSignal): Promise<WorkspaceInspection> {
-  return inspectWorkspace(workspacePath, (signal ? { signal } : {}));
+  const snapshot = await workspaceStatus(workspacePath, signal);
+  if (!snapshot.git) return snapshot;
+  const changes = await listWorkspaceChanges(workspacePath, signal);
+  const output = new BoundedOutputBuffer(2 * 1024 * 1024);
+  let incomplete = changes.entries.length > 100;
+  for (const entry of changes.entries.slice(0, 100)) {
+    const detail = await readWorkspaceChange(workspacePath, entry, signal);
+    output.append(detail.text + '\n'); incomplete ||= detail.truncated;
+    if (output.truncated) break;
+  }
+  snapshot.git.diff = output.text;
+  snapshot.git.diffTruncated = incomplete || output.truncated;
+  return snapshot;
 }
 
 export function formatWorkspaceInspection(value: WorkspaceInspection, diff = false): string {

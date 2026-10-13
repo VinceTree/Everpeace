@@ -1,6 +1,6 @@
 # 当前交接
 
-更新日期：2026-10-11。入口为 [AGENTS](../AGENTS.md)，当前专题是 [开发验收](DEVELOPMENT.md)、[专用 Windows Runner](WINDOWS_RUNNER.md)。前次 MCP/公共网络补丁及已发布产物证据见 [历史交接](archive/HANDOFF-2026-10-11-mcp-security.md)，不替代本轮验证。
+更新日期：2026-10-11。入口为 [AGENTS](../../AGENTS.md)，当前专题是 [开发验收](../DEVELOPMENT.md)、[专用 Windows Runner](../WINDOWS_RUNNER.md)。前次 MCP/公共网络补丁及已发布产物证据见 [历史交接](HANDOFF-2026-10-11-mcp-security.md)，不替代本轮验证。
 
 ## 范围与交付状态
 
@@ -39,10 +39,10 @@ main 的 Required checks 分支保护已实际启用：strict、绑定 GitHub Ac
 
 此前候选流程保留真实失败：[首次安装包验收](https://github.com/VinceTree/Everpeace/actions/runs/38113775671) 发现 pnpm bundled 子包无 Linux 构建及 Runner launcher 定位问题；[后续生产构建](https://github.com/VinceTree/Everpeace/actions/runs/38114719881) 暴露错误要求 Linux spawn-helper；[全局命令验收](https://github.com/VinceTree/Everpeace/actions/runs/38115570776) 暴露 Unix symlink 入口静默退出。上述失败按固定上游条件和真实安装行为修复，失败轮不计作成功证据。
 
-外置证据根：`C:\Users\39850\AppData\Local\Temp\everpeace-distribution-30b46b1685c1497ba90539e9cd829a02`。最终包及收据位于 final-candidate-package；本机门禁 entry-final-*、绑定 local-candidate-binding.json、原生 native-final-candidate、远端 final-* 日志。较早 dirty 开发包和失败日志保留，只供诊断，不可替代最终产物。
+外置证据根：`<LOCAL_EVIDENCE>`。最终包及收据位于 final-candidate-package；本机门禁 entry-final-*、绑定 local-candidate-binding.json、原生 native-final-candidate、远端 final-* 日志。较早 dirty 开发包和失败日志保留，只供诊断，不可替代最终产物。
 
 ## 发布阻塞与后续接入
 
-Runner API 当前 total_count=0，RUNNER_READ_TOKEN 未配置。最终流程的 availability 因缺少此配置而失败，native skipped、gate failure、publish skipped；平台、打包及两平台消费者均 success，流程整体 failure 是基础设施门禁的正确拒绝，不是完整发布成功。再次核对 v0.5.3 tag/Release 均不存在。不得使用本机成功或 hosted skip 替代。专用 Windows 机器按 [部署说明](WINDOWS_RUNNER.md) 接入后，重新对准确候选运行全部发布必需检查，只有同包消费者和 required native 全成功才能创建 tag/Release。不能先手工建 draft/tag 再补验收，也不移动冲突 tag。
+Runner API 当前 total_count=0，RUNNER_READ_TOKEN 未配置。最终流程的 availability 因缺少此配置而失败，native skipped、gate failure、publish skipped；平台、打包及两平台消费者均 success，流程整体 failure 是基础设施门禁的正确拒绝，不是完整发布成功。再次核对 v0.5.3 tag/Release 均不存在。不得使用本机成功或 hosted skip 替代。专用 Windows 机器按 [部署说明](../WINDOWS_RUNNER.md) 接入后，重新对准确候选运行全部发布必需检查，只有同包消费者和 required native 全成功才能创建 tag/Release。不能先手工建 draft/tag 再补验收，也不移动冲突 tag。
 
 起点为 `796f75be499794eab66f6fcdd238badd6921785d`。初版 `152a791d5db905ea1e7623380d595b0035cd1f32` 与后续 `79bcc32f751af4e0e6031d977a24ddb614d7fe85`、`257a97c2ab5b8065eed0447331fc8b299e31a93a`、最终生产候选均已提交、推送。保留用户原有 untracked `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`。本轮没有付费模型请求、npm registry 发布或外部上游投稿。

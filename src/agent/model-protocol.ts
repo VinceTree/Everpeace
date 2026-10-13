@@ -17,7 +17,11 @@ export interface AgentResponse {
   incomplete_details?: unknown;
 }
 
-export type ResponseStreamLike = AsyncIterable<Record<string, unknown>>;
+export type ResponseStreamLike = AsyncIterable<Record<string, unknown>> & {
+  /** Provider and consumer share the same cleanup deadline. */
+  cleanupDeadline?(timeoutMs?: number): import('../util/cleanup-deadline.js').CleanupDeadline;
+  cleanupFailed?(deadline: import('../util/cleanup-deadline.js').CleanupDeadline): void;
+};
 
 export interface ResponseRecoveryState {
   events: readonly Record<string, unknown>[];

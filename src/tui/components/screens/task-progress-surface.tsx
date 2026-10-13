@@ -1,3 +1,4 @@
+import {uiText} from '../../../localization/messages.js';
 import { Box, Text } from "ink";
 import React from "react";
 import type { TaskProgress } from "../../../workflow/task-progress.js";
@@ -17,18 +18,18 @@ export function TaskProgressSurface({ progress, workflow, onBack }: {
   onBack(): void;
 }) {
   return (
-    <CommandSurface title="/tasks · Current task" onBack={onBack}>
-      <Text>Last task result: {resultText(workflow)}</Text>
+    <CommandSurface title={uiText('mae21e85f3f80')} onBack={onBack}>
+      <Text>{uiText('mfd35b9675a13')}{resultText(workflow)}</Text>
       <Box flexDirection="column" marginTop={1}>
         {!progress || progress.plan.length === 0 ? (
-          <Text dimColor>No checklist is active for this task.</Text>
+          <Text dimColor>{uiText('mae3f1eade900')}</Text>
         ) : progress.plan.map((item, index) => (
           <Text key={`${index}:${item.step}`} {...(item.status === "completed" ? { color: "green" as const } : item.status === "in_progress" ? { color: "yellow" as const } : {})}>
             {item.status === "completed" ? "✓" : item.status === "in_progress" ? "●" : "○"} {item.step}
           </Text>
         ))}
       </Box>
-      <Text dimColor>Checklist status is advisory; verification determines completion.</Text>
+      <Text dimColor>{uiText('md5dd9584fb27')}</Text>
     </CommandSurface>
   );
 }
