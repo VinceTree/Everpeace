@@ -1,5 +1,7 @@
 # 当前计划
 
+问题 24–41 的当前执行计划与边界见 [编码竞争力评测](benchmark/CODING_COMPETITIVENESS.md)。本阶段先完成请求级计量、预算、清理与报告契约，再证明 12 项实际上游任务，最后按最终构建冻结官方、修复、团队、dsh 和 Memory/web/performance pilots。
+
 既有安全边界与隐私加固，问题 01–12 的设计、实现和限制见 [安全加固](architecture/SECURITY_HARDENING.md)。交付顺序为文件竞争/路径 → 敏感读取/外传 → 验证/MCP → 隐私/综合验收。
 
 当前实施问题 13–23：流和进程有界清理 → 补丁/恢复 → 权限与覆盖 → 明确能力限制；契约见 [可靠性加固](architecture/RELIABILITY_HARDENING.md)。第 22、23 项本轮只补检测与拒绝，不自动拉取子模块/LFS 或启动浏览器。真实断电验收单列未运行。
@@ -9,3 +11,5 @@ Windows 本地 NTFS 是本轮安全文件后端的支持范围；其他平台明
 用户已授权更新源码候选号、提交和推送。提交使用 `[skip publish]`，保持测试启用，不创建 tag 或 Release。正式安装包仍遵守原有准确候选、跨平台消费者、安全与专用 Windows native 门禁，不降低发布标准。最新检查证据和未覆盖项目见 [HANDOFF](HANDOFF.md)。
 
 此前公开契约与核心体验的未验收终端、安装和真实收益事项保留在 [实施状态](core-experience/STATUS.md)，不自动扩大为本轮任务。
+
+正式对照每臂五次并默认串行等额预算配对；官方原始模型 ID 和登记 ID 未确定时保留占位符，禁止凭据解析和 live。生产最多三轮修复、默认单 Agent、权限与原生 sandbox 不变。本轮不付费评测、不改版本、不提交/推送、不打 tag 或创建 Release；新的质量、速度、Token/费用和长期 Memory 收益继续等待真实模型数据。

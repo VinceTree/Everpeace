@@ -5,7 +5,7 @@
 Host display: `--lang auto|en|zh-CN`, `EVERPEACE_LANG` and `/language`. `--accessible` provides append-only TTY interaction; redirected automation uses `exec --json`. [Task and acceptance status](docs/core-experience/STATUS.md).
 
 
-**Candidate 0.6.0-rc.3.** The hardened workspace file backend requires Windows and local NTFS. Other platforms report unavailable file access. See [current validation and limitations](docs/HANDOFF.md); real-model security evaluation remains paused.
+**Candidate 0.6.0-rc.4.** The hardened workspace file backend requires Windows and local NTFS. Other platforms report unavailable file access. See [current validation and limitations](docs/HANDOFF.md); real-model security evaluation remains paused.
 
 **Plan, edit and verify your Node.js / TypeScript project from the terminal.**
 
@@ -54,7 +54,7 @@ pnpm link --global
 everpeace
 ```
 
-Current source version: **0.6.0-rc.3** (source prerelease).
+Current source version: **0.6.0-rc.4** (source prerelease).
 
 ## Real tools, checked changes
 
@@ -124,6 +124,8 @@ Team JSONL uses schema v2; ordinary execution retains v1. Interrupted or conflic
   Failed requests with unknown usage retain safe HTTP/error categories without logging provider error bodies or headers.
 
 For approval keys, terminal controls and integration setup, see the [usage guide](docs/USAGE.md). Broader coding quality, reliability and cost still require measured testing. [Development status](docs/HANDOFF.md) · [DeepSeek test preparation](docs/benchmark/READINESS.md).
+
+The [official DeepSeek experiment protocol](docs/benchmark/CODING_COMPETITIVENESS.md) prepares 12 upstream tasks, serial equal-budget pairs, a pinned dsh comparison, and Memory, web and performance pilots. Preparation and offline proof do not call models. Official coding success rates, strategy gains and costs remain unmeasured.
 
 ## Develop and contribute
 

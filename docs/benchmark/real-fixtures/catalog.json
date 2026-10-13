@@ -1,0 +1,943 @@
+{
+  "schema": 1,
+  "tasks": [
+    {
+      "id": "chalk-browser-642",
+      "prompt": "The browser color-detection entry crashes when navigator is absent. Make importing it safe in that environment, preserving modern Chromium client hints, legacy Chromium and non-Chromium behavior.",
+      "workspacePath": "unused-before-preparation",
+      "tags": [
+        "real_issue",
+        "chalk"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "sourceType": "upstream_issue",
+        "repositoryUrl": "https://github.com/chalk/chalk",
+        "commit": "fc809b686d5048d56fec3a5d96d1ad57dee193bf",
+        "issue": "https://github.com/chalk/chalk/commit/4ebb62d1ca70c122674558a88932ddf6545fe9ef",
+        "license": "MIT"
+      },
+      "fixture": {
+        "startingState": "upstream",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "chalk-browser-642",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 180000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "chalk-browser-642",
+            "${WORKSPACE}",
+            "baseline"
+          ],
+          "timeoutMs": 120000
+        },
+        "referencePatch": "chalk-browser-642/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      },
+      "verification": {
+        "command": "npm",
+        "args": [
+          "test"
+        ],
+        "timeoutMs": 180000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "chalk-browser-642",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 120000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "chalk-browser-642",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 120000
+      },
+      "allowedPaths": [
+        "source/vendor/supports-color/browser.js",
+        "test",
+        "tests"
+      ]
+    },
+    {
+      "id": "chalk-ansi256-687",
+      "prompt": "Correct ansi256 and bgAnsi256 on basic-color terminals: downsample their palette values to ANSI 16 colors. Preserve level 0, level 2/3 and nested styling behavior.",
+      "workspacePath": "unused-before-preparation",
+      "tags": [
+        "real_issue",
+        "chalk"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "sourceType": "upstream_issue",
+        "repositoryUrl": "https://github.com/chalk/chalk",
+        "commit": "678e5505458d0cf40134e205aed4454e0eeac45c",
+        "issue": "https://github.com/chalk/chalk/commit/ff549c534c413a9225322c1ff4e5fc0d97ae5610",
+        "license": "MIT"
+      },
+      "fixture": {
+        "startingState": "upstream",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "chalk-ansi256-687",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 180000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "chalk-ansi256-687",
+            "${WORKSPACE}",
+            "baseline"
+          ],
+          "timeoutMs": 120000
+        },
+        "referencePatch": "chalk-ansi256-687/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      },
+      "verification": {
+        "command": "npm",
+        "args": [
+          "test"
+        ],
+        "timeoutMs": 180000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "chalk-ansi256-687",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 120000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "chalk-ansi256-687",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 120000
+      },
+      "allowedPaths": [
+        "source/index.js",
+        "source/index.d.ts",
+        "test",
+        "tests"
+      ]
+    },
+    {
+      "id": "dayjs-timezone-invalid-3180",
+      "prompt": "Timezone conversion currently throws for invalid Day.js values and invalid string input. Return invalid instances safely in both instance and static timezone APIs, preserving valid-date offsets and timezone metadata.",
+      "workspacePath": "unused-before-preparation",
+      "tags": [
+        "real_issue",
+        "dayjs"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "sourceType": "upstream_issue",
+        "repositoryUrl": "https://github.com/iamkun/dayjs",
+        "commit": "ae3a55025cdf0f06c8705b5e8b61cd4edb33697a",
+        "issue": "https://github.com/iamkun/dayjs/commit/dad46e6fe5198d77d87ed3b121937f77adaee0a6",
+        "license": "MIT"
+      },
+      "fixture": {
+        "startingState": "upstream",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "dayjs-timezone-invalid-3180",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 180000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "dayjs-timezone-invalid-3180",
+            "${WORKSPACE}",
+            "baseline"
+          ],
+          "timeoutMs": 120000
+        },
+        "referencePatch": "dayjs-timezone-invalid-3180/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      },
+      "verification": {
+        "command": "npm",
+        "args": [
+          "test"
+        ],
+        "timeoutMs": 180000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "dayjs-timezone-invalid-3180",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 120000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "dayjs-timezone-invalid-3180",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 120000
+      },
+      "allowedPaths": [
+        "src/plugin/timezone/index.js",
+        "test",
+        "tests"
+      ]
+    },
+    {
+      "id": "dayjs-locale-merge-3012",
+      "prompt": "Partial updateLocale updates to nested objects currently discard sibling properties. Merge object-valued updates, preserving siblings, while continuing to replace arrays and scalar values.",
+      "workspacePath": "unused-before-preparation",
+      "tags": [
+        "real_issue",
+        "dayjs"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "sourceType": "upstream_issue",
+        "repositoryUrl": "https://github.com/iamkun/dayjs",
+        "commit": "9d2b6a1ec744ad5db13afd4d701f93349135dfec",
+        "issue": "https://github.com/iamkun/dayjs/commit/99691c5f3bd1371d3b763d5f9dfaed9a1945a477",
+        "license": "MIT"
+      },
+      "fixture": {
+        "startingState": "upstream",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "dayjs-locale-merge-3012",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 180000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "dayjs-locale-merge-3012",
+            "${WORKSPACE}",
+            "baseline"
+          ],
+          "timeoutMs": 120000
+        },
+        "referencePatch": "dayjs-locale-merge-3012/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      },
+      "verification": {
+        "command": "npm",
+        "args": [
+          "test"
+        ],
+        "timeoutMs": 180000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "dayjs-locale-merge-3012",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 120000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "dayjs-locale-merge-3012",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 120000
+      },
+      "allowedPaths": [
+        "src/plugin/updateLocale/index.js",
+        "test",
+        "tests"
+      ]
+    },
+    {
+      "id": "chalk-supports-color-579",
+      "prompt": "Refresh the vendored supports-color integration for Azure DevOps non-TTY output, GitHub Actions truecolor, xterm-kitty and Chromium client hints. Keep runtime and public declaration compatibility consistent.",
+      "workspacePath": "unused-before-preparation",
+      "tags": [
+        "dependency_compatibility",
+        "chalk"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "sourceType": "upstream_issue",
+        "repositoryUrl": "https://github.com/chalk/chalk",
+        "commit": "a027e3c1e0fa8dcd850e20b7a99e73a5278e8f9a",
+        "issue": "https://github.com/chalk/chalk/commit/7443e9faa05b470a8a53850c2ded16fa0810a407",
+        "license": "MIT"
+      },
+      "fixture": {
+        "startingState": "upstream",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "chalk-supports-color-579",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 180000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "chalk-supports-color-579",
+            "${WORKSPACE}",
+            "baseline"
+          ],
+          "timeoutMs": 120000
+        },
+        "referencePatch": "chalk-supports-color-579/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      },
+      "verification": {
+        "command": "npm",
+        "args": [
+          "test"
+        ],
+        "timeoutMs": 180000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "chalk-supports-color-579",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 120000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "chalk-supports-color-579",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 120000
+      },
+      "allowedPaths": [
+        "source/vendor/supports-color",
+        "test",
+        "tests"
+      ]
+    },
+    {
+      "id": "chalk-supports-color-603",
+      "prompt": "Update the vendored supports-color behavior to recognize Gitea Actions as truecolor under CI, retaining existing GitHub Actions and non-CI behavior.",
+      "workspacePath": "unused-before-preparation",
+      "tags": [
+        "dependency_compatibility",
+        "chalk"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "sourceType": "upstream_issue",
+        "repositoryUrl": "https://github.com/chalk/chalk",
+        "commit": "a370f468a43999e4397094ff5c3d17aadcc4860e",
+        "issue": "https://github.com/chalk/chalk/commit/29b856959f4bee5a514c7ed48a1f6879686eadf2",
+        "license": "MIT"
+      },
+      "fixture": {
+        "startingState": "upstream",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "chalk-supports-color-603",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 180000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "chalk-supports-color-603",
+            "${WORKSPACE}",
+            "baseline"
+          ],
+          "timeoutMs": 120000
+        },
+        "referencePatch": "chalk-supports-color-603/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      },
+      "verification": {
+        "command": "npm",
+        "args": [
+          "test"
+        ],
+        "timeoutMs": 180000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "chalk-supports-color-603",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 120000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "chalk-supports-color-603",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 120000
+      },
+      "allowedPaths": [
+        "source/vendor/supports-color",
+        "test",
+        "tests"
+      ]
+    },
+    {
+      "id": "commander-native-util-2486",
+      "prompt": "Replace Commander's handwritten ANSI stripping dependency with Node's stripVTControlCharacters in both help-width calculation and command diagnostics. Include OSC sequences as well as SGR; preserve plain-text layout.",
+      "workspacePath": "unused-before-preparation",
+      "tags": [
+        "dependency_compatibility",
+        "commander"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "sourceType": "upstream_issue",
+        "repositoryUrl": "https://github.com/tj/commander.js",
+        "commit": "987f28966c71baecb0ef4a36780e727bcd575b31",
+        "issue": "https://github.com/tj/commander.js/commit/373f660f6febb720b82635220eea72dd9b7e0cba",
+        "license": "MIT"
+      },
+      "fixture": {
+        "startingState": "upstream",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "commander-native-util-2486",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 180000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "commander-native-util-2486",
+            "${WORKSPACE}",
+            "baseline"
+          ],
+          "timeoutMs": 120000
+        },
+        "referencePatch": "commander-native-util-2486/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      },
+      "verification": {
+        "command": "npm",
+        "args": [
+          "test"
+        ],
+        "timeoutMs": 180000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "commander-native-util-2486",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 120000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "commander-native-util-2486",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 120000
+      },
+      "allowedPaths": [
+        "lib/command.js",
+        "lib/help.js",
+        "tests/help.stripAnsi.test.js",
+        "test",
+        "tests"
+      ]
+    },
+    {
+      "id": "dayjs-windows-cross-env-3064",
+      "prompt": "Make the existing timezone test command portable to Windows using the already installed cross-env dependency. Preserve all timezone variants and correctly pass the JSON coverage threshold to Jest.",
+      "workspacePath": "unused-before-preparation",
+      "tags": [
+        "dependency_compatibility",
+        "dayjs"
+      ],
+      "timeoutMs": 900000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "sourceType": "upstream_issue",
+        "repositoryUrl": "https://github.com/iamkun/dayjs",
+        "commit": "7bb06f80a7671db32c5fc0345606037edae452f5",
+        "issue": "https://github.com/iamkun/dayjs/commit/51ef048fb085b57c170bfea7150ac433020f1dcb",
+        "license": "MIT"
+      },
+      "fixture": {
+        "startingState": "upstream",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "dayjs-windows-cross-env-3064",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 180000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "dayjs-windows-cross-env-3064",
+            "${WORKSPACE}",
+            "baseline"
+          ],
+          "timeoutMs": 120000
+        },
+        "referencePatch": "dayjs-windows-cross-env-3064/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      },
+      "verification": {
+        "command": "npm",
+        "args": [
+          "test"
+        ],
+        "timeoutMs": 180000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "dayjs-windows-cross-env-3064",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 120000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "dayjs-windows-cross-env-3064",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 120000
+      },
+      "allowedPaths": [
+        "package.json",
+        "test",
+        "tests"
+      ]
+    },
+    {
+      "id": "chalk-vendor-migration",
+      "prompt": "Bundle the runtime ansi-styles and supports-color dependencies into source/vendor, route imports through package import mappings including the browser condition, and remove runtime package dependencies. Preserve styling, color detection and exported types.",
+      "workspacePath": "unused-before-preparation",
+      "tags": [
+        "cross_module_refactor",
+        "chalk"
+      ],
+      "timeoutMs": 1800000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "sourceType": "upstream_issue",
+        "repositoryUrl": "https://github.com/chalk/chalk",
+        "commit": "d7c4aac07e422c8ae534897b3f1707aa71a51c73",
+        "issue": "https://github.com/chalk/chalk/commit/04fdbd6d8d262ed8668cf3f2e94f647d2bc028d8",
+        "license": "MIT"
+      },
+      "fixture": {
+        "startingState": "upstream",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "chalk-vendor-migration",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 180000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "chalk-vendor-migration",
+            "${WORKSPACE}",
+            "baseline"
+          ],
+          "timeoutMs": 120000
+        },
+        "referencePatch": "chalk-vendor-migration/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      },
+      "verification": {
+        "command": "npm",
+        "args": [
+          "test"
+        ],
+        "timeoutMs": 180000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "chalk-vendor-migration",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 120000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "chalk-vendor-migration",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 120000
+      },
+      "allowedPaths": [
+        "source",
+        "package.json",
+        "test",
+        "tests"
+      ]
+    },
+    {
+      "id": "commander-esm-2464",
+      "prompt": "Migrate Commander to ESM-only consistently across package exports, implementation modules, tests, examples and type declarations. Preserve its public command, option, argument and help behavior. Remove the redundant CommonJS/ESM bridge.",
+      "workspacePath": "unused-before-preparation",
+      "tags": [
+        "cross_module_refactor",
+        "commander"
+      ],
+      "timeoutMs": 1800000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "sourceType": "upstream_issue",
+        "repositoryUrl": "https://github.com/tj/commander.js",
+        "commit": "b51c0ea3d012ea165d7e50bb375f4db67b9d8e75",
+        "issue": "https://github.com/tj/commander.js/commit/f4bd4700021c7f0258834c803f354f06241518be",
+        "license": "MIT"
+      },
+      "fixture": {
+        "startingState": "upstream",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "commander-esm-2464",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 180000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "commander-esm-2464",
+            "${WORKSPACE}",
+            "baseline"
+          ],
+          "timeoutMs": 120000
+        },
+        "referencePatch": "commander-esm-2464/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      },
+      "verification": {
+        "command": "npm",
+        "args": [
+          "test"
+        ],
+        "timeoutMs": 180000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "commander-esm-2464",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 120000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "commander-esm-2464",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 120000
+      },
+      "allowedPaths": [
+        "package.json",
+        "package-lock.json",
+        "index.js",
+        "lib",
+        "tests",
+        "examples",
+        "typings",
+        "esm.mjs",
+        ".prettierrc.js",
+        "eslint.config.js",
+        "Readme.md",
+        "CHANGELOG.md",
+        "docs",
+        "test",
+        "tests"
+      ]
+    },
+    {
+      "id": "commander-node-tests-2463",
+      "prompt": "Migrate the Commander test suite from Jest to Node's built-in test runner and strict assertions. Preserve substantive assertions, async and mock behavior; update scripts, dependency lock and type/lint configuration consistently.",
+      "workspacePath": "unused-before-preparation",
+      "tags": [
+        "cross_module_refactor",
+        "commander"
+      ],
+      "timeoutMs": 1800000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "sourceType": "upstream_issue",
+        "repositoryUrl": "https://github.com/tj/commander.js",
+        "commit": "63eed4aa05435575d515311bb5efaf6d88b6be84",
+        "issue": "https://github.com/tj/commander.js/commit/3dd608610b4e064b4d5d1ae133c3b3d5b469a198",
+        "license": "MIT"
+      },
+      "fixture": {
+        "startingState": "upstream",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "commander-node-tests-2463",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 180000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "commander-node-tests-2463",
+            "${WORKSPACE}",
+            "baseline"
+          ],
+          "timeoutMs": 120000
+        },
+        "referencePatch": "commander-node-tests-2463/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      },
+      "verification": {
+        "command": "npm",
+        "args": [
+          "test"
+        ],
+        "timeoutMs": 180000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "commander-node-tests-2463",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 120000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "commander-node-tests-2463",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 120000
+      },
+      "allowedPaths": [
+        "package.json",
+        "package-lock.json",
+        "tests",
+        "eslint.config.js",
+        "tsconfig.json",
+        "test",
+        "tests"
+      ]
+    },
+    {
+      "id": "commander-help-option-2006",
+      "prompt": "Refactor help-option handling to hold a real Option instance and expose a chainable addHelpOption. Keep disabled help, inherited help, customized flags/descriptions and option conflicts consistent across command logic, help rendering and declarations.",
+      "workspacePath": "unused-before-preparation",
+      "tags": [
+        "cross_module_refactor",
+        "commander"
+      ],
+      "timeoutMs": 1800000,
+      "maxRepairAttempts": 3,
+      "source": {
+        "sourceType": "upstream_issue",
+        "repositoryUrl": "https://github.com/tj/commander.js",
+        "commit": "ff08a02866d5431a9702edb43915b448c3002f82",
+        "issue": "https://github.com/tj/commander.js/commit/09244af7ab71d4241bb9566380db7fd56eceb969",
+        "license": "MIT"
+      },
+      "fixture": {
+        "startingState": "upstream",
+        "setup": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/setup.mjs",
+            "commander-help-option-2006",
+            "${WORKSPACE}"
+          ],
+          "timeoutMs": 180000
+        },
+        "pristineVerification": {
+          "command": "node",
+          "args": [
+            "${FIXTURE_ROOT}/verify.mjs",
+            "commander-help-option-2006",
+            "${WORKSPACE}",
+            "baseline"
+          ],
+          "timeoutMs": 120000
+        },
+        "referencePatch": "commander-help-option-2006/reference.patch",
+        "seedFailureContains": [
+          "ERR_ASSERTION"
+        ]
+      },
+      "verification": {
+        "command": "npm",
+        "args": [
+          "test"
+        ],
+        "timeoutMs": 180000
+      },
+      "acceptance": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "commander-help-option-2006",
+          "${WORKSPACE}",
+          "acceptance"
+        ],
+        "timeoutMs": 120000
+      },
+      "regression": {
+        "command": "node",
+        "args": [
+          "${FIXTURE_ROOT}/verify.mjs",
+          "commander-help-option-2006",
+          "${WORKSPACE}",
+          "regression"
+        ],
+        "timeoutMs": 120000
+      },
+      "allowedPaths": [
+        "lib",
+        "index.js",
+        "typings",
+        "tests",
+        "Readme.md",
+        "CHANGELOG.md",
+        "docs",
+        "test",
+        "tests"
+      ]
+    }
+  ]
+}

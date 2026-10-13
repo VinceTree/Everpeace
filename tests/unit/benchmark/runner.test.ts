@@ -376,8 +376,6 @@ test("unknown usage stays incomplete after an earlier metered repair attempt", a
     inputTokens: 80,
     outputTokens: 20,
     reasoningTokens: 0,
-    cachedInputTokens: 0,
-    cacheObservedInputTokens: 0,
     complete: false,
   });
 });

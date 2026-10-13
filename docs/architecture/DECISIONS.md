@@ -445,3 +445,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 - 搜索改 DOM，Brave 由用户明确选择、Keyring 保存；固定 LLM Context HTTPS、零自动付费重试、全部重定向拒绝。响应清理保留原租约实现，仅以压力验收验证。
 - doctor 分阶段证据与配置假设分开，默认取消、有限预算、未知 Usage 停后续；费用为用户价格的逐请求快照估算，按币种汇总，不承诺硬预算或在途停止计费。
 - 扩展九类固定任务，合成/上游 Issue 明确分开；公开成绩以计划分母和独立候选逐次账本为准，缺数据不推算，正式 DeepSeek 付费证据未完成。
+
+- 问题 24–41 的官方端点、原始模型 ID、Usage、串行配对、12 项实际上游任务与 Memory/web/performance pilot 独立冻结；离线 proof 和 preflight 不构成供应商兼容、成功率、成本或长期生产力证据。有限配对必须保留完整双臂预算，Unknown Usage、清理、隔离、存储和身份故障停止 admission；价格模板的 null 只能表示未知。
+
+- 问题 24–41 的官方端点、原始模型 ID、Usage、串行配对、12 项实际上游任务与 Memory/web/performance pilot 独立冻结；离线 proof 和 preflight 不构成供应商兼容、成功率、成本或长期生产力证据。有限配对必须保留完整双臂预算，Unknown Usage、清理、隔离、存储和身份故障停止 admission；价格模板的 null 只能表示未知。

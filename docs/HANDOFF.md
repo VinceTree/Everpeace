@@ -40,3 +40,29 @@ Windows x64、本地 NTFS、Node 22.19.0、pnpm 10.30.3、MinGW-w64、Windows bu
 修复提交 `ca4b9bcf1046b3de93a157666eb636705f2d6700`：`fix bounded cleanup and durable edit recovery [skip publish]`，包含候选号、实现、回归和文档。已普通 fast-forward 推送到 `origin/codex/public-contract-core-experience`，随后 `git ls-remote` 核验该分支指向相同 SHA；此后只追加本交接收据，未改实施源码。
 
 交付使用 `[skip publish]`，不使用 `[skip ci]`；Release 工作流只有 main 上显式 workflow_dispatch。Test 工作流仅 PR/main push 触发，当前功能分支 push 不自动触发它，不能声称远端 CI 通过。本轮没有 tag、Release 或 npm 发布。
+
+## 2026-10-13 Benchmark 交接（问题 24–41）
+
+本轮完成 Benchmark 工程、真实上游 fixture、Usage 计量和离线评测准备。没有读取 API key/keyring，没有发起真实模型请求、DeepSeek 付费调用或外部 dsh 真实编码请求；没有改版本、提交、推送、tag 或 Release。当前工作树保留本轮未提交源码、测试和文档改动。
+
+### 已完成的离线证据
+
+- `docs/benchmark/real-fixtures/catalog.json` 冻结 Chalk、Commander、Day.js 共 12 项实际上游任务，三类各 4 项：`real_issue`、`dependency_compatibility`、`cross_module_refactor`。`.cache/benchmark-c-real-proof-v2/proof.json` 记录 12/12 的 pristine baseline pass、预期缺陷 assertion fail、reference repair pass 和独立 regression pass；`modelRequests: 0`。
+- `.cache/benchmark-c-web-v3/report.json` 记录 24 页、8 个公共技术站点计划，22 页下载成功，Fastify 2 页连接失败并保留在失败分母。包含 DOM reference、代码/link retention、JS shell 和深层正文截断控制；`annotationReview: required before any accuracy claim`，不能称为通用网页准确率。
+- `.cache/benchmark-memory-pilot-v2/proof.json` 记录 3 个 coding sequence、每个 4 个连续任务、on/off Memory、3 次 repetition，共 72 个计划任务；只在 coding verification 与 external acceptance 都通过后捕获 Memory，提取成本进入 ledger，前序失败保留后续 skipped。离线 proof 通过，`modelRequests: 0`。
+- `.cache/benchmark-official-draft-v6/protocol.json` 记录官方 DeepSeek 端点草案 `https://api.deepseek.com`、占位 raw model/registration ID、12 个任务、每臂 5 次、正式每实验 120 runs、默认串行配对和保留失败分母。占位符继续阻止 live。
+- Everpeace official/team/performance smoke preflight 通过，并实际观察 provider boundary、high reasoning、32,768 output 和团队成员请求；这是合成 provider boundary 的启动证据，不是供应商兼容或成功率证据。
+- dsh smoke preflight 明确失败：固定 HEAD `639ed015397290b3745d163aafe02ffee4aa3f84` 正确，但现有 `C:\Users\39850\Desktop\coding-agent\deepseek-harness` 有 tracked modifications，未能证明干净部署。失败保存在 `.cache/benchmark-official-draft-v6/external/smoke/artifacts/preflight-result.json`，没有修改该 dirty worktree，也没有把失败当作通过。
+
+### 代码与回归
+
+- RequestAttemptLedger/RequestExecutor 保持 Unknown Usage sticky；请求数、rejected、unknown、purpose/reason 分开统计；缺少 cache usage 保持未观察，不补零；在途请求可超出 token admission，文档不将预算称为账单硬上限。
+- campaign 支持同预算 paired arms，有限预算默认串行，双臂预算不足时保留完整 pair 分母；结果、计划、storage/cleanup/isolation/identity failure 都会阻止完整统计。paired interval 按 task cluster bootstrap。
+- checkout identity 现在覆盖普通 checkout 的未忽略 untracked source，以及 dsh 的 apps/packages/vendor/native 生成模块（跳过 node_modules）；fresh worker 在异常退出且已有 Usage telemetry 时保留已知 usage 并标记 incomplete。
+- 安全路径扫描继续保留 10,000 项上限；仓库 `.cache` 不作为敏感路径递归扫描对象之外的安全放宽，MCP 回归最终在无缓存干扰的证据副本中通过。
+- `pnpm exec tsx --test --test-concurrency=4 tests/unit/benchmark/*.test.ts`：80 项通过、0 失败、0 跳过。
+- 最终门禁在仓库外 fresh source snapshot `C:\Users\39850\Desktop\coding-agent\c-final-gates-20261013-v1` 串行通过：frozen install、build、typecheck、lint、全量 test（1340 项，1337 通过、3 跳过、0 失败）和 final build。收据为 `C:\Users\39850\Desktop\coding-agent\c-final-gates-20261013-v1\receipt.json`，日志为同目录各 `.log` 文件。隔离副本用于避免本地 Benchmark `.cache` 资料影响 MCP 安全路径扫描；不是新的提交或发布候选。
+
+### 后续边界
+
+仍需用户另行明确授权并提供真实供应商原始 model ID、登记 ID、数值预算和价格快照，才能执行官方兼容、smoke 或正式 120-run campaign。真实模型成功率、修复策略收益、单 Agent 对团队收益、外部 dsh 优势、成本/账单、Memory 长期净收益、复杂网站泛化和性能收益均未被本轮证明。生产默认仍是单 Agent、最多三轮修复。

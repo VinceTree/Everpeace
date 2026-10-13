@@ -5,7 +5,7 @@
 宿主显示使用 `--lang auto|en|zh-CN`、`EVERPEACE_LANG` 和 `/language`；`--accessible` 提供追加式 TTY 交互，重定向自动化使用 `exec --json`。[本轮任务与验收状态](docs/core-experience/STATUS.md)。
 
 
-**候选版本 0.6.0-rc.3。** 加固后的工作区文件后端要求 Windows 与本地 NTFS，其他平台明确报告文件访问不可用。[本轮验收与限制](docs/HANDOFF.md)；真实模型安全评测继续暂停。
+**候选版本 0.6.0-rc.4。** 加固后的工作区文件后端要求 Windows 与本地 NTFS，其他平台明确报告文件访问不可用。[本轮验收与限制](docs/HANDOFF.md)；真实模型安全评测继续暂停。
 
 **在终端中规划、修改并验证你的 Node.js / TypeScript 项目。**
 
@@ -54,7 +54,7 @@ pnpm link --global
 everpeace
 ```
 
-当前源码版本：**0.6.0-rc.3**（源码预发布）。
+当前源码版本：**0.6.0-rc.4**（源码预发布）。
 
 ## 真实调用，验证改动
 
@@ -124,6 +124,8 @@ SDK 在 `runTask` 加入 `team: { maxAgents: 3, models: { worker: '<已注册模
   请求失败且用量未知时保留安全 HTTP 状态和错误类别，不记录供应商错误正文或请求头。
 
 审批按键、终端操作和集成配置见 [使用指南](docs/USAGE.zh-CN.md)。更广泛的编码质量、稳定性和成本仍须通过实测衡量。[开发状态](docs/HANDOFF.md) · [DeepSeek 实测准备](docs/benchmark/READINESS.md)。
+
+[官方 DeepSeek 实验协议](docs/benchmark/CODING_COMPETITIVENESS.md) 准备十二项上游任务、串行等预算配对、固定 dsh 对照及 Memory、网页、性能 pilot。准备和离线证明不调用模型；官方编码成功率、策略收益及成本尚未实测。
 
 ## 开发与贡献
 

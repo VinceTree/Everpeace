@@ -4,7 +4,7 @@
 
 后续增强、changed-line/独立来源、Memory 审查 CLI、二进制事务及真实评测状态见 [本轮验收](../implementation/REPORT.md)。
 
-问题 20–30 的实现契约集中在本页；当前候选、实际门禁和未完成证据只在 [HANDOFF](../HANDOFF.md) 维护。模型效果尚未实测，不改变三轮生产修复上限、默认单 Agent、权限或请求准入。
+问题 20–30 的实现契约集中在本页；问题 24–41 的真实任务、预算配对和 pilot 见 [编码竞争力评测](../benchmark/CODING_COMPETITIVENESS.md)。当前候选、实际门禁和未完成证据只在 [HANDOFF](../HANDOFF.md) 维护。模型效果尚未实测，不改变三轮生产修复上限、默认单 Agent、权限或请求准入。
 
 ## 验证证据
 

@@ -1,5 +1,11 @@
 # User-facing changes / 用户变更记录
 
+## 0.6.0-rc.4
+
+- Benchmark preparation now freezes real upstream task fixtures, paired equal-budget campaign rules, request usage accounting, and auditable offline proofs without claiming live-model success.
+- Official DeepSeek and external harness preparation records endpoint, model, budget, pricing, and dirty-checkout prerequisites; live and paid evaluations remain paused until those inputs are supplied.
+- Reliability evidence preserves unknown usage, failed or skipped denominator entries, cleanup and identity failures, and final-build acceptance receipts.
+
 ## Unreleased candidate
 
 - Host display supports English and simplified Chinese through `--lang`, `EVERPEACE_LANG` and `/language`, with command/permission identities preserved.

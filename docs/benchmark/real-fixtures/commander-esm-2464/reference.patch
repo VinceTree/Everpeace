@@ -1,0 +1,3476 @@
+diff --git a/.prettierrc.js b/.prettierrc.js
+index fa93574..f26a078 100644
+--- a/.prettierrc.js
++++ b/.prettierrc.js
+@@ -1,4 +1,4 @@
+-const config = {
++export default {
+   singleQuote: true,
+   overrides: [
+     {
+@@ -7,5 +7,3 @@ const config = {
+     },
+   ],
+ };
+-
+-module.exports = config;
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 1257bc1..6c5314f 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -8,6 +8,43 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
+ <!-- markdownlint-disable MD024 -->
+ <!-- markdownlint-disable MD004 -->
+ 
++## [15.0.0] (2026-05-15)
++
++_date is placeholder, Node.js 20 EOL on 2026-04-30_
++
++Commander 15 is ESM only. This is expected to be seamless for ESM consumers, but some CommonJS consumers may hit issues with tooling requiring configuration for ESM-only dependencies. See Migration Tips below.
++
++The release of Commander 15 moves Commander 14 into maintenance. Commander 14 will get security updates for 12 months.
++For more info see [Release Policy](./docs/release-policy.md).
++
++### Added
++
++### Fixed
++
++### Changed
++
++- *Breaking:* migrated Commander implementation from CommonJS to ESM ([#2464])
++- *Breaking:* Commander 15 requires Node.js v20 or higher. To be more precise, `^20.19.0 || >=22.12.0` for `require(esm)`.
++- dev: switch tests from Jest to `node:test` test runner ([#2463])
++
++### Deleted
++
++- *Breaking:* removed deprecated export of `commander/esm.mjs` ([#2464])
++
++### Migration Tips
++
++Commander 15 is ESM only, but this does not mean you need to migrate to ESM to use it. Importing ESM from CommonJS is
++supported by Node.js, and Bun, and Deno. Hopefully it Just Works for you! However, you may be using a different runtime or
++some other part of your setup that may not yet natively support importing ESM from CommonJS, such as your testing framework
++or bundler.
++
++If you have problems using Commander 15 in your environment, one option is stay on Commander 14 for now. Commander 14 will
++get security updates until May 2027 and things will hopefully improve for your setup in the meantime.
++
++To allow `require(esm)` from CommonJS you may be able to make small changes to your current setup. Some
++examples for Jest are included in [examples/using-esm-from-commonjs](./examples/using-esm-from-commonjs).
++(Commander was using Jest, so we have a special interest.)
++
+ ## [14.0.3] (2026-01-31)
+ 
+ ### Added
+@@ -1454,6 +1491,8 @@ program
+ [#2427]: https://github.com/tj/commander.js/pull/2427
+ [#2428]: https://github.com/tj/commander.js/pull/2428
+ [#2462]: https://github.com/tj/commander.js/pull/2462
++[#2463]: https://github.com/tj/commander.js/pull/2463
++[#2464]: https://github.com/tj/commander.js/pull/2464
+ [#2465]: https://github.com/tj/commander.js/pull/2465
+ 
+ <!-- Referenced in 5.x -->
+diff --git a/Readme.md b/Readme.md
+index 630ae6b..66a3efe 100644
+--- a/Readme.md
++++ b/Readme.md
+@@ -76,7 +76,7 @@ The two most used option types are a boolean option, and an option which takes i
+ Example file: [split.js](./examples/split.js)
+ 
+ ```js
+-const { program } = require('commander');
++import { program } from 'commander';
+ 
+ program
+   .option('--first')
+@@ -103,7 +103,7 @@ Here is a more complete program using a subcommand and with descriptions for the
+ Example file: [string-util.js](./examples/string-util.js)
+ 
+ ```js
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ program
+@@ -147,11 +147,10 @@ More samples can be found in the [examples](https://github.com/tj/commander.js/t
+ ## Declaring _program_ variable
+ 
+ Commander exports a global object which is convenient for quick programs.
+-This is used in the examples in this README for brevity.
++This is used in some examples in this README for brevity.
+ 
+ ```js
+-// CommonJS (.cjs)
+-const { program } = require('commander');
++import { program } from 'commander';
+ ```
+ 
+ For larger programs which may use commander in multiple ways, including unit testing, it is better to create a local `Command` object to use.
+@@ -555,7 +554,7 @@ Configuration options can be passed with the call to `.command()` and `.addComma
+ remove the command from the generated help output. Specifying `isDefault: true` will run the subcommand if no other
+ subcommand is specified. (Example file: [defaultCommand.js](./examples/defaultCommand.js).)
+ 
+-You can add alternative names for a command with `.alias()`. (Example file: [alias.js](./examples/alias.js).)
++You can add alternative names for a command with `.alias()`. (Example file: [alias.cjs](./examples/alias.cjs).)
+ 
+ `.command()` automatically copies the inherited settings from the parent command to the newly created subcommand. This is only done during creation; any later setting changes to the parent are not inherited.
+ 
+@@ -1057,7 +1056,7 @@ node -r ts-node/register pm.ts
+ This factory function creates a new command. It is exported and may be used instead of using `new`, like:
+ 
+ ```js
+-const { createCommand } = require('commander');
++import { createCommand } from 'commander';
+ const program = createCommand();
+ ```
+ 
+diff --git a/docs/deprecated.md b/docs/deprecated.md
+index 09e13cf..165ee00 100644
+--- a/docs/deprecated.md
++++ b/docs/deprecated.md
+@@ -12,12 +12,12 @@ They are currently still available for backwards compatibility, but should not b
+     - [.command('\*')](#command)
+     - [cmd.description(cmdDescription, argDescriptions)](#cmddescriptioncmddescription-argdescriptions)
+     - [InvalidOptionArgumentError](#invalidoptionargumenterror)
+-    - [Import from `commander/esm.mjs`](#import-from-commanderesmmjs)
+     - [cmd.\_args](#cmd_args)
+     - [.addHelpCommand(string|boolean|undefined)](#addhelpcommandstringbooleanundefined)
+   - [Removed](#removed)
+     - [Short option flag longer than a single character](#short-option-flag-longer-than-a-single-character)
+     - [Default import of global Command object](#default-import-of-global-command-object)
++    - [Import from `commander/esm.mjs`](#import-from-commanderesmmjs)
+ 
+ ### RegExp .option() parameter
+ 
+@@ -168,22 +168,6 @@ function myParseInt(value, dummyPrevious) {
+ 
+ Deprecated from Commander v8.
+ 
+-### Import from `commander/esm.mjs`
+-
+-The first support for named imports required an explicit entry file.
+-
+-```js
+-import { Command } from 'commander/esm.mjs';
+-```
+-
+-This is no longer required, just import directly from the module.
+-
+-```js
+-import { Command } from 'commander';
+-```
+-
+-README updated in Commander v9. Deprecated from Commander v9.
+-
+ ### cmd._args
+ 
+ This was always private, but was previously the only way to access the command `Argument` array.
+@@ -256,3 +240,21 @@ const program = new Command()
+ - Deprecated from Commander v7.
+ - Removed from TypeScript declarations in Commander v8.
+ - Removed from CommonJS in Commander v12. Deprecated and gone!
++
++### Import from `commander/esm.mjs`
++
++The first support for named imports required an explicit entry file.
++
++```js
++import { Command } from 'commander/esm.mjs';
++```
++
++This is no longer required, just import directly from the module.
++
++```js
++import { Command } from 'commander';
++```
++
++- README updated in Commander v9. Deprecated from Commander v9.
++- Deleted in Command v15.  Deprecated and gone!
++
+diff --git a/eslint.config.js b/eslint.config.js
+index a8a2e0b..1c73cb6 100644
+--- a/eslint.config.js
++++ b/eslint.config.js
+@@ -1,14 +1,14 @@
+-const globals = require('globals');
+-const esLintjs = require('@eslint/js');
+-const tseslint = require('typescript-eslint');
+-const prettier = require('eslint-config-prettier');
++import globals from 'globals';
++import esLintjs from '@eslint/js';
++import tseslint from 'typescript-eslint';
++import prettier from 'eslint-config-prettier';
+ 
+ // Only run tseslint on the files that we have included for TypeScript.
+ const tsconfigTsFiles = ['**/*.{ts,mts}']; // match "include" in tsconfig.ts.json;
+ const tsconfigJsFiles = ['*.{js,mjs}', 'lib/**/*.{js,mjs}']; // match "include" in tsconfig.js.json
+ 
+ // Using tseslint.config adds some type safety and `extends` to simplify customising config array.
+-module.exports = tseslint.config(
++export default tseslint.config(
+   // Add recommended rules.
+   esLintjs.configs.recommended,
+   // tseslint with different setup for js/ts
+diff --git a/esm.mjs b/esm.mjs
+deleted file mode 100644
+index 796ec3a..0000000
+--- a/esm.mjs
++++ /dev/null
+@@ -1,16 +0,0 @@
+-import commander from './index.js';
+-
+-// wrapper to provide named exports for ESM.
+-export const {
+-  program,
+-  createCommand,
+-  createArgument,
+-  createOption,
+-  CommanderError,
+-  InvalidArgumentError,
+-  InvalidOptionArgumentError, // deprecated old name
+-  Command,
+-  Argument,
+-  Option,
+-  Help,
+-} = commander;
+diff --git a/examples/action-this.js b/examples/action-this.js
+index d6ac722..d78eddd 100644
+--- a/examples/action-this.js
++++ b/examples/action-this.js
+@@ -2,7 +2,7 @@
+ 
+ // This example is used as an example in the README for the action handler.
+ 
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ program
+diff --git a/examples/alias.js b/examples/alias.cjs
+similarity index 78%
+rename from examples/alias.js
+rename to examples/alias.cjs
+index 0e3a87b..2588806 100644
+--- a/examples/alias.js
++++ b/examples/alias.cjs
+@@ -28,9 +28,9 @@ program
+ program.parse();
+ 
+ // Try the following:
+-//    node alias.js --help
+-//    node alias.js exec script
+-//    node alias.js ex script
+-//    node alias.js print file
+-//    node alias.js pr file
+-//    node alias.js show file
++//    node alias.cjs --help
++//    node alias.cjs exec script
++//    node alias.cjs ex script
++//    node alias.cjs print file
++//    node alias.cjs pr file
++//    node alias.cjs show file
+diff --git a/examples/argument.js b/examples/argument.js
+index cf17162..30276f1 100644
+--- a/examples/argument.js
++++ b/examples/argument.js
+@@ -2,7 +2,7 @@
+ 
+ // This example shows specifying the command arguments using argument() function.
+ 
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ program
+diff --git a/examples/arguments-custom-processing.js b/examples/arguments-custom-processing.js
+index 876f7d3..b5bfc3f 100644
+--- a/examples/arguments-custom-processing.js
++++ b/examples/arguments-custom-processing.js
+@@ -4,14 +4,14 @@
+ //    Custom argument processing
+ //    You may specify a function to do custom processing of argument values.
+ 
+-const commander = require('commander');
+-const program = new commander.Command();
++import { Command, InvalidArgumentError } from 'commander';
++const program = new Command();
+ 
+ function myParseInt(value) {
+   // parseInt takes a string and a radix
+   const parsedValue = parseInt(value, 10);
+   if (isNaN(parsedValue)) {
+-    throw new commander.InvalidArgumentError('Not a number.');
++    throw new InvalidArgumentError('Not a number.');
+   }
+   return parsedValue;
+ }
+diff --git a/examples/arguments-extra.js b/examples/arguments-extra.js
+index 4795515..e8a83cb 100644
+--- a/examples/arguments-extra.js
++++ b/examples/arguments-extra.js
+@@ -2,22 +2,19 @@
+ 
+ // This is used as an example in the README for extra argument features.
+ 
+-const commander = require('commander');
+-const program = new commander.Command();
++import { Command, Argument } from 'commander';
++const program = new Command();
+ 
+ program
+   .addArgument(
+-    new commander.Argument('<drink-size>', 'drink cup size').choices([
++    new Argument('<drink-size>', 'drink cup size').choices([
+       'small',
+       'medium',
+       'large',
+     ]),
+   )
+   .addArgument(
+-    new commander.Argument('[timeout]', 'timeout in seconds').default(
+-      60,
+-      'one minute',
+-    ),
++    new Argument('[timeout]', 'timeout in seconds').default(60, 'one minute'),
+   )
+   .action((drinkSize, timeout) => {
+     console.log(`Drink size: ${drinkSize}`);
+diff --git a/examples/configure-help.js b/examples/configure-help.js
+index 8e86d69..090d88b 100644
+--- a/examples/configure-help.js
++++ b/examples/configure-help.js
+@@ -1,5 +1,5 @@
+-const commander = require('commander');
+-const program = new commander.Command();
++import { Command } from 'commander';
++const program = new Command();
+ 
+ // This example shows a simple use of configureHelp.
+ // This is used as an example in the README.
+diff --git a/examples/configure-output.js b/examples/configure-output.js
+index f992f93..60de733 100644
+--- a/examples/configure-output.js
++++ b/examples/configure-output.js
+@@ -1,5 +1,5 @@
+-const commander = require('commander');
+-const program = new commander.Command();
++import { Command } from 'commander';
++const program = new Command();
+ 
+ function errorColor(str) {
+   // Add ANSI escape codes to display text in red.
+diff --git a/examples/custom-command-class.js b/examples/custom-command-class.js
+index d577e3d..5fda523 100755
+--- a/examples/custom-command-class.js
++++ b/examples/custom-command-class.js
+@@ -1,9 +1,9 @@
+ #!/usr/bin/env node
+-const commander = require('commander');
++import { Command } from 'commander';
+ 
+ // Use a class override to customise the command and its subcommands.
+ 
+-class CommandWithTrace extends commander.Command {
++class CommandWithTrace extends Command {
+   createCommand(name) {
+     const cmd = new CommandWithTrace(name);
+     // Add an option to subcommands created using `.command()`
+@@ -20,7 +20,7 @@ function inspectCommand(command) {
+ }
+ 
+ const program = new CommandWithTrace('program')
+-  .option('-v, ---verbose')
++  .option('-v, --verbose')
+   .action((options, command) => {
+     inspectCommand(command);
+   });
+diff --git a/examples/custom-help b/examples/custom-help
+index 67af8c4..cc1ad77 100755
+--- a/examples/custom-help
++++ b/examples/custom-help
+@@ -3,7 +3,7 @@
+ // This example shows a simple use of addHelpText.
+ // This is used as an example in the README.
+ 
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ program.option('-f, --foo', 'enable some foo');
+diff --git a/examples/custom-help-description b/examples/custom-help-description
+index ccabc7b..c03cf56 100755
+--- a/examples/custom-help-description
++++ b/examples/custom-help-description
+@@ -2,7 +2,7 @@
+ 
+ // This example shows changing the flags and description for the help option.
+ 
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ program
+diff --git a/examples/custom-help-text.js b/examples/custom-help-text.js
+index 0e8e574..ec88a6f 100644
+--- a/examples/custom-help-text.js
++++ b/examples/custom-help-text.js
+@@ -2,7 +2,7 @@
+ 
+ // This example shows using addHelpText.
+ 
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ program.name('awesome');
+diff --git a/examples/custom-version b/examples/custom-version
+index 7649d97..6061cb6 100755
+--- a/examples/custom-version
++++ b/examples/custom-version
+@@ -2,7 +2,7 @@
+ 
+ // This example shows changing the flags and description for the version option.
+ 
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ program
+diff --git a/examples/defaultCommand.js b/examples/defaultCommand.js
+index b383d60..046cad4 100755
+--- a/examples/defaultCommand.js
++++ b/examples/defaultCommand.js
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env node
+ 
+-const commander = require('commander');
+-const program = new commander.Command();
++import { Command } from 'commander';
++const program = new Command();
+ 
+ // Example program using the command configuration option isDefault to specify the default command.
+ 
+diff --git a/examples/deploy b/examples/deploy
+index 841e9cc..535b72e 100755
+--- a/examples/deploy
++++ b/examples/deploy
+@@ -1,6 +1,6 @@
+ #!/usr/bin/env node
+ 
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ program
+diff --git a/examples/description b/examples/description
+index 00e277c..8c2bbe7 100755
+--- a/examples/description
++++ b/examples/description
+@@ -2,7 +2,7 @@
+ 
+ // This example shows adding a description which is displayed in the help.
+ 
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ program
+diff --git a/examples/global-options-added.js b/examples/global-options-added.js
+index 9440f96..21bb339 100644
+--- a/examples/global-options-added.js
++++ b/examples/global-options-added.js
+@@ -9,7 +9,7 @@
+ // (A different pattern for a "global" option is to add it to the root command, rather
+ // than to the subcommand. See global-options-nested.js.)
+ 
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ 
+ // Common options can be added when subcommands are created by using a custom subclass.
+ // If the options are unsorted in the help, these will appear first.
+diff --git a/examples/global-options-nested.js b/examples/global-options-nested.js
+index 5c225c3..4dc343c 100644
+--- a/examples/global-options-nested.js
++++ b/examples/global-options-nested.js
+@@ -6,7 +6,7 @@
+ // (A different pattern for a "global" option is to add it to the subcommands, rather
+ // than to the program. See global-options-added.js.)
+ 
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ program.configureHelp({ showGlobalOptions: true }).option('-g, --global');
+diff --git a/examples/help-groups.js b/examples/help-groups.js
+index 280d99c..9eac28a 100644
+--- a/examples/help-groups.js
++++ b/examples/help-groups.js
+@@ -1,4 +1,4 @@
+-const { Command, Option } = require('commander');
++import { Command, Option } from 'commander';
+ 
+ // Show the two approaches for adding help groups, and how to customise the built-in help and version.
+ 
+diff --git a/examples/help-subcommands-usage.js b/examples/help-subcommands-usage.js
+index 082874f..072dfff 100644
+--- a/examples/help-subcommands-usage.js
++++ b/examples/help-subcommands-usage.js
+@@ -1,4 +1,4 @@
+-const commander = require('commander');
++import { Command } from 'commander';
+ 
+ // By default the subcommand list includes a fairly simple usage. If you have added a custom usage
+ // to the subcommands you may wish to configure the help to show these instead.
+@@ -6,7 +6,7 @@ const commander = require('commander');
+ // See also ./configure-help.js which shows configuring the subcommand list to have no usage at all
+ // and just the subcommand name.
+ 
+-const program = new commander.Command().configureHelp({
++const program = new Command().configureHelp({
+   subcommandTerm: (cmd) => cmd.name() + ' ' + cmd.usage(),
+ });
+ 
+diff --git a/examples/hook.js b/examples/hook.js
+index 1d495c1..f1a808b 100644
+--- a/examples/hook.js
++++ b/examples/hook.js
+@@ -1,6 +1,6 @@
+ #!/usr/bin/env node
+ 
+-const { Command, Option } = require('commander');
++import { Command, Option } from 'commander';
+ const program = new Command();
+ 
+ // This example shows using some hooks for life cycle events.
+diff --git a/examples/nestedCommands.js b/examples/nestedCommands.js
+index 30ee163..be3d9a6 100755
+--- a/examples/nestedCommands.js
++++ b/examples/nestedCommands.js
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env node
+ 
+-const commander = require('commander');
+-const program = new commander.Command();
++import { Command } from 'commander';
++const program = new Command();
+ 
+ // Commander supports nested subcommands.
+ // .command() can add a subcommand with an action handler or an executable.
+@@ -19,7 +19,7 @@ brew.command('coffee').action(() => {
+ // Add nested commands using `.addCommand().
+ // The command could be created separately in another module.
+ function makeHeatCommand() {
+-  const heat = new commander.Command('heat');
++  const heat = new Command('heat');
+   heat.command('jug').action(() => {
+     console.log('heat jug');
+   });
+diff --git a/examples/options-boolean-or-value.js b/examples/options-boolean-or-value.js
+index c9c83e6..4a426cf 100755
+--- a/examples/options-boolean-or-value.js
++++ b/examples/options-boolean-or-value.js
+@@ -4,8 +4,8 @@
+ //    Other option types, flag|value
+ //    You can specify an option which functions as a flag but may also take a value (declared using square brackets).
+ 
+-const commander = require('commander');
+-const program = new commander.Command();
++import { Command } from 'commander';
++const program = new Command();
+ 
+ program.option('-c, --cheese [type]', 'Add cheese with optional type');
+ 
+diff --git a/examples/options-common.js b/examples/options-common.js
+index ed1acba..08ddfce 100755
+--- a/examples/options-common.js
++++ b/examples/options-common.js
+@@ -3,8 +3,8 @@
+ // This is used as an example in the README for:
+ //    Common option types, boolean and value
+ 
+-const commander = require('commander');
+-const program = new commander.Command();
++import { Command } from 'commander';
++const program = new Command();
+ 
+ program
+   .option('-d, --debug', 'output extra debugging')
+diff --git a/examples/options-conflicts.js b/examples/options-conflicts.js
+index 6236369..5838ff1 100644
+--- a/examples/options-conflicts.js
++++ b/examples/options-conflicts.js
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env node
+-const { Command, Option } = require('commander');
++import { Command, Option } from 'commander';
+ const program = new Command();
+ 
+ // You can use .conflicts() with a single string, which is the camel-case name of the conflicting option.
+diff --git a/examples/options-custom-processing.js b/examples/options-custom-processing.js
+index e25c5c0..0f0d4af 100755
+--- a/examples/options-custom-processing.js
++++ b/examples/options-custom-processing.js
+@@ -4,14 +4,14 @@
+ //    Custom option processing
+ //    You may specify a function to do custom processing of option values.
+ 
+-const commander = require('commander');
+-const program = new commander.Command();
++import { Command, InvalidArgumentError } from 'commander';
++const program = new Command();
+ 
+ function myParseInt(value) {
+   // parseInt takes a string and a radix
+   const parsedValue = parseInt(value, 10);
+   if (isNaN(parsedValue)) {
+-    throw new commander.InvalidArgumentError('Not a number.');
++    throw new InvalidArgumentError('Not a number.');
+   }
+   return parsedValue;
+ }
+diff --git a/examples/options-defaults.js b/examples/options-defaults.js
+index af79302..cf223a6 100755
+--- a/examples/options-defaults.js
++++ b/examples/options-defaults.js
+@@ -3,8 +3,8 @@
+ // This is used as an example in the README for:
+ //    Default option value
+ 
+-const commander = require('commander');
+-const program = new commander.Command();
++import { Command } from 'commander';
++const program = new Command();
+ 
+ program.option(
+   '-c, --cheese <type>',
+diff --git a/examples/options-env.js b/examples/options-env.js
+index 1e149e5..196162d 100644
+--- a/examples/options-env.js
++++ b/examples/options-env.js
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env node
+-const { Command, Option } = require('commander');
++import { Command, Option } from 'commander';
+ const program = new Command();
+ 
+ program.addOption(
+diff --git a/examples/options-extra.js b/examples/options-extra.js
+index 0ad0460..3f03857 100644
+--- a/examples/options-extra.js
++++ b/examples/options-extra.js
+@@ -4,7 +4,7 @@
+ // See also options-env.js for more extensive env examples,
+ // and options-conflicts.js for more details about .conflicts().
+ 
+-const { Command, Option } = require('commander');
++import { Command, Option } from 'commander';
+ const program = new Command();
+ 
+ program
+diff --git a/examples/options-implies.js b/examples/options-implies.js
+index 620528e..eae3ef0 100644
+--- a/examples/options-implies.js
++++ b/examples/options-implies.js
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env node
+-const { Command, Option } = require('commander');
++import { Command, Option } from 'commander';
+ const program = new Command();
+ 
+ program
+diff --git a/examples/options-negatable.js b/examples/options-negatable.js
+index 2eafa6d..75078ae 100755
+--- a/examples/options-negatable.js
++++ b/examples/options-negatable.js
+@@ -4,8 +4,8 @@
+ //    Other option types, negatable boolean
+ //    You can specify a boolean option long name with a leading `no-` to make it true by default and able to be negated.
+ 
+-const commander = require('commander');
+-const program = new commander.Command();
++import { Command } from 'commander';
++const program = new Command();
+ 
+ program
+   .option('--no-sauce', 'Remove sauce')
+diff --git a/examples/options-required.js b/examples/options-required.js
+index 4ffc493..bddbc09 100755
+--- a/examples/options-required.js
++++ b/examples/options-required.js
+@@ -5,8 +5,8 @@
+ //    You may specify a required (mandatory) option using `.requiredOption`.
+ //    The option must be specified on the command line, or by having a default value.
+ 
+-const commander = require('commander');
+-const program = new commander.Command();
++import { Command } from 'commander';
++const program = new Command();
+ 
+ program.requiredOption('-c, --cheese <type>', 'pizza must have cheese');
+ 
+diff --git a/examples/options-variadic.js b/examples/options-variadic.js
+index f3a6301..f55e38d 100644
+--- a/examples/options-variadic.js
++++ b/examples/options-variadic.js
+@@ -2,8 +2,8 @@
+ 
+ // This is used as an example in the README for variadic options.
+ 
+-const commander = require('commander');
+-const program = new commander.Command();
++import { Command } from 'commander';
++const program = new Command();
+ 
+ program
+   .option('-n, --number <value...>', 'specify numbers')
+diff --git a/examples/pass-through-options.js b/examples/pass-through-options.js
+index b5cba29..d8265e1 100644
+--- a/examples/pass-through-options.js
++++ b/examples/pass-through-options.js
+@@ -1,6 +1,6 @@
+ #!/usr/bin/env node
+ 
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ program
+diff --git a/examples/pizza b/examples/pizza
+index 9cff7ec..0576a9e 100755
+--- a/examples/pizza
++++ b/examples/pizza
+@@ -1,6 +1,6 @@
+ #!/usr/bin/env node
+ 
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ program
+@@ -21,6 +21,6 @@ console.log('  - %s cheese', cheese);
+ //    ./pizza --help
+ //
+ // Try the following:
+-//    ./pizza --help
++//    node pizza --help
+ //    node pizza --peppers --cheese=blue
+ //    node pizza --no-cheese
+diff --git a/examples/pm b/examples/pm
+index fa6dab5..c852596 100755
+--- a/examples/pm
++++ b/examples/pm
+@@ -1,6 +1,6 @@
+ #!/usr/bin/env node
+ 
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ // Example of subcommands which are implemented as stand-alone executable files.
+diff --git a/examples/pm-install b/examples/pm-install
+index f5cba6e..13bdd10 100755
+--- a/examples/pm-install
++++ b/examples/pm-install
+@@ -1,6 +1,6 @@
+ #!/usr/bin/env node
+ 
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ program.option('-f, --force', 'force installation');
+diff --git a/examples/positional-options.js b/examples/positional-options.js
+index c61cdb1..ed3e23d 100644
+--- a/examples/positional-options.js
++++ b/examples/positional-options.js
+@@ -1,6 +1,6 @@
+ #!/usr/bin/env node
+ 
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ program.enablePositionalOptions().option('-p, --progress');
+diff --git a/examples/split.js b/examples/split.js
+index 2c4dc33..e4664c0 100644
+--- a/examples/split.js
++++ b/examples/split.js
+@@ -1,4 +1,4 @@
+-const { program } = require('commander');
++import { program } from 'commander';
+ 
+ // This is used as an example in the README for the Quick Start.
+ 
+diff --git a/examples/string-util.js b/examples/string-util.js
+index b329da9..3ccecf2 100644
+--- a/examples/string-util.js
++++ b/examples/string-util.js
+@@ -1,4 +1,4 @@
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ // This is used as an example in the README for the Quick Start.
+diff --git a/examples/thank.js b/examples/thank.js
+index 7386e56..be30833 100644
+--- a/examples/thank.js
++++ b/examples/thank.js
+@@ -2,7 +2,7 @@
+ 
+ // This example is used as an example in the README for the action handler.
+ 
+-const { Command } = require('commander');
++import { Command } from 'commander';
+ const program = new Command();
+ 
+ program
+diff --git a/examples/using-esm-from-commonjs/jest-javascript/.gitignore b/examples/using-esm-from-commonjs/jest-javascript/.gitignore
+new file mode 100644
+index 0000000..4acd23d
+--- /dev/null
++++ b/examples/using-esm-from-commonjs/jest-javascript/.gitignore
+@@ -0,0 +1,4 @@
++node_modules/
++
++# Save space, do not commit package-lock.json with all the Jest dependencies!
++package-lock.json
+diff --git a/examples/using-esm-from-commonjs/jest-javascript/README.md b/examples/using-esm-from-commonjs/jest-javascript/README.md
+new file mode 100644
+index 0000000..702f89a
+--- /dev/null
++++ b/examples/using-esm-from-commonjs/jest-javascript/README.md
+@@ -0,0 +1,40 @@
++# Example configuration for Jest 30 running CommonJS Javascript
++
++This project shows using Babel to transform Commander ESM to CommonJS.
++
++Example error message when requiring ESM-only Commander in a Jest test with default configuration:
++
++```
++$ npm run --silent test
++ FAIL  ./index.test.js
++  ● Test suite failed to run
++
++    Jest encountered an unexpected token
++
++    Jest failed to parse a file. This happens e.g. when your code or its dependencies use non-standard JavaScript syntax, or when Jest is not configured to support such syntax.
++
++    [more detail omitted, check output for up-to-date suggestions]
++...
++    SyntaxError: Cannot use import statement outside a module
++
++    > 1 | const { Command } = require('commander');
++...
++```
++
++Additional install:
++
++```console
++npm install --save-dev @babel/preset-env
++```
++
++Additional setup:
++
++- add `babel.config.js` to configure babel for smart setup for current node version
++- add `transformIgnorePatterns` to `jest.config.js` to process Commander from `node_modules`
++
++Running test:
++
++```console
++npm install
++npm test
++```
+diff --git a/examples/using-esm-from-commonjs/jest-javascript/babel.config.js b/examples/using-esm-from-commonjs/jest-javascript/babel.config.js
+new file mode 100644
+index 0000000..c74fb53
+--- /dev/null
++++ b/examples/using-esm-from-commonjs/jest-javascript/babel.config.js
+@@ -0,0 +1,3 @@
++module.exports = {
++  presets: [['@babel/preset-env', { targets: { node: 'current' } }]],
++};
+diff --git a/examples/using-esm-from-commonjs/jest-javascript/index.spec.cjs b/examples/using-esm-from-commonjs/jest-javascript/index.spec.cjs
+new file mode 100644
+index 0000000..66fcfa3
+--- /dev/null
++++ b/examples/using-esm-from-commonjs/jest-javascript/index.spec.cjs
+@@ -0,0 +1,9 @@
++const { Command } = require('commander');
++const { test, expect } = require('@jest/globals');
++
++test('when set command name then get command name', () => {
++  const program = new Command();
++  const name = 'my-cli';
++  program.name(name);
++  expect(program.name()).toBe(name);
++});
+diff --git a/examples/using-esm-from-commonjs/jest-javascript/jest.config.js b/examples/using-esm-from-commonjs/jest-javascript/jest.config.js
+new file mode 100644
+index 0000000..6e0d869
+--- /dev/null
++++ b/examples/using-esm-from-commonjs/jest-javascript/jest.config.js
+@@ -0,0 +1,6 @@
++// List the dependencies that are pure esm and need transformation.
++const esmModules = ['commander'].join('|'); // redundant join in case you have others
++
++module.exports = {
++  transformIgnorePatterns: [`node_modules/(?!(${esmModules})/)`],
++};
+diff --git a/examples/using-esm-from-commonjs/jest-javascript/package.json b/examples/using-esm-from-commonjs/jest-javascript/package.json
+new file mode 100644
+index 0000000..73de361
+--- /dev/null
++++ b/examples/using-esm-from-commonjs/jest-javascript/package.json
+@@ -0,0 +1,17 @@
++{
++  "name": "jest-javascript",
++  "version": "1.0.0",
++  "description": "",
++  "scripts": {
++    "test": "jest"
++  },
++  "license": "MIT",
++  "type": "commonjs",
++  "dependencies": {
++    "commander": "^15.0.0"
++  },
++  "devDependencies": {
++    "@babel/preset-env": "^7.28.6",
++    "jest": "^30.2.0"
++  }
++}
+diff --git a/examples/using-esm-from-commonjs/jest-typescript/.gitignore b/examples/using-esm-from-commonjs/jest-typescript/.gitignore
+new file mode 100644
+index 0000000..4acd23d
+--- /dev/null
++++ b/examples/using-esm-from-commonjs/jest-typescript/.gitignore
+@@ -0,0 +1,4 @@
++node_modules/
++
++# Save space, do not commit package-lock.json with all the Jest dependencies!
++package-lock.json
+diff --git a/examples/using-esm-from-commonjs/jest-typescript/README.md b/examples/using-esm-from-commonjs/jest-typescript/README.md
+new file mode 100644
+index 0000000..ded212e
+--- /dev/null
++++ b/examples/using-esm-from-commonjs/jest-typescript/README.md
+@@ -0,0 +1,34 @@
++# Example configuration for Jest 30 running CommonJS from TypeScript
++
++This project shows using `ts-jest` to transform Commander ESM to CommonJS.
++
++Example error message when requiring ESM-only Commander in a Jest test with default configuration:
++
++```
++$ npm run --silent test
++ FAIL  ./index.test.ts
++  ● Test suite failed to run
++
++    Jest encountered an unexpected token
++
++    Jest failed to parse a file. This happens e.g. when your code or its dependencies use non-standard JavaScript syntax, or when Jest is not configured to support such syntax.
++
++    [more detail omitted, check output for up-to-date suggestions]
++...
++    import { Command } from 'commander';
++    ^^^^^^
++
++    SyntaxError: Cannot use import statement outside a module
++...
++```
++
++Additional setup:
++
++- see two tweaks in `jest.config.js` to use `ts-jest` to convert Commander ESM to CommonJS
++
++Running test:
++
++```console
++npm install
++npm test
++```
+diff --git a/examples/using-esm-from-commonjs/jest-typescript/index.spec.cts b/examples/using-esm-from-commonjs/jest-typescript/index.spec.cts
+new file mode 100644
+index 0000000..0701e98
+--- /dev/null
++++ b/examples/using-esm-from-commonjs/jest-typescript/index.spec.cts
+@@ -0,0 +1,9 @@
++import { Command } from 'commander';
++import { test, expect } from '@jest/globals';
++
++test('when set command name then get command name', () => {
++  const program = new Command();
++  const name = 'my-cli';
++  program.name(name);
++  expect(program.name()).toBe(name);
++});
+diff --git a/examples/using-esm-from-commonjs/jest-typescript/jest.config.js b/examples/using-esm-from-commonjs/jest-typescript/jest.config.js
+new file mode 100644
+index 0000000..bb9acc5
+--- /dev/null
++++ b/examples/using-esm-from-commonjs/jest-typescript/jest.config.js
+@@ -0,0 +1,16 @@
++// List the dependencies that are pure esm and need transformation.
++const esmModules = ['commander'].join('|'); // redundant join in case you have others
++
++module.exports = {
++  // 1. tell ts-jest to (also) handle .js and .mjs files
++  transform: {
++    '^.+\\.[cm]?[tj]sx?$': [
++      'ts-jest',
++      {
++        useESM: false, // want CJS for Jest
++      },
++    ],
++  },
++  // 2. allow transformation of specific node_modules
++  transformIgnorePatterns: [`node_modules/(?!(${esmModules})/)`],
++};
+diff --git a/examples/using-esm-from-commonjs/jest-typescript/package.json b/examples/using-esm-from-commonjs/jest-typescript/package.json
+new file mode 100644
+index 0000000..a185133
+--- /dev/null
++++ b/examples/using-esm-from-commonjs/jest-typescript/package.json
+@@ -0,0 +1,18 @@
++{
++  "name": "jest-typescript",
++  "version": "1.0.0",
++  "description": "",
++  "scripts": {
++    "test": "jest"
++  },
++  "license": "MIT",
++  "type": "commonjs",
++  "dependencies": {
++    "commander": "^15.0.0"
++  },
++  "devDependencies": {
++    "jest": "^30.2.0",
++    "ts-jest": "^29.4.6",
++    "typescript": "^5.9.3"
++  }
++}
+diff --git a/examples/using-esm-from-commonjs/jest-typescript/tsconfig.json b/examples/using-esm-from-commonjs/jest-typescript/tsconfig.json
+new file mode 100644
+index 0000000..bc5c653
+--- /dev/null
++++ b/examples/using-esm-from-commonjs/jest-typescript/tsconfig.json
+@@ -0,0 +1,44 @@
++{
++  // Visit https://aka.ms/tsconfig to read more about this file
++  "compilerOptions": {
++    // File Layout
++    // "rootDir": "./src",
++    // "outDir": "./dist",
++
++    // Environment Settings
++    // See also https://aka.ms/tsconfig/module
++    "module": "nodenext",
++    "target": "esnext",
++    "types": [],
++    // For nodejs:
++    // "lib": ["esnext"],
++    // "types": ["node"],
++    // and npm install -D @types/node
++
++    // Other Outputs
++    "sourceMap": true,
++    "declaration": true,
++    "declarationMap": true,
++
++    // Stricter Typechecking Options
++    "noUncheckedIndexedAccess": true,
++    "exactOptionalPropertyTypes": true,
++
++    // Style Options
++    // "noImplicitReturns": true,
++    // "noImplicitOverride": true,
++    // "noUnusedLocals": true,
++    // "noUnusedParameters": true,
++    // "noFallthroughCasesInSwitch": true,
++    // "noPropertyAccessFromIndexSignature": true,
++
++    // Recommended Options
++    "strict": true,
++    "jsx": "react-jsx",
++    "verbatimModuleSyntax": false, // we want import to be output as require, not verbatim
++    "isolatedModules": true,
++    "noUncheckedSideEffectImports": true,
++    "moduleDetection": "force",
++    "skipLibCheck": true,
++  },
++}
+diff --git a/index.js b/index.js
+index c30bb21..d271078 100644
+--- a/index.js
++++ b/index.js
+@@ -1,24 +1,21 @@
+-const { Argument } = require('./lib/argument.js');
+-const { Command } = require('./lib/command.js');
+-const { CommanderError, InvalidArgumentError } = require('./lib/error.js');
+-const { Help } = require('./lib/help.js');
+-const { Option } = require('./lib/option.js');
++import { Argument } from './lib/argument.js';
++import { Command } from './lib/command.js';
++import { CommanderError, InvalidArgumentError } from './lib/error.js';
++import { Help } from './lib/help.js';
++import { Option } from './lib/option.js';
+ 
+-exports.program = new Command();
++export const program = new Command();
+ 
+-exports.createCommand = (name) => new Command(name);
+-exports.createOption = (flags, description) => new Option(flags, description);
+-exports.createArgument = (name, description) => new Argument(name, description);
++export const createCommand = (name) => new Command(name);
++export const createOption = (flags, description) =>
++  new Option(flags, description);
++export const createArgument = (name, description) =>
++  new Argument(name, description);
+ 
+ /**
+  * Expose classes
+  */
+ 
+-exports.Command = Command;
+-exports.Option = Option;
+-exports.Argument = Argument;
+-exports.Help = Help;
+-
+-exports.CommanderError = CommanderError;
+-exports.InvalidArgumentError = InvalidArgumentError;
+-exports.InvalidOptionArgumentError = InvalidArgumentError; // Deprecated
++export { Command, Option, Argument, Help };
++export { CommanderError, InvalidArgumentError };
++export { InvalidArgumentError as InvalidOptionArgumentError }; // Deprecated
+diff --git a/jest.config.js b/jest.config.js
+deleted file mode 100644
+index ce5d7f7..0000000
+--- a/jest.config.js
++++ /dev/null
+@@ -1,10 +0,0 @@
+-const config = {
+-  testEnvironment: 'node',
+-  collectCoverage: true,
+-  transform: {
+-    '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.ts.json' }],
+-  },
+-  testPathIgnorePatterns: ['/node_modules/'],
+-};
+-
+-module.exports = config;
+diff --git a/lib/argument.js b/lib/argument.js
+index 2c2f840..6da521d 100644
+--- a/lib/argument.js
++++ b/lib/argument.js
+@@ -1,6 +1,6 @@
+-const { InvalidArgumentError } = require('./error.js');
++import { InvalidArgumentError } from './error.js';
+ 
+-class Argument {
++export class Argument {
+   /**
+    * Initialize a new command argument with the given name and description.
+    * The default is that the argument is required, and you can explicitly
+@@ -140,11 +140,8 @@ class Argument {
+  * @private
+  */
+ 
+-function humanReadableArgName(arg) {
++export function humanReadableArgName(arg) {
+   const nameOutput = arg.name() + (arg.variadic === true ? '...' : '');
+ 
+   return arg.required ? '<' + nameOutput + '>' : '[' + nameOutput + ']';
+ }
+-
+-exports.Argument = Argument;
+-exports.humanReadableArgName = humanReadableArgName;
+diff --git a/lib/command.js b/lib/command.js
+index 66379c0..d8b810a 100644
+--- a/lib/command.js
++++ b/lib/command.js
+@@ -1,16 +1,16 @@
+-const EventEmitter = require('node:events').EventEmitter;
+-const childProcess = require('node:child_process');
+-const path = require('node:path');
+-const fs = require('node:fs');
+-const process = require('node:process');
++import { EventEmitter } from 'node:events';
++import childProcess from 'node:child_process';
++import path from 'node:path';
++import fs from 'node:fs';
++import process from 'node:process';
+ 
+-const { Argument, humanReadableArgName } = require('./argument.js');
+-const { CommanderError } = require('./error.js');
+-const { Help, stripColor } = require('./help.js');
+-const { Option, DualOptions } = require('./option.js');
+-const { suggestSimilar } = require('./suggestSimilar');
++import { Argument, humanReadableArgName } from './argument.js';
++import { CommanderError } from './error.js';
++import { Help, stripColor } from './help.js';
++import { Option, DualOptions } from './option.js';
++import { suggestSimilar } from './suggestSimilar.js';
+ 
+-class Command extends EventEmitter {
++export class Command extends EventEmitter {
+   /**
+    * Initialize a new `Command`.
+    *
+@@ -2419,12 +2419,12 @@ Expecting one of '${allowedValues.join("', '")}'`);
+ 
+   /**
+    * Set the name of the command from script filename, such as process.argv[1],
+-   * or require.main.filename, or __filename.
++   * or import.meta.filename.
+    *
+    * (Used internally and public although not documented in README.)
+    *
+    * @example
+-   * program.nameFromFilename(require.main.filename);
++   * program.nameFromFilename(import.meta.filename);
+    *
+    * @param {string} filename
+    * @return {Command}
+@@ -2440,7 +2440,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
+    * Get or set the directory for searching for executable subcommands of this command.
+    *
+    * @example
+-   * program.executableDir(__dirname);
++   * program.executableDir(import.meta.dirname);
+    * // or
+    * program.executableDir('subcommands');
+    *
+@@ -2760,10 +2760,12 @@ function incrementNodeInspectorPort(args) {
+ }
+ 
+ /**
++ * Exported for using from tests, not otherwise used outside this file.
++ *
+  * @returns {boolean | undefined}
+  * @package
+  */
+-function useColor() {
++export function useColor() {
+   // Test for common conventions.
+   // NB: the observed behaviour is in combination with how author adds color! For example:
+   //   - we do not test NODE_DISABLE_COLORS, but util:styletext does
+@@ -2786,6 +2788,3 @@ function useColor() {
+     return true;
+   return undefined;
+ }
+-
+-exports.Command = Command;
+-exports.useColor = useColor; // exporting for tests
+diff --git a/lib/error.js b/lib/error.js
+index 7b5b0d3..d00f874 100644
+--- a/lib/error.js
++++ b/lib/error.js
+@@ -1,7 +1,7 @@
+ /**
+  * CommanderError class
+  */
+-class CommanderError extends Error {
++export class CommanderError extends Error {
+   /**
+    * Constructs the CommanderError class
+    * @param {number} exitCode suggested exit code which could be used with process.exit
+@@ -22,7 +22,7 @@ class CommanderError extends Error {
+ /**
+  * InvalidArgumentError class
+  */
+-class InvalidArgumentError extends CommanderError {
++export class InvalidArgumentError extends CommanderError {
+   /**
+    * Constructs the InvalidArgumentError class
+    * @param {string} [message] explanation of why argument is invalid
+@@ -34,6 +34,3 @@ class InvalidArgumentError extends CommanderError {
+     this.name = this.constructor.name;
+   }
+ }
+-
+-exports.CommanderError = CommanderError;
+-exports.InvalidArgumentError = InvalidArgumentError;
+diff --git a/lib/help.js b/lib/help.js
+index 9cfa860..350b798 100644
+--- a/lib/help.js
++++ b/lib/help.js
+@@ -1,4 +1,4 @@
+-const { humanReadableArgName } = require('./argument.js');
++import { humanReadableArgName } from './argument.js';
+ 
+ /**
+  * TypeScript import types for JSDoc, used by Visual Studio Code IntelliSense and `npm run typescript-checkJS`
+@@ -9,7 +9,7 @@ const { humanReadableArgName } = require('./argument.js');
+  */
+ 
+ // Although this is a class, methods are static in style to allow override using subclass or just functions.
+-class Help {
++export class Help {
+   constructor() {
+     this.helpWidth = undefined;
+     this.minWidthToWrap = 40;
+@@ -737,11 +737,8 @@ class Help {
+  * @package
+  */
+ 
+-function stripColor(str) {
++export function stripColor(str) {
+   // eslint-disable-next-line no-control-regex
+   const sgrPattern = /\x1b\[\d*(;\d*)*m/g;
+   return str.replace(sgrPattern, '');
+ }
+-
+-exports.Help = Help;
+-exports.stripColor = stripColor;
+diff --git a/lib/option.js b/lib/option.js
+index 4a0bd7f..4b4daaf 100644
+--- a/lib/option.js
++++ b/lib/option.js
+@@ -1,6 +1,6 @@
+-const { InvalidArgumentError } = require('./error.js');
++import { InvalidArgumentError } from './error.js';
+ 
+-class Option {
++export class Option {
+   /**
+    * Initialize a new `Option` with the given `flags` and `description`.
+    *
+@@ -265,7 +265,7 @@ class Option {
+  * use cases, but is tricky for others where we want separate behaviours despite
+  * the single shared option value.
+  */
+-class DualOptions {
++export class DualOptions {
+   /**
+    * @param {Option[]} options
+    */
+@@ -375,6 +375,3 @@ function splitOptionFlags(flags) {
+ 
+   return { shortFlag, longFlag };
+ }
+-
+-exports.Option = Option;
+-exports.DualOptions = DualOptions;
+diff --git a/lib/suggestSimilar.js b/lib/suggestSimilar.js
+index 6047306..dba447e 100644
+--- a/lib/suggestSimilar.js
++++ b/lib/suggestSimilar.js
+@@ -53,7 +53,7 @@ function editDistance(a, b) {
+  * @returns {string}
+  */
+ 
+-function suggestSimilar(word, candidates) {
++export function suggestSimilar(word, candidates) {
+   if (!candidates || candidates.length === 0) return '';
+   // remove possible duplicates
+   candidates = Array.from(new Set(candidates));
+@@ -97,5 +97,3 @@ function suggestSimilar(word, candidates) {
+   }
+   return '';
+ }
+-
+-exports.suggestSimilar = suggestSimilar;
+diff --git a/package.json b/package.json
+index 874c7e3..1ffde3b 100644
+--- a/package.json
++++ b/package.json
+@@ -34,28 +34,15 @@
+   "files": [
+     "index.js",
+     "lib/*.js",
+-    "esm.mjs",
+     "typings/index.d.ts",
+-    "typings/esm.d.mts",
+     "package-support.json"
+   ],
+-  "type": "commonjs",
++  "type": "module",
+   "main": "./index.js",
+   "exports": {
+     ".": {
+-      "require": {
+-        "types": "./typings/index.d.ts",
+-        "default": "./index.js"
+-      },
+-      "import": {
+-        "types": "./typings/esm.d.mts",
+-        "default": "./esm.mjs"
+-      },
++      "types": "./typings/index.d.ts",
+       "default": "./index.js"
+-    },
+-    "./esm.mjs": {
+-      "types": "./typings/esm.d.mts",
+-      "import": "./esm.mjs"
+     }
+   },
+   "devDependencies": {
+@@ -71,7 +58,7 @@
+   },
+   "types": "typings/index.d.ts",
+   "engines": {
+-    "node": ">=20"
++    "node": "^20.19.0 || >=22.12.0"
+   },
+   "support": true
+ }
+diff --git a/tests/args.literal.test.js b/tests/args.literal.test.js
+index b460f22..5f11174 100644
+--- a/tests/args.literal.test.js
++++ b/tests/args.literal.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Utility Conventions: http://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap12.html#tag_12_02
+ //
+diff --git a/tests/args.variadic.test.js b/tests/args.variadic.test.js
+index cb82207..5806d09 100644
+--- a/tests/args.variadic.test.js
++++ b/tests/args.variadic.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Testing variadic arguments.
+ 
+diff --git a/tests/argument.chain.test.js b/tests/argument.chain.test.js
+index b47b83b..3cc6ebb 100644
+--- a/tests/argument.chain.test.js
++++ b/tests/argument.chain.test.js
+@@ -1,6 +1,6 @@
+-const { Argument } = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { Argument } from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Argument methods that should return this for chaining', () => {
+   test('when call .default() then returns this', () => {
+diff --git a/tests/argument.choices.test.js b/tests/argument.choices.test.js
+index 733c597..ac5afef 100644
+--- a/tests/argument.choices.test.js
++++ b/tests/argument.choices.test.js
+@@ -1,7 +1,7 @@
+-const commander = require('../');
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Argument.choices()', () => {
+   test('when command argument in choices then argument set', () => {
+diff --git a/tests/argument.custom-processing.test.js b/tests/argument.custom-processing.test.js
+index 60c0462..544cc37 100644
+--- a/tests/argument.custom-processing.test.js
++++ b/tests/argument.custom-processing.test.js
+@@ -1,7 +1,7 @@
+-const commander = require('../');
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Testing default value and custom processing behaviours.
+ // Some double assertions in tests to check action argument and .processedArg
+diff --git a/tests/argument.required.test.js b/tests/argument.required.test.js
+index d04608b..1a0bcb7 100644
+--- a/tests/argument.required.test.js
++++ b/tests/argument.required.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Low-level tests of setting Argument.required.
+ // Higher level tests of optional/required arguments elsewhere.
+diff --git a/tests/argument.variadic.test.js b/tests/argument.variadic.test.js
+index f0f95bb..0c012fc 100644
+--- a/tests/argument.variadic.test.js
++++ b/tests/argument.variadic.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Testing variadic arguments. Testing all the action arguments, but could test just variadicArg.
+ 
+diff --git a/tests/command.action.test.js b/tests/command.action.test.js
+index 5d560e0..cafd8e1 100644
+--- a/tests/command.action.test.js
++++ b/tests/command.action.test.js
+@@ -1,7 +1,7 @@
+-const commander = require('../');
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Test some behaviours of .action not covered in more specific tests.
+ 
+diff --git a/tests/command.addCommand.test.js b/tests/command.addCommand.test.js
+index dac0e38..80f2171 100644
+--- a/tests/command.addCommand.test.js
++++ b/tests/command.addCommand.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Command.addCommand()', () => {
+   // simple sanity check subcommand works
+diff --git a/tests/command.addHelpOption.test.js b/tests/command.addHelpOption.test.js
+index 4bf9789..96cb036 100644
+--- a/tests/command.addHelpOption.test.js
++++ b/tests/command.addHelpOption.test.js
+@@ -1,7 +1,7 @@
+-const { Option } = require('../');
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { Option } from '../index.js';
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // More complete tests are in command.helpOption.test.js.
+ 
+diff --git a/tests/command.addHelpText.test.js b/tests/command.addHelpText.test.js
+index 9ccb947..c0eb185 100644
+--- a/tests/command.addHelpText.test.js
++++ b/tests/command.addHelpText.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe, beforeEach } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe, beforeEach } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Using outputHelp to simplify testing.
+ 
+diff --git a/tests/command.alias.test.js b/tests/command.alias.test.js
+index fcc112d..d288e35 100644
+--- a/tests/command.alias.test.js
++++ b/tests/command.alias.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Running alias commands is tested in command.executableSubcommand.lookup.test.js
+ // Test various other behaviours for .alias
+diff --git a/tests/command.allowExcessArguments.test.js b/tests/command.allowExcessArguments.test.js
+index 80b779a..4f125bd 100644
+--- a/tests/command.allowExcessArguments.test.js
++++ b/tests/command.allowExcessArguments.test.js
+@@ -1,6 +1,6 @@
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Not testing output, just testing whether an error is detected.
+ 
+diff --git a/tests/command.allowUnknownOption.test.js b/tests/command.allowUnknownOption.test.js
+index aba95a0..d801084 100644
+--- a/tests/command.allowUnknownOption.test.js
++++ b/tests/command.allowUnknownOption.test.js
+@@ -1,6 +1,6 @@
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Not testing output, just testing whether an error is detected.
+ 
+diff --git a/tests/command.argumentVariations.test.js b/tests/command.argumentVariations.test.js
+index a7dedd7..cd17e04 100644
+--- a/tests/command.argumentVariations.test.js
++++ b/tests/command.argumentVariations.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Do some low-level checks that the multiple ways of specifying command arguments produce same internal result,
+ // and not exhaustively testing all methods elsewhere.
+diff --git a/tests/command.asterisk.test.js b/tests/command.asterisk.test.js
+index 0736421..f89b3ed 100644
+--- a/tests/command.asterisk.test.js
++++ b/tests/command.asterisk.test.js
+@@ -1,7 +1,7 @@
+-const commander = require('../');
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // .command('*') is the old main/default command handler. It adds a listener
+ // for 'command:*'. It has been somewhat replaced by the program action handler,
+diff --git a/tests/command.chain.test.js b/tests/command.chain.test.js
+index 89a86fd..4f45dac 100644
+--- a/tests/command.chain.test.js
++++ b/tests/command.chain.test.js
+@@ -1,6 +1,6 @@
+-const { Command, Option, Argument } = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { Command, Option, Argument } from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Testing the functions which should chain.
+ // parse and parseAsync are tested in command.parse.test.js
+diff --git a/tests/command.commandHelp.test.js b/tests/command.commandHelp.test.js
+index d8530d4..eadc6c9 100644
+--- a/tests/command.commandHelp.test.js
++++ b/tests/command.commandHelp.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // This is a ported legacy test.
+ 
+diff --git a/tests/command.configureHelp.test.js b/tests/command.configureHelp.test.js
+index 22223bc..2569e77 100644
+--- a/tests/command.configureHelp.test.js
++++ b/tests/command.configureHelp.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Command.configureHelp()', () => {
+   test('when configure program then affects program helpInformation', () => {
+diff --git a/tests/command.configureOutput.test.js b/tests/command.configureOutput.test.js
+index d05ea75..1924c2a 100644
+--- a/tests/command.configureOutput.test.js
++++ b/tests/command.configureOutput.test.js
+@@ -1,7 +1,7 @@
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
+-const commander = require('../');
+-const process = require('node:process');
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
++import * as commander from '../index.js';
++import process from 'node:process';
+ 
+ describe('Command.configureOutput()', () => {
+   test('when default writeErr() then error on stderr', (t) => {
+diff --git a/tests/command.copySettings.test.js b/tests/command.copySettings.test.js
+index 7258ecd..0ec3ef8 100644
+--- a/tests/command.copySettings.test.js
++++ b/tests/command.copySettings.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Tests some private properties as simpler than pure tests of observable behaviours.
+ // Testing before and after values in some cases, to ensure value actually changes (when copied).
+diff --git a/tests/command.createArgument.test.js b/tests/command.createArgument.test.js
+index e530793..cd270c6 100644
+--- a/tests/command.createArgument.test.js
++++ b/tests/command.createArgument.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ class MyArgument extends commander.Argument {
+   constructor(name, description) {
+diff --git a/tests/command.createHelp.test.js b/tests/command.createHelp.test.js
+index 2d6df7f..090c1e1 100644
+--- a/tests/command.createHelp.test.js
++++ b/tests/command.createHelp.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Command.createHelp() override in subclass', () => {
+   test('when override createCommand then affects help', () => {
+diff --git a/tests/command.createOption.test.js b/tests/command.createOption.test.js
+index 12ee751..5c7cb8c 100644
+--- a/tests/command.createOption.test.js
++++ b/tests/command.createOption.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ class MyOption extends commander.Option {
+   constructor(flags, description) {
+diff --git a/tests/command.default.test.js b/tests/command.default.test.js
+index acab940..1c79a93 100644
+--- a/tests/command.default.test.js
++++ b/tests/command.default.test.js
+@@ -1,15 +1,15 @@
+-const childProcess = require('child_process');
+-const commander = require('../');
+-const path = require('path');
+-const util = require('util');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as childProcess from 'child_process';
++import * as commander from '../index.js';
++import * as path from 'path';
++import * as util from 'util';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ const execFileAsync = util.promisify(childProcess.execFile);
+ 
+ describe('default executable command', () => {
+   // Calling node explicitly so pm works without file suffix cross-platform.
+-  const pm = path.join(__dirname, './fixtures/pm');
++  const pm = path.join(import.meta.dirname, './fixtures/pm');
+ 
+   test('when default subcommand and no command then call default', async () => {
+     const { stdout } = await execFileAsync('node', [pm]);
+@@ -18,12 +18,12 @@ describe('default executable command', () => {
+ 
+   test('when default subcommand and unrecognised argument then call default with argument', async () => {
+     const { stdout } = await execFileAsync('node', [pm, 'an-argument']);
+-    assert.equal(stdout, "default\n[ 'an-argument' ]\n");
++    assert.equal(stdout, 'default\n["an-argument"]\n');
+   });
+ 
+   test('when default subcommand and unrecognised option then call default with option', async () => {
+     const { stdout } = await execFileAsync('node', [pm, '--an-option']);
+-    assert.equal(stdout, "default\n[ '--an-option' ]\n");
++    assert.equal(stdout, 'default\n["--an-option"]\n');
+   });
+ });
+ 
+diff --git a/tests/command.description.test.js b/tests/command.description.test.js
+index 29095de..4c3289e 100644
+--- a/tests/command.description.test.js
++++ b/tests/command.description.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Command description()', () => {
+   test('when set description then get description', () => {
+diff --git a/tests/command.error.test.js b/tests/command.error.test.js
+index a1b2805..768ef05 100644
+--- a/tests/command.error.test.js
++++ b/tests/command.error.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Command.error()', () => {
+   test('when error called with message then message displayed on stderr', (t) => {
+diff --git a/tests/command.executableSubcommand.inspect.test.js b/tests/command.executableSubcommand.inspect.test.js
+index 672a9ed..1415bcc 100644
+--- a/tests/command.executableSubcommand.inspect.test.js
++++ b/tests/command.executableSubcommand.inspect.test.js
+@@ -1,15 +1,19 @@
+-const childProcess = require('child_process');
+-const path = require('path');
+-const util = require('util');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as childProcess from 'child_process';
++import * as path from 'path';
++import * as util from 'util';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ const execFileAsync = util.promisify(childProcess.execFile);
+ 
+ // Test the special handling for --inspect to increment fixed debug port numbers.
+ // If we reuse port we can get conflicts because port not released fast enough.
+ 
+-const inspectCommand = path.join(__dirname, './fixtures', 'inspect.js');
++const inspectCommand = path.join(
++  import.meta.dirname,
++  './fixtures',
++  'inspect.js',
++);
+ 
+ describe('executable subcommand support for --inspect ', () => {
+   test('when execArgv empty then spawn execArgs empty', async () => {
+@@ -23,7 +27,7 @@ describe('executable subcommand support for --inspect ', () => {
+       inspectCommand,
+       'sub',
+     ]);
+-    assert.equal(stdout, "[ '--harmony' ]\n");
++    assert.equal(stdout, '["--harmony"]\n');
+   });
+ 
+   // --inspect defaults to 127.0.0.1:9229, port should be incremented
+@@ -33,7 +37,7 @@ describe('executable subcommand support for --inspect ', () => {
+       inspectCommand,
+       'sub',
+     ]);
+-    assert.equal(stdout, "[ '--inspect=127.0.0.1:9230' ]\n");
++    assert.equal(stdout, '["--inspect=127.0.0.1:9230"]\n');
+   });
+ 
+   // custom port
+@@ -43,7 +47,7 @@ describe('executable subcommand support for --inspect ', () => {
+       inspectCommand,
+       'sub',
+     ]);
+-    assert.equal(stdout, "[ '--inspect=127.0.0.1:9241' ]\n");
++    assert.equal(stdout, '["--inspect=127.0.0.1:9241"]\n');
+   });
+ 
+   // zero is special, random port
+@@ -53,7 +57,7 @@ describe('executable subcommand support for --inspect ', () => {
+       inspectCommand,
+       'sub',
+     ]);
+-    assert.equal(stdout, "[ '--inspect=0' ]\n");
++    assert.equal(stdout, '["--inspect=0"]\n');
+   });
+ 
+   // ip address
+@@ -63,7 +67,7 @@ describe('executable subcommand support for --inspect ', () => {
+       inspectCommand,
+       'sub',
+     ]);
+-    assert.equal(stdout, "[ '--inspect=127.0.0.1:9251' ]\n");
++    assert.equal(stdout, '["--inspect=127.0.0.1:9251"]\n');
+   });
+ 
+   // localhost
+@@ -73,7 +77,7 @@ describe('executable subcommand support for --inspect ', () => {
+       inspectCommand,
+       'sub',
+     ]);
+-    assert.equal(stdout, "[ '--inspect=localhost:9261' ]\n");
++    assert.equal(stdout, '["--inspect=localhost:9261"]\n');
+   });
+ 
+   // --inspect-port, just test most likely format
+@@ -83,6 +87,6 @@ describe('executable subcommand support for --inspect ', () => {
+       inspectCommand,
+       'sub',
+     ]);
+-    assert.equal(stdout, "[ '--inspect-port=127.0.0.1:9271' ]\n");
++    assert.equal(stdout, '["--inspect-port=127.0.0.1:9271"]\n');
+   });
+ });
+diff --git a/tests/command.executableSubcommand.lookup.test.js b/tests/command.executableSubcommand.lookup.test.js
+index c477625..a61de36 100644
+--- a/tests/command.executableSubcommand.lookup.test.js
++++ b/tests/command.executableSubcommand.lookup.test.js
+@@ -1,9 +1,9 @@
+-const childProcess = require('child_process');
+-const path = require('path');
+-const util = require('util');
++import * as childProcess from 'child_process';
++import * as path from 'path';
++import * as util from 'util';
+ const execFileAsync = util.promisify(childProcess.execFile);
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Calling node explicitly so pm works without file suffix cross-platform.
+ // This file does end-to-end tests actually spawning program.
+@@ -12,7 +12,7 @@ const assert = require('node:assert/strict');
+ // Suppress false positive warnings due to use of testOrSkipOnWindows
+ 
+ const testOrSkipOnWindows = process.platform === 'win32' ? test.skip : test;
+-const pm = path.join(__dirname, './fixtures/pm');
++const pm = path.join(import.meta.dirname, './fixtures/pm');
+ 
+ describe('executable subcommand lookup ', () => {
+   test('when subcommand file missing then error', () => {
+@@ -70,7 +70,7 @@ describe('executable subcommand lookup ', () => {
+   testOrSkipOnWindows(
+     'when subcommand file is symlink then lookup succeeds',
+     async () => {
+-      const pmlink = path.join(__dirname, 'fixtures', 'pmlink');
++      const pmlink = path.join(import.meta.dirname, 'fixtures', 'pmlink');
+       const { stdout } = await execFileAsync('node', [pmlink, 'install']);
+       assert.equal(stdout, 'install\n');
+     },
+@@ -79,29 +79,47 @@ describe('executable subcommand lookup ', () => {
+   testOrSkipOnWindows(
+     'when subcommand file is double symlink then lookup succeeds',
+     async () => {
+-      const pmlink = path.join(__dirname, 'fixtures', 'another-dir', 'pm');
++      const pmlink = path.join(
++        import.meta.dirname,
++        'fixtures',
++        'another-dir',
++        'pm',
++      );
+       const { stdout } = await execFileAsync('node', [pmlink, 'install']);
+       assert.equal(stdout, 'install\n');
+     },
+   );
+ 
+-  test('when subcommand suffix is .ts then lookup succeeds', async () => {
++  // This test currently fails on Node 20 when run as ESM because Node does not execute .ts files as JavaScript by default.
++  test.skip('when subcommand suffix is .ts then lookup succeeds', async () => {
+     // We support looking for ts files for ts-node in particular, but don't need to test ts-node itself.
+     // The subcommand is both plain JavaScript code for this test.
+-    const binLinkTs = path.join(__dirname, 'fixtures-extensions', 'pm.js');
++    const binLinkTs = path.join(
++      import.meta.dirname,
++      'fixtures-extensions',
++      'pm.js',
++    );
+     // childProcess.execFile('node', ['-r', 'ts-node/register', binLinkTs, 'install'], function(_error, stdout, stderr) {
+     const { stdout } = await execFileAsync('node', [binLinkTs, 'try-ts']);
+     assert.equal(stdout, 'found .ts\n');
+   });
+ 
+   test('when subcommand suffix is .cjs then lookup succeeds', async () => {
+-    const binLinkTs = path.join(__dirname, 'fixtures-extensions', 'pm.js');
++    const binLinkTs = path.join(
++      import.meta.dirname,
++      'fixtures-extensions',
++      'pm.js',
++    );
+     const { stdout } = await execFileAsync('node', [binLinkTs, 'try-cjs']);
+     assert.equal(stdout, 'found .cjs\n');
+   });
+ 
+   test('when subcommand suffix is .mjs then lookup succeeds', async () => {
+-    const binLinkTs = path.join(__dirname, 'fixtures-extensions', 'pm.js');
++    const binLinkTs = path.join(
++      import.meta.dirname,
++      'fixtures-extensions',
++      'pm.js',
++    );
+     const { stdout } = await execFileAsync('node', [binLinkTs, 'try-mjs']);
+     assert.equal(stdout, 'found .mjs\n');
+   });
+diff --git a/tests/command.executableSubcommand.mock.test.js b/tests/command.executableSubcommand.mock.test.cjs
+similarity index 97%
+rename from tests/command.executableSubcommand.mock.test.js
+rename to tests/command.executableSubcommand.mock.test.cjs
+index cf316b5..117b82a 100644
+--- a/tests/command.executableSubcommand.mock.test.js
++++ b/tests/command.executableSubcommand.mock.test.cjs
+@@ -4,6 +4,8 @@ const EventEmitter = require('events');
+ const { test, describe } = require('node:test');
+ const assert = require('node:assert/strict');
+ 
++// Using mocking of child_process.spawn. Not fully supported yet in esm by node:test so run as cjs.
++
+ // Using mock to allow try/catch around what is otherwise out-of-stack error handling.
+ // Injecting errors, these are not end-to-end tests.
+ 
+diff --git a/tests/command.executableSubcommand.search.test.js b/tests/command.executableSubcommand.search.test.cjs
+similarity index 99%
+rename from tests/command.executableSubcommand.search.test.js
+rename to tests/command.executableSubcommand.search.test.cjs
+index 592bd98..783baeb 100644
+--- a/tests/command.executableSubcommand.search.test.js
++++ b/tests/command.executableSubcommand.search.test.cjs
+@@ -5,6 +5,8 @@ const commander = require('../');
+ const { test, describe } = require('node:test');
+ const assert = require('node:assert/strict');
+ 
++// Using mocking of child_process.spawn. Not fully supported yet in esm by node:test so run as cjs.
++
+ // This file does in-process mocking. Bit clumsy but faster and less external clutter than using fixtures.
+ // See also command.executableSubcommand.lookup.test.js for tests using fixtures.
+ 
+diff --git a/tests/command.executableSubcommand.signals.test.js b/tests/command.executableSubcommand.signals.test.js
+index 6cb0e24..1d0508f 100644
+--- a/tests/command.executableSubcommand.signals.test.js
++++ b/tests/command.executableSubcommand.signals.test.js
+@@ -1,9 +1,9 @@
+-const childProcess = require('child_process');
+-const path = require('path');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as childProcess from 'child_process';
++import * as path from 'path';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+-const pmPath = path.join(__dirname, 'fixtures', 'pm');
++const pmPath = path.join(import.meta.dirname, 'fixtures', 'pm');
+ 
+ // Disabling some tests on Windows as:
+ // "Windows does not support sending signals"
+diff --git a/tests/command.executableSubcommand.test.js b/tests/command.executableSubcommand.test.js
+index 246789d..30bde73 100644
+--- a/tests/command.executableSubcommand.test.js
++++ b/tests/command.executableSubcommand.test.js
+@@ -1,6 +1,6 @@
+-const { createTestCommand } = require('./testHelpers');
+-const { test } = require('node:test');
+-const assert = require('node:assert/strict');
++import { createTestCommand } from './testHelpers.js';
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Executable subcommand tests that didn't fit in elsewhere.
+ 
+diff --git a/tests/command.exitOverride.test.js b/tests/command.exitOverride.test.js
+index 18bfc88..5afdcda 100644
+--- a/tests/command.exitOverride.test.js
++++ b/tests/command.exitOverride.test.js
+@@ -1,7 +1,7 @@
+-const commander = require('../');
+-const path = require('path');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import * as path from 'path';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Test details of the exitOverride errors.
+ // The important checks are the exitCode and code which are intended to be stable for
+@@ -256,7 +256,7 @@ describe('Command.exitOverride', () => {
+   });
+ 
+   test('when executableSubcommand succeeds then call exitOverride', async () => {
+-    const pm = path.join(__dirname, 'fixtures/pm');
++    const pm = path.join(import.meta.dirname, 'fixtures/pm');
+     const program = new commander.Command();
+     await new Promise((resolve) => {
+       program
+diff --git a/tests/command.help.test.js b/tests/command.help.test.js
+index 129c1d9..6046e03 100644
+--- a/tests/command.help.test.js
++++ b/tests/command.help.test.js
+@@ -1,7 +1,7 @@
+-const commander = require('../');
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Testing various help incantations.
+ //
+diff --git a/tests/command.helpCommand.test.js b/tests/command.helpCommand.test.js
+index d8e76b9..841fca3 100644
+--- a/tests/command.helpCommand.test.js
++++ b/tests/command.helpCommand.test.js
+@@ -1,7 +1,7 @@
+-const commander = require('../');
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('help handling of subcommands', () => {
+   describe('help command listed in helpInformation', () => {
+diff --git a/tests/command.helpOption.test.js b/tests/command.helpOption.test.js
+index 98b123f..f5d8a1a 100644
+--- a/tests/command.helpOption.test.js
++++ b/tests/command.helpOption.test.js
+@@ -1,7 +1,7 @@
+-const commander = require('../');
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Command.helpOption()', () => {
+   test('when helpOption has custom flags then custom short flag invokes help', (t) => {
+diff --git a/tests/command.hook.test.js b/tests/command.hook.test.js
+index a234e3b..dbede89 100644
+--- a/tests/command.hook.test.js
++++ b/tests/command.hook.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Command.hook()', () => {
+   test('when hook event wrong then throw', () => {
+diff --git a/tests/command.name.test.js b/tests/command.name.test.js
+index debcef7..84faf6f 100644
+--- a/tests/command.name.test.js
++++ b/tests/command.name.test.js
+@@ -1,7 +1,7 @@
+-const path = require('path');
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as path from 'path';
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Command.name()', () => {
+   test('when construct with name then name is set', () => {
+@@ -49,9 +49,9 @@ describe('Command.name()', () => {
+     assert.equal(program.name(), 'foo');
+   });
+ 
+-  test('when pass __filename to nameFromFilename then name is plain name of this file', () => {
++  test('when pass import.meta.filename to nameFromFilename then name is plain name of this file', () => {
+     const program = new commander.Command();
+-    program.nameFromFilename(__filename);
++    program.nameFromFilename(import.meta.filename);
+     assert.equal(program.name(), 'command.name.test');
+   });
+ });
+diff --git a/tests/command.nested.test.js b/tests/command.nested.test.js
+index e3a29aa..7ffd753 100644
+--- a/tests/command.nested.test.js
++++ b/tests/command.nested.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ test('when call nested subcommand then runs', (t) => {
+   const program = new commander.Command();
+diff --git a/tests/command.onCommand.test.js b/tests/command.onCommand.test.js
+index 1a70bc1..5e0266f 100644
+--- a/tests/command.onCommand.test.js
++++ b/tests/command.onCommand.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // The action handler used to be implemented using command events and listeners.
+ // Now, this is mostly just for backwards compatibility.
+diff --git a/tests/command.option-misuse.test.js b/tests/command.option-misuse.test.js
+index ef1dfd2..711a7c9 100644
+--- a/tests/command.option-misuse.test.js
++++ b/tests/command.option-misuse.test.js
+@@ -1,6 +1,6 @@
+-const { Command, Option } = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { Command, Option } from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // It is a reasonable and easy mistake to pass Option to .option(). Detect this
+ // and offer advice.
+diff --git a/tests/command.parse.test.js b/tests/command.parse.test.js
+index 015fe7e..25014cc 100644
+--- a/tests/command.parse.test.js
++++ b/tests/command.parse.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Testing some Electron conventions but not directly using Electron to avoid overheads.
+ // https://github.com/electron/electron/issues/4690#issuecomment-217435222
+diff --git a/tests/command.parseOptions.test.js b/tests/command.parseOptions.test.js
+index c49fa21..54c1f39 100644
+--- a/tests/command.parseOptions.test.js
++++ b/tests/command.parseOptions.test.js
+@@ -1,9 +1,9 @@
+-const childProcess = require('child_process');
+-const commander = require('../');
+-const path = require('path');
+-const util = require('util');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as childProcess from 'child_process';
++import * as commander from '../index.js';
++import * as path from 'path';
++import * as util from 'util';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ const execFileAsync = util.promisify(childProcess.execFile);
+ 
+@@ -38,7 +38,7 @@ describe('parsing regression tests', () => {
+ 
+   // https://github.com/tj/commander.js/issues/508
+   test('when arguments to executable include option flags then argument order preserved', async () => {
+-    const pm = path.join(__dirname, 'fixtures/pm');
++    const pm = path.join(import.meta.dirname, 'fixtures/pm');
+     const { stdout } = await execFileAsync('node', [
+       pm,
+       'echo',
+@@ -50,7 +50,7 @@ describe('parsing regression tests', () => {
+       '5',
+       '6',
+     ]);
+-    assert.equal(stdout, "[ '1', '2', '--dry-run', '3', '4', '5', '6' ]\n");
++    assert.equal(stdout, '["1","2","--dry-run","3","4","5","6"]\n');
+   });
+ });
+ 
+diff --git a/tests/command.positionalOptions.test.js b/tests/command.positionalOptions.test.js
+index 21c6127..fe7a96a 100644
+--- a/tests/command.positionalOptions.test.js
++++ b/tests/command.positionalOptions.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // The changes to parsing for positional options are subtle, and took extra care to work with
+ // implicit help and default commands. Lots of tests.
+diff --git a/tests/command.registerClash.test.js b/tests/command.registerClash.test.js
+index 9775014..764984b 100644
+--- a/tests/command.registerClash.test.js
++++ b/tests/command.registerClash.test.js
+@@ -1,6 +1,6 @@
+-const { Command } = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { Command } from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('registering clashing subcommands', () => {
+   test('when command name conflicts with existing name then throw', () => {
+diff --git a/tests/command.showHelpAfterError.test.js b/tests/command.showHelpAfterError.test.js
+index 46553dd..c39c4e0 100644
+--- a/tests/command.showHelpAfterError.test.js
++++ b/tests/command.showHelpAfterError.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe, mock } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe, mock } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Command.showHelpAfterError(message)', () => {
+   const customHelpMessage = 'See --help';
+diff --git a/tests/command.showSuggestionAfterError.test.js b/tests/command.showSuggestionAfterError.test.js
+index 7003890..4474a67 100644
+--- a/tests/command.showSuggestionAfterError.test.js
++++ b/tests/command.showSuggestionAfterError.test.js
+@@ -1,6 +1,6 @@
+-const { Command } = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { Command } from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ function getSuggestion(program, arg) {
+   let message = '';
+diff --git a/tests/command.summary.test.js b/tests/command.summary.test.js
+index 3370277..170f55f 100644
+--- a/tests/command.summary.test.js
++++ b/tests/command.summary.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ test('Command.summary(): when set summary then get summary', () => {
+   const program = new commander.Command();
+diff --git a/tests/command.unknownCommand.test.js b/tests/command.unknownCommand.test.js
+index 3c02420..a2f51f2 100644
+--- a/tests/command.unknownCommand.test.js
++++ b/tests/command.unknownCommand.test.js
+@@ -1,6 +1,6 @@
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('parsing unknown command', () => {
+   test('when unknown argument in simple program then error', () => {
+diff --git a/tests/command.unknownOption.test.js b/tests/command.unknownOption.test.js
+index 73acd31..280374d 100644
+--- a/tests/command.unknownOption.test.js
++++ b/tests/command.unknownOption.test.js
+@@ -1,6 +1,6 @@
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Checking for detection of unknown options, including regression tests for some past issues.
+ 
+diff --git a/tests/command.usage.test.js b/tests/command.usage.test.js
+index abe871c..26010b9 100644
+--- a/tests/command.usage.test.js
++++ b/tests/command.usage.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('command Usage section in help', () => {
+   test('when default usage and check program help then starts with default usage', () => {
+diff --git a/tests/commander.storeOptionsAsProperties.test.js b/tests/commander.storeOptionsAsProperties.test.js
+index 7e06793..490cfa4 100644
+--- a/tests/commander.storeOptionsAsProperties.test.js
++++ b/tests/commander.storeOptionsAsProperties.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Mostly testing direct on program, limited check that (sub)command working same.
+ 
+diff --git a/tests/createCommand.test.js b/tests/createCommand.test.js
+index ce75c05..f73ea3f 100644
+--- a/tests/createCommand.test.js
++++ b/tests/createCommand.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Command.createCommand()', () => {
+   test('when createCommand then unattached', () => {
+diff --git a/tests/deprecated.test.js b/tests/deprecated.test.js
+index 0ac0fb0..349f451 100644
+--- a/tests/deprecated.test.js
++++ b/tests/deprecated.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Test for backwards compatible behaviour of deprecated features that don't fit in elsewhere.
+ // We keep deprecated features working (when not too difficult) to avoid breaking existing code
+diff --git a/tests/fixtures-extensions/pm.js b/tests/fixtures-extensions/pm.js
+index d05bb2a..ee8e388 100644
+--- a/tests/fixtures-extensions/pm.js
++++ b/tests/fixtures-extensions/pm.js
+@@ -1,6 +1,6 @@
+ #!/usr/bin/env node
+ 
+-const { program } = require('../../');
++import { program } from '../../index.js';
+ 
+ program
+   .command('try-ts', 'test file extension lookup')
+diff --git a/tests/fixtures/inspect-sub.js b/tests/fixtures/inspect-sub.js
+index efbc46d..83ca9aa 100644
+--- a/tests/fixtures/inspect-sub.js
++++ b/tests/fixtures/inspect-sub.js
+@@ -1 +1 @@
+-console.log(process.execArgv);
++console.log(JSON.stringify(process.execArgv));
+diff --git a/tests/fixtures/inspect.js b/tests/fixtures/inspect.js
+index d17aeb3..fc0b3e2 100644
+--- a/tests/fixtures/inspect.js
++++ b/tests/fixtures/inspect.js
+@@ -1,7 +1,5 @@
+ #!/usr/bin/env node
+ 
+-const { program } = require('../../');
+-
+-process.env.FORCE_COLOR = 0; // work-around bug in Jest: https://github.com/jestjs/jest/issues/14391
++import { program } from '../../index.js';
+ 
+ program.command('sub', 'install one or more packages').parse(process.argv);
+diff --git a/tests/fixtures/pm b/tests/fixtures/pm
+index f5b5864..6a3dd83 100755
+--- a/tests/fixtures/pm
++++ b/tests/fixtures/pm
+@@ -1,9 +1,7 @@
+ #!/usr/bin/env node
+ 
+-const path = require('node:path');
+-const { program } = require('../../');
+-
+-process.env.FORCE_COLOR = 0; // work-around bug in Jest: https://github.com/jestjs/jest/issues/14391
++import * as path from 'node:path';
++import { program } from '../../index.js';
+ 
+ program
+   .version('0.0.1')
+@@ -37,10 +35,10 @@ program
+     process.exit(err.exitCode);
+   })
+   .command('fail', 'exit with non-zero status code', {
+-    executableFile: path.join(__dirname, 'pm-fail.js'),
++    executableFile: path.join(import.meta.dirname, 'pm-fail.js'),
+   })
+   .command('terminate', 'terminate due to signal', {
+-    executableFile: path.join(__dirname, 'pm-terminate.js'),
++    executableFile: path.join(import.meta.dirname, 'pm-terminate.js'),
+   });
+ 
+ program.parse(process.argv);
+diff --git a/tests/fixtures/pm-cache.js b/tests/fixtures/pm-cache.js
+index 58346dc..c4c9030 100644
+--- a/tests/fixtures/pm-cache.js
++++ b/tests/fixtures/pm-cache.js
+@@ -1,4 +1,4 @@
+-const { program } = require('../../');
++import { program } from '../../index.js';
+ 
+ program
+   .command('clear', 'clear the cache')
+diff --git a/tests/fixtures/pm-default b/tests/fixtures/pm-default
+index 09888b0..3a05c41 100755
+--- a/tests/fixtures/pm-default
++++ b/tests/fixtures/pm-default
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env node
+ console.log('default');
+ if (process.argv.length > 2) {
+-  console.log(process.argv.slice(2));
++  console.log(JSON.stringify(process.argv.slice(2)));
+ }
+diff --git a/tests/fixtures/pm-echo.js b/tests/fixtures/pm-echo.js
+index 71ebf99..74e2668 100644
+--- a/tests/fixtures/pm-echo.js
++++ b/tests/fixtures/pm-echo.js
+@@ -1 +1 @@
+-console.log(process.argv.slice(2));
++console.log(JSON.stringify(process.argv.slice(2)));
+diff --git a/tests/help.argumentDescription.test.js b/tests/help.argumentDescription.test.js
+index 8bb7c36..2f609a3 100644
+--- a/tests/help.argumentDescription.test.js
++++ b/tests/help.argumentDescription.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // These are tests of the Help class, not of the Command help.
+ 
+diff --git a/tests/help.boxWrap.test.js b/tests/help.boxWrap.test.js
+index baa8587..f23023e 100644
+--- a/tests/help.boxWrap.test.js
++++ b/tests/help.boxWrap.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Help.boxWrap()', () => {
+   test('when empty string then return empty string', () => {
+diff --git a/tests/help.commandTerm.test.js b/tests/help.commandTerm.test.js
+index cbe9526..148d3f6 100644
+--- a/tests/help.commandTerm.test.js
++++ b/tests/help.commandTerm.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // These are tests of the Help class, not of the Command help.
+ // There is some overlap with the higher level Command tests (which predate Help).
+diff --git a/tests/help.commandUsage.test.js b/tests/help.commandUsage.test.js
+index dbfcd45..0fb2e4c 100644
+--- a/tests/help.commandUsage.test.js
++++ b/tests/help.commandUsage.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // These are tests of the Help class, not of the Command help.
+ // There is some overlap with the higher level Command tests (which predate Help).
+diff --git a/tests/help.longestArgumentTermLength.test.js b/tests/help.longestArgumentTermLength.test.js
+index 0c4d9fd..8a06498 100644
+--- a/tests/help.longestArgumentTermLength.test.js
++++ b/tests/help.longestArgumentTermLength.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // These are tests of the Help class, not of the Command help.
+ // There is some overlap with the higher level Command tests (which predate Help).
+diff --git a/tests/help.longestCommandTermLength.test.js b/tests/help.longestCommandTermLength.test.js
+index 5fff9dc..d6afb8a 100644
+--- a/tests/help.longestCommandTermLength.test.js
++++ b/tests/help.longestCommandTermLength.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // These are tests of the Help class, not of the Command help.
+ // There is some overlap with the higher level Command tests (which predate Help).
+diff --git a/tests/help.longestOptionTermLength.test.js b/tests/help.longestOptionTermLength.test.js
+index 161b4d8..0ce0951 100644
+--- a/tests/help.longestOptionTermLength.test.js
++++ b/tests/help.longestOptionTermLength.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // These are tests of the Help class, not of the Command help.
+ // There is some overlap with the higher level Command tests (which predate Help).
+diff --git a/tests/help.minWidthToWrap.test.js b/tests/help.minWidthToWrap.test.js
+index 86b624a..912c375 100644
+--- a/tests/help.minWidthToWrap.test.js
++++ b/tests/help.minWidthToWrap.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Help.minWidthToWrap()', () => {
+   test('when enough width then wrap', () => {
+diff --git a/tests/help.optionDescription.test.js b/tests/help.optionDescription.test.js
+index ef451f4..98de536 100644
+--- a/tests/help.optionDescription.test.js
++++ b/tests/help.optionDescription.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // These are tests of the Help class, not of the Command help.
+ // There is some overlap with the higher level Command tests (which predate Help).
+diff --git a/tests/help.optionTerm.test.js b/tests/help.optionTerm.test.js
+index dec0093..1811bf9 100644
+--- a/tests/help.optionTerm.test.js
++++ b/tests/help.optionTerm.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // These are tests of the Help class, not of the Command help.
+ // There is some overlap with the higher level Command tests (which predate Help).
+diff --git a/tests/help.padWidth.test.js b/tests/help.padWidth.test.js
+index cd482d6..c234755 100644
+--- a/tests/help.padWidth.test.js
++++ b/tests/help.padWidth.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // These are tests of the Help class, not of the Command help.
+ // There is some overlap with the higher level Command tests (which predate Help).
+diff --git a/tests/help.preformatted.test.js b/tests/help.preformatted.test.js
+index 2c0c5c9..19377cc 100644
+--- a/tests/help.preformatted.test.js
++++ b/tests/help.preformatted.test.js
+@@ -1,6 +1,6 @@
+-const { Help, Command } = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { Help, Command } from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Help.preformatted()', () => {
+   test('when single line then false', () => {
+diff --git a/tests/help.showGlobalOptions.test.js b/tests/help.showGlobalOptions.test.js
+index 984dd9b..5a8f25f 100644
+--- a/tests/help.showGlobalOptions.test.js
++++ b/tests/help.showGlobalOptions.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Help.showGlobalOptions()', () => {
+   test('when default configuration then global options hidden', () => {
+diff --git a/tests/help.sortCommands.test.js b/tests/help.sortCommands.test.js
+index cf1be40..4414027 100644
+--- a/tests/help.sortCommands.test.js
++++ b/tests/help.sortCommands.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // These are tests of the Help class, not of the Command help.
+ // There is some overlap with the higher level Command tests (which predate Help).
+diff --git a/tests/help.sortOptions.test.js b/tests/help.sortOptions.test.js
+index 948043c..5c1374a 100644
+--- a/tests/help.sortOptions.test.js
++++ b/tests/help.sortOptions.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // These are tests of the Help class, not of the Command help.
+ // There is some overlap with the higher level Command tests (which predate Help).
+diff --git a/tests/help.stripAnsi.test.js b/tests/help.stripAnsi.test.js
+index 1b5fb86..7590780 100644
+--- a/tests/help.stripAnsi.test.js
++++ b/tests/help.stripAnsi.test.js
+@@ -1,6 +1,6 @@
+-const { stripColor } = require('../lib/help');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { stripColor } from '../lib/help.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_(Select_Graphic_Rendition)_parameters
+ 
+diff --git a/tests/help.style.test.js b/tests/help.style.test.js
+index f3e1535..9f1220d 100644
+--- a/tests/help.style.test.js
++++ b/tests/help.style.test.js
+@@ -1,6 +1,6 @@
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
+-const { Command } = require('../');
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
++import { Command } from '../index.js';
+ 
+ function red(str) {
+   // Use plain characters so not stripped in failure messages. (Means displayWidth is bogus though.)
+diff --git a/tests/help.subcommandDescription.test.js b/tests/help.subcommandDescription.test.js
+index 18bcf4d..c045c98 100644
+--- a/tests/help.subcommandDescription.test.js
++++ b/tests/help.subcommandDescription.test.js
+@@ -1,6 +1,6 @@
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
+-const commander = require('../');
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
++import * as commander from '../index.js';
+ 
+ // These are tests of the Help class, not of the Command help.
+ // There is some overlap with the higher level Command tests (which predate Help).
+diff --git a/tests/help.suggestion.test.js b/tests/help.suggestion.test.js
+index 1c95028..92046e6 100644
+--- a/tests/help.suggestion.test.js
++++ b/tests/help.suggestion.test.js
+@@ -1,6 +1,6 @@
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
+-const { Command, Option } = require('../');
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
++import { Command, Option } from '../index.js';
+ 
+ // Note: setting up shared command configuration in getSuggestion,
+ // and looking for possible subcommand 'sub'.
+diff --git a/tests/help.visibleArguments.test.js b/tests/help.visibleArguments.test.js
+index c849d9a..e199ef1 100644
+--- a/tests/help.visibleArguments.test.js
++++ b/tests/help.visibleArguments.test.js
+@@ -1,6 +1,6 @@
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
+-const commander = require('../');
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
++import * as commander from '../index.js';
+ 
+ // These are tests of the Help class, not of the Command help.
+ // There is some overlap with the higher level Command tests (which predate Help).
+diff --git a/tests/help.visibleCommands.test.js b/tests/help.visibleCommands.test.js
+index 91df3b0..3955d68 100644
+--- a/tests/help.visibleCommands.test.js
++++ b/tests/help.visibleCommands.test.js
+@@ -1,6 +1,6 @@
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
+-const commander = require('../');
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
++import * as commander from '../index.js';
+ 
+ // These are tests of the Help class, not of the Command help.
+ // There is some overlap with the higher level Command tests (which predate Help).
+diff --git a/tests/help.visibleGlobalOptions.test.js b/tests/help.visibleGlobalOptions.test.js
+index 40f3aa8..09f63cd 100644
+--- a/tests/help.visibleGlobalOptions.test.js
++++ b/tests/help.visibleGlobalOptions.test.js
+@@ -1,6 +1,6 @@
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
+-const commander = require('../');
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
++import * as commander from '../index.js';
+ 
+ describe('Help.visibleGlobalOptions()', () => {
+   test('when default configuration then return empty array', () => {
+diff --git a/tests/help.visibleOptions.test.js b/tests/help.visibleOptions.test.js
+index ea7781c..6288ec3 100644
+--- a/tests/help.visibleOptions.test.js
++++ b/tests/help.visibleOptions.test.js
+@@ -1,6 +1,6 @@
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
+-const commander = require('../');
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
++import * as commander from '../index.js';
+ 
+ // These are tests of the Help class, not of the Command help.
+ // There is some overlap with the higher level Command tests (which predate Help).
+diff --git a/tests/helpGroup.test.js b/tests/helpGroup.test.js
+index 5983fb1..fcbf2b6 100644
+--- a/tests/helpGroup.test.js
++++ b/tests/helpGroup.test.js
+@@ -1,6 +1,6 @@
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
+-const { Command, Option } = require('../');
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
++import { Command, Option } from '../index.js';
+ 
+ // Similar tests for Option.helpGroup() and Command.helpGroup(),
+ // and for Command.optionsGroup() and Command.commandsGroup().
+diff --git a/tests/imports.test.cjs b/tests/imports.test.cjs
+index 8cf09bc..0d673ba 100644
+--- a/tests/imports.test.cjs
++++ b/tests/imports.test.cjs
+@@ -11,6 +11,7 @@ const {
+   createOption,
+   createArgument,
+ } = require('../index.js');
++const commander = require('../index.js');
+ const { describe, test } = require('node:test');
+ const assert = require('node:assert/strict');
+ 
+@@ -22,7 +23,7 @@ function checkClass(obj, name) {
+   assert.equal(obj.constructor.name, name);
+ }
+ 
+-describe('imports from .cjs', () => {
++describe('named imports from .cjs', () => {
+   test('program', () => {
+     checkClass(program, 'Command');
+   });
+@@ -71,3 +72,62 @@ describe('imports from .cjs', () => {
+     checkClass(createArgument('<foo>', 'description'), 'Argument');
+   });
+ });
++
++describe('unnamed imports from .cjs', () => {
++  test('program', () => {
++    checkClass(commander.program, 'Command');
++  });
++
++  test('Command', () => {
++    checkClass(new commander.Command('name'), 'Command');
++  });
++
++  test('Option', () => {
++    checkClass(new commander.Option('-e, --example', 'description'), 'Option');
++  });
++
++  test('Argument', () => {
++    checkClass(new commander.Argument('<foo>', 'description'), 'Argument');
++  });
++
++  test('Help', () => {
++    checkClass(new commander.Help(), 'Help');
++  });
++
++  test('CommanderError', () => {
++    checkClass(
++      new commander.CommanderError(1, 'code', 'failed'),
++      'CommanderError',
++    );
++  });
++
++  test('InvalidArgumentError', () => {
++    checkClass(
++      new commander.InvalidArgumentError('failed'),
++      'InvalidArgumentError',
++    );
++  });
++
++  test('InvalidOptionArgumentError', () => {
++    // Deprecated
++    checkClass(
++      new commander.InvalidOptionArgumentError('failed'),
++      'InvalidArgumentError',
++    );
++  });
++
++  test('createCommand', () => {
++    checkClass(commander.createCommand('foo'), 'Command');
++  });
++
++  test('createOption', () => {
++    checkClass(
++      commander.createOption('-e, --example', 'description'),
++      'Option',
++    );
++  });
++
++  test('createArgument', () => {
++    checkClass(commander.createArgument('<foo>', 'description'), 'Argument');
++  });
++});
+diff --git a/tests/incrementNodeInspectorPort.test.js b/tests/incrementNodeInspectorPort.test.cjs
+similarity index 98%
+rename from tests/incrementNodeInspectorPort.test.js
+rename to tests/incrementNodeInspectorPort.test.cjs
+index 434c99e..22bfba2 100644
+--- a/tests/incrementNodeInspectorPort.test.js
++++ b/tests/incrementNodeInspectorPort.test.cjs
+@@ -4,6 +4,8 @@ const childProcess = require('child_process');
+ const path = require('path');
+ const commander = require('../');
+ 
++// Using mocking of child_process.spawn. Not fully supported yet in esm by node:test so run as cjs.
++
+ describe('increment node inspector port in executable subcommands', () => {
+   function makeSpies(t) {
+     const spawnSpy = t.mock.method(childProcess, 'spawn', () => {
+diff --git a/tests/negatives.test.js b/tests/negatives.test.js
+index fc1d717..2499785 100644
+--- a/tests/negatives.test.js
++++ b/tests/negatives.test.js
+@@ -1,7 +1,7 @@
+-const { Command } = require('../');
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { Command } from '../index.js';
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('negative numbers', () => {
+   describe('negative numbers in args', () => {
+diff --git a/tests/option.bad-flags.test.js b/tests/option.bad-flags.test.js
+index c4a1f2c..f6da551 100644
+--- a/tests/option.bad-flags.test.js
++++ b/tests/option.bad-flags.test.js
+@@ -1,6 +1,6 @@
+-const { Option } = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { Option } from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Check that unsupported flags throw.
+ describe('when construct Option with unsupported flags then throw', () => {
+diff --git a/tests/option.chain.test.js b/tests/option.chain.test.js
+index 2c79b0b..ce0cbc9 100644
+--- a/tests/option.chain.test.js
++++ b/tests/option.chain.test.js
+@@ -1,6 +1,6 @@
+-const { Option } = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { Option } from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Option methods that should return this for chaining', () => {
+   test('when call .default() then returns this', () => {
+diff --git a/tests/options.bool.combo.test.js b/tests/options.bool.combo.test.js
+index 9d9af19..eca0015 100644
+--- a/tests/options.bool.combo.test.js
++++ b/tests/options.bool.combo.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Test combination of flag and --no-flag
+ // (single flags tested in options.bool.test.js)
+diff --git a/tests/options.bool.small.combined.test.js b/tests/options.bool.small.combined.test.js
+index 1c5e10f..6d02766 100644
+--- a/tests/options.bool.small.combined.test.js
++++ b/tests/options.bool.small.combined.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ test('when when multiple short flags specified then parsed as short option group', () => {
+   const program = new commander.Command();
+diff --git a/tests/options.bool.test.js b/tests/options.bool.test.js
+index f348bf9..0b24f22 100644
+--- a/tests/options.bool.test.js
++++ b/tests/options.bool.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Test simple flag and negatable flag
+ 
+diff --git a/tests/options.camelcase.test.js b/tests/options.camelcase.test.js
+index 0ea8295..afa38ab 100644
+--- a/tests/options.camelcase.test.js
++++ b/tests/options.camelcase.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Capitalise the letters of words after dashes, but otherwise preserve case
+ 
+diff --git a/tests/options.choices.test.js b/tests/options.choices.test.js
+index 4746337..f494376 100644
+--- a/tests/options.choices.test.js
++++ b/tests/options.choices.test.js
+@@ -1,7 +1,7 @@
+-const commander = require('../');
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Option.choices()', () => {
+   test('when option argument in choices then option set', () => {
+diff --git a/tests/options.conflicts.test.js b/tests/options.conflicts.test.js
+index 9e45fba..48eb3dc 100644
+--- a/tests/options.conflicts.test.js
++++ b/tests/options.conflicts.test.js
+@@ -1,8 +1,8 @@
+-const path = require('path');
+-const commander = require('../');
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as path from 'path';
++import * as commander from '../index.js';
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Option.conflicts()', () => {
+   function makeProgram(t) {
+@@ -381,7 +381,7 @@ describe('Option.conflicts()', () => {
+     program
+       .addOption(new commander.Option('--black'))
+       .addOption(new commander.Option('--white').conflicts('black'));
+-    const pm = path.join(__dirname, './fixtures/pm');
++    const pm = path.join(import.meta.dirname, './fixtures/pm');
+     program.command('ext', 'external command', { executableFile: pm });
+ 
+     try {
+diff --git a/tests/options.custom-processing.test.js b/tests/options.custom-processing.test.js
+index b3a8025..87464d9 100644
+--- a/tests/options.custom-processing.test.js
++++ b/tests/options.custom-processing.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ function myParseInt(value, dummyPrevious) {
+   // parseInt takes a string and a radix
+diff --git a/tests/options.default.test.js b/tests/options.default.test.js
+index 927f389..866abf9 100644
+--- a/tests/options.default.test.js
++++ b/tests/options.default.test.js
+@@ -1,6 +1,6 @@
+-const { Command, Option } = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { Command, Option } from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Command.option() with default value and option not specified in parse', () => {
+   test('when boolean option with boolean default then value is default', () => {
+diff --git a/tests/options.dual-options.test.js b/tests/options.dual-options.test.js
+index 81e6ab0..4201003 100644
+--- a/tests/options.dual-options.test.js
++++ b/tests/options.dual-options.test.js
+@@ -1,7 +1,7 @@
+-const { Option, DualOptions } = require('../lib/option.js');
+-const { Command } = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { Option, DualOptions } from '../lib/option.js';
++import { Command } from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // This tests an internal helper class which is not currently exposed on the package.
+ 
+diff --git a/tests/options.env.test.js b/tests/options.env.test.js
+index 9a8883a..7313a70 100644
+--- a/tests/options.env.test.js
++++ b/tests/options.env.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Option.env()', () => {
+   // treating optional same as required, treat as option taking value rather than as boolean
+diff --git a/tests/options.flags.test.js b/tests/options.flags.test.js
+index 83d442e..2a8af57 100644
+--- a/tests/options.flags.test.js
++++ b/tests/options.flags.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Test the various ways flags can be specified in the first parameter to `.option`
+ 
+diff --git a/tests/options.getset.test.js b/tests/options.getset.test.js
+index e9a7e07..b2f4b45 100644
+--- a/tests/options.getset.test.js
++++ b/tests/options.getset.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Command.getOptionValue() and .setOptionValue()', () => {
+   describe('storeOptionsAsProperties', () => {
+diff --git a/tests/options.implies.test.js b/tests/options.implies.test.js
+index 38774dc..e79e1e1 100644
+--- a/tests/options.implies.test.js
++++ b/tests/options.implies.test.js
+@@ -1,7 +1,7 @@
+-const { Command, Option } = require('../');
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { Command, Option } from '../index.js';
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Option.implies()', () => {
+   describe('check priorities', () => {
+diff --git a/tests/options.mandatory.test.js b/tests/options.mandatory.test.js
+index 5445192..85a34aa 100644
+--- a/tests/options.mandatory.test.js
++++ b/tests/options.mandatory.test.js
+@@ -1,7 +1,7 @@
+-const commander = require('../');
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Assuming mandatory options behave as normal options apart from the mandatory aspect, not retesting all behaviour.
+ // Likewise, not redoing all tests on subcommand after testing on program.
+diff --git a/tests/options.optional.test.js b/tests/options.optional.test.js
+index e9b67e5..f9a1082 100644
+--- a/tests/options.optional.test.js
++++ b/tests/options.optional.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // option with optional value, no default
+ describe('option with optional value, no default', () => {
+diff --git a/tests/options.opts.test.js b/tests/options.opts.test.js
+index c1a1f91..9c2b8f8 100644
+--- a/tests/options.opts.test.js
++++ b/tests/options.opts.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Test the `.opts()` way of accessing option values.
+ // Basic coverage of the main option types (leaving out negatable flags and options with optional values).
+diff --git a/tests/options.optsWithGlobals.test.js b/tests/options.optsWithGlobals.test.js
+index 445b5d1..0f84454 100644
+--- a/tests/options.optsWithGlobals.test.js
++++ b/tests/options.optsWithGlobals.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Testing optsWithGlobals and getOptionValueSourceWithGlobals with focus on globals.
+ 
+diff --git a/tests/options.preset.test.js b/tests/options.preset.test.js
+index 9f5f52d..cd71f44 100644
+--- a/tests/options.preset.test.js
++++ b/tests/options.preset.test.js
+@@ -1,6 +1,6 @@
+-const { Command, Option } = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { Command, Option } from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('Option.preset()', () => {
+   test('when boolean option with string preset used then value is preset', () => {
+diff --git a/tests/options.registerClash.test.js b/tests/options.registerClash.test.js
+index fc8aeb6..9a73aa3 100644
+--- a/tests/options.registerClash.test.js
++++ b/tests/options.registerClash.test.js
+@@ -1,6 +1,6 @@
+-const { Command, Option } = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { Command, Option } from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('registering clashing options', () => {
+   test('when short option flag conflicts then throws', () => {
+diff --git a/tests/options.required.test.js b/tests/options.required.test.js
+index 6b31fec..bdc5690 100644
+--- a/tests/options.required.test.js
++++ b/tests/options.required.test.js
+@@ -1,7 +1,7 @@
+-const commander = require('../');
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // option with required value, no default
+ describe('option with required option-argument, no default', () => {
+diff --git a/tests/options.twice.test.js b/tests/options.twice.test.js
+index cbf0b14..5cc0351 100644
+--- a/tests/options.twice.test.js
++++ b/tests/options.twice.test.js
+@@ -1,6 +1,6 @@
+-const { Command, Option } = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import { Command, Option } from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Test that when option specified twice, second use wins.
+ // Seems pretty obvious for boolean options, but there was a bug before Commander v9.
+diff --git a/tests/options.values.test.js b/tests/options.values.test.js
+index 0ee2f8f..4641ae3 100644
+--- a/tests/options.values.test.js
++++ b/tests/options.values.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Test the ways values can be specified for options.
+ // See also references on "Utility Conventions" in command.parseOptions.test.js
+diff --git a/tests/options.variadic.test.js b/tests/options.variadic.test.js
+index c9e6ef3..47cebfa 100644
+--- a/tests/options.variadic.test.js
++++ b/tests/options.variadic.test.js
+@@ -1,7 +1,7 @@
+-const commander = require('../');
+-const { createTestCommand } = require('./testHelpers');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { createTestCommand } from './testHelpers.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('variadic options', () => {
+   describe('variadic option with required option-argument', () => {
+diff --git a/tests/options.version.test.js b/tests/options.version.test.js
+index bda5475..3fee612 100644
+--- a/tests/options.version.test.js
++++ b/tests/options.version.test.js
+@@ -1,6 +1,6 @@
+-const commander = require('../');
+-const { test, describe } = require('node:test');
+-const assert = require('node:assert/strict');
++import * as commander from '../index.js';
++import { test, describe } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ // Test .version. Using exitOverride to check behaviour (instead of mocking process.exit).
+ 
+diff --git a/tests/testHelpers.js b/tests/testHelpers.js
+index d1d846a..1239b8c 100644
+--- a/tests/testHelpers.js
++++ b/tests/testHelpers.js
+@@ -1,4 +1,4 @@
+-const { Command } = require('../');
++import { Command } from '../index.js';
+ 
+ /**
+  * Create a Command configured for using in tests.
+@@ -9,7 +9,7 @@ const { Command } = require('../');
+  * @returns Command
+  */
+ 
+-function createTestCommand() {
++export function createTestCommand() {
+   const cmd = new Command();
+   cmd
+     .exitOverride() // So we get exceptions instead of process.exit
+@@ -19,5 +19,3 @@ function createTestCommand() {
+     });
+   return cmd;
+ }
+-
+-exports.createTestCommand = createTestCommand;
+diff --git a/tests/useColor.test.js b/tests/useColor.test.js
+index c4dcb5b..3e20759 100644
+--- a/tests/useColor.test.js
++++ b/tests/useColor.test.js
+@@ -1,6 +1,6 @@
+-const { useColor } = require('../lib/command.js');
+-const { test, describe, beforeEach, after } = require('node:test');
+-const assert = require('node:assert/strict');
++import { useColor } from '../lib/command.js';
++import { test, describe, beforeEach, after } from 'node:test';
++import assert from 'node:assert/strict';
+ 
+ describe('internal useColor environment variable support', () => {
+   let holdNoColor = process.env.NO_COLOR;
+diff --git a/typings/esm.d.mts b/typings/esm.d.mts
+deleted file mode 100644
+index 40b0230..0000000
+--- a/typings/esm.d.mts
++++ /dev/null
+@@ -1,3 +0,0 @@
+-// Just reexport the types from cjs
+-// This is a bit indirect. There is not an index.js, but TypeScript will look for index.d.ts for types.
+-export * from './index.js';
+diff --git a/typings/index.d.ts b/typings/index.d.ts
+index 9ef7935..e3d0b72 100644
+--- a/typings/index.d.ts
++++ b/typings/index.d.ts
+@@ -958,13 +958,13 @@ export class Command {
+ 
+   /**
+    * Set the name of the command from script filename, such as process.argv[1],
+-   * or require.main.filename, or __filename.
++   * or import.meta.filename.
+    *
+    * (Used internally and public although not documented in README.)
+    *
+    * @example
+    * ```ts
+-   * program.nameFromFilename(require.main.filename);
++   * program.nameFromFilename(import.meta.filename);
+    * ```
+    *
+    * @returns `this` command for chaining
+@@ -976,7 +976,7 @@ export class Command {
+    *
+    * @example
+    * ```ts
+-   * program.executableDir(__dirname);
++   * program.executableDir(import.meta.dirname);
+    * // or
+    * program.executableDir('subcommands');
+    * ```
+diff --git a/typings/index.test-d.ts b/typings/index.test-d.ts
+index c0ca815..b2e8e2a 100644
+--- a/typings/index.test-d.ts
++++ b/typings/index.test-d.ts
+@@ -1,4 +1,4 @@
+-import * as commander from './index';
++import * as commander from './index.js';
+ import { expectType } from 'tsd';
+ 
+ // We are not just checking return types here, we are also implicitly checking that the expected syntax is allowed.
+@@ -444,10 +444,10 @@ expectType<commander.Command>(program.optionsGroup('My Group'));
+ expectType<string>(program.optionsGroup());
+ 
+ // nameFromFilename
+-expectType<commander.Command>(program.nameFromFilename(__filename));
++expectType<commander.Command>(program.nameFromFilename(import.meta.filename));
+ 
+ // executableDir
+-expectType<commander.Command>(program.executableDir(__dirname));
++expectType<commander.Command>(program.executableDir(import.meta.dirname));
+ expectType<string | null>(program.executableDir());
+ 
+ // outputHelp

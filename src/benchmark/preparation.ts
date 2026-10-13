@@ -104,16 +104,20 @@ async function checkedGit(args: readonly string[], cwd: string | undefined, sign
   return result.stdout;
 }
 
-async function applyPatch(path: string, workspacePath: string, signal?: AbortSignal): Promise<void> {
+async function applyPatch(path: string, workspacePath: string, signal?: AbortSignal, upstream = false): Promise<void> {
   await readFile(path);
-  await checkedGit(["apply", "--check", "--unidiff-zero", "--whitespace=error-all", "--", path], workspacePath, signal);
-  await checkedGit(["apply", "--unidiff-zero", "--whitespace=error-all", "--", path], workspacePath, signal);
+  const whitespace = upstream ? "--whitespace=nowarn" : "--whitespace=error-all";
+  await checkedGit(["apply", "--check", "--unidiff-zero", whitespace, "--", path], workspacePath, signal);
+  await checkedGit(["apply", "--unidiff-zero", whitespace, "--", path], workspacePath, signal);
 }
 
 export interface PrepareBenchmarkFixtureOptions {
   destination: string;
   fixtureRoot: string;
   signal?: AbortSignal;
+  /** Explicit evaluator-owned Git cache; never selected by task/model text. */
+  sourceCache?: string;
+  onVerification?(phase: "setup" | "pristine" | "defect" | "reference" | "regression", result: BenchmarkVerificationResult): Promise<void>;
 }
 
 /** Clone a pinned source into a new directory and apply only the reviewed seed patch. */
@@ -135,7 +139,7 @@ export async function prepareBenchmarkFixture(
       await checkedGit(["init", "--quiet"], destination, options.signal);
       await checkedGit(['config','core.autocrlf','false'],destination,options.signal);
     } else {
-      await checkedGit(["clone", "--quiet", "--no-checkout", "--filter=blob:none", "-c", "core.autocrlf=false", "--", task.source.repositoryUrl, destination], undefined, options.signal);
+      await checkedGit(["clone", "--quiet", "--no-checkout", ...(options.sourceCache ? ["--no-hardlinks"] : ["--filter=blob:none"]), "-c", "core.autocrlf=false", "-c", "core.symlinks=false", "--", options.sourceCache ?? task.source.repositoryUrl, destination], undefined, options.signal);
       await checkedGit(["checkout", "--quiet", "--detach", task.source.commit], destination, options.signal);
       const head = (await checkedGit(["rev-parse", "HEAD"], destination, options.signal)).trim().toLowerCase();
       if (!head.startsWith(task.source.commit.toLowerCase())) throw new Error(`Pinned source mismatch for ${task.id}: expected ${task.source.commit}, received ${head}`);
@@ -148,6 +152,7 @@ export async function prepareBenchmarkFixture(
     }
     if (preparedTask.fixture?.setup) {
       const setup = await runBenchmarkVerification(preparedTask.fixture.setup, destination, preparationSignal);
+      await options.onVerification?.("setup", setup);
       if (setup.cleanupFailed) throw new ProcessCleanupError(setup.error);
       if (!setup.passed) {
         const outcome = /ENOENT|MODULE_NOT_FOUND|ERR_UNKNOWN_BUILTIN_MODULE|not found|not recognized|MISSING_TOOLCHAIN/iu.test(`${setup.error ?? ""} ${setup.stderr} ${setup.stdout}`) ? "missing_toolchain" : "preparation_failed";
@@ -156,6 +161,7 @@ export async function prepareBenchmarkFixture(
     }
     if (preparedTask.fixture?.pristineVerification) {
       const pristine = await runBenchmarkVerification(preparedTask.fixture.pristineVerification, destination, preparationSignal);
+      await options.onVerification?.("pristine", pristine);
       if (pristine.cleanupFailed) throw new ProcessCleanupError(pristine.error);
       if (!pristine.passed) {
         const reason = pristine.error
@@ -169,7 +175,10 @@ export async function prepareBenchmarkFixture(
       await checkedGit(['-c','core.hooksPath=','add','--all'],destination,options.signal);
       await checkedGit(['-c','core.hooksPath=','-c','user.name=Everpeace Fixture','-c','user.email=fixture@localhost','commit','--quiet','-m','Frozen pristine synthetic fixture'],destination,options.signal);
     }
-    await applyPatch(fixturePath(options.fixtureRoot, task.fixture.seedPatch), destination, options.signal);
+    if (task.fixture.startingState !== "upstream") {
+      if (!task.fixture.seedPatch) throw new Error("Seeded fixtures require a seed patch");
+      await applyPatch(fixturePath(options.fixtureRoot, task.fixture.seedPatch), destination, options.signal);
+    }
     return preparedTask;
   } catch (error) {
     if (error instanceof ProcessCleanupError) throw error;
@@ -186,12 +195,13 @@ export async function applyBenchmarkReferenceRepair(
   signal?: AbortSignal,
 ): Promise<void> {
   if (!task.fixture) throw new Error(`Benchmark ${task.id} does not declare seed and reference patches`);
-  await applyPatch(fixturePath(fixtureRoot, task.fixture.referencePatch), task.workspacePath, signal);
+  await applyPatch(fixturePath(fixtureRoot, task.fixture.referencePatch), task.workspacePath, signal, task.fixture.startingState === "upstream");
 }
 
 export interface BenchmarkFixtureProof {
   seeded: BenchmarkVerificationResult;
   repaired: BenchmarkVerificationResult;
+  regression?: BenchmarkVerificationResult;
 }
 
 /** Prove the seed fails and the reviewed reference patch makes the same assertion pass. */
@@ -208,8 +218,9 @@ export async function proveBenchmarkFixture(
   if (options.signal?.aborted) abort();
   try {
     const seeded = await runBenchmarkVerification(verification, prepared.workspacePath, controller.signal);
+    await options.onVerification?.("defect", seeded);
     if (seeded.cleanupFailed) throw new ProcessCleanupError(seeded.error);
-    if (seeded.timedOut || seeded.error || seeded.exitCode === null) {
+    if (seeded.timedOut || seeded.cancelled || seeded.error || seeded.exitCode === null) {
       throw new Error(`Benchmark ${task.id} seed proof failed because verification infrastructure was unavailable: ${seeded.error ?? "no exit code"}`);
     }
     if (seeded.passed) throw new Error(`Benchmark ${task.id} seed did not fail its acceptance assertion`);
@@ -220,9 +231,16 @@ export async function proveBenchmarkFixture(
     }
     await applyBenchmarkReferenceRepair(prepared, options.fixtureRoot, controller.signal);
     const repaired = await runBenchmarkVerification(verification, prepared.workspacePath, controller.signal);
+    await options.onVerification?.("reference", repaired);
     if (repaired.cleanupFailed) throw new ProcessCleanupError(repaired.error);
     if (!repaired.passed) throw new Error(`Benchmark ${task.id} reference repair did not pass its acceptance assertion${repaired.error ? `: ${repaired.error}` : ""}`);
-    return { seeded, repaired };
+    const regression = prepared.regression ? await runBenchmarkVerification(prepared.regression, prepared.workspacePath, controller.signal) : undefined;
+    if (regression) {
+      await options.onVerification?.("regression", regression);
+      if (regression.cleanupFailed) throw new ProcessCleanupError(regression.error);
+      if (!regression.passed) throw new Error(`Benchmark ${task.id} reference repair failed independent regression checks`);
+    }
+    return { seeded, repaired, ...(regression ? { regression } : {}) };
   } finally {
     options.signal?.removeEventListener("abort", abort);
     controller.abort();
