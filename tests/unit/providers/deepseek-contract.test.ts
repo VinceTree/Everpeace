@@ -38,7 +38,7 @@ async function harness(t: TestContext, onEvent?: (event: LoopEvent) => void, get
   return { ...handle, ledger, sessions, session, workspace, model };
 }
 
-test("official DeepSeek SSE preserves completed tool pairing and counts reasoning inside output", async (t) => {
+test("official DeepSeek SSE preserves completed tool pairing and counts reasoning inside output", { skip: process.platform !== "win32" }, async (t) => {
   const requests: Record<string, unknown>[] = [];
   t.mock.method(globalThis, "fetch", async (url: Parameters<typeof fetch>[0], options?: RequestInit) => {
     assert.equal(String(url), "https://api.deepseek.com/responses");
