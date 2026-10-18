@@ -76,7 +76,7 @@
     "oxlint": "1.87.0",
     "react-test-renderer": "19.3.0",
     "spdx-expression-parse": "5.0.0",
-    "tsx": "4.23.13",
+    "tsx": "4.23.15",
     "typescript": "7.0.2",
     "typescript-evaluator": "npm:typescript@5.9.3"
   },
