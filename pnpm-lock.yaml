@@ -53,8 +53,8 @@ importers:
         specifier: 3.3.0
         version: 3.3.0
       marked:
-        specifier: 18.0.13
-        version: 18.0.13
+        specifier: 18.1.1
+        version: 18.1.1
       node-pty:
         specifier: 1.1.0
         version: 1.1.0(patch_hash=f100f0202f6f42e4246d8a911b6c42e0988175cbb00aae12e23688cf2985965e)
@@ -1121,8 +1121,8 @@ packages:
   lowlight@3.3.0:
     resolution: {integrity: sha512-0JNhgFoPvP6U6lE/UdVsSq99tn6DhjjpAj5MxG49ewd2mOBVtwWYIT8ClyABhq198aXXODMU6Ox8DrGy/CpTZQ==}
 
-  marked@18.0.13:
-    resolution: {integrity: sha512-xTxVzZsBFwunP6HDmtBkabUQEYArnP7/rMDGmPj9SlrKlQ4i8MdYVow+nJL0eOqwpUqhzBoTBRADGN6uYwPyOw==}
+  marked@18.1.1:
+    resolution: {integrity: sha512-zEGgrtUG8crk+TrMacJSVABU4DYDDkS8uqgU3ohrn/2fW9C2AEfUrO3m6IhpIpQpl7YcVpiXXC9cSMWDANT3dg==}
     engines: {node: '>= 20'}
     hasBin: true
 
@@ -2260,7 +2260,7 @@ snapshots:
       devlop: 1.1.0
       highlight.js: 11.11.2
 
-  marked@18.0.13: {}
+  marked@18.1.1: {}
 
   math-intrinsics@1.1.0: {}
 
