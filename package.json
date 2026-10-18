@@ -68,7 +68,7 @@
     "yaml": "2.9.1"
   },
   "devDependencies": {
-    "@types/node": "22.20.2",
+    "@types/node": "26.6.5",
     "@types/proper-lockfile": "4.1.4",
     "@types/react": "19.3.0",
     "fast-check": "4.10.2",
