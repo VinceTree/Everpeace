@@ -47,7 +47,7 @@
   },
   "dependencies": {
     "@inkjs/ui": "2.0.0",
-    "@modelcontextprotocol/sdk": "1.31.0",
+    "@modelcontextprotocol/sdk": "1.32.0",
     "@napi-rs/keyring": "2.1.0",
     "@openai/codex": "0.162.0",
     "@vscode/ripgrep": "1.18.0",
