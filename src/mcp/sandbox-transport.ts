@@ -12,8 +12,10 @@ export class SandboxedMcpTransport {
   #process?: CodexDuplexProcess;
   #pending = '';
   #close?: Promise<void>;
+  #closed = false;
   constructor(readonly config: McpServerConfig, readonly workspace: string) {}
   async start(): Promise<void> {
+    if (this.#close || this.#closed) throw new Error('MCP transport is closed');
     if (this.#process) throw new Error('MCP transport already started');
     if (this.config.transport.type !== 'stdio') throw new Error('Expected stdio MCP');
     const transport = this.config.transport;
@@ -34,19 +36,27 @@ export class SandboxedMcpTransport {
         catch { this.onerror?.(new Error('Invalid MCP JSON-RPC frame')); void this.close().catch(error => this.onerror?.(error)); return; }
       }
     });
-    void this.#process.exit.then(result => { if (result.exitCode !== 0 && !this.#close) this.onerror?.(new Error('Owned MCP exited')); this.onclose?.(); }, error => { this.onerror?.(error instanceof Error ? error : new Error('MCP cleanup failed')); this.onclose?.(); });
+    void this.#process.exit.then(result => { if (result.exitCode !== 0 && !this.#close) this.onerror?.(new Error('Owned MCP exited')); this.#notifyClosed(); }, error => { this.onerror?.(error instanceof Error ? error : new Error('MCP cleanup failed')); this.#notifyClosed(); });
   }
   async send(message: JSONRPCMessage): Promise<void> {
+    if (this.#close || this.#closed) throw new Error('MCP transport is closed');
     const line = JSON.stringify(message) + '\n';
     if (Buffer.byteLength(line) > 2 * 1024 * 1024 || !this.#process) throw new Error('MCP transport unavailable or frame too large');
     await this.#process.write(line);
   }
+  #notifyClosed(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.onclose?.();
+  }
   close(): Promise<void> {
-    return this.#close ??= (async () => { if (this.#process) {
+    // Publish the shared close promise before notifying the SDK: its close
+    // callback may reenter close(). No process also has a confirmed terminal state.
+    return this.#close ??= Promise.resolve().then(async () => { if (this.#process) {
       const process = this.#process; process.closeInput();
       let stopping: Promise<unknown> | undefined;
       const timer = setTimeout(() => { stopping = process.terminate(); void stopping.catch(() => undefined); }, 100);
       try { await process.exit; if (stopping) await stopping; } finally { clearTimeout(timer); }
-    } })();
+    } else this.#notifyClosed(); });
   }
 }

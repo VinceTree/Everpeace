@@ -74,6 +74,8 @@ everpeace
 
 MCP stdio 程序需要独立启动信任，默认在原生工作区沙箱运行并禁止联网。`/mcp trust <server>` 审阅启动身份，`/mcp reconnect` 启动或重载，`/mcp revoke <server>` 撤销访问。`/mcp mode <server> host` 明确选择宿主用户权限并撤销旧信任，启动前必须重新审阅授权。程序或入口脚本字节变化需要重新授权，动态启动器每次启动均确认。Windows host stdio 需要已核验的可执行程序和 argv；`.cmd`/`.bat` 入口请显式配置解释器。远程 MCP 必须使用 HTTPS，本机回环 HTTP 需要独立例外，重定向均拒绝。缺少启动批准时，非交互 CLI/SDK 返回 `interaction_required`（退出码 5）。
 
+MCP 进程启动前的沙箱准备失败会保留启动原因，连接可以正常关闭；已启动进程仍须确认清理完成。
+
 默认搜索使用 DOM 选择器；`/web` 可明确选择 Brave LLM Context，密钥只保存在系统凭据库，保存不发请求。`/doctor --live` 先预览有界流式、工具、用量与取消诊断，默认 Cancel。`/cost` 显示用户定价的估算、未知／不完整计量和任务预警；请求 Token 预算不是费用上限。[安全与诊断契约](docs/architecture/SECURITY_AND_DIAGNOSTICS.md)。
 
 `/privacy` 展示持久化、保留策略和清理预览。首次设置推荐 30 天，复核预览后才生效；已有设置保持原样。`/history no-save` 不保存下一次输入历史，Session 仍保存对话。疑似秘密输入提供遮罩、授权原文或取消；原文也不写输入历史。删除 Session 同步清理关联历史，旧未关联记录使用 `/history clear` 单独清理。`everpeace privacy --help` 提供本地 CLI；`/perf` 展示实际时间和 Token，项目 Memory 在 90 天后暂停召回等待 `/memory` 审查。[隐私契约](docs/architecture/SECURITY_HARDENING.md)。

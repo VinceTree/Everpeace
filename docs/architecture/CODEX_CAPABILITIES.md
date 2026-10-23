@@ -55,6 +55,8 @@ stdio 的宿主进程启动与 MCP tool-call 审批是独立权限边界。默�
 
 每个 server 有独立 supervisor。瞬时启动失败或断连使用 500 ms 起步、30 秒封顶的指数退避，最多重试十次；连接连续稳定 30 秒才清零计数。配置不支持、认证不可用、stdio executable 明确缺失等永久错误直接进入 failed。断连先从目录原子移除该 server 的全部 callable，再关闭旧 client；初始化未完成的 client 也由 supervisor 管理，关闭同时等待 SDK close 完成及 transport 的实际 close 事件。五秒内不能确认关闭时停止自动恢复，不能同时建立替代连接。退出、切换工作区、`/mcp reconnect` 主动刷新都会取消旧 generation 的连接和 timer，迟到 callback 不能复活它。默认 TUI 在正常退出和启动失败路径都等待共享 `TuiDependencies.dispose()`；它关闭活动 Memory runtime 与 `McpRuntime`，即使清理失败也继续恢复终端模式。
 
+stdio transport 尚未创建进程时，close 同样发出恰好一次终态通知，使 SDK 和 supervisor 完成关闭；沙箱准备失败保留启动原因，不因缺失事件误报进程清理不明。close 先登记共享 Promise 再通知观察者，重复或重入关闭复用同一结果，并立即禁止新 start/send。已创建进程仍等待真实退出与必要的进程树终止；真实清理失败继续阻止替代连接和成功结算。回归见 [transport lifecycle](../../tests/unit/mcp/transport-lifecycle.test.ts)、[原生 sandbox](../../tests/unit/mcp/sandbox.test.ts) 和 [恢复](../../tests/unit/mcp/stdio-recovery.test.ts)。
+
 恢复只影响后续调用。断连时正在进行的 tool call 不自动重放；普通业务错误、单次 tool timeout 和用户取消不会单独触发 reconnect。Streamable HTTP 已有 session ID 收到 404 时，宿主将该会话视为失效，通过同一关闭/重连流程建立后续连接；SDK 自身的 SSE 流恢复仍由 SDK 管理。`tools/list_changed` 通知以 50 ms 合并；每次先完整读取分页结果，再原子替换该 server 的工具定义和执行校验器。失败时保持上一份完整目录并在 status 中记录错误，真正断连则立即移除。发现最多 100 页、1,000 个工具和 2 MiB 定义，连接、发现及校验器编译共享配置的启动期限；重复 cursor、重复原始工具名及超限都明确失败。
 
 `McpSnapshot` 在同一时刻复制 function definitions、annotations/审批所需 metadata 和 opaque binding。binding 摘要包含随机 connection ID、完整原始定义（包括 `outputSchema`、`execution` 和 annotations）及最终 callable name。Agent 为每个逻辑 step 冻结该快照，普通网络重试复用；dispatch 同时检查当前连接 generation 和冻结 binding，因此工具在审批等待或下一步前被删除、重连或改定义后，旧调用返回 stale/unavailable，不会转发到新能力。

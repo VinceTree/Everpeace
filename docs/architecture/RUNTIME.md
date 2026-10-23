@@ -162,6 +162,8 @@ Session 恢复使用 `resumeTurn` 重建进程内追踪，不清除任务身份�
 
 进程清理失败是宿主资源故障，不作为普通命令失败进入自动修复。Agent、runner 与 workflow 保留进程内故障，阻止同一所有者的后续操作；后台记录淘汰及新任务账本重置均不能消除故障。生产 shell bridge 在失败后不再启动工作区快照，所有后台 worker 收束后才拒绝待完成 Goal 并以 failed 结算 Memory。workflow 将固定的 process-ownership 原因、tracking_limited 和 pending_verification 保存为未验证债务，错误正文不进入 workflow 元数据；Session 恢复和空改动不把该债务变为成功。具体闭环见 [cleanup settlement](../../tests/unit/workflow/cleanup-settlement.test.ts)。
 
+MCP 在沙箱准备阶段、进程尚未创建时的拒绝属于启动失败。空 transport 仍提供一次关闭事件，避免误造五秒超时和资源归属故障；关闭后的 start/send 被拒绝。实际进程的退出与故障结算要求保持，见 [集成契约](CODEX_CAPABILITIES.md#mcp) 和 [transport 回归](../../tests/unit/mcp/transport-lifecycle.test.ts)。
+
 模型流清理故障沿用同一 runner 结算：停止宿主验证／修复和 Goal 续跑、拒绝待完成 Goal、不捕获成功 Memory，持久化固定 request-ownership 原因的未验证债务。exec/SDK 报 runtime_error、cleanup_failed、退出码 1，即使同时取消或超时；重新恢复 Session 不把债务推断为成功。错误正文与 provider 响应不进入 workflow 元数据。
 
 文件搜索、项目地图和语义导航的 dispatch 同样重抛 ProcessCleanupError，进入当前调用 cleanup_failed、后续调用 skipped/process_cleanup_failed 的有序持久化与任务停止流程，不能被普通工具错误 envelope 吞掉。导航与 Skill 管理器另保留自身故障，阻止排队／后续子进程启动；各自清理等待及 stage 规则见 [TOOLS](TOOLS.md) 和 [CODEX_CAPABILITIES](CODEX_CAPABILITIES.md)。
