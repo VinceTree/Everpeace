@@ -143,6 +143,8 @@ pnpm build
 
 按上述顺序执行门禁，首败停止，另跑 `git diff --check`。开发从 [AGENTS.md](AGENTS.md) 和 [文档地图](docs/README.md) 开始。可复现问题请提交到 [GitHub Issues](https://github.com/VinceTree/Everpeace/issues)。
 
+[离线性能对照](docs/benchmark/LOCAL_PERFORMANCE.md) 使用固定 fixture 和保留样本，比较 CLI 新进程启动、Session 恢复、历史搜索与项目扫描。CLI 帮助耗时不代表终端首 prompt，本机结果不外推模型或跨平台收益。
+
 采用 [Apache 2.0](LICENSE) 许可证，由 [VinceTree](https://github.com/VinceTree) 维护。
 
 ## 网络与源码安装保障

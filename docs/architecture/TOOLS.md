@@ -68,7 +68,9 @@
 
 [project_map](../../src/tools/project-map.ts) 是共享 production Agent 的只读文件工具，TUI、exec、SDK 和 Plan 均可使用。`path` 默认工作区目录，只允许工作区内目录；`depth` 默认 2、范围 1–4，只控制结构展示深度。每次重新枚举，遵守随包 rg ignore 规则，不跟随 symlink/junction，排除 node_modules、vendor、虚拟环境及 `.git`／`.codex`／`.agents`／`.everpeace`，不查询系统 PATH、不建数据库或自动注入每轮请求。
 
-结果包含观察到的目录结构、文件类型计数、包元数据和 README／AGENTS／测试／配置／manifest 位置。只解析 package.json 的 name、packageManager、脚本与声明入口（main/module/types/typings/bin/exports）；其他语言仅标记已发现 manifest。`declaredEntries` 与 `entryCandidates` 分开，后者仅依据文件名约定，不代表已确认架构。地图不扫描源码正文、符号或依赖图，不加载规则正文、登记文件写观察、提升权限或证明验证成功；地图作用域也不会登记到下一步规则加载路径。编辑仍须 read_file。
+结果包含观察到的目录结构、文件类型计数、包元数据和 README／AGENTS／测试／配置／manifest 位置。只解析 package.json 的 name、packageManager、脚本与声明入口（main/module/types/typings/bin/exports）；其他语言仅标记已发现 manifest。`declaredEntries` 与 `entryCandidates` 分开，后者仅依据文件名约定，不代表已确认架构。源码补充只提取有界 import 与测试关系候选，不返回正文或完整符号／依赖图；不加载规则正文、登记文件写观察、提升权限或证明验证成功。地图作用域也不会登记到下一步规则加载路径。编辑仍须 read_file。
+
+源码候选最多 64 个，每个分析上限 64 KiB，累计分析 256 KiB。读取每批最多四个，全部经既有安全原生文件工具，仍重新读取原始字节并按 SHA-256 校验解析缓存。每批全部结算后按文件顺序应用累计预算与提交结果；取消不再启动下一批，typed 清理失败优先于取消返回。工作区 pin、进程所有权与清理等待不因并发而省略。回归见 [insights](../../tests/unit/tools/project-insights.test.ts)。
 
 枚举最多 5 秒、2 MiB、10,000 路径；最多解析 32 份 manifest，每份 256 KiB、合计 1 MiB；JSON 结果最多 32 KiB。达到上限、文件期间变化或损坏 manifest 时返回 `incomplete`、明确 `reasons` 和缩小目录提示；不把不完整地图当作全部结构。不熟悉项目时可先地图、再搜索与读取；简单任务无须强制扫描。回归见 [project map](../../tests/unit/tools/project-map.test.ts) 与 [共享生产链路](../../tests/unit/runtime/project-editing.test.ts)。
 

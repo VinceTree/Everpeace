@@ -4,6 +4,8 @@
 
 用途：准备开发环境、选择测试入口、解释 CI 边界和完成交付。先读根目录 [AGENTS.md](../AGENTS.md) 与 [HANDOFF.md](HANDOFF.md)，再按本次任务定位源码；不需要每次重新扫描整个项目。当前展示版本、提交、测试计数和最近执行证据只在 HANDOFF 维护。
 
+CLI、长 Session、历史搜索和项目扫描的离线延迟复测见 [本地性能协议](benchmark/LOCAL_PERFORMANCE.md)。必须使用新建合成 fixture、固定双臂身份与同一原生工具，禁止用真实用户历史或同时运行门禁污染采样；性能数字不是测试通过阈值。
+
 ## 工具链与安装
 
 - Node.js 22+，使用仓库指定的 `pnpm@10.30.3`；版本要求和脚本以 [package.json](../package.json) 为准。

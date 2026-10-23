@@ -756,7 +756,7 @@ function workflowSnapshot(workflow: WorkflowState): WorkflowState {
 }
 
 /** Decode complete records only; replay retains one record, not the whole raw log. */
-async function* sessionRecords(filePath: string, trace: PerformanceTrace, signal?: AbortSignal) {
+async function* sessionRecordBatches(filePath: string, trace: PerformanceTrace, signal?: AbortSignal) {
   signal?.throwIfAborted();
   const handle = await fs.open(filePath, "r");
   let input: ReturnType<typeof createReadStream> | undefined;
@@ -771,6 +771,7 @@ async function* sessionRecords(filePath: string, trace: PerformanceTrace, signal
       signal?.throwIfAborted();
       const chunk = value as Buffer;
       trace.increment("session_log_read_bytes", chunk.byteLength);
+      const batch: Array<{ line: string; number: number; terminated: boolean }> = [];
       let offset = 0;
       while (offset < chunk.byteLength) {
         signal?.throwIfAborted();
@@ -784,11 +785,19 @@ async function* sessionRecords(filePath: string, trace: PerformanceTrace, signal
         const bytes = pending.length === 1 ? pending[0]! : Buffer.concat(pending, pendingBytes);
         pending = [];
         pendingBytes = 0;
-        yield { line: bytes.toString("utf8"), number: ++number, terminated: true };
+        // Keep each decoded record independent of the chunk; only the async handoff is batched.
+        batch.push({ line: bytes.toString("utf8"), number: ++number, terminated: true });
         offset = newline + 1;
       }
+      if (batch.length) {
+        trace.increment("session_replay_batches");
+        yield batch;
+      }
     }
-    if (pendingBytes) yield { line: Buffer.concat(pending, pendingBytes).toString("utf8"), number: ++number, terminated: false };
+    if (pendingBytes) {
+      trace.increment("session_replay_batches");
+      yield [{ line: Buffer.concat(pending, pendingBytes).toString("utf8"), number: ++number, terminated: false }];
+    }
   } finally {
     input?.destroy();
     await handle.close();
@@ -814,75 +823,77 @@ async function readSession(filePath: string, trace: PerformanceTrace, summaryOnl
   let lineage: SessionLineage | undefined;
   let forkPendingResume = false;
   let team: SessionTeamReference | undefined;
-  for await (const record of sessionRecords(filePath, trace)) {
-    if (!record.line.trim()) continue;
-    let event: SessionEvent;
-    try { event = parseEvent(JSON.parse(record.line)); }
-    catch (error) {
-      if (!record.terminated) break;
-      const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`Invalid session JSONL at ${filePath}:${record.number}: ${reason}`);
+  replay: for await (const batch of sessionRecordBatches(filePath, trace)) {
+    for (const record of batch) {
+      if (!record.line.trim()) continue;
+      let event: SessionEvent;
+      try { event = parseEvent(JSON.parse(record.line)); }
+      catch (error) {
+        if (!record.terminated) break replay;
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`Invalid session JSONL at ${filePath}:${record.number}: ${reason}`);
+      }
+      trace.increment("session_log_records");
+      if (!header) {
+        if (event.type !== "session_created") throw new Error(`Session file has no valid header: ${filePath}`);
+        header = event;
+        title = header.title;
+        titlePending = header.title_pending;
+        model = header.model;
+        updatedAt = header.at;
+        usage = createEmptySessionUsage(header.usage_tracking);
+        lineage = header.lineage === undefined ? undefined : cloneLineage(header.lineage);
+        continue;
+      }
+      updatedAt = event.at;
+      if (event.type === "cost_estimated" && !summaryOnly) costs.push(event.estimate);
+      if (event.type === "performance_report" && !summaryOnly) performanceReport = event.report;
+      if (event.type === "title_updated") {
+        title = event.title;
+        titlePending = false;
+      }
+      if (event.type === "timeline_entry" && !summaryOnly) timeline.push(event.entry);
+      if (event.type === "context_append" && !summaryOnly) context.push(...event.items);
+      if (event.type === "context_compacted") {
+        if (!summaryOnly) context = event.items.map((item) => ({ ...item }));
+        usage = applyCompactionUsage(usage, event.usage);
+      }
+      if (event.type === "context_pruned") {
+        if (!summaryOnly) context = event.items.map((item) => ({ ...item }));
+        // Pruning changes the effective request without adding provider usage.
+        // The next response supplies a fresh measured context value.
+        usage = { ...usage, context_tokens: null };
+      }
+      if (event.type === "model_selected") {
+        model = event.model;
+        if (!event.preserve_context) context = [];
+        usage = resetContextUsage(usage, event.preserve_context);
+      }
+      if (event.type === "usage_recorded") {
+        const context = usage.context_tokens;
+        usage = applyUsageSample(usage, event.usage);
+        if (event.preserve_context && event.usage !== null) usage.context_tokens = context;
+      }
+      if (event.type === "goal_updated") goal = { ...event.goal };
+      if (event.type === "team_updated") team = structuredClone(event.team);
+      if (event.type === "workflow_updated") workflow = { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
+      if (event.type === "task_progress_updated") taskProgress = cloneTaskProgress(event.progress);
+      if (event.type === "memory_policy_updated") memoryPolicy = { ...event.policy };
+      if (event.type === "fork_boundary") {
+        lineage = cloneLineage(event.lineage);
+        usage = createEmptySessionUsage(header.usage_tracking);
+        goal = undefined;
+        workflow = event.workflow === undefined
+          ? undefined
+          : { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
+        taskProgress = event.task_progress === undefined
+          ? undefined
+          : cloneTaskProgress(event.task_progress);
+        memoryPolicy = event.memory_policy === undefined ? undefined : { ...event.memory_policy };
+        forkPendingResume = true;
+      }
+      if (event.type === "fork_resume_updated") forkPendingResume = event.pending;
     }
-    trace.increment("session_log_records");
-    if (!header) {
-      if (event.type !== "session_created") throw new Error(`Session file has no valid header: ${filePath}`);
-      header = event;
-      title = header.title;
-      titlePending = header.title_pending;
-      model = header.model;
-      updatedAt = header.at;
-      usage = createEmptySessionUsage(header.usage_tracking);
-      lineage = header.lineage === undefined ? undefined : cloneLineage(header.lineage);
-      continue;
-    }
-    updatedAt = event.at;
-    if (event.type === "cost_estimated" && !summaryOnly) costs.push(event.estimate);
-    if (event.type === "performance_report" && !summaryOnly) performanceReport = event.report;
-    if (event.type === "title_updated") {
-      title = event.title;
-      titlePending = false;
-    }
-    if (event.type === "timeline_entry" && !summaryOnly) timeline.push(event.entry);
-    if (event.type === "context_append" && !summaryOnly) context.push(...event.items);
-    if (event.type === "context_compacted") {
-      if (!summaryOnly) context = event.items.map((item) => ({ ...item }));
-      usage = applyCompactionUsage(usage, event.usage);
-    }
-    if (event.type === "context_pruned") {
-      if (!summaryOnly) context = event.items.map((item) => ({ ...item }));
-      // Pruning changes the effective request without adding provider usage.
-      // The next response supplies a fresh measured context value.
-      usage = { ...usage, context_tokens: null };
-    }
-    if (event.type === "model_selected") {
-      model = event.model;
-      if (!event.preserve_context) context = [];
-      usage = resetContextUsage(usage, event.preserve_context);
-    }
-    if (event.type === "usage_recorded") {
-      const context = usage.context_tokens;
-      usage = applyUsageSample(usage, event.usage);
-      if (event.preserve_context && event.usage !== null) usage.context_tokens = context;
-    }
-    if (event.type === "goal_updated") goal = { ...event.goal };
-    if (event.type === "team_updated") team = structuredClone(event.team);
-    if (event.type === "workflow_updated") workflow = { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
-    if (event.type === "task_progress_updated") taskProgress = cloneTaskProgress(event.progress);
-    if (event.type === "memory_policy_updated") memoryPolicy = { ...event.policy };
-    if (event.type === "fork_boundary") {
-      lineage = cloneLineage(event.lineage);
-      usage = createEmptySessionUsage(header.usage_tracking);
-      goal = undefined;
-      workflow = event.workflow === undefined
-        ? undefined
-        : { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
-      taskProgress = event.task_progress === undefined
-        ? undefined
-        : cloneTaskProgress(event.task_progress);
-      memoryPolicy = event.memory_policy === undefined ? undefined : { ...event.memory_policy };
-      forkPendingResume = true;
-    }
-    if (event.type === "fork_resume_updated") forkPendingResume = event.pending;
   }
 
   if (!header || !model) throw new Error(`Session file has no valid header: ${filePath}`);
@@ -1064,9 +1075,12 @@ async function readSearchProjection(filePath: string, trace: PerformanceTrace, s
     if (event.type === "fork_resume_updated") forkPendingResume = event.pending;
   };
 
-  for await (const record of sessionRecords(filePath, trace, signal)) {
-    processLine(record.line, !record.terminated);
-    trace.increment("session_search_records");
+  for await (const batch of sessionRecordBatches(filePath, trace, signal)) {
+    for (const record of batch) {
+      signal?.throwIfAborted();
+      processLine(record.line, !record.terminated);
+      trace.increment("session_search_records");
+    }
   }
   if (!header || !model) throw new Error(`Session file has no valid header: ${filePath}`);
   return {

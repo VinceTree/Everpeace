@@ -54,6 +54,7 @@ Composer 的挂载身份、提交占用和当前草稿归输入适配持有；�
 | `src/util/` | 保留版式的凭据脱敏；Memory 与历史/附件复用同一匹配规则 |
 | `src/skills/`、`src/mcp/` | 外部能力发现、读取、安装或连接；工具内容不是上层授权 |
 | `src/benchmark/`、`src/performance/` | 隔离评测、独立评分、预算与元数据 trace |
+| `scripts/benchmark/local-performance.mjs` | 无凭据 CLI、Session、搜索与项目地图的固定双臂采样；方法见 [本地性能](../benchmark/LOCAL_PERFORMANCE.md) |
 | `tests/unit/` | 按模块定位回归；部分测试实际启动子进程/临时仓库 |
 | `tests/fixtures/`、`docs/benchmark/` | 固定材料与任务目录；评测材料不得由被评 Agent 定义成功 |
 | `third_party/`、`patches/` | 上游来源说明与受控依赖补丁，不当作项目业务源码重写 |

@@ -439,6 +439,8 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 
 ## 安全、诊断与评测补丁决策
 
+- 离线性能优化绑定相同合成 fixture、原生组件与双臂源码／构建摘要，交错新进程采样，保留原始样本和无收益候选。Session 只合并块内异步交接，不批量解码并保留整块字符串；项目源码分析最多四路安全读取，全部收尾后按文件顺序应用预算，清理错误优先。冷 CLI help 不是终端首 prompt，合成数据收益不外推模型成功率、Token 或跨平台收益。
+
 完整门禁暴露的 Windows 输出代理关闭竞态一并修复在既有 node-pty 分发补丁中：仅接管 EPIPE/ECONNRESET，detach 后继续排空 Conpty 防止关闭死锁；其他错误不屏蔽。源码安装与消费者产物都验证此补丁，更新锁文件及外置评分器的冻结锁，不用重跑掩盖失败。流生命周期语义参考 [Node stream 文档](https://nodejs.org/api/stream.html)；安装目录回归使用真实 stream 的错误回调与尾部输出。
 
 - GitHub 私密报告与原生 Secret Scanning/Push Protection 配合固定 Gitleaks、本地完整 pnpm audit、SPDX 解析和 Syft 多层 SBOM；扫描服务失败、缺报告和摘要不符拒绝必需门禁。例外绑定准确组件或公开测试文件完整摘要。

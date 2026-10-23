@@ -48,6 +48,8 @@
 
 `load`、`list` 与 `/resume` 搜索共用字节流记录读取器，在打开日志时固定 EOF，按 64 KiB 文件块逐条解析，不再同时保留整份原始文本、拆行数组和事件数组。`list` 只累积摘要所需状态；`load` 仍须保留最终 timeline 与有效 context，因此这不表示整个 Session 的内存恒定。重放不会新增拒绝超过 8 MiB 合法旧记录的限制；单条记录仍完整解析，旧 JSONL 与未终止末行的判定保持一致。模型历史工具自身的单行扫描上限保持独立。
 
+读取器把同一文件块里的完整记录作为一批交给消费者，减少逐记录 Promise 调度；每条 UTF-8 仍单独解码，跨块记录按原始字节拼接，避免切片字符串保留整个解码块。保留内存为一个块的记录及跨块未完成记录，不积累全部事件；每条搜索记录仍检查取消。`session_replay_batches` 只记录交接次数，不保存正文或路径。边界与多小记录回归见 [streaming](../../tests/unit/storage/session-streaming.test.ts)，对照方法见 [本地性能](../benchmark/LOCAL_PERFORMANCE.md)。
+
 | 事件 | 含义 |
 | --- | --- |
 | `session_created` | Session ID、标题、工作目录、无凭据模型引用、标题待生成、usage 跟踪标记，以及分支时的可选 lineage |

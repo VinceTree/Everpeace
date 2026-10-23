@@ -10,6 +10,37 @@ import { toolOutputAttachmentReference } from "../../../src/storage/session-outp
 
 const model = { id: "fixture", model_name: "fixture", base_url: "https://example.test" };
 
+test("many small records replay in bounded batches without losing timeline or search positions", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-stream-batches-"));
+  try {
+    const store = new SessionStore({ directory });
+    const session = await store.create({ title: "batch fixture", titlePending: false, workspacePath: directory, model });
+    const file = path.join(directory, `${session.id}.jsonl`);
+    let records = "\r\n";
+    const expected = [];
+    for (let index = 0; index < 10_000; index++) {
+      const entry = { kind: "user" as const, text: `${index}: 中文🙂 ${index === 9_999 ? "needle" : "text"}` };
+      expected.push(entry);
+      records += JSON.stringify({ version: 1, type: "timeline_entry", at: "2026-10-24T00:00:00.000Z", entry }) + "\r\n";
+    }
+    // A valid unterminated record must still replay; malformed unterminated tails stay ignored.
+    records += JSON.stringify({ version: 1, type: "title_updated", at: "2026-10-24T00:00:00.000Z", title: "batch title" });
+    await fs.appendFile(file, records);
+    const loaded = await store.load(session.id);
+    assert.deepEqual(loaded.timeline, expected);
+    assert.equal(loaded.summary.title, "batch title");
+    const metrics = store.performanceTrace.snapshot().counters;
+    assert.equal(metrics.session_log_records, 10_002);
+    assert.equal(metrics.session_log_read_bytes, (await fs.stat(file)).size);
+    assert.ok(metrics.session_replay_batches! < metrics.session_log_records! / 10);
+    assert.ok(metrics.session_replay_max_input_buffer_bytes! < 128 * 1024);
+    const found = await store.search({ query: "needle", workspacePath: directory });
+    assert.equal(found.skipped, 0);
+    assert.equal(found.matches[0]?.match?.timelineIndex, 9_999);
+    assert.deepEqual((await store.list()).sessions, [loaded.summary]);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
 test("128 MiB replay retains final context and bounded raw records; list retains only summary", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-stream-replay-"));
   try {

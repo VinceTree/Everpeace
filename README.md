@@ -143,6 +143,8 @@ pnpm build
 
 Run these gates in order and stop on failure, then run `git diff --check`. Start with [AGENTS.md](AGENTS.md) and the [documentation map](docs/README.md). Report reproducible issues through [GitHub Issues](https://github.com/VinceTree/Everpeace/issues).
 
+The [offline performance protocol](docs/benchmark/LOCAL_PERFORMANCE.md) compares CLI process startup, Session recovery, history search and project scanning with fixed fixtures and saved samples. CLI help timing excludes terminal prompt readiness; local results do not imply model or cross-platform gains.
+
 Licensed under [Apache 2.0](LICENSE). Maintained by [VinceTree](https://github.com/VinceTree).
 
 ## Network and source installation

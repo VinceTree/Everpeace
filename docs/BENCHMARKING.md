@@ -1,5 +1,7 @@
 # Coding Task Benchmarking
 
+无模型 CLI、Session 恢复、历史搜索及项目扫描的工程延迟对照见 [本地性能协议](benchmark/LOCAL_PERFORMANCE.md)；它与下述 coding task／真实模型评测独立。
+
 问题 24–41 的当前工程契约、官方端点草案、十二项真实上游任务、五次串行配对与 Memory/网页/性能 pilot 见 [编码竞争力评测](benchmark/CODING_COMPETITIVENESS.md)。实际执行结果在 [HANDOFF](HANDOFF.md)；本文旧协议保留为独立历史，不当作当前官方实验。
 
 修复分配与 single/team 是两个独立实验。`pnpm exec tsx tests/fixtures/prepare-controlled-experiments.ts <新绝对证据目录>` 在 build 后准备冻结的 19 项诊断任务、每臂五次、配对交错计划和无网络生产 preflight；端点/model/budget 草案不是付费授权。`ordering: paired` 保留每个 task/repetition 的两臂，交替先后顺序，不用重跑替换失败。[计量、比较规则与限制](architecture/VALIDATION_PRIVACY_PERFORMANCE.md)。
