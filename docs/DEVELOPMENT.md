@@ -8,7 +8,7 @@
 
 - Node.js 22+，使用仓库指定的 `pnpm@10.30.3`；版本要求和脚本以 [package.json](../package.json) 为准。
 - TypeScript + ESM，采用 NodeNext 模块解析。源码内本地导入保留 `.js` 扩展；配置见 [tsconfig.json](../tsconfig.json) 和 [tsconfig.build.json](../tsconfig.build.json)。
-- `tsx` 运行开发入口与 Node test runner；`tsc` 输出到 `dist/`，构建会先清理该生成目录。
+- `tsx` 运行开发入口与 Node test runner；`pnpm build` 通过 [构建入口](../scripts/build.mjs) 先清理工作区内固定的 `dist/`，再调用已安装的 TypeScript。已有 `dist` 是符号链接、junction 或非目录时拒绝构建；编译诊断失败不输出 JS、声明和 source map，避免旧模块或失败产物被误运行。
 - Git 用于工作区跟踪；模型 search/glob、Composer `@` 候选和 doctor 使用固定的 `@vscode/ripgrep@1.18.0` 平台 optional dependency，并通过绝对路径运行。Windows 使用系统 PowerShell，macOS/Linux 模型 shell 使用 Bash。
 - 只运行离线测试、类型检查和构建不需要模型凭据。交互登录通过系统 keyring 保存 Key；不要把凭据加入文件、命令记录或测试快照。
 
@@ -78,7 +78,7 @@ Windows 本地 NTFS 文件工具需要 C++ 辅助程序。安装 MinGW-w64 g++ �
 
 Linux hosted CI 的 Ubuntu AppArmor 默认限制 unprivileged user namespace。Test workflow 先记录内核设置和普通 namespace 探测，再仅为锁定安装的 Codex 原生二进制加载 `userns` 应用 profile；系统限制保持开启，不全局关闭 AppArmor，不给模型宿主执行降级。profile 是一次性 runner 环境准备，不自动修改用户系统；生成时核对 native package revision，升级后必须重新审查。真实团队隔离和双 worker 整合测试仍必须通过，启动不可用不算验收成功。设计依据见 [Ubuntu namespace 说明](https://ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces) 与 [固定 backend](architecture/SANDBOX.md)。
 
-[类型配置](../tsconfig.json) 显式包含 `src` 和 `tests` 下所有 `.ts`、`.tsx`，保留严格选项和 ES2022 target；[构建配置](../tsconfig.build.json) 显式包含源码 TSX，继续排除测试。测试替身按真实接口返回结果、处理可选参数和收窄联合类型；不得通过扩大生产接口、`any`、忽略错误或移除断言规避检查。辅助写法必须与当前编译库兼容。
+[类型配置](../tsconfig.json) 显式包含 `src` 和 `tests` 下所有 `.ts`、`.tsx`，保留严格选项和 ES2023 target；[构建配置](../tsconfig.build.json) 显式包含源码 TSX，继续排除测试。测试替身按真实接口返回结果、处理可选参数和收窄联合类型；不得通过扩大生产接口、`any`、忽略错误或移除断言规避检查。辅助写法必须与当前编译库兼容。
 
 [依赖边界回归](../tests/unit/architecture/dependency-boundaries.test.ts) 使用已有 TypeScript 的异步解析 API 扫描 runtime、Agent、workflow、exec、SDK 的源码，禁止普通／类型导入、重导出和字面量动态导入 React、Ink、`@inkjs/ui` 或 TUI。TUI、CLI 适配入口允许 UI 依赖。虚拟文件案例验证语法覆盖与允许边界；解析快照和本地编译器子进程在结束时清理，不增加依赖或独立 lint 工具。TypeScript 的 `unstable` API 是当前已安装编译器的接口，升级编译器时须复核这项回归。
 
@@ -94,6 +94,7 @@ pnpm exec tsx --test --test-name-pattern="cancel" tests/unit/agent/react-agent.t
 
 | 修改范围 | 首选测试入口 |
 | --- | --- |
+| 构建、lint 与文档检查入口 | [build](../tests/unit/development/build.test.ts)、[lint](../tests/unit/development/lint.test.ts)、[docs](../tests/unit/development/docs.test.ts)；隔离临时 Git 工作区和真实编译器／Oxlint，覆盖删除、改名、ignored、空输入和失败输出 |
 | 分层依赖、类型配置 | [dependency-boundaries.test.ts](../tests/unit/architecture/dependency-boundaries.test.ts)；用 `tsc --listFilesOnly` 对照 tracked `.ts` / `.tsx` 清单 |
 | 模型任务准入、取消、会话身份与批准 | [application-coordinator.test.ts](../tests/unit/runtime/application-coordinator.test.ts)、[app.test.tsx](../tests/unit/tui/app.test.tsx)、[生产 Plan 闭环](../tests/unit/runtime/plan-execution.test.tsx) |
 | 采样、工具调度、取消、上下文 | [agent tests](../tests/unit/agent/) |
@@ -122,6 +123,8 @@ Test 与 Release 共用 [Validate](../.github/workflows/validate.yml)。PR/main 
 完整测试入口同时覆盖 [MCP 协议 fixture](../tests/unit/mcp/protocol.test.ts)、[stdio 恢复 fixture](../tests/unit/mcp/stdio-recovery.test.ts) 与 [exec 子进程 fixture](../tests/unit/cli/exec-process.test.ts)：MCP 测试实际启动 SDK stdio server 和本地 Streamable HTTP endpoint，并检查中断调用不重放、初始化失败的旧进程退出后才重连；exec 测试使用 fake provider 与真实 stdout/stderr 管道检验慢读、关闭、停滞和清理。这些测试在 Windows/Linux 都运行，不需要 keyring、模型网络调用或额外服务。Linux 使用真实 OS 信号；Windows fixture 通过 IPC 触发已注册的 SIGINT/SIGTERM handler，不能代替真实 Windows Terminal 的 Ctrl+C 验收。现有测试 glob 已纳入这些文件，无需再并行重复整套门禁。
 
 完整测试、定向测试、平台跳过、基础设施失败和手工验收分别报告。单测目录也包含部分真实进程集成测试，不能仅凭目录名把全部检查描述为纯模拟。
+
+真实 sandbox MCP discovery／filter 用例在各自的临时空工作区启动固定 fixture，不扫描开发仓库中的私有缓存；仍走生产安全策略和原生启动，且检查关闭后才删除测试工作区。安全扫描的上限与拒绝行为不变。
 
 真实 stdio 恢复 fixture 的启动期限涵盖 Node／tsx／SDK 冷启动，测试使用 10 秒连接期限、20 秒恢复观察期限及 45 秒整体上限。首代在 timeout 场景明确不回应初始化；仍要求恰好两代、旧进程先退出、旧 binding 被拒绝和调用不重放。不要把冷启动误超时引入的第三代当作预期结果；生产 timeout 与重连策略未因此改变。
 
@@ -215,7 +218,7 @@ Release 不再由分支或 tag push 自动触发，只能在 main 显式 dispatc
 
 `pnpm exec tsx --test tests/unit/team/team.test.ts tests/unit/tui/team-surface.test.tsx` 覆盖团队总账、调度／取消、隔离与恢复、两成员编码及根失败、角色 profile 与 Skill 管理。原生探测需真实系统与 Git；CI skip 不替代实机证据。`tests/fixtures/tui-offline.ts --root <新绝对目录> --team` 可在真实 Windows Terminal 用合成 Responses 验收 /team、Esc、resize、滚轮／缩放、Ctrl+C 与单 prompt；只使用 fixture 状态、不读用户注册表或 keyring。前台窗口 capture 在 GPU PrintWindow 返回黑图时仅在 owned HWND 确认前台后截取其矩形，并记录方法；焦点变化拒绝发送按键或记录成功。
 
-Oxlint JSON 配置见 [.oxlintrc.json](../.oxlintrc.json)，[官方配置说明](https://oxc.rs/docs/guide/usage/linter/config.html)。只启用 correctness，不做格式化与类型感知 lint。门禁串行 typecheck → lint → test → build，首败停止；lint 通过 Git 清单检查 src/tests/scripts 的 tracked 及非 ignored 待管理新文件，用户其他未跟踪目录、third_party 与生成 dist 不扫描。局部清理/控制字符例外说明必要性，没有全仓旧代码豁免。
+Oxlint JSON 配置见 [.oxlintrc.json](../.oxlintrc.json)，[官方配置说明](https://oxc.rs/docs/guide/usage/linter/config.html)。只启用 correctness，不做格式化与类型感知 lint。门禁串行 typecheck → lint → test → build，首败停止；lint 通过 Git 清单检查 src/tests/scripts 的 tracked 及非 ignored 待管理新文件，用户其他未跟踪目录、third_party 与生成 dist 不扫描。lint 和 docs:verify 共用 [输入发现](../scripts/maintained-files.mjs)：只忽略磁盘已删除的路径，其他访问错误或非普通文件仍失败；改名后的未跟踪文件继续检查，lint 没有实际输入时失败。文档删除后，其他文件对它的残留链接仍报错。局部清理/控制字符例外说明必要性，没有全仓旧代码豁免。
 
 `pnpm install:clean` 只证明源码安装。独立消费者检查从同一 tarball 在隔离的 npm/pnpm/全局 prefix 安装，不读取用户 npm 配置/授权、不需要仓库或 tsx；使用已安装 CLI、SDK 和真实 PTY 验证输入、resize、重复启动、取消和后代清理。日志、失败尝试、平台差异与远端证据分别保存于 HANDOFF，不把源码或 Windows 通过推断为 Linux 安装成功。
 

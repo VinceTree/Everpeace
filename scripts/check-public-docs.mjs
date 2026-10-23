@@ -1,7 +1,7 @@
-import { execFileSync } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-const files = [...new Set(execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'docs', '.github', 'README.md', 'README.zh-CN.md', 'CONTRIBUTING.md', 'CONTRIBUTING.zh-CN.md', 'AGENTS.md', 'SECURITY.md'], { encoding: 'utf8' }).split('\0'))].filter(file => /\.(?:md|json|ya?ml|txt|svg)$/u.test(file));
+import { maintainedFiles } from './maintained-files.mjs';
+const files = maintainedFiles(['docs', '.github', 'README.md', 'README.zh-CN.md', 'CONTRIBUTING.md', 'CONTRIBUTING.zh-CN.md', 'AGENTS.md', 'SECURITY.md'], /\.(?:md|json|ya?ml|txt|svg)$/u);
 // Generic examples such as C:\projects and C:\workspace intentionally stay
 // outside these patterns. User-home roots and machine evidence roots do not.
 const privatePath = /(?:[A-Za-z]:(?:\\+|\/)Users(?:\\+|\/)[^\s`<>"']+|\/(?:home|Users)\/[A-Za-z0-9_.-]+(?:\/[^\s`<>"']*)?|[A-Za-z]:(?:\\+|\/)WSL(?:\\+|\/)[^\s`<>"']+)/u;

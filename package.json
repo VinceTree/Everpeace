@@ -31,7 +31,7 @@
     "test:portable": "tsx --test --test-concurrency=4 tests/unit/storage/*.test.ts tests/unit/providers/*.test.ts tests/unit/network/*.test.ts tests/unit/util/*.test.ts tests/unit/status/*.test.ts tests/unit/security/*.test.ts tests/unit/permissions.test.ts",
     "lint": "node scripts/lint.mjs",
     "test": "tsx --test --test-concurrency=4 tests/**/*.test.{ts,tsx}",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node scripts/build.mjs",
     "install:verify": "node scripts/verify-source-install.mjs",
     "install:smoke": "node scripts/source-install-smoke.mjs",
     "install:clean": "node scripts/verify-clean-install.mjs",

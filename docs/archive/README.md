@@ -1,5 +1,7 @@
 # 历史归档
 
+- [可靠性与 Benchmark 交接](HANDOFF-2026-10-13-reliability-benchmark.md)：有界清理、持久编辑恢复和离线评测准备的历史验证，不代表当前工作树状态或本轮授权。
+
 - [安全、诊断与评测补丁交接](HANDOFF-2026-10-11-security-diagnostics.md)：问题 11–20 的既有交付与旧候选收据，不替代当前候选证据。
 
 - [分发与 CI 补丁交接](HANDOFF-2026-10-11-distribution.md)：问题 5–10 的既有交付及尚未准备的专用 Windows Runner，不替代当前候选证据。

@@ -8,7 +8,7 @@
 
 Everpeace 是 DeepSeek 优先、Windows 优先的个人开发 CLI；保留官方供应商和兼容端点。当前核心是 Node/TypeScript 单包任务：理解规则、受保护地修改、执行完整检查、有限诊断并交付宿主可证明的结果。
 
-- Node.js 22+、TypeScript、ESM；包管理器为 `pnpm@10.22.0`。
+- Node.js 22+、TypeScript、ESM；包管理器以 [package.json](../../package.json) 的 `packageManager` 为准。
 - React + Ink 提供 inline TUI，保留原生 scrollback；同一 `dist/cli/index.js` 也暴露不加载 Ink 的 `everpeace exec`。
 - 普通 Responses 驱动默认单 Agent ReAct，可选宿主管理的团队；供应商能力显式配置，不依据 SDK 是否有方法或模型名推断能力。
 - 模型 shell 使用固定原生执行后端；结构化读写、Web、MCP、Skills 各自保持权限与信任边界。

@@ -54,6 +54,8 @@ pnpm link --global
 everpeace
 ```
 
+`pnpm build` clears the generated `dist` directory before compiling. A redirected `dist` is rejected, and type errors produce no new output; fix the errors and rebuild before running the CLI.
+
 Current source version: **0.6.0-rc.4** (source prerelease).
 
 ## Real tools, checked changes

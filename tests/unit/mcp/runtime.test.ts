@@ -145,12 +145,13 @@ function config(overrides: Partial<McpServerConfig> = {}): McpServerConfig {
 }
 
 test("MCP runtime discovers namespaced stdio tools, instructions, and calls", async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), "everpeace-mcp-discovery-"));
   const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
-    workspacePath: process.cwd(),
+    workspacePath: workspace,
     version: "test",
     async loadConfig() { return [config()]; },
   });
-  t.after(() => runtime.close());
+  t.after(async () => { await runtime.close(); await rm(workspace, { recursive: true, force: true }); });
 
   const snapshot = await runtime.refresh();
   assert.deepEqual(snapshot.tools.map((tool) => tool.name), [
@@ -160,7 +161,7 @@ test("MCP runtime discovers namespaced stdio tools, instructions, and calls", as
     "mcp__test_server__read_resource",
     "mcp__test_server__list_prompts",
     "mcp__test_server__get_prompt",
-  ]);
+  ], JSON.stringify(snapshot.servers));
   assert.match(snapshot.instructions, /Use ping/u);
   assert.match(formatMcpStatus(snapshot), /test_server · stdio · ready · 6 tools/u);
   assert.deepEqual(runtime.toolInfo("mcp__test_server__ping")?.annotations, {
@@ -179,8 +180,9 @@ test("MCP runtime discovers namespaced stdio tools, instructions, and calls", as
 });
 
 test("MCP runtime respects Codex enabled tools and isolates server failures", async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), "everpeace-mcp-filtered-"));
   const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
-    workspacePath: process.cwd(),
+    workspacePath: workspace,
     async loadConfig() {
       return [
         config({ name: "filtered", enabled_tools: [] }),
@@ -192,11 +194,11 @@ test("MCP runtime respects Codex enabled tools and isolates server failures", as
       ];
     },
   });
-  t.after(() => runtime.close());
+  t.after(async () => { await runtime.close(); await rm(workspace, { recursive: true, force: true }); });
 
   const snapshot = await runtime.refresh();
   assert.equal(snapshot.tools.length, 0);
-  assert.equal(snapshot.servers.find((server) => server.name === "filtered")?.state, "ready");
+  assert.equal(snapshot.servers.find((server) => server.name === "filtered")?.state, "ready", JSON.stringify(snapshot.servers));
   assert.equal(snapshot.servers.find((server) => server.name === "broken")?.state, "failed");
   assert.equal(snapshot.servers.find((server) => server.name === "off")?.state, "disabled");
 });
