@@ -94,6 +94,7 @@ pnpm exec tsx --test --test-name-pattern="cancel" tests/unit/agent/react-agent.t
 
 | 修改范围 | 首选测试入口 |
 | --- | --- |
+| 取消、超时、多个资源清理与 Session 验证债务恢复 | [recovery boundaries](../tests/unit/workflow/recovery-boundaries.test.ts)、[cleanup boundaries](../tests/unit/agent/cleanup-boundaries.test.ts) 与 [cleanup settlement](../tests/unit/workflow/cleanup-settlement.test.ts)；覆盖真实 JSONL 重开、取消信号、当前授权和受控 worker 的清理等待 |
 | 构建、lint 与文档检查入口 | [build](../tests/unit/development/build.test.ts)、[lint](../tests/unit/development/lint.test.ts)、[docs](../tests/unit/development/docs.test.ts)；隔离临时 Git 工作区和真实编译器／Oxlint，覆盖删除、改名、ignored、空输入和失败输出 |
 | 分层依赖、类型配置 | [dependency-boundaries.test.ts](../tests/unit/architecture/dependency-boundaries.test.ts)；用 `tsc --listFilesOnly` 对照 tracked `.ts` / `.tsx` 清单 |
 | 模型任务准入、取消、会话身份与批准 | [application-coordinator.test.ts](../tests/unit/runtime/application-coordinator.test.ts)、[app.test.tsx](../tests/unit/tui/app.test.tsx)、[生产 Plan 闭环](../tests/unit/runtime/plan-execution.test.tsx) |

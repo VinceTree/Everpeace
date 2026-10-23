@@ -128,6 +128,7 @@ export class CodingWorkflowRuntime {
   /** Rebuild process-local trackers without clearing persisted verification debt. */
   async resumeTurn(signal?: AbortSignal): Promise<WorkflowState> {
     this.assertCleanupComplete();
+    signal?.throwIfAborted();
     this.#basis.resume();
     this.#packageEvidence.clear();
     this.#checkpoint.clear();
@@ -136,10 +137,15 @@ export class CodingWorkflowRuntime {
     this.#trackingLimited = false;
     this.#gitTrackingComplete = false;
     this.#commandsPromise = discoverVerificationCommands(this.#workspacePath);
-    await this.#tracker.begin();
+    await this.#tracker.begin(signal);
     await this.#tracker.trackPaths(this.#state.changed_paths, signal);
-    this.#changed = this.#state.pending_verification === true || this.#state.changed_paths.length > 0;
-    await this.#set({ task_source: "session_resume", checkpoint_available: false });
+    signal?.throwIfAborted();
+    const pendingVerification = this.#state.pending_verification === true
+      || this.#state.result === "failed" || this.#state.result === "unverified"
+      || this.#state.tracking_limited === true || this.#state.checkpoint_available
+      || ["implement", "verify_fast", "diagnose", "verify_full", "review", "blocked"].includes(this.#state.phase);
+    this.#changed = pendingVerification || this.#state.changed_paths.length > 0;
+    await this.#set({ task_source: "session_resume", checkpoint_available: false, ...(pendingVerification ? { pending_verification: true } : {}) });
     return this.state;
   }
 
@@ -406,13 +412,14 @@ export class CodingWorkflowRuntime {
     this.assertCleanupComplete();
     const observation = await this.#tracker.observe(signal);
     this.assertCleanupComplete();
+    const resumedDebt = this.#state.task_source === "session_resume" && this.#state.pending_verification === true;
     if (observation.available && observation.complete) {
       this.#gitTrackingComplete = true;
-      const retainedDebt = this.#state.pending_verification === true && this.#state.task_source === "session_resume"
+      const retainedDebt = resumedDebt
         ? this.#state.changed_paths
         : [];
       const changedPaths = [...new Set([...observation.changedPaths, ...retainedDebt])].sort((left, right) => left.localeCompare(right));
-      this.#changed = changedPaths.length > 0;
+      this.#changed = changedPaths.length > 0 || resumedDebt;
       this.#trackingLimited = false;
       await this.#set({
         changed_paths: changedPaths,
@@ -423,8 +430,8 @@ export class CodingWorkflowRuntime {
       return { ...observation, changedPaths };
     }
     this.#gitTrackingComplete = false;
-    this.#changed = this.#patchChanged || this.#shellObserved;
-    this.#trackingLimited = this.#shellObserved || observation.available;
+    this.#changed = this.#patchChanged || this.#shellObserved || resumedDebt;
+    this.#trackingLimited = this.#shellObserved || observation.available || resumedDebt;
     await this.#set({
       tracking_limited: this.#trackingLimited,
       checkpoint_available: this.#checkpoint.available,

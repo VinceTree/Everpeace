@@ -403,6 +403,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 - 后台完成 callback 只携带 job ID、终态、退出码和时间，并受 runner invocation generation 限制；下一普通 step 通过 durable context 保存后才确认通知。运行 job 与未送达通知共用 20 个槽位，任务结束关闭准入并丢弃余项，通知不唤醒 Session，输出仍由 `poll_background` 获取。
 - 搜索 continuation 只在 Agent 进程内保留最多 16 个搜索和 8 MiB 序列化 UTF-8 payload，按创建顺序淘汰；读完最后一页或 dispose 立即释放。单次 ripgrep 的 2 MiB 输入限额同时计算未终止记录，`has_more` 与 `incomplete` 保持不同含义。
 - `CodingTaskRunner` 是最终结算的唯一入口。验证完成后、Goal/Memory 写入前必须重查取消；异常路径统一拒绝待完成 Goal、停止后台作业并以 failed/stopped 结算学习。benchmark 必须返回 runner 的真实终态、workflow outcome、诊断轮和首次 suite，独立 acceptance 不能把 stopped/预算失败改写成整体成功。
+- 恢复的验证债务与本次 Git 差异是独立事实。空路径列表、缺失的旧 pending 字段和不可用的 Git 都不能推断债务已消除；现有 failed/unverified、tracking/checkpoint 和中断阶段以既有 pending 字段继续保存，完整检查与当前授权才能结算，不新增 Session schema。取消贯穿恢复基线和冷快照，团队验证的异步收尾后再次复核；团队与根后台资源分别收束并共同等待，任一 typed 故障关闭后续准入。
 - provider request 通过 `RequestExecutor` 在实际 attempt 边界准入和结算。已发送但没有可靠 usage 的 attempt 使对应 task/campaign 永久 incomplete；被预算或 incomplete ledger 拒绝的 attempt 记录为 rejected，但不伪造 provider 消耗。coding 与 auxiliary 累计分开显示。每个 stream attempt 拥有独立 AbortController，iterator 和 transport 关闭前不得启动 retry。
 - 文件版本的规范表示是原始字节 SHA-256。`read_file`、patch preview、执行、审批绑定和 rollback 使用同一摘要；文本编辑解码 UTF-8 后保留 BOM 和原有 LF/CRLF。模型读取到的正文规范化仅用于展示，不能成为并发保护的 hash 来源。
 - 项目规则是 workspace root 到目标目录的 `AGENTS.md` chain。宿主保存 scope、content hash、诊断和 target revision；新 scope 或更新未到达模型时拒绝结构化 edit 并要求下一 sampling boundary。规则 revision 通过现有 context channel 持久化，但请求只采用当前 workspace snapshot，历史快照不能在 compaction 后重新取得权威。

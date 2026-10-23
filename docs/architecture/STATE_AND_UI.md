@@ -86,6 +86,8 @@
 
 恢复后重新读取项目规则与文件观察；权限读取当前配置，不从 JSONL 复活。`session_resume` 和 Goal 自动续跑必须保留修复计数与未验证债务，不能通过新的 `no_changes` 清除失败。后台命令和进程内 undo 检查点不可恢复。
 
+验证债务独立于变更路径列表：路径为空、旧事件缺少 pending 字段或当前 Git 不可用，不能抹掉 failed/unverified、受限追踪或中断阶段。恢复后须通过当前授权的完整检查才能清除，追踪不足继续显示 unverified；预取消不开始恢复快照或保存新的状态。JSONL 重开与取消回归见 [recovery boundaries](../../tests/unit/workflow/recovery-boundaries.test.ts)，具体判定见 [运行时](RUNTIME.md)。
+
 `session_resume` 恢复最后一个有效 `task_progress_updated`；repair 与同一顶层任务里的 Goal continuation 复用投影，新的用户 coding task 则先持久化空清单。清单随每次请求重新提供，包括 context 压缩之后；它始终是进度说明，不能推导 workflow 或 Goal 结果。旧 Session 没有该事件时按“尚无清单”处理。
 
 `SessionStore.search` 流式读取并校验 JSONL，只投影当前标题以及 user/assistant conversation message；tool output、模型 context 和 learned Memory 不参与匹配。匹配采用不区分大小写的字面量比较，每个 Session 只返回一项，按最新活动时间排序，并提供命中片段及最多三条本地对话预览。每页最多 50 项，界面显示八行；输入有 200ms debounce，新的 query/scope/page 会取消旧搜索并忽略迟到结果。

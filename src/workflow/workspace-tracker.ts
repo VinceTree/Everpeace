@@ -226,6 +226,7 @@ export class WorkspaceChangeTracker {
 
   /** Include host-observed edit targets even when Git ignores them. */
   async trackPaths(paths: readonly string[], signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     if (!this.#baseline) await this.begin(signal);
     if (!this.#baseline || !this.#workspaceRoot) return;
     const workspaceRoot = this.#workspaceRoot;
@@ -248,7 +249,8 @@ export class WorkspaceChangeTracker {
   }
 
   async observe(signal?: AbortSignal): Promise<WorkspaceChangeObservation> {
-    if (!this.#baseline) await this.begin();
+    signal?.throwIfAborted();
+    if (!this.#baseline) await this.begin(signal);
     if (!this.#gitRoot || !this.#workspaceRoot) return this.#compare({
       available: false,
       complete: false,

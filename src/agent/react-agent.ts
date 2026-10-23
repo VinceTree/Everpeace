@@ -786,7 +786,17 @@ export class ReactAgent {
     this.#backgroundNoticeAdmission = false;
     this.#pendingBackgroundNotices.clear();
     this.#backgroundNoticeSlots.clear();
-    try { await this.#team?.cancel(reason); return await this.#backgroundJobs.stopAll(reason); }
+    try {
+      const results = await Promise.allSettled([
+        Promise.resolve().then(() => this.#team?.cancel(reason)),
+        this.#backgroundJobs.stopAll(reason),
+      ]);
+      for (const result of results) if (result.status === "rejected" && result.reason instanceof ResourceCleanupError) this.#cleanupFailure ??= result.reason;
+      const [team, background] = results;
+      if (team.status === "rejected") throw team.reason;
+      if (background.status === "rejected") throw background.reason;
+      return background.value;
+    }
     finally { this.#assertResourceCleanup(); }
   }
 

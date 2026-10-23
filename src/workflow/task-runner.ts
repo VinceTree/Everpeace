@@ -193,6 +193,7 @@ export class CodingTaskRunner {
       const outcome = lastWorkflowResult.state.result;
       input.signal?.throwIfAborted();
       if (this.#agent.finishTeamVerification) await this.#agent.finishTeamVerification(outcome === "verified");
+      input.signal?.throwIfAborted();
       await this.#agent.finalizePendingGoalCompletion?.(outcome === "verified" || outcome === "no_changes");
       input.signal?.throwIfAborted();
       await this.#agent.finishMemoryTurn?.(

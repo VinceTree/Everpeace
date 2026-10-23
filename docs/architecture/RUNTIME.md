@@ -160,6 +160,10 @@ Plan 使用独立于 coding 的行为指令：先针对性读取实现与测试�
 
 Session 恢复使用 `resumeTurn` 重建进程内追踪，不清除任务身份、修复上限或验证债务；结构化 undo 检查点和文件观察版本不恢复。Goal 自动续跑只有在本轮结算允许时发生，不能利用空改动绕过旧债务。
 
+恢复时，pending 标记、failed/unverified 结果、受限追踪、旧检查点或未结束的实施／验证阶段都保留为验证债务，即使没有已知变更路径也须重新发现并执行完整检查；旧记录缺少 pending 字段不清除已有失败事实。Git 不可用或快照不完整时仍为 unverified，不能以空改动结算。恢复基线、冷启动快照和显式路径追踪传递当前取消信号；预取消不启动 Git 或保存新 workflow。恢复仍需当前验证依据授权，不从历史恢复批准。回归见 [恢复边界](../../tests/unit/workflow/recovery-boundaries.test.ts)。
+
+团队验证收尾返回后、Goal 完成前再次检查取消与超时。异常取消同时请求团队与根后台命令停止，并等待两者全部结算；一个所有者失败不能提前放弃另一个。typed 清理故障保留在 Agent，后续请求不能复用故障所有者。回归见 [清理边界](../../tests/unit/agent/cleanup-boundaries.test.ts) 和 [可信结算](../../tests/unit/workflow/cleanup-settlement.test.ts)。
+
 进程清理失败是宿主资源故障，不作为普通命令失败进入自动修复。Agent、runner 与 workflow 保留进程内故障，阻止同一所有者的后续操作；后台记录淘汰及新任务账本重置均不能消除故障。生产 shell bridge 在失败后不再启动工作区快照，所有后台 worker 收束后才拒绝待完成 Goal 并以 failed 结算 Memory。workflow 将固定的 process-ownership 原因、tracking_limited 和 pending_verification 保存为未验证债务，错误正文不进入 workflow 元数据；Session 恢复和空改动不把该债务变为成功。具体闭环见 [cleanup settlement](../../tests/unit/workflow/cleanup-settlement.test.ts)。
 
 MCP 在沙箱准备阶段、进程尚未创建时的拒绝属于启动失败。空 transport 仍提供一次关闭事件，避免误造五秒超时和资源归属故障；关闭后的 start/send 被拒绝。实际进程的退出与故障结算要求保持，见 [集成契约](CODEX_CAPABILITIES.md#mcp) 和 [transport 回归](../../tests/unit/mcp/transport-lifecycle.test.ts)。
