@@ -1,10 +1,11 @@
+import {uiText} from '../../../localization/messages.js';
 import { ConfirmInput } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import React from "react";
 import { HighlightedCommand, RichOutput } from "../../rendering/rich-text.js";
 
 export interface ApprovalConfirmationProps {
-  kind: "bash" | "patch" | "web" | "mcp" | "goal";
+  kind: "bash" | "patch" | "web" | "mcp" | "goal" | "verification_basis";
   request: string;
   onConfirm(): void;
   onCancel(): void;
@@ -18,6 +19,7 @@ export function ApprovalConfirmation({
   onCancel,
   inputHandledByPrompt = false,
 }: ApprovalConfirmationProps) {
+  const isVerification = kind === "verification_basis";
   const isBash = kind === "bash";
   const isPatch = kind === "patch";
   const isMcp = kind === "mcp";
@@ -26,14 +28,14 @@ export function ApprovalConfirmation({
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
       <Text color="yellow">
-        {isBash ? `The model wants to run ${shell}:` : isPatch ? "The model wants to edit workspace files:" : isMcp ? "The model wants to call an MCP tool:" : isGoal ? "The model wants to change the session goal:" : "The model wants to access the web:"}
+        {isVerification ? uiText('security.verificationHeader') : isBash ? uiText('medfbff3286cb', {p0: shell}) : isPatch ? uiText('m8b4018da6a61') : isMcp ? uiText('m35ad3d7a6630') : isGoal ? uiText('maae9dc7063da') : uiText('ma51d760b6e4f')}
       </Text>
       {isBash ? <HighlightedCommand command={request} shell={shell} /> : isPatch ? <RichOutput text={request} /> : <Text wrap="truncate-end">{request}</Text>}
       <Box>
-        <Text>{isBash ? "Run this command? " : isPatch ? "Apply this patch? " : isMcp ? "Allow this MCP tool call? " : isGoal ? "Allow this goal change? " : "Allow this web request? "}</Text>
-        {inputHandledByPrompt ? <Text>y/N</Text> : <ConfirmInput defaultChoice="cancel" onConfirm={onConfirm} onCancel={onCancel} />}
+        <Text>{isVerification ? uiText('security.verificationConfirm') : isBash ? uiText('m29c33691ecb3') : isPatch ? uiText('m42219adcf198') : isMcp ? uiText('m2a0af6a0010c') : isGoal ? uiText('m0af9f38d3ebc') : uiText('mdab1a62e2569')}</Text>
+        {inputHandledByPrompt ? <Text>{uiText('me7bb53e4fecb')}</Text> : <ConfirmInput defaultChoice="cancel" onConfirm={onConfirm} onCancel={onCancel} />}
       </Box>
-      {inputHandledByPrompt ? <Text dimColor>Empty prompt: y approves; n or Enter rejects. With a draft, Enter sends guidance.</Text> : null}
+      {inputHandledByPrompt ? <Text dimColor>{uiText('m28f01d0dca4a')}</Text> : null}
     </Box>
   );
 }

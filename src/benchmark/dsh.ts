@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawnOwned as spawn } from "../tools/owned-process.js";
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,6 +9,8 @@ import { BoundedOutputBuffer } from "../tools/command-record.js";
 import { observeProcessCompletion } from "../tools/process-completion.js";
 import { modelShellEnvironment } from "../tools/sandbox-policy.js";
 import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult } from "./types.js";
+import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
+import { createProviderCapabilityProfile } from "./capabilities.js";
 
 export const PINNED_DSH_REVISION = "639ed015397290b3745d163aafe02ffee4aa3f84";
 const MAX_PROCESS_OUTPUT_BYTES = 1024 * 1024;
@@ -40,6 +42,7 @@ interface DshLedger {
   cacheObservedInputTokens: number;
   complete: boolean;
   configurationErrors: string[];
+  attempts?: Array<{ purpose: string; status: string; usage: unknown; unknownReason?: string }>;
 }
 
 function quoteYaml(value: string): string {
@@ -183,6 +186,7 @@ function parseLedger(text: string): DshLedger {
     cacheObservedInputTokens: nonNegativeInteger(value.cacheObservedInputTokens, "dsh ledger cacheObservedInputTokens"),
     complete: value.complete === true,
     configurationErrors: [...value.configurationErrors],
+    ...(Array.isArray(value.attempts) && value.attempts.every(attempt => typeof attempt.purpose === "string" && typeof attempt.status === "string") ? { attempts: value.attempts } : {}),
   };
 }
 
@@ -208,7 +212,9 @@ export function createInstrumentedDshAdapter(options: InstrumentedDshAdapterOpti
       const ledgerPath = join(runDirectory, "request-ledger.json");
       try {
         const baseEnvironment = options.preflight ? modelShellEnvironment(process.env) : process.env;
-        const result = await runDsh(options, ["--profile", options.profile, "--json", task.prompt], task.workspacePath, {
+        let runFailure: unknown;
+        let result: Awaited<ReturnType<typeof runDsh>>;
+        try { result = await runDsh(options, ["--profile", options.profile, "--json", task.prompt], task.workspacePath, {
           ...baseEnvironment,
           DSH_HOME: resolve(options.dshHome),
           DSH_AGENTS_HOME: join(resolve(options.dshHome), "agents"),
@@ -227,12 +233,15 @@ export function createInstrumentedDshAdapter(options: InstrumentedDshAdapterOpti
             EVERPEACE_DSH_PREFLIGHT: "1",
             NODE_OPTIONS: `--import=${pathToFileURL(resolvedPreflightGuardPath()).href}`,
           } : {}),
-        }, context.signal);
+        }, context.signal); } catch (error) {
+          runFailure = error;
+          result = { stdout: "", stderr: "", exitCode: null };
+        }
         await context.writeArtifact?.("harness-stdout.txt", result.stdout);
         await context.writeArtifact?.("harness-stderr.txt", result.stderr);
         const ledger = parseLedger(await readFile(ledgerPath, "utf8"));
-        const completed = result.exitCode === 0 && hasFinalEvent(result.stdout) && ledger.configurationErrors.length === 0;
-        const stopReason = ledger.configurationErrors.length > 0
+        const completed = !runFailure && result.exitCode === 0 && hasFinalEvent(result.stdout) && ledger.configurationErrors.length === 0;
+        const stopReason = runFailure ? context.signal.aborted ? "dsh_cancelled" : "dsh_process_failed" : ledger.configurationErrors.length > 0
           ? ledger.configurationErrors.join("; ")
           : !ledger.complete
             ? "dsh request usage is incomplete"
@@ -241,15 +250,25 @@ export function createInstrumentedDshAdapter(options: InstrumentedDshAdapterOpti
               : `dsh exited with ${result.exitCode ?? "no exit code"}`;
         return {
           terminalOutcome: completed ? "completed" : "stopped",
+          ...(runFailure instanceof ResourceCleanupError ? { cleanupFailed: true } : {}),
           ...(stopReason ? { stopReason } : {}),
+          capabilities: createProviderCapabilityProfile(options.baseUrl, options.model, { streaming: (ledger.attempts?.length ?? 0) > 0, promptCache: ledger.cacheObservedInputTokens > 0 }),
           usage: {
             inputTokens: ledger.inputTokens,
             outputTokens: ledger.outputTokens,
             reasoningTokens: ledger.reasoningTokens,
-            cachedInputTokens: ledger.cachedInputTokens,
-            cacheObservedInputTokens: ledger.cacheObservedInputTokens,
+            ...(ledger.cacheObservedInputTokens > 0 ? { cachedInputTokens: ledger.cachedInputTokens, cacheObservedInputTokens: ledger.cacheObservedInputTokens } : {}),
             complete: ledger.complete,
           },
+          ...(ledger.attempts ? {
+            requestAttempts: ledger.attempts.filter(attempt => attempt.status !== "rejected").length,
+            requestAccounting: {
+              requests: ledger.attempts.filter(attempt => attempt.status !== "rejected").length,
+              rejectedRequests: ledger.attempts.filter(attempt => attempt.status === "rejected").length,
+              unknownRequests: ledger.attempts.filter(attempt => attempt.status !== "rejected" && !attempt.usage).length,
+              reasons: Object.fromEntries([...new Set(ledger.attempts.filter(attempt => !attempt.usage).map(attempt => `${attempt.purpose}:${attempt.unknownReason ?? "historical_unknown"}`))].map(reason => [reason, ledger.attempts!.filter(attempt => !attempt.usage && `${attempt.purpose}:${attempt.unknownReason ?? "historical_unknown"}` === reason).length])),
+            },
+          } : {}),
           notes: `Pinned dsh ${options.revision.slice(0, 8)} profile ${options.profile}`,
         };
       } finally {

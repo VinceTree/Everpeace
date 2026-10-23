@@ -113,6 +113,7 @@ export function createInstrumentation(expected, persist = () => {}) {
         if (validUsage === undefined) {
           incomplete = true;
           attempt.usage = null;
+          attempt.unknownReason = usage == null ? 'missing_usage' : 'invalid_usage';
           configurationErrors.push('Provider has unknown usage: missing or invalid token counts');
         } else {
           const cacheRead = validUsage.cacheReadTokens ?? 0;

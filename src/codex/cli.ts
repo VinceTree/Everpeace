@@ -1,4 +1,5 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawnOwned as spawn } from "../tools/owned-process.js";
 import { createRequire } from "node:module";
 import type { Readable } from "node:stream";
 import { BoundedOutputBuffer } from "../tools/command-record.js";
@@ -8,6 +9,7 @@ const require = createRequire(import.meta.url);
 
 export interface CodexCliResult {
   cleanupFailed?: boolean;
+  cleanupStatus?: import('../tools/owned-process.js').ProcessState;
   stdout: string;
   stderr: string;
   exitCode: number | null;
@@ -92,7 +94,13 @@ export function startCodexDuplexProcess(
 ): CodexDuplexProcess {
   options.signal?.throwIfAborted();
   const launch = codexCliLaunch(args, options);
-  const child: ChildProcessWithoutNullStreams = spawn(launch.command, launch.args, {
+  return startOwnedDuplexProcess(launch.command, launch.args, options);
+}
+
+/** Structured executable/argv launch; host MCP still owns a complete process tree. */
+export function startOwnedDuplexProcess(command: string, args: readonly string[], options: CodexDuplexOptions = {}): CodexDuplexProcess {
+  options.signal?.throwIfAborted();
+  const child: ChildProcessWithoutNullStreams = spawn(command, args, {
     cwd: options.cwd ?? process.cwd(),
     env: options.env ?? process.env,
     detached: (options.platform ?? process.platform) !== "win32",
@@ -212,6 +220,7 @@ export async function runCodexProcess(
       attempts, truncated: stdout.truncated || stderr.truncated,
       ...(result.timedOut ? { timedOut: true } : {}),
       ...(result.cleanupError ? { cleanupFailed: true } : {}),
+      ...(result.cleanupStatus ? { cleanupStatus: result.cleanupStatus } : {}),
       ...(error ? { error } : {}),
     };
   }

@@ -15,7 +15,7 @@ Everpeace 是一个 DeepSeek 优先、Windows 优先的个人开发 CLI，提供
 
 ## 需求
 
-- Node.js 22+
+- Node.js 22.19+
 - pnpm
 - macOS/Linux 上的 Bash；Windows 模型命令在 Codex sandbox 内使用系统 PowerShell
 - DeepSeek、OpenAI 或兼容服务的 API Key
@@ -158,7 +158,7 @@ project_map 增加有界 import、源码／测试候选、内容指纹及不完�
 
 对于依赖当前信息或冷门资料的问题，模型可以先调用 `web_search`，再使用 `web_fetch` 读取有价值的来源。搜索和网页读取不需要 Bash 确认；function call 及结果会保留在可恢复的模型上下文中，TUI transcript 则显示简短的工具动作。模型会被要求在最终回答中列出实际采用的来源 URL。
 
-TUI 自身界面现统一使用英文。任务运行时会显示按供应商识别的状态，例如 `Waiting for DeepSeek (3s • ctrl+c to interrupt)`，进入工具调度阶段后切换为 `Working`；只有供应商真正发出 reasoning 阶段事件时，才显示独立计时的 `Thinking`。支持 Responses 流式端点时，模型文字和工具进度会即时显示；只有端点在发出任何事件前明确拒绝 streaming 时才切换到 buffered，流式中断或不完整响应在清理成功后从最后一个已持久化上下文有界重试，不会执行半截工具调用。兼容的 buffered 端点仍显示阶段、审批和命令预览。模型回复支持 GitHub Flavored Markdown，包括标题、列表、强调、链接、表格、行内代码和 fenced code；代码块及 Bash/PowerShell 命令使用语言感知的终端高亮，超大内容会安全退回纯文本。
+TUI 宿主界面支持英文与简体中文，使用 `--lang auto|en|zh-CN`、`EVERPEACE_LANG` 或 `/language` 选择；命令、快捷键及模型/工具原文不翻译。`--accessible` 提供追加式辅助交互，`exec --json` 用于无交互自动化。任务运行时会显示按供应商识别的状态，例如 `Waiting for DeepSeek (3s • ctrl+c to interrupt)`，进入工具调度阶段后切换为 `Working`；只有供应商真正发出 reasoning 阶段事件时，才显示独立计时的 `Thinking`。支持 Responses 流式端点时，模型文字和工具进度会即时显示；只有端点在发出任何事件前明确拒绝 streaming 时才切换到 buffered，流式中断或不完整响应在清理成功后从最后一个已持久化上下文有界重试，不会执行半截工具调用。兼容的 buffered 端点仍显示阶段、审批和命令预览。模型回复支持 GitHub Flavored Markdown，包括标题、列表、强调、链接、表格、行内代码和 fenced code；代码块及 Bash/PowerShell 命令使用语言感知的终端高亮，超大内容会安全退回纯文本。
 
 流清理失败会在工具执行或下一模型请求前停止任务。供应商已返回的可靠用量仍然计入，但 Goal 完成和成功 Memory 捕获被阻止，Session 保留未验证工作。开始下一任务前需重启 Agent。exec 和 SDK 即使同时取消或达到期限，也以 `cleanup_failed`、退出码 1 报告清理故障。
 

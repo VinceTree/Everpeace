@@ -1,6 +1,6 @@
 # 当前交接
 
-更新日期：2026-10-10。先读 [AGENTS](../AGENTS.md)，按 [索引](README.md) 定位；本轮详细契约见 [TEAMS](architecture/TEAMS.md)。前轮交接已移至 [profile 交付归档](archive/HANDOFF-2026-10-09-profiles.md)，旧授权与证据不适用于本轮。
+更新日期：2026-10-10。先读 [AGENTS](../../AGENTS.md)，按 [索引](README.md) 定位；本轮详细契约见 [TEAMS](../architecture/TEAMS.md)。前轮交接已移至 [profile 交付归档](HANDOFF-2026-10-09-profiles.md)，旧授权与证据不适用于本轮。
 
 ## 当前范围与授权
 
@@ -8,7 +8,7 @@
 
 保留工作起点的未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`，不纳入提交；不能把用户原有目录当成待清理产物。测试用 Git fixture 的提交只发生在宿主所有的临时目录，不创建用户提交或改用户 index。
 
-发布交付根为 `C:\Users\39850\AppData\Local\Temp\everpeace-publish-20261010`，保留实现验收原收据、发布前源码核对、最终 source/build digest、准确 commit、Windows/Linux CI、tag 和 Release 的远端核验。发布的最终状态及不可自引用的准确 commit 以该根 `delivery-receipt.json` 为准；它只在两平台 CI、tag 与 Release 全部核对后生成，不把计划步骤写成已完成结果。
+发布交付根为 `<LOCAL_EVIDENCE>`，保留实现验收原收据、发布前源码核对、最终 source/build digest、准确 commit、Windows/Linux CI、tag 和 Release 的远端核验。发布的最终状态及不可自引用的准确 commit 以该根 `delivery-receipt.json` 为准；它只在两平台 CI、tag 与 Release 全部核对后生成，不把计划步骤写成已完成结果。
 
 发布顺序：提交含 `[skip publish]`，先推 main 执行 Windows/Linux Test；两平台通过后显式创建并推送匹配 manifest 的 tag，触发 Release workflow，再核对 tag、Release、正文和最新标记。此标记仅延后分支的自动发布，不跳过 CI，也不阻止已授权的 tag 发布。现有工作流不执行 npm publish。
 
@@ -44,7 +44,7 @@ Git 快照包含 tracked 当前内容/删除及普通非 ignored untracked，拒
 
 更新 manifest 与双语展示后，发布前再次串行执行 typecheck → lint 缺项 → test → build，**1117 项、1114 通过、3 跳过、0 失败，109494.8563 ms**；diff 检查、当前构建的 CLI help/SDK 导入和 pnpm pack 通过。日志与 `everpeace-0.5.0.tgz` 保存在发布交付根，源码与打包产物重新绑定摘要，不沿用实现阶段的 source digest。
 
-最终日志位于 `C:\Users\39850\AppData\Local\Temp\`：
+最终日志位于 `<LOCAL_EVIDENCE>`：
 
 - `everpeace-team-final-typecheck-passed.log`、`everpeace-team-final-test-passed.log`、`everpeace-team-final-build-passed.log`：最终串行门禁；typecheck/build 正常退出但没有日志正文，退出结果和产物摘要见验收收据。
 - `everpeace-team-layout-fix.log`：团队与 App 并行定向回归，102 项通过。
@@ -62,9 +62,9 @@ Git 快照包含 tracked 当前内容/删除及普通非 ignored untracked，拒
 
 **Windows：**最终完整回归实际执行 pinned Codex 原生后端，验证两 worker 独立编码/整合及根成功和根失败。探测证明成员 cwd、本目录写入以及主目录写入/其他成员读写/ownership 记录/Git 公共 metadata 的边界；没有用 mock 替代。
 
-**Linux：**WSL Ubuntu、Node v22.22.1 的真实 kernel sandbox 执行最终源码快照，两成员均证明 owned cwd 与 source/sibling/metadata denial。临时根为 `C:\Users\39850\AppData\Local\Temp\everpeace-team-linux-20261010`；原生二进制来自已锁定 codex 依赖并核对完整性，未改仓库依赖。WSL 的 NAT/代理环境提示保留，不影响探测；此证据是 Linux 原生隔离专项，不声称完整 Linux TUI/SDK 验收。
+**Linux：**WSL Ubuntu、Node v22.22.1 的真实 kernel sandbox 执行最终源码快照，两成员均证明 owned cwd 与 source/sibling/metadata denial。临时根为 `<LOCAL_EVIDENCE>`；原生二进制来自已锁定 codex 依赖并核对完整性，未改仓库依赖。WSL 的 NAT/代理环境提示保留，不影响探测；此证据是 Linux 原生隔离专项，不声称完整 Linux TUI/SDK 验收。
 
-**Windows Terminal：**使用真实 WindowsTerminal 1.24、宿主所有的 offline fixture、合成 Responses；不读取用户注册表/keyring，不发真实模型请求。证据根为 `C:\Users\39850\AppData\Local\Temp\everpeace-team-terminal-d7ca9eae-bdae-4522-85d3-a21bd6e4aa1c`，截图和带 HWND/PID/终端版本的 action 记录在 `terminal-evidence/`。
+**Windows Terminal：**使用真实 WindowsTerminal 1.24、宿主所有的 offline fixture、合成 Responses；不读取用户注册表/keyring，不发真实模型请求。证据根为 `<LOCAL_EVIDENCE>`，截图和带 HWND/PID/终端版本的 action 记录在 `terminal-evidence/`。
 
 该根 `delivery-receipt.json` 绑定最终 source/build digest、检查结果、原生探测和明确采用的终端截图；临时资料没有加入仓库。
 
@@ -74,7 +74,7 @@ Git 快照包含 tracked 当前内容/删除及普通非 ignored untracked，拒
 
 ## 使用与限制
 
-入口和双语示例见 [英文使用指南](USAGE.md#agent-teams)、[中文使用指南](USAGE.zh-CN.md#多-agent-协作)。TUI `/team on` 后 Esc 返回聊天；CLI `everpeace exec "任务" --team`；SDK 可传 `team: {}`。角色注册 ID 与最多 1–3 Agent 可在任务前配置；`/team <team-id>` 要先恢复所属根 Session。
+入口和双语示例见 [英文使用指南](../USAGE.md#agent-teams)、[中文使用指南](../USAGE.zh-CN.md#多-agent-协作)。TUI `/team on` 后 Esc 返回聊天；CLI `everpeace exec "任务" --team`；SDK 可传 `team: {}`。角色注册 ID 与最多 1–3 Agent 可在任务前配置；`/team <team-id>` 要先恢复所属根 Session。
 
 首版并行编码仅支持 Git 根和文件编辑工具支持的文本变更。Windows/Linux 每次启动 worker 都先证明隔离；实际环境不能满足时明确拒绝，仍可用单 Agent/只读成员。权限、恢复和清理失败必须保留产物并阻止后续任务绕过。团队总账保留未知缺口时不能继续 provider，需开始新任务并独立处理保留产物。
 

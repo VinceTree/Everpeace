@@ -1,10 +1,11 @@
+import { McpIsolationStore, type McpIsolationStoreLike } from "./isolation-store.js";
+import { ProcessCleanupError } from "../tools/process-completion.js";
+import { defaultPermissions, type PermissionPolicy } from "../permissions/policy.js";
+import { SandboxedMcpTransport } from "./sandbox-transport.js";
 import { createHash, randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import {
-  StdioClientTransport,
-} from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CallToolResultSchema, ListRootsRequestSchema, ListToolsResultSchema, type Tool } from "@modelcontextprotocol/sdk/types.js";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
@@ -39,6 +40,9 @@ interface RawStdioTransport {
   env?: Record<string, string> | null;
   env_vars?: string[] | null;
   cwd?: string | null;
+  isolation?: "sandbox" | "host";
+  sandboxMode?: "read-only" | "workspace-write";
+  launchIdentity?: { files: Array<{ path: string; sha256: string }>; persistent: boolean };
 }
 
 interface RawHttpTransport {
@@ -76,6 +80,7 @@ export interface McpToolDefinition {
 }
 
 export interface McpToolInfo {
+  destination?: string;
   callableName: string;
   serverName: string;
   toolName: string;
@@ -193,6 +198,8 @@ export interface McpRuntimeOptions {
   clientFactory?: McpClientFactory;
   clock?: McpRuntimeClock;
   trustStore?: McpTrustStoreLike;
+  permissions?(): PermissionPolicy;
+  isolationStore?: McpIsolationStoreLike;
 }
 
 export interface McpRuntimeLike {
@@ -235,6 +242,7 @@ function normalizeConfig(value: unknown): McpServerConfig | undefined {
         env: stringRecord(transport.env),
         env_vars: Array.isArray(transport.env_vars) ? transport.env_vars.filter((item): item is string => typeof item === "string") : [],
         cwd: typeof transport.cwd === "string" ? transport.cwd : null,
+        ...(transport.isolation === "host" ? { isolation: "host" as const } : {}),
       },
       ...(typeof raw.disabled_reason === "string" ? { disabled_reason: raw.disabled_reason } : {}),
       ...(Array.isArray(raw.enabled_tools) ? { enabled_tools: raw.enabled_tools.filter((item): item is string => typeof item === "string") } : {}),
@@ -348,6 +356,8 @@ const SYSTEM_CLOCK: McpRuntimeClock = {
 
 export class McpRuntime {
   #workspacePath: string;
+  readonly #permissions: () => PermissionPolicy;
+  readonly #isolationStore: McpIsolationStoreLike | undefined;
   readonly #version: string;
   readonly #loadConfig: NonNullable<McpRuntimeOptions["loadConfig"]>;
   readonly #clientFactory: McpClientFactory;
@@ -355,6 +365,7 @@ export class McpRuntime {
   readonly #trust: McpTrustStoreLike;
   #loaded = false;
   #loading: Promise<void> | undefined;
+  readonly #transientGrants = new Map<string, string>();
   #epoch = 0;
   #statusEntries: ServerStatusEntry[] = [];
   #supervisors: ServerSupervisor[] = [];
@@ -366,6 +377,8 @@ export class McpRuntime {
 
   constructor(options: McpRuntimeOptions) {
     this.#workspacePath = options.workspacePath;
+    this.#permissions = options.permissions ?? defaultPermissions;
+    this.#isolationStore = options.isolationStore ?? (options.loadConfig ? undefined : new McpIsolationStore());
     this.#version = options.version ?? "0.0.0";
     this.#loadConfig = options.loadConfig ?? loadCodexMcpServers;
     this.#clock = options.clock ?? SYSTEM_CLOCK;
@@ -379,8 +392,9 @@ export class McpRuntime {
     this.#epoch++;
     this.#workspacePath = workspacePath;
     this.#loaded = false;
-    await this.#stopServers();
+    const unresolved = await this.#stopServers();
     if (loading) await loading.catch(() => undefined);
+    if (unresolved.size || this.#uncertainClosedNames.size) throw new ProcessCleanupError("MCP process or transport cleanup is unresolved");
     this.#statusEntries = [];
   }
 
@@ -413,6 +427,9 @@ export class McpRuntime {
     const checked = await this.#trust.evaluate(current.workspace, prepared.name, current.kind, mcpTrustMaterial(prepared));
     if (checked.fingerprint !== preview.fingerprint) throw new McpPermanentConnectionError("MCP configuration changed; review a new preview");
     const material = stableJson(mcpTrustMaterial(prepared));
+    if (prepared.transport.type === 'stdio' && prepared.transport.launchIdentity?.persistent === false) {
+      this.#transientGrants.set(prepared.name, checked.fingerprint); return;
+    }
     await this.#trust.grant(current, signal, async () => {
       const fresh = await this.#freshConfig(preview.name, signal);
       if (epoch !== this.#epoch || stableJson(mcpTrustMaterial(fresh)) !== material) throw new McpPermanentConnectionError("MCP configuration changed; review a new preview");
@@ -420,7 +437,22 @@ export class McpRuntime {
     // Approval persists authority only; connection happens after an explicit refresh.
   }
 
+  async previewIsolation(name: string, mode: 'sandbox' | 'host'): Promise<{ summary: string }> {
+    const config = await this.#freshConfig(name);
+    if (config.transport.type !== 'stdio') throw new McpPermanentConnectionError('Isolation mode applies only to stdio MCP');
+    config.transport.isolation = mode;
+    return { summary: mcpTrustSummary(config, await canonicalWorkspace(this.#workspacePath)) };
+  }
+  async setIsolation(name: string, mode: 'sandbox' | 'host'): Promise<void> {
+    if (!this.#isolationStore) throw new McpPermanentConnectionError('MCP isolation settings are unavailable');
+    await this.previewIsolation(name, mode);
+    await this.close();
+    await this.#trust.revoke(await canonicalWorkspace(this.#workspacePath), name);
+    await this.#isolationStore.set(await canonicalWorkspace(this.#workspacePath), name, mode);
+  }
+
   async revokeTrust(name: string): Promise<void> {
+    this.#transientGrants.delete(name);
     const workspace = await canonicalWorkspace(this.#workspacePath);
     const matches = this.#supervisors.filter((server) => server.config.name === name);
     // Remove capability bindings and cancel generations before awaiting disk I/O.
@@ -435,7 +467,10 @@ export class McpRuntime {
     const matching = configs.filter((config) => config.name === name);
     if (matching.length !== 1 || !matching[0]!.enabled) throw new McpTrustRequiredError();
     this.#assertSupportedConfig(matching[0]!);
-    return prepareMcpConfig(matching[0]!, this.#workspacePath);
+    const prepared = await prepareMcpConfig(matching[0]!, this.#workspacePath);
+    if (prepared.transport.type === 'stdio' && this.#isolationStore) prepared.transport.isolation = await this.#isolationStore.get(await canonicalWorkspace(this.#workspacePath), prepared.name) ?? 'sandbox';
+    if (prepared.transport.type === 'stdio') prepared.transport.sandboxMode = this.#permissions().mode === 'read-only' ? 'read-only' : 'workspace-write';
+    return prepared;
   }
 
   async #authorize(supervisor: ServerSupervisor, signal?: AbortSignal): Promise<McpServerConfig> {
@@ -445,7 +480,10 @@ export class McpRuntime {
     const material = mcpTrustMaterial(config);
     const authorization = kind
       ? await this.#trust.evaluate(await canonicalWorkspace(this.#workspacePath), config.name, kind, material).then((identity) => {
-        if (!identity.approved) throw new McpTrustRequiredError();
+        if (config.transport.type === 'stdio' && config.transport.launchIdentity?.persistent === false) {
+          if (!supervisor.client && this.#transientGrants.get(config.name) !== identity.fingerprint) throw new McpTrustRequiredError();
+          this.#transientGrants.delete(config.name);
+        } else if (!identity.approved) throw new McpTrustRequiredError();
         return identity.fingerprint;
       })
       : digest(stableJson(material));
@@ -595,11 +633,13 @@ export class McpRuntime {
   }
 
   async close(): Promise<void> {
+    this.#transientGrants.clear();
     const loading = this.#loading;
     this.#epoch++;
     this.#loaded = false;
-    await this.#stopServers();
+    const unresolved = await this.#stopServers();
     if (loading) await loading.catch(() => undefined);
+    if (unresolved.size || this.#uncertainClosedNames.size) throw new ProcessCleanupError("MCP process or transport cleanup is unresolved");
     this.#statusEntries = [];
   }
 
@@ -750,22 +790,11 @@ export class McpRuntime {
     }) : undefined;
     if (http) this.#httpCleanup.set(client, http.close);
     const transport = config.transport.type === "stdio"
-      ? new StdioClientTransport({
-          command: config.transport.command,
-          args: config.transport.args ?? [],
-          env: config.transport.env ?? {},
-          cwd: config.transport.cwd
-            ? resolve(context.workspacePath, config.transport.cwd)
-            : context.workspacePath,
-          stderr: "pipe",
-        })
+      ? new SandboxedMcpTransport(config, context.workspacePath)
       : new StreamableHTTPClientTransport(
           new URL(config.transport.url),
           { requestInit: { headers: this.#httpHeaders(config.transport) }, fetch: http!.fetch },
         );
-    if (transport instanceof StdioClientTransport) {
-      transport.stderr?.on("data", () => undefined);
-    }
     // SDK stdio close() may resolve immediately after SIGKILL, before the child
     // has emitted close. Observe the public transport event as the exit gate.
     this.#transportClosed.set(client, new Promise<void>((resolveClosed) => {
@@ -1279,7 +1308,9 @@ export class McpRuntime {
   }
 
   #copyToolInfo(tool: ActiveTool): McpToolInfo {
+    const transport = tool.supervisor.config.transport;
     return {
+      destination: transport.type === 'stdio' ? `${transport.isolation ?? 'sandbox'}:${transport.command}` : new URL(transport.url).origin,
       callableName: tool.callableName,
       serverName: tool.serverName,
       toolName: tool.toolName,

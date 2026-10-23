@@ -1,5 +1,9 @@
 # 工具：文件、规则、搜索与后台命令
 
+取消期限、Job 进程归属、持久批次恢复、allow 迁移与子包验证的现行契约见 [可靠性加固](RELIABILITY_HARDENING.md)。
+
+当前安全加固契约（文件后端、敏感内容、验证依据、MCP 与隐私迁移）见 [安全加固](SECURITY_HARDENING.md)，与旧说明冲突时以该契约及当前实现为准。
+
 本文是工具修改的知识入口。启动仍先读 [AGENTS.md](../../AGENTS.md) 和 [HANDOFF](../HANDOFF.md)；只修改某类工具时，阅读对应小节及链接的实现/测试即可。请求与最终结算见 [RUNTIME](RUNTIME.md)，权限配置和原生后端细节见 [PERMISSIONS](PERMISSIONS.md)、[SANDBOX](SANDBOX.md)。
 
 ## 职责地图
@@ -52,7 +56,7 @@
 
 解析、预览和执行错误返回稳定原因及修复提示，覆盖无效参数、缺少当前进程观察、旧版本、未匹配或多重匹配、hunk 不符及策略拒绝。策略拒绝与可修复的编辑错误保持不同；任何替代编辑路径仍需通过同一权限边界。审批绑定预览文件 SHA-256 与权限 revision；审批期间权限变化或文件内容变化时不能沿用旧批准继续写入。create 使用排他创建，不能把期间新增的用户文件覆盖。
 
-真正写入前再次比较目标版本；update 使用临时文件原子替换，delete 检查原版本后删除。工作区控制目录与平台状态保护继续有效，详见权限文档。
+真正写入前再次比较目标版本；update/delete 在原生句柄保护下校验并保全原版本，采用排他安装/删除协议。工作区控制目录与平台状态保护继续有效，详见权限文档。
 
 批量写入失败后，只逆序回滚本批已实际修改的文件，而且当前文件必须仍匹配本批 post-image。用户在此期间再次修改时保留用户内容，返回 `rollbackConflicts`；回滚 IO 错误返回 `rollbackErrors`，不能无条件报告 `rolledBack: true`。
 
@@ -64,7 +68,9 @@
 
 [project_map](../../src/tools/project-map.ts) 是共享 production Agent 的只读文件工具，TUI、exec、SDK 和 Plan 均可使用。`path` 默认工作区目录，只允许工作区内目录；`depth` 默认 2、范围 1–4，只控制结构展示深度。每次重新枚举，遵守随包 rg ignore 规则，不跟随 symlink/junction，排除 node_modules、vendor、虚拟环境及 `.git`／`.codex`／`.agents`／`.everpeace`，不查询系统 PATH、不建数据库或自动注入每轮请求。
 
-结果包含观察到的目录结构、文件类型计数、包元数据和 README／AGENTS／测试／配置／manifest 位置。只解析 package.json 的 name、packageManager、脚本与声明入口（main/module/types/typings/bin/exports）；其他语言仅标记已发现 manifest。`declaredEntries` 与 `entryCandidates` 分开，后者仅依据文件名约定，不代表已确认架构。地图不扫描源码正文、符号或依赖图，不加载规则正文、登记文件写观察、提升权限或证明验证成功；地图作用域也不会登记到下一步规则加载路径。编辑仍须 read_file。
+结果包含观察到的目录结构、文件类型计数、包元数据和 README／AGENTS／测试／配置／manifest 位置。只解析 package.json 的 name、packageManager、脚本与声明入口（main/module/types/typings/bin/exports）；其他语言仅标记已发现 manifest。`declaredEntries` 与 `entryCandidates` 分开，后者仅依据文件名约定，不代表已确认架构。源码补充只提取有界 import 与测试关系候选，不返回正文或完整符号／依赖图；不加载规则正文、登记文件写观察、提升权限或证明验证成功。地图作用域也不会登记到下一步规则加载路径。编辑仍须 read_file。
+
+源码候选最多 64 个，每个分析上限 64 KiB，累计分析 256 KiB。读取每批最多四个，全部经既有安全原生文件工具，仍重新读取原始字节并按 SHA-256 校验解析缓存。每批全部结算后按文件顺序应用累计预算与提交结果；取消不再启动下一批，typed 清理失败优先于取消返回。工作区 pin、进程所有权与清理等待不因并发而省略。回归见 [insights](../../tests/unit/tools/project-insights.test.ts)。
 
 枚举最多 5 秒、2 MiB、10,000 路径；最多解析 32 份 manifest，每份 256 KiB、合计 1 MiB；JSON 结果最多 32 KiB。达到上限、文件期间变化或损坏 manifest 时返回 `incomplete`、明确 `reasons` 和缩小目录提示；不把不完整地图当作全部结构。不熟悉项目时可先地图、再搜索与读取；简单任务无须强制扫描。回归见 [project map](../../tests/unit/tools/project-map.test.ts) 与 [共享生产链路](../../tests/unit/runtime/project-editing.test.ts)。
 

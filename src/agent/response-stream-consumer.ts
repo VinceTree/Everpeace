@@ -1,11 +1,13 @@
 import type { AgentResponse, ResponseStreamLike, ResponseRecoveryState, AgentIO } from './react-agent.js';
 import type { LoopEvent } from './agent-loop.js';
 import { ResponseStreamIncompleteError, ModelStreamCleanupError, ModelResponseError } from './response-errors.js';
+import { ModelStreamCancelledError } from './response-errors.js';
 import { ResourceCleanupError } from '../util/resource-cleanup-error.js';
 import { PersistenceError } from '../storage/persistence-error.js';
+import { CleanupDeadline, abortable } from '../util/cleanup-deadline.js';
 type ResponseOutputItem = AgentResponse['output'][number];
 export interface StreamConsumerOptions {
-  recovery: boolean; recoveryCacheMaxBytes: number; idleTimeoutMs: number;
+  recovery: boolean; recoveryCacheMaxBytes: number; idleTimeoutMs: number; cleanupTimeoutMs?: number;
   onEvent?(event: LoopEvent): void;
   writeAssistantDelta?: AgentIO['writeAssistantDelta']; onToolProgress?: AgentIO['onToolProgress'];
 }
@@ -18,6 +20,7 @@ export class ResponseStreamConsumer {
     stream: ResponseStreamLike,
     onEvent: () => void,
     abortRequest: () => void,
+    signal?: AbortSignal,
   ): Promise<AgentResponse> {
     let response: AgentResponse | undefined;
     let outputText = "";
@@ -33,17 +36,22 @@ export class ResponseStreamConsumer {
     let firstTextSeen = false;
     let exhausted = false;
     let pendingNext: Promise<IteratorResult<Record<string, unknown>>> | undefined;
+    let observedUsage: unknown;
     const iterator = stream[Symbol.asyncIterator]();
     try {
       while (true) {
         let timer: ReturnType<typeof setTimeout> | undefined;
         pendingNext = Promise.resolve(iterator.next());
-        const next = await Promise.race([
+        void pendingNext.then(next => {
+          if (!next.done && ['response.completed', 'response.failed', 'response.incomplete'].includes(String(next.value.type)) && next.value.response && typeof next.value.response === 'object') observedUsage = (next.value.response as Record<string, unknown>).usage;
+        }, () => {});
+        const next = await abortable(Promise.race([
           pendingNext,
           new Promise<never>((_resolve, reject) => {
             timer = setTimeout(() => reject(new ResponseStreamIncompleteError({ cause: new Error(`Model stream was idle for ${this.options.idleTimeoutMs}ms`) })), this.options.idleTimeoutMs);
           }),
-        ]).finally(() => { if (timer) clearTimeout(timer); });
+        ]), signal).finally(() => { if (timer) clearTimeout(timer); });
+        signal?.throwIfAborted();
         if (next.done) { exhausted = true; break; }
         const event = next.value;
         onEvent();
@@ -156,23 +164,27 @@ export class ResponseStreamConsumer {
       }
       throw error;
     } finally {
+      const deadline = stream.cleanupDeadline?.(this.options.cleanupTimeoutMs) ?? new CleanupDeadline(this.options.cleanupTimeoutMs);
       abortRequest();
       if (!exhausted) {
         try {
           // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
           if (typeof iterator.return !== "function") throw new Error("The stream iterator exposes no close operation");
-          const closed = await iterator.return();
+          const closed = await deadline.wait(Promise.resolve().then(() => iterator.return!()), 'iterator_return');
           // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
           if (closed.done !== true) throw new Error("The stream iterator did not confirm closure");
           // A timeout may leave next() active even after return() reports done.
-          await pendingNext?.then(() => {}, () => {});
+          await deadline.wait(pendingNext?.then(() => {}, cause => { if (cause instanceof ResourceCleanupError) throw cause; }) ?? Promise.resolve(), 'pending_next');
         } catch (cause) {
-          const failure = cause instanceof ModelStreamCleanupError ? cause : new ModelStreamCleanupError(cause, response?.usage);
+          stream.cleanupFailed?.(deadline);
+          const failure = cause instanceof ModelStreamCleanupError ? cause : new ModelStreamCleanupError(cause, response?.usage ?? observedUsage);
           this.#failure ??= failure;
           // oxlint-disable-next-line no-unsafe-finally -- Cleanup failure must override a pending result; unfinished resources cannot settle successfully.
           throw failure;
         }
       }
+      // oxlint-disable-next-line no-unsafe-finally -- Cancelled output must remain discarded, while reliable billing survives.
+      if (signal?.aborted && (response?.usage ?? observedUsage) !== undefined) throw new ModelStreamCancelledError(signal.reason, response?.usage ?? observedUsage);
     }
     if (reasoningActive) this.options.onEvent?.({ type: "reasoning_finished" });
     if (!response) {

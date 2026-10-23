@@ -1,5 +1,6 @@
 import type { BenchmarkCampaignResult } from "./campaign.js";
 import { compareAgentStrategies } from "./strategy-comparison.js";
+import { pairedSuccessInterval } from "./paired-statistics.js";
 
 /** Statistics reuse the recorded campaign denominator; unknown measurements stay unknown. */
 export function controlledComparison(campaign: BenchmarkCampaignResult, baseline: string, candidate: string, experiment: "repair" | "team", realModelRuns: boolean) {
@@ -44,7 +45,7 @@ export function controlledComparison(campaign: BenchmarkCampaignResult, baseline
     const team=experiment!=='team'||bRuns.every(run=>(run.teamMetrics?.members??0)>=2);
     return {tag,tasks:ids.size,comparison:result,tokenRatio:tokens,wallRatio:time,errorModificationRate:{baseline:errorA,candidate:errorB},eligibleForRecommendation:realModelRuns&&repetitions&&result.complete&&result.usageComplete&&quality&&efficiency&&team};
   });
-  return { schema: 2, experiment, realModelRuns, comparison, measurements: { baseline: a, candidate: b }, sufficientRepetitions: enough, qualityPassed, efficiencyPassed, tokenRatio, wallRatio, teamExecuted, categories,
+  return { schema: 2, experiment, realModelRuns, comparison, measurements: { baseline: a, candidate: b }, pairedSuccess: pairedSuccessInterval(campaign, baseline, candidate), sufficientRepetitions: enough, qualityPassed, efficiencyPassed, tokenRatio, wallRatio, teamExecuted, categories,
     eligibleForDefault,
     interpretation: !realModelRuns ? "Offline accounting/scorer proof only; no model benefit measured." : eligibleForDefault ? "Observed benefit on this frozen model and task sample. Configuration remains explicit; no general superiority claim." : "Quality, completeness, repetition or efficiency gate not met; retain the baseline." };
 }

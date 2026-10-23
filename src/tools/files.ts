@@ -1,8 +1,11 @@
-import { spawn } from "node:child_process";
+import { globPattern, enumerateSafeFiles } from "./secure-enumeration.js";
+import { sensitivePath } from "../permissions/sensitive-access.js";
+import { spawnOwned as spawn } from "./owned-process.js";
 import { randomUUID } from "node:crypto";
-import { constants, promises as fs } from "node:fs";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { observeProcessCompletion } from "./process-completion.js";
+import { safeReadFile, safeListDirectory } from "./safe-files.js";
 import { decodeTextFile } from "./file-version.js";
 import { resolveBundledRipgrep, type RipgrepPathResolver } from "./ripgrep.js";
 import { invalidToolArgument, POLICY_DENIED_REMEDY, ToolFeedbackError } from "./tool-feedback.js";
@@ -177,34 +180,31 @@ function integer(value: unknown, fallback: number, maximum: number, field: strin
   return value as number;
 }
 
-async function resolveWorkspaceTarget(workspace: string, requestedPath: string, allowMissing = false): Promise<{ root: string; lexical: string; relative: string }> {
-  const root = await fs.realpath(workspace);
-  const lexical = path.resolve(workspace, requestedPath);
-  if (!inside(path.resolve(workspace), lexical)) throw new ToolFeedbackError("POLICY_DENIED", "File access is limited to the current workspace", POLICY_DENIED_REMEDY);
-  let target: string;
-  try {
-    target = await fs.realpath(lexical);
-  } catch (error) {
-    if (!allowMissing || (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    const parent = await fs.realpath(path.dirname(lexical));
-    target = path.join(parent, path.basename(lexical));
-  }
+async function resolveWorkspaceTarget(workspace: string, requestedPath: string): Promise<{ root: string; lexical: string; relative: string }> {
+  const root = path.resolve(workspace);
+  const target = path.resolve(root, requestedPath);
   if (!inside(root, target)) throw new ToolFeedbackError("POLICY_DENIED", "File access is limited to the current workspace", POLICY_DENIED_REMEDY);
   const relative = path.relative(root, target);
+  if (relative.split(path.sep).some(part => /\.everpeace-(?:recovery|stage|batch)-/u.test(part))) throw new ToolFeedbackError('POLICY_DENIED', 'Recovery and staging files are host-only; use explicit user recovery.', POLICY_DENIED_REMEDY);
   if (process.platform === "win32" && relative.includes(":")) throw new Error("Alternate data streams are not supported");
   return { root, lexical: target, relative };
 }
 
-async function runRipgrep(
+export async function runRipgrep(
   args: string[],
   cwd: string,
   signal?: AbortSignal,
   resolveRipgrep: RipgrepPathResolver = resolveBundledRipgrep,
-): Promise<{ lines: string[]; exitCode: number | null; incomplete: boolean }> {
+  input?: Buffer,
+  outputBudget = MAX_SEARCH_BYTES,
+): Promise<{ lines: string[]; exitCode: number | null; incomplete: boolean; incompleteReason?: 'output_limit' | 'timeout' }> {
   signal?.throwIfAborted();
+  outputBudget = Math.max(0, Math.min(MAX_SEARCH_BYTES, outputBudget));
+  if (outputBudget === 0) return { lines: [], exitCode: null, incomplete: true, incompleteReason: 'output_limit' };
   const executable = await resolveRipgrep();
   signal?.throwIfAborted();
-  const child = spawn(executable, ["--no-config", ...args], { cwd, windowsHide: true, shell: false, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+  const child = spawn(executable, ["--no-config", ...args], { cwd, windowsHide: true, shell: false, stdio: [input ? "pipe" : "ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+  if (input && child.stdin) { child.stdin.on("error", () => undefined); child.stdin.end(input); }
   const owned = observeProcessCompletion(child, (signal ? { signal } : {}));
   const lines: string[] = [];
   let pending = "";
@@ -212,16 +212,19 @@ async function runRipgrep(
   let stderr = "";
   let incomplete = false;
   let stoppedByHost = false;
+  let incompleteReason: 'output_limit' | 'timeout' | undefined;
   const stop = () => owned.stop();
-  const timer = setTimeout(() => { incomplete = true; stoppedByHost = true; stop(); }, SEARCH_TIMEOUT_MS);
+  const timer = setTimeout(() => { incomplete = true; stoppedByHost = true; incompleteReason ??= 'timeout'; stop(); }, SEARCH_TIMEOUT_MS);
   timer.unref?.();
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk: string) => {
+  child.stdout!.setEncoding("utf8");
+  child.stderr!.setEncoding("utf8");
+  child.stdout!.on("data", (chunk: string) => {
     if (stoppedByHost || owned.closed || owned.stopping) return;
-    if (retainedBytes + Buffer.byteLength(pending, "utf8") + Buffer.byteLength(chunk, "utf8") > MAX_SEARCH_BYTES) {
+    if (retainedBytes + Buffer.byteLength(pending, "utf8") + Buffer.byteLength(chunk, "utf8") >= outputBudget) {
       incomplete = true;
       stoppedByHost = true;
+      incompleteReason = 'output_limit';
+      stop();
       return;
     }
     pending += chunk;
@@ -230,16 +233,18 @@ async function runRipgrep(
       const line = pending.slice(0, newline).replace(/\r$/u, "");
       pending = pending.slice(newline + 1);
       const bytes = Buffer.byteLength(line, "utf8") + 1;
-      if (retainedBytes + bytes > MAX_SEARCH_BYTES) {
+      if (retainedBytes + bytes > outputBudget) {
         incomplete = true;
         stoppedByHost = true;
+        incompleteReason = 'output_limit';
+        stop();
         return;
       }
       retainedBytes += bytes;
       if (line) lines.push(line);
     }
   });
-  child.stderr.on("data", (chunk: string) => {
+  child.stderr!.on("data", (chunk: string) => {
     if (!owned.closed) stderr = `${stderr}${chunk}`.slice(-32 * 1024);
   });
   let result;
@@ -250,11 +255,11 @@ async function runRipgrep(
   signal?.throwIfAborted();
   if (!stoppedByHost && pending) {
     const bytes = Buffer.byteLength(pending, "utf8");
-    if (retainedBytes + bytes <= MAX_SEARCH_BYTES) lines.push(pending.replace(/\r$/u, ""));
+    if (retainedBytes + bytes <= outputBudget) lines.push(pending.replace(/\r$/u, ""));
     else incomplete = true;
   }
   if (!stoppedByHost && result.exitCode !== 0 && result.exitCode !== 1) throw new Error(stderr.trim() || `ripgrep exited with ${result.exitCode}`);
-  return { lines, exitCode: result.exitCode, incomplete };
+  return { lines, exitCode: result.exitCode, incomplete, ...(incompleteReason ? { incompleteReason } : {}) };
 }
 
 export const fileSearchLimits = {
@@ -307,23 +312,21 @@ export async function runFileTool(
     if (record.regex !== undefined && record.regex !== null && typeof record.regex !== "boolean") invalidToolArgument("regex", "a boolean, or null to use fixed-string search");
   }
   const requestedPath = typeof record.path === "string" && record.path.trim() && !record.path.includes("\0") ? record.path : ".";
-  const targetInfo = await resolveWorkspaceTarget(workspace, requestedPath, name === "read_file");
+  const targetInfo = await resolveWorkspaceTarget(workspace, requestedPath);
   const { root, lexical: target } = targetInfo;
   if (name === "list_directory") {
-    const entries: Array<{ name: string; type: string }> = [];
-    const directory = await fs.opendir(target);
-    let truncated = false;
-    for await (const entry of directory) {
-      if (entries.length === 500) { truncated = true; break; }
-      entries.push({ name: entry.name, type: entry.isSymbolicLink() ? "symlink" : entry.isDirectory() ? "directory" : "file" });
-    }
-    return { path: requestedPath, entries, truncated };
+    const all = await safeListDirectory(workspace, requestedPath, signal);
+    return { path: requestedPath, entries: all.slice(0, 500), truncated: all.length > 500 };
   }
   if (name === "glob_files") {
     const stat = await fs.stat(target);
     if (!stat.isDirectory()) throw new Error("glob_files path must be a directory");
-    const result = await runRipgrep(["--files", "--hidden", "--glob", record.pattern as string, "--", "."], target, signal, resolveRipgrep);
-    const files = result.lines.map((value) => path.relative(root, path.resolve(target, value)).split(path.sep).join("/"));
+    await resolveRipgrep();
+    signal?.throwIfAborted();
+    const enumerated = await enumerateSafeFiles(workspace, requestedPath, signal);
+    const pattern = globPattern(record.pattern as string);
+    const result = { incomplete: enumerated.incomplete };
+    const files = enumerated.paths.filter(value => pattern.test(value) || pattern.test(path.posix.basename(value)));
     const page = searches?.page("files", files, maximum, result.incomplete);
     const first = page?.items ?? files.slice(0, maximum);
     const continuation = page?.continuation ?? null;
@@ -331,8 +334,32 @@ export async function runFileTool(
     return { path: requestedPath, pattern: record.pattern, files: first, continuation, has_more: continuation !== null, incomplete: result.incomplete || unavailableRemainder, truncated: result.incomplete || unavailableRemainder || continuation !== null };
   }
   if (name === "search_files") {
-    const rgArgs = ["--json", "--hidden", "--line-number", "--column", ...(record.regex === true ? [] : ["--fixed-strings"]), ...(typeof record.glob === "string" ? ["--glob", record.glob] : []), "--", record.query as string, targetInfo.relative || "."];
-    const result = await runRipgrep(rgArgs, root, signal, resolveRipgrep);
+    await resolveRipgrep();
+    signal?.throwIfAborted();
+    const files = await enumerateSafeFiles(workspace, requestedPath, signal);
+    const result: { lines: string[]; incomplete: boolean; incompleteReason?: 'output_limit' | 'timeout' } = { lines: [], incomplete: files.incomplete };
+    let readBytes = 0, outputBytes = 0;
+    const include = typeof record.glob === 'string' ? globPattern(record.glob) : undefined;
+    for (const relative of files.paths) {
+      if (sensitivePath(relative)) continue;
+      if (include && !include.test(relative) && !include.test(path.posix.basename(relative))) continue;
+      signal?.throwIfAborted();
+      const value = await safeReadFile(workspace, relative, signal);
+      if (!value.exists) { result.incomplete = true; continue; }
+      readBytes += value.bytes.length;
+      if (readBytes > MAX_SEARCH_BYTES) { result.incomplete = true; break; }
+      const args = ["--json", "--line-number", "--column", ...(record.regex === true ? [] : ["--fixed-strings"]), '--', record.query as string, '-'];
+      const searched = await runRipgrep(args, root, signal, resolveRipgrep, value.bytes, MAX_SEARCH_BYTES - outputBytes);
+      for (let line of searched.lines) {
+        try { const event = JSON.parse(line) as { data?: { path?: { text?: string } } }; if (event.data?.path) event.data.path.text = relative; line = JSON.stringify(event); } catch { /* preserve the bounded original record */ }
+        const size = Buffer.byteLength(line) + 1;
+        if (outputBytes + size > MAX_SEARCH_BYTES) { result.incomplete = true; result.incompleteReason = 'output_limit'; break; }
+        outputBytes += size; result.lines.push(line);
+      }
+      result.incomplete ||= searched.incomplete;
+      if (result.incompleteReason === 'output_limit') break;
+      if (searched.incompleteReason) { result.incompleteReason = searched.incompleteReason; break; }
+    }
     const matches: Array<{ path: string; line: number; column: number; text: string }> = [];
     for (const line of result.lines) {
       if (!line) continue;
@@ -348,37 +375,21 @@ export async function runFileTool(
     const unavailableRemainder = searches === undefined && matches.length > maximum;
     return {
       query: record.query,
+      sensitive_files_omitted: true,
       path: requestedPath,
       matches: first,
       continuation,
       has_more: continuation !== null,
       incomplete: result.incomplete || unavailableRemainder,
+      ...(result.incompleteReason ? { incompleteReason: result.incompleteReason } : {}),
       truncated: result.incomplete || unavailableRemainder || continuation !== null,
       ...(result.incomplete || unavailableRemainder ? { guidance: "Search stopped at its time or retained-byte limit; narrow the query if retained pages are insufficient." } : {}),
     };
   }
-  let stat;
-  try { stat = await fs.stat(target); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { path: requestedPath, exists: false, sha256: null, content: "", start_line: 1, end_line: 0, total_lines: 0, next_line: null };
-    throw error;
-  }
-  if (!stat.isFile()) throw new Error("Only regular text files can be read");
-  if (stat.size > MAX_FILE_BYTES) throw new Error(`File exceeds the ${MAX_FILE_BYTES / 1024 / 1024} MiB read limit`);
-  const flags = process.platform === "win32" ? constants.O_RDONLY : constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW;
-  const handle = await fs.open(target, flags);
-  try {
-    const current = await handle.stat();
-    if (!current.isFile()) throw new Error("Only regular text files can be read");
-    if (current.size > MAX_FILE_BYTES) throw new Error(`File exceeds the ${MAX_FILE_BYTES / 1024 / 1024} MiB read limit`);
-    const bytes = Buffer.alloc(current.size);
-    let length = 0;
-    while (length < bytes.length) {
-      const { bytesRead } = await handle.read(bytes, length, bytes.length - length, length);
-      if (!bytesRead) break;
-      length += bytesRead;
-    }
-    const version = decodeTextFile(bytes.subarray(0, length));
+  const value = await safeReadFile(workspace, requestedPath, signal);
+  if (!value.exists) return { path: requestedPath, exists: false, sha256: null, content: "", start_line: 1, end_line: 0, total_lines: 0, next_line: null };
+  if (value.bytes.length > MAX_FILE_BYTES) throw new Error("File exceeds the read limit");
+  const version = decodeTextFile(value.bytes);
     const content = version.text;
     const lines = content.split("\n");
     const startLine = integer(requestedStartLine, 1, Math.max(1, lines.length + 1), "start_line");
@@ -388,15 +399,13 @@ export async function runFileTool(
       path: requestedPath,
       exists: true,
       sha256: version.sha256,
+      file_identity: value.identity,
       content: selected.join("\n"),
       start_line: startLine,
       end_line: endLine,
       total_lines: lines.length,
       next_line: endLine < lines.length ? endLine + 1 : null,
     };
-  } finally {
-    await handle.close();
-  }
 }
 
 export const fileToolLimits = { maxFileBytes: MAX_FILE_BYTES, maxReadLines: MAX_READ_LINES, maxSearchResults: MAX_SEARCH_RESULTS, maxSearchBytes: MAX_SEARCH_BYTES, searchTimeoutMs: SEARCH_TIMEOUT_MS } as const;

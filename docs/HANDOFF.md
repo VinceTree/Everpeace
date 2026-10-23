@@ -1,41 +1,46 @@
 # 当前交接
 
-## 当前候选与授权
+2026-10-24：第三轮按用户授权测量 CLI 冷启动、长 Session 恢复、历史搜索和项目扫描，依据复测优化，完整门禁后提交并推送。分支 `codex/public-contract-core-experience`，起点 `85695e8fd187d710fcd18d9200ad86309a9f0eb5`，开始时工作树干净；展示候选仍为 `0.6.0-rc.4`。未读取 keyring 或真实 Session，未调用模型、付费评测、改版本、打 tag 或创建 Release。
 
-当前源码候选 **0.6.0-rc.1**。用户明确授权十项优化、deepseek-flash 真实评测不限 Token/费用总额，以及提交、推送、更新版本和 GitHub Release。用户接受先在 Windows 测试，Linux 本机/云服务器检查后续进行。正式原生安装包仍保留原有完整发布门禁；本次发布为源码预发布，不把本机成功或跳过当作正式包验收。
+上轮取消、清理失败和持久恢复修复已提交推送，证据在 [历史交接](archive/HANDOFF-2026-10-24-core-recovery.md)；旧结果不作为本轮门禁。原有 ignored 用户目录及私有材料保持原样，所有性能数据为新建隔离合成 fixture。
 
-起点目录缺少 Git、根工程配置及锁文件。完整性清单在 [baseline-manifest.json](implementation/baseline-manifest.json)，恢复依据见 [RESTORATION](implementation/RESTORATION.md)。本地基线及阶段提交全部保留，随后与远端 main 的真实历史连接，不覆盖上游提交。pnpm 固定 10.30.3、依赖使用本机安装记录核验的精确版本。
+## 测量与结果
 
-## 逐项交付
+入口 [local-performance.mjs](../scripts/benchmark/local-performance.mjs)，协议见 [本地性能对照](benchmark/LOCAL_PERFORMANCE.md)。基线为上述 Git revision 的只读 archive 独立构建，链接同一依赖；两臂原生组件摘要相同。每场景每臂九次，奇偶轮交换顺序、串行创建新 Node 进程。测量前后核对 fixture、源码、构建与原生身份，全部正确性断言通过。
 
-十项实现、验收、迁移和复现方式见 [优化验收报告](implementation/REPORT.md)。报告分别标出已有能力、补强、测试及真实效果待验证。生产修复上限继续三轮，团队默认仍单 Agent。验证 v1/v2 增量兼容；独立功能验证只能由宿主入口绑定。Memory 来源不足可读但不注入，纠正/禁用会在下一请求前刷新。二进制整合以宿主原始字节与事务恢复为边界，64 MiB 单文件、256 MiB 快照及 10,000 文件资源限制不代表费用预算。
+Windows x64、本地 NTFS、Node 22.19.0、pnpm 10.30.3，Intel Core Ultra 5 125H。原始逐次墙钟／CPU／峰值 RSS／trace／身份保留在 `.cache/performance-round3-final/paired.json`，fixture manifest 同目录 `fixture.json`；基线构建在 `.cache/performance-round3-v3/baseline`。fixture SHA-256 `aae98281858fa211d9034914534fc7d48b3296015c2cacd9457cbf1584c4f652`，runner SHA-256 `473ffa92acf21d7e0edfd1ae1797bb7b0ea6db67aa7ca611a28b488d198e2b84`。
 
-## 真实评测结果
+| 场景 | 优化前中位 ms | 优化后中位 ms | p95 前 → 后 ms | 结论 |
+| --- | ---: | ---: | ---: | --- |
+| CLI `--lang en --help` | 96.08 | 94.99 | 104.05 → 99.48 | 持平，未修改 CLI |
+| 长 Session 恢复 | 537.53 | 499.91 | 544.98 → 539.66 | 下降 7.0% |
+| 历史搜索冷缓存 | 223.54 | 209.68 | 226.97 → 214.13 | 下降 6.2% |
+| 历史搜索暖缓存 | 18.73 | 18.67 | 22.32 → 19.16 | 持平 |
+| 项目地图扫描 | 7215.16 | 4957.00 | 7373.56 → 5109.03 | 下降 31.3% |
 
-模型使用可解析凭据的 deepseek-flash 注册项；较新的另一注册项凭据不可用。密钥只经 AuthStorage 读取，没有写入源码或报告。修复/团队各计划十二任务、每臂五次、共 120 次；实际运行与全部跳过均保留。四个配对通道并发，配对内顺序随机且串行，存在同端点/同机器竞争限制。
+九次样本的 nearest-rank p95 即样本最大值，不承诺稳定尾延迟。CLI 是新进程帮助启动，未清空 OS 缓存，不含终端首 prompt；恢复计时不含 Ink 渲染。合成目录不证明真实大型仓库、跨平台或模型收益。
 
-- 修复：46 passed、32 failed、3 error、39 skipped；33 recorded runs 的 Usage 未知。
-- 团队：0 passed、28 failed、1 error、91 skipped；28 recorded runs 的 Usage 未知。
-- 两个 campaign 都因 Windows taskkill 128 清理失败停止；有失败模型请求、计量不完整与未运行项。没有达到策略门槛，不宣称效率改善，也不推荐自动开启团队。
-- Memory：90 次全部执行；无记忆 30/30、有效记忆 29/30、过期/禁用/纠正组 30/30。旧错误经验注入零次；一例解析失败且 Usage 未知，整体不能记为全通过。
-- Web：24 页固定技术文档对照，包含十二份有许可的 Node 上游快照；正文及关键代码保持，合成页面外壳不宣称通用网站效果。
+- 长日志 103,956,100 字节／80,002 记录，恢复 40,000 条 timeline 与最终一项压缩 context；两臂读量相同，最大输入缓冲均 66,840 字节。异步交接从逐条降至 1,587 批。峰值 RSS 中位 255,520,768 → 253,362,176 字节，不宣称稳定内存下降。
+- 搜索 100 个 Session、32,100 记录，冷读均 11,283,100 字节；总匹配 100、返回 50、skipped 0，暖缓存 100 次命中且没有新增日志读取。缓存上限和正文匹配语义不变。
+- 项目 fixture 为 20 包、422 个可枚举文件，含 ignore 内容；两臂都完整枚举，唯一 incomplete 原因为既有 `source_insight_limit`。原生启动均 128 次且退出已确认；未通过减少检查或漏扫提速。项目峰值 RSS 中位 70,397,952 → 73,805,824 字节，宿主 system CPU 中位 328,000 → 422,000 微秒；并发以少量内存和 CPU 开销换取墙钟收益。
 
-脱敏证据见 [evidence](implementation/evidence/manifest.json)。原始计划、JSONL、模型原始记录和冻结 harness 保存在本地 .cache/evaluation；不上传原始源码/客户路径/输出。修复已知 Token 5,218,486，Memory 已知输入 350,289、输出 6,812；这些是部分已知消耗，不是完整账单。先前基础设施失败 pilot 的已知输入 653,238、输出 41,803 及在途未知用量另行保留，不从总工作记录中删除。
+## 瓶颈与修改
 
-## 当前检查与发布状态
+- 初始完整扫描中位约 7.37 秒，128 次安全原生进程访问的累计所有者时间约 5.9 秒；改为每批最多四个源码候选读取，全部仍经原生安全访问、workspace pin、固定进程所有者与清理。每批全部结算后按文件顺序应用原有字节预算和输出顺序；typed 清理失败优先于取消，不启动下一批。
+- 初始长 Session CPU profile 显示逐记录 UTF-8 解码及重放占主要成本。整块解码候选使恢复退化到约 598 ms，已撤掉；最终只合并块内异步交接，每条仍独立解码，保留跨块 UTF-8、旧大记录、固定 EOF、尾部损坏和取消检查。
+- 诊断证据保留在 `.cache/performance-round3-v3/{before,candidate,replay-batched}.json` 与 `restore-before.cpuprofile`、`help-before.cpuprofile`。较大初始项目样本触发枚举期限，未纳入对照；初始 fixture 缺少 compaction automatic 字段被正确拒绝，修正后另建 fixture，未更改生产校验。
+- CLI profile 未显示需要扩大本轮范围的启动瓶颈；暖搜索已有缓存收益，不增加持久索引、schema、依赖或模型配置。生产文件改动仅 SessionStore 与 project insights；双语 README、专题、计划、项目地图与开发指南同步。
 
-最终 Windows 四项检查、干净安装、安装烟测、工作流配置及安全检查正在本次候选上执行。最后结果与远端 CI/PR/Release 链接将追加在本节；旧交接收据不迁移为本次成功。当前 Linux 本机未执行：WSL 映像不可用，用户选择后续服务器验证。GitHub hosted 检查如运行，将独立记录其结果和平台跳过。
+## 本轮验证
 
-原有 question、test-me、NUL 及私有 .cache 模型产物保留。没有 npm registry 发布。上轮交接已归档到 [observability base](archive/HANDOFF-2026-10-12-observability-base.md)。
+新增多小记录的真实 JSONL 重放／搜索位置回归，以及受控四路读取、乱序字节预算、取消等待、并发 typed 清理故障和当前字节缓存复核。首批定向 streaming／insights 9 项通过，0 失败／跳过；日志 `.cache/performance-round3-targeted-initial.log`。交错性能对照另通过全部正确性、fixture 和构建身份断言。
 
-### 本次最终 Windows 收据
+完整门禁按实际 package scripts 串行执行 typecheck → lint → test → build，一次全部通过；1367 项测试，1364 通过、3 跳过、0 失败，约 306 秒。日志 `.cache/performance-round3-gates/{typecheck,lint,test,build}.log`。跳过为本机文件 symlink、Windows 临时目录别名专门场景和 Unix 超时子进程实测，与前轮一致。
 
-串行 typecheck → lint → test → build 全部通过：1258 tests，1255 pass、3 skip、0 fail、0 cancel；CLI/SDK/native PTY 安装烟测 7 pass。干净安装及工作流固定/门禁配置检查通过。命令和日志摘要见 [windows-checks.json](implementation/evidence/windows-checks.json)。安全工具初次下载连接中断不计成功，重试及远端安全结果另行追加。
+补充静态检查通过：164 份公开文档路径和链接、953 组双语语言键与插值、workflow 固定身份及门禁、`git diff --check`。门禁后只补充本交接收据；提交前重查文档、暂存差异及最终源码／构建身份。
 
-### 本次远端独立验收
+最终源码及 JS 构建摘要与性能采样候选一致。门禁 pretest 会重编译原生 helper，采样时与门禁后的原生摘要分别保存在 `.cache/performance-round3-final/final-identity.json`；两臂采样期间的原生身份相同，原生源码和构建参数未修改。
 
-[PR #10](https://github.com/VinceTree/Everpeace/pull/10) 的第二轮 [完整 CI](https://github.com/VinceTree/Everpeace/actions/runs/38216807264) 全部通过，绑定 commit 4483a606113baf0709853a4a4d7d9ca986163169。Ubuntu hosted：1258 tests、1249 pass、9 skip、0 fail；Windows hosted 结果见 [hosted-ci.json](implementation/evidence/hosted-ci.json)。security 与 Required checks 全成功。首次远端失败原样保留：Memory CLI 测试隔离变量误用 XDG_CONFIG_HOME，修正为 XDG_STATE_HOME；合成 PEM 标记增加精确历史/当前文件哈希的审查记录，不放宽扫描。
+## 交付边界
 
-本机安全工具下载失败及 TLS 中断仍记录为未完成；远端安全扫描独立通过。Linux hosted 源码检查现在有实际证据，本机 WSL 及专用 Windows native 发布验收仍未执行。末次仅补正文展示版本及验收文档的提交继续接受同一分支保护门禁。正式原生安装包不因源码预发布绕过其门禁。
-
-本次源码预发布名称 v0.6.0-rc.1，[Release 入口](https://github.com/VinceTree/Everpeace/releases/tag/v0.6.0-rc.1) 在合并及打标签之后创建；公开附件仅含脱敏 evidence。
+本轮按授权以 `perf batch session replay and bound project reads [skip publish]` 提交并普通 fast-forward 推送当前分支，推送后核对远端 SHA，不使用 `[skip ci]`。Release workflow 仍仅 main 显式 dispatch；当前功能分支 push 不自动触发 PR/main Test，不声称远端 CI 已通过。真实终端、干净安装、取消收尾性能和跨平台仍未验收，不因此扩大当前授权任务。

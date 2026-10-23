@@ -2,6 +2,8 @@ import OpenAI from "openai";
 import { EnvHttpProxyAgent } from "undici";
 import type { AgentResponse, ResponseStreamLike } from "../agent/model-protocol.js";
 import { ownResponseStream } from "./response-stream.js";
+import { CleanupDeadline } from '../util/cleanup-deadline.js';
+import { ModelStreamCleanupError } from '../agent/response-errors.js';
 import {
   defaultModelRequestSettings,
   resolveProviderCapabilities,
@@ -52,6 +54,7 @@ export function getProviderDefinition(
 }
 
 const clientDisposals = new WeakMap<OpenAI, () => Promise<void>>();
+const failedCleanupDeadlines = new WeakMap<OpenAI, CleanupDeadline>();
 
 /** Close this client's transport after its requests and response bodies finish. */
 export function disposeProviderClient(client: OpenAI): Promise<void> {
@@ -82,7 +85,7 @@ export function createProviderClient(
   let disposal: Promise<void> | undefined;
   // Owners have already joined model requests. Force-close idle sockets and
   // unfinished proxy CONNECT handshakes, which graceful close can wait on.
-  clientDisposals.set(client, () => disposal ??= dispatcher.destroy());
+  clientDisposals.set(client, () => disposal ??= (failedCleanupDeadlines.get(client) ?? new CleanupDeadline()).wait(dispatcher.destroy(), 'provider_transport_destroy').catch(error => { throw new ModelStreamCleanupError(error); }));
   return client;
 }
 
@@ -129,11 +132,14 @@ export function createProviderRuntime(
 ): ProviderRuntime {
   const capabilities = resolveProviderCapabilities(baseURL, modelName, profile);
   const sdk = createProviderClient(baseURL, apiKey);
+  const assertAvailable = () => { if (failedCleanupDeadlines.has(sdk)) throw new ModelStreamCleanupError('Provider resource ownership is unresolved'); };
   const responses: ProviderRuntime["responses"] = {
     create(params, options) {
+      assertAvailable();
       return sdk.responses.create(sanitizeProviderRequest(capabilities, params) as never, options as never) as unknown as Promise<AgentResponse>;
     },
     async stream(params, options) {
+      assertAvailable();
       const controller = new AbortController();
       const signal = options?.signal instanceof AbortSignal
         ? AbortSignal.any([options.signal, controller.signal])
@@ -142,11 +148,11 @@ export function createProviderRuntime(
         { ...sanitizeProviderRequest(capabilities, params), stream: true } as never,
         { ...options, signal } as never,
       ).asResponse();
-      return ownResponseStream(response, controller, signal, sdk);
+      return ownResponseStream(response, controller, signal, sdk, deadline => { failedCleanupDeadlines.set(sdk, deadline); });
     },
   };
   if (capabilities.compaction === "native") {
-    responses.compact = (params, options) => sdk.responses.compact(params as never, options as never) as unknown as Promise<{ output: Array<Record<string, unknown>>; usage?: unknown }>;
+    responses.compact = (params, options) => { assertAvailable(); return sdk.responses.compact(params as never, options as never) as unknown as Promise<{ output: Array<Record<string, unknown>>; usage?: unknown }>; };
   }
   return {
     sdk,

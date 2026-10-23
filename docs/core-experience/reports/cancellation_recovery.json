@@ -1,0 +1,352 @@
+{
+  "schema": 1,
+  "baselineCommit": "1e805410b713ab90ee09040fced7137416186d0c",
+  "candidateCommit": null,
+  "definitionDigest": "bd94ae15d72fca9a9cee813be625a07a9daa0624e30a89fc5d29c4d5d777a52f",
+  "seed": 20261012,
+  "model": "deepseek-flash",
+  "modelRegistration": null,
+  "endpoint": null,
+  "parameters": null,
+  "taskTokenBudget": null,
+  "campaignTokenBudget": null,
+  "parallelPairs": 1,
+  "repetitions": 5,
+  "status": "deferred_by_user",
+  "tasks": [
+    {
+      "id": "cancellation_recovery-cancel-model",
+      "scenario": "cancellation_recovery",
+      "prompt": "Cancel a model request, settle resources and resume in a fresh child Session.",
+      "acceptance": "Assert request closes, partial usage stays unknown when absent and resumed acceptance passes.",
+      "materialStatus": "not_frozen"
+    },
+    {
+      "id": "cancellation_recovery-cancel-tool",
+      "scenario": "cancellation_recovery",
+      "prompt": "Cancel during owned subprocess execution and resume.",
+      "acceptance": "Assert all recorded child identities close, no replay of side effects and resumed acceptance passes.",
+      "materialStatus": "not_frozen"
+    },
+    {
+      "id": "cancellation_recovery-cancel-write",
+      "scenario": "cancellation_recovery",
+      "prompt": "Cancel at the protected write boundary and resume.",
+      "acceptance": "Assert no partial replacement/user-data loss, permission revision is rechecked and recovery passes.",
+      "materialStatus": "not_frozen"
+    }
+  ],
+  "planned": [
+    {
+      "pair": 2,
+      "withinPair": 1,
+      "taskId": "cancellation_recovery-cancel-write",
+      "scenario": "cancellation_recovery",
+      "repetition": 5,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 2,
+      "withinPair": 2,
+      "taskId": "cancellation_recovery-cancel-write",
+      "scenario": "cancellation_recovery",
+      "repetition": 5,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 5,
+      "withinPair": 1,
+      "taskId": "cancellation_recovery-cancel-write",
+      "scenario": "cancellation_recovery",
+      "repetition": 3,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 5,
+      "withinPair": 2,
+      "taskId": "cancellation_recovery-cancel-write",
+      "scenario": "cancellation_recovery",
+      "repetition": 3,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 7,
+      "withinPair": 1,
+      "taskId": "cancellation_recovery-cancel-tool",
+      "scenario": "cancellation_recovery",
+      "repetition": 1,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 7,
+      "withinPair": 2,
+      "taskId": "cancellation_recovery-cancel-tool",
+      "scenario": "cancellation_recovery",
+      "repetition": 1,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 16,
+      "withinPair": 1,
+      "taskId": "cancellation_recovery-cancel-model",
+      "scenario": "cancellation_recovery",
+      "repetition": 4,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 16,
+      "withinPair": 2,
+      "taskId": "cancellation_recovery-cancel-model",
+      "scenario": "cancellation_recovery",
+      "repetition": 4,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 23,
+      "withinPair": 1,
+      "taskId": "cancellation_recovery-cancel-tool",
+      "scenario": "cancellation_recovery",
+      "repetition": 2,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 23,
+      "withinPair": 2,
+      "taskId": "cancellation_recovery-cancel-tool",
+      "scenario": "cancellation_recovery",
+      "repetition": 2,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 26,
+      "withinPair": 1,
+      "taskId": "cancellation_recovery-cancel-tool",
+      "scenario": "cancellation_recovery",
+      "repetition": 5,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 26,
+      "withinPair": 2,
+      "taskId": "cancellation_recovery-cancel-tool",
+      "scenario": "cancellation_recovery",
+      "repetition": 5,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 32,
+      "withinPair": 1,
+      "taskId": "cancellation_recovery-cancel-write",
+      "scenario": "cancellation_recovery",
+      "repetition": 4,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 32,
+      "withinPair": 2,
+      "taskId": "cancellation_recovery-cancel-write",
+      "scenario": "cancellation_recovery",
+      "repetition": 4,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 33,
+      "withinPair": 1,
+      "taskId": "cancellation_recovery-cancel-write",
+      "scenario": "cancellation_recovery",
+      "repetition": 1,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 33,
+      "withinPair": 2,
+      "taskId": "cancellation_recovery-cancel-write",
+      "scenario": "cancellation_recovery",
+      "repetition": 1,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 36,
+      "withinPair": 1,
+      "taskId": "cancellation_recovery-cancel-model",
+      "scenario": "cancellation_recovery",
+      "repetition": 5,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 36,
+      "withinPair": 2,
+      "taskId": "cancellation_recovery-cancel-model",
+      "scenario": "cancellation_recovery",
+      "repetition": 5,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 42,
+      "withinPair": 1,
+      "taskId": "cancellation_recovery-cancel-tool",
+      "scenario": "cancellation_recovery",
+      "repetition": 3,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 42,
+      "withinPair": 2,
+      "taskId": "cancellation_recovery-cancel-tool",
+      "scenario": "cancellation_recovery",
+      "repetition": 3,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 46,
+      "withinPair": 1,
+      "taskId": "cancellation_recovery-cancel-model",
+      "scenario": "cancellation_recovery",
+      "repetition": 3,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 46,
+      "withinPair": 2,
+      "taskId": "cancellation_recovery-cancel-model",
+      "scenario": "cancellation_recovery",
+      "repetition": 3,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 48,
+      "withinPair": 1,
+      "taskId": "cancellation_recovery-cancel-model",
+      "scenario": "cancellation_recovery",
+      "repetition": 1,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 48,
+      "withinPair": 2,
+      "taskId": "cancellation_recovery-cancel-model",
+      "scenario": "cancellation_recovery",
+      "repetition": 1,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 54,
+      "withinPair": 1,
+      "taskId": "cancellation_recovery-cancel-write",
+      "scenario": "cancellation_recovery",
+      "repetition": 2,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 54,
+      "withinPair": 2,
+      "taskId": "cancellation_recovery-cancel-write",
+      "scenario": "cancellation_recovery",
+      "repetition": 2,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 66,
+      "withinPair": 1,
+      "taskId": "cancellation_recovery-cancel-model",
+      "scenario": "cancellation_recovery",
+      "repetition": 2,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 66,
+      "withinPair": 2,
+      "taskId": "cancellation_recovery-cancel-model",
+      "scenario": "cancellation_recovery",
+      "repetition": 2,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 67,
+      "withinPair": 1,
+      "taskId": "cancellation_recovery-cancel-tool",
+      "scenario": "cancellation_recovery",
+      "repetition": 4,
+      "arm": "baseline",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    },
+    {
+      "pair": 67,
+      "withinPair": 2,
+      "taskId": "cancellation_recovery-cancel-tool",
+      "scenario": "cancellation_recovery",
+      "repetition": 4,
+      "arm": "candidate",
+      "status": "not_executed",
+      "reason": "user_deferred_live_tests"
+    }
+  ],
+  "executed": 0,
+  "plannedCount": 30,
+  "complete": false,
+  "metrics": {
+    "success": null,
+    "errorModificationRate": null,
+    "wallMs": null,
+    "tokens": null,
+    "completeCost": null
+  },
+  "interpretation": "Task definitions only; fixtures, independent executable acceptance and model/candidate identities still need freezing. No real-model efficacy measured."
+}

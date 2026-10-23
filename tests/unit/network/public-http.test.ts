@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { promises as fs } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawnOwned as spawn } from '../../../src/tools/owned-process.js';
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import http from "node:http";

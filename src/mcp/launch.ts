@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
+import { scanSensitiveText } from "../util/sensitive-scan.js";
+import { safeApprovalText } from "../permissions/sensitive-access.js";
 import { promises as fs } from "node:fs";
-import { delimiter, extname, isAbsolute, resolve } from "node:path";
+import { delimiter, extname, isAbsolute, resolve, dirname } from "node:path";
 import { DEFAULT_INHERITED_ENV_VARS, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { McpServerConfig } from "./runtime.js";
 import { McpPermanentConnectionError } from "./errors.js";
@@ -47,6 +50,10 @@ export async function prepareMcpConfig(config: McpServerConfig, workspace: strin
     return copy;
   }
   const transport = copy.transport;
+  if (transport.isolation !== undefined && transport.isolation !== 'sandbox' && transport.isolation !== 'host') throw new McpPermanentConnectionError('Invalid MCP isolation mode');
+  transport.isolation ??= 'sandbox';
+  // oxlint-disable-next-line no-control-regex -- Reject terminal controls before displaying launch arguments.
+  if ([transport.command, ...(transport.args ?? [])].some(value => /[\u0000-\u001f\u007f-\u009f]/u.test(value))) throw new McpPermanentConnectionError('MCP command or arguments contain control characters');
   const cwd = await fs.realpath(resolve(workspace, transport.cwd ?? "."));
   const inherited = Object.fromEntries((transport.env_vars ?? []).flatMap((name) => process.env[name] === undefined ? [] : [[name, process.env[name]!]]));
   const values = { ...Object.fromEntries(DEFAULT_INHERITED_ENV_VARS.map((name) => [name, ""])), ...getDefaultEnvironment(), ...inherited, ...transport.env };
@@ -66,6 +73,24 @@ export async function prepareMcpConfig(config: McpServerConfig, workspace: strin
       transport.env = env;
       transport.env_vars = [];
       transport.args ??= [];
+      const files: Array<{ path: string; sha256: string }> = [];
+      const hash = async (file: string) => {
+        const real = await fs.realpath(file);
+        const handle = await fs.open(real, 'r');
+        try {
+          const metadata = await handle.stat();
+          if (!metadata.isFile() || metadata.size > 256 * 1024 * 1024) throw new Error('launch material too large');
+          const digest = createHash('sha256'); const chunk = Buffer.alloc(64 * 1024); let total = 0;
+          for (;;) { const result = await handle.read(chunk); if (!result.bytesRead) break; total += result.bytesRead; if (total > 256 * 1024 * 1024) throw new Error('launch material too large'); digest.update(chunk.subarray(0, result.bytesRead)); }
+          files.push({ path: real, sha256: digest.digest('hex') });
+        } finally { await handle.close(); }
+      };
+      await hash(transport.command);
+      for (const arg of transport.args) if (/\.(?:[cm]?js|ts|py|cmd|bat|ps1)$/iu.test(arg) && !arg.startsWith('-')) await hash(resolve(cwd, arg));
+      for (const directory of new Set([cwd, dirname(transport.command), ...files.slice(1).map(file => dirname(file.path))])) for (const name of ['package.json', 'pnpm-lock.yaml', 'package-lock.json', 'yarn.lock']) {
+        const file = resolve(directory, name); try { await fs.access(file); } catch { continue; } await hash(file);
+      }
+      transport.launchIdentity = { files, persistent: !/(?:^|[/\\])(?:npx|npm|pnpm|yarn|uvx)(?:\.(?:cmd|exe))?$/iu.test(transport.command) };
       return copy;
     } catch { /* Continue PATH lookup without exposing filesystem errors. */ }
   }
@@ -85,9 +110,22 @@ export function mcpTrustSummary(config: McpServerConfig, workspace: string): str
   const transport = config.transport;
   const lines = [`Server: ${JSON.stringify(config.name)}`, `Workspace: ${JSON.stringify(workspace)}`, "Source: effective Codex MCP configuration (file origin unknown)"];
   if (transport.type === "stdio") {
-    lines.push(`Program: ${JSON.stringify(transport.command)}`, `Arguments: ${(transport.args ?? []).map(() => "<redacted>").join(" ") || "(none)"}`, `Directory: ${JSON.stringify(transport.cwd)}`, `Environment names: ${JSON.stringify(Object.keys(transport.env ?? {}).sort())}`, "Allowing startup means allowing this program to run with your host user permissions. Tool-call approval does not limit this program. This does not verify the program or its dependencies.");
+    lines.push(`Program: ${JSON.stringify(transport.command)}`, `Arguments: ${safeMcpArguments(transport.args ?? [], transport.launchIdentity?.files.map(file => file.path) ?? [], transport.cwd ?? undefined).join(" ") || "(none)"}`, `Directory: ${JSON.stringify(transport.cwd)}`, `Environment names: ${JSON.stringify(Object.keys(transport.env ?? {}).sort())}`, `Isolation: ${transport.isolation ?? "sandbox"}. ${transport.isolation === "host" ? "Runs with your host user permissions. HOST USER AUTHORITY: tool approval does not isolate this process." : "Native workspace sandbox; network denied; filtered environment."} Startup identity: ${transport.launchIdentity?.files.length ?? 0} files. Transitive dependency integrity is not verified. ${transport.launchIdentity?.persistent === false ? "Dynamic launcher: approval is valid for one startup only." : "Changed launch material requires new approval."}`);
   } else {
     lines.push(`Endpoint: ${new URL(transport.url).origin} (path and query hidden)`, `Header names: ${JSON.stringify([...Object.keys(transport.http_headers ?? {}), ...Object.keys(transport.env_http_headers ?? {}), ...(transport.bearer_token_env_var ? ["Authorization"] : [])])}`, "Allow plaintext HTTP to this local endpoint? Credentials and MCP data can be read by local programs.");
   }
   return lines.join("\n");
+}
+
+/** Unknown positional values are hidden; safe options remain useful for review. */
+export function safeMcpArguments(args: readonly string[], verifiedPaths: readonly string[] = [], cwd?: string): string[] {
+  let secretNext = false;
+  return args.map(value => {
+    const secret = secretNext; secretNext = /^(?:--?)(?:token|api[-_]?key|password|secret|authorization|credential)$/iu.test(value);
+    if (secret || scanSensitiveText(value).length || /(?:token|key|secret|password|auth)[=_]/iu.test(value)) return '<redacted>';
+    if (/^--?[a-z][a-z0-9_-]*(?:=(?:true|false|[0-9]+))?$/iu.test(value)) return JSON.stringify(value);
+    if ((verifiedPaths.includes(value) || cwd && verifiedPaths.includes(resolve(cwd, value))) && !scanSensitiveText(value).length) return JSON.stringify(value);
+    if (/^(?:stdio|--|[0-9]+)$/u.test(value)) return JSON.stringify(value);
+    return '<redacted>';
+  }).map(safeApprovalText);
 }

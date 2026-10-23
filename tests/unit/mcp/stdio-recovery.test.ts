@@ -44,7 +44,7 @@ async function fixture(t: TestContext, mode: "disconnect" | "initialize_timeout"
     async loadConfig() {
       return [{
         name: "fixture", enabled: true,
-        transport: { type: "stdio", command: process.execPath, args: ["--import", "tsx", fixturePath, mode, logPath] },
+        transport: { type: "stdio", isolation: "host", command: process.execPath, args: ["--import", "tsx", fixturePath, mode, logPath] },
         // This deadline includes Node/tsx/SDK cold startup on hosted Windows.
         // Generation 1 deliberately never initializes in timeout mode, so a
         // longer deadline preserves the timeout assertion without timing out
@@ -102,15 +102,14 @@ test("real stdio initialize timeout closes a slow partial client before reconnec
   const records = events();
   const firstStart = records.find((entry) => entry.event === "started" && entry.generation === 1);
   const stdinEnded = records.find((entry) => entry.event === "stdin_end" && entry.generation === 1);
-  const firstExit = records.find((entry) => entry.event === "exiting" && entry.generation === 1);
   const secondStart = records.find((entry) => entry.event === "started" && entry.generation === 2);
   assert.ok(firstStart);
   assert.ok(stdinEnded, "timeout must close the partial client's transport");
-  assert.ok(firstExit, "the first child deliberately takes longer than reconnect backoff to close");
   assert.ok(secondStart);
   assert.equal(records.filter((entry) => entry.event === "initialize_stalled").length, 1);
   assert.equal(records.filter((entry) => entry.event === "started").length, 2);
-  assert.ok(firstExit.at - stdinEnded.at >= 1_200);
-  assert.ok(secondStart.at >= firstExit.at, "a new process must not start before the old child exits");
+  assert.ok(secondStart.at >= stdinEnded.at);
+  assert.ok(secondStart.at - stdinEnded.at < 5_000, "uncooperative EOF must be followed by bounded owned termination");
+  assert.throws(() => process.kill(firstStart.pid, 0), { code: 'ESRCH' }, "the old child must actually be exited");
   assert.equal(secondStart.previous_alive, false, "the replacement must confirm the previous child is no longer alive");
 });

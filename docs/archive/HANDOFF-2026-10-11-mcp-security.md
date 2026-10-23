@@ -2,7 +2,7 @@
 
 ## 前次 MCP 补丁交付记录
 
-更新日期：2026-10-11。本轮入口为 [AGENTS](../AGENTS.md)，专题为 [集成能力](architecture/CODEX_CAPABILITIES.md#启动信任与-http-边界)、[公共网络](architecture/NETWORK.md) 与 [开发验收](DEVELOPMENT.md#mcp-启动信任专项终端验收)。前轮网络、安装、团队准备及补丁交付记录保存于 [历史交接](archive/HANDOFF-2026-10-10-network-readiness.md)，不能作为本轮验证或发布授权。
+更新日期：2026-10-11。本轮入口为 [AGENTS](../../AGENTS.md)，专题为 [集成能力](../architecture/CODEX_CAPABILITIES.md#启动信任与-http-边界)、[公共网络](../architecture/NETWORK.md) 与 [开发验收](../DEVELOPMENT.md#mcp-启动信任专项终端验收)。前轮网络、安装、团队准备及补丁交付记录保存于 [历史交接](HANDOFF-2026-10-10-network-readiness.md)，不能作为本轮验证或发布授权。
 
 ## 范围与工作区
 
@@ -26,7 +26,7 @@ MCP 安全回归 15 项全部通过、无跳过，覆盖真实 stdio 零启动/�
 
 真实 Windows Terminal 已以 owned 离线 fixture 验证：未批准、默认 Cancel、Esc 和 Ctrl+C 均零启动；resize 保留预览；取消后返回同一 Session 且单 prompt。批准仅落盘，重连 ready/6 tools、marker 恰好 1 次；撤销后 grant 删除、工具归零、stdio 退出，再重连没有新增启动。测试使用软件按键与实际窗口截图，未冒称人工按键；owned 终端和 fixture 均已退出。之后仅补诊断脱敏，相关路径由最终自动回归验证。
 
-本轮外置证据根：`C:\Users\39850\AppData\Local\Temp\everpeace-mcp-security-fd060153a5e34e7ab5315d8ef5666f3b`，包含 `gates.json`、`final-*.log`、`terminal-receipt.json`、`terminal-evidence/actions.jsonl` 和窗口截图。真实终端使用 owned fixture、合成 HMAC 与 marker；没有修改用户 MCP 配置或 keyring。
+本轮外置证据根：`<LOCAL_EVIDENCE>`，包含 `gates.json`、`final-*.log`、`terminal-receipt.json`、`terminal-evidence/actions.jsonl` 和窗口截图。真实终端使用 owned fixture、合成 HMAC 与 marker；没有修改用户 MCP 配置或 keyring。
 
 ## 补丁交付
 
@@ -34,7 +34,7 @@ MCP 安全回归 15 项全部通过、无跳过，覆盖真实 stdio 零启动/�
 
 对应 [Release workflow](https://github.com/VinceTree/Everpeace/actions/runs/38110024777) 已成功，[v0.5.2 Release](https://github.com/VinceTree/Everpeace/releases/tag/v0.5.2) 已发布并设为 Latest，非 draft/prerelease。实际正文与审阅的双语安全补丁说明逐字核对，保留既有配置需独立启动批准、MCP 仍有宿主用户权限和不提供进程沙箱/依赖完整性验证的升级边界。随后仅追加这份交付记录，不移动已经通过验证的 tag。
 
-补丁交付根为 `C:\Users\39850\AppData\Local\Temp\everpeace-patch-20261011-501d21521426410e85fb0d5f07a6e78d`。更新展示版本后重新执行串行门禁，准确结果保存为 `local-gates.json`、`final-*.log`；`delivery-receipt.json` 绑定源码 commit/tree、构建文件摘要、远端 CI、tag 和 Release，`ci.log`、`ci.json`、`release-run.json` 保留实际远端结果。此前实现证据继续保留，不冒充新候选身份。
+补丁交付根为 `<LOCAL_EVIDENCE>`。更新展示版本后重新执行串行门禁，准确结果保存为 `local-gates.json`、`final-*.log`；`delivery-receipt.json` 绑定源码 commit/tree、构建文件摘要、远端 CI、tag 和 Release，`ci.log`、`ci.json`、`release-run.json` 保留实际远端结果。此前实现证据继续保留，不冒充新候选身份。
 
 补丁候选四项门禁全部 exit 0，完整测试仍为 1,156 项、1,153 通过、3 项平台跳过、0 失败。`pnpm install:verify` 核对固定原生依赖及实际补丁通过；`pnpm install:smoke` 的构建 CLI、SDK 导入与 6 项真实 PTY 生命周期检查通过、无跳过。差异空白检查通过。源码、构建及提交身份由交付收据绑定。
 

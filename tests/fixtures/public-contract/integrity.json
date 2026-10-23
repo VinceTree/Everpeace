@@ -1,0 +1,9 @@
+{
+  "capturedFrom": "1e805410b713ab90ee09040fced7137416186d0c",
+  "method": "Baseline serializer, synthetic redacted inputs, fixed clock; frozen consumer is independently maintained",
+  "files": {
+    "consumer-v1.mjs": "12cb0b0ec32a2e7d54d1b24508c4b4a983a2d64eb784b48b9de6d869b8e93282",
+    "v1.jsonl": "7c6630746705b29a5252849823e7d53009d994d9617c01ec4283447644ff378f",
+    "v2.jsonl": "8114ca90319cc349734709a7984f67648e0d435d37257f2129a9f5d728b82ccc"
+  }
+}

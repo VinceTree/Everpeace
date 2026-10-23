@@ -1,3 +1,5 @@
+import { readdirSync, existsSync } from "node:fs";
+import { sensitivePath } from "../permissions/sensitive-access.js";
 import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -84,6 +86,25 @@ export function applicationStateRoots(
   return [...new Set([api.join(config, "everpeace"), api.join(state, "everpeace")])];
 }
 
+export function sensitiveHomePaths(homeDirectory: string, platform: NodeJS.Platform): string[] {
+  const api = pathApi(platform);
+  return ['.ssh', '.aws', '.azure', '.kube', '.npmrc', '.netrc', '.pypirc', '.git-credentials'].map(name => api.join(homeDirectory, name));
+}
+
+export function sensitiveSandboxPaths(workspace: string): string[] {
+  if (!existsSync(workspace)) return [];
+  const denied: string[] = []; let count = 0;
+  const visit = (directory: string) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (++count > 10_000) throw new Error('Sensitive-path scan incomplete; sandbox launch blocked');
+      const target = path.join(directory, entry.name);
+      if (entry.isSymbolicLink() || sensitivePath(entry.name) || /\.everpeace-(?:recovery|stage|batch)-/u.test(entry.name)) denied.push(target);
+      else if (entry.isDirectory() && !['.git', '.everpeace', '.codex', '.agents', 'node_modules'].includes(entry.name)) visit(target);
+    }
+  };
+  visit(workspace); return denied;
+}
+
 export function createEffectiveSandboxPolicy(
   permissionPolicy: PermissionPolicy,
   workspaceRoot: string,
@@ -109,6 +130,7 @@ export function createEffectiveSandboxPolicy(
     : [
         ...controlPaths.map((rulePath): SandboxPathRule => ({ path: rulePath, access: "read" })),
         ...globalState.map((rulePath): SandboxPathRule => ({ path: rulePath, access: "none" })),
+        ...[...sensitiveSandboxPaths(workspace), ...sensitiveHomePaths(options.homeDirectory ?? os.homedir(), platform)].map((rulePath): SandboxPathRule => ({ path: rulePath, access: "none" })),
       ];
   if (options.isolation) {
     if (permissionProfile === ":danger-full-access") throw new Error("Team members cannot use full access");
@@ -129,7 +151,7 @@ export function createEffectiveSandboxPolicy(
     readableRoots: normalizedReadableRoots,
     pathRules,
     ...(options.isolation?.traversalRoots?.[0] ? { launchRoot: canonicalExistingPath(options.isolation.traversalRoots[0], platform) } : {}),
-    networkMode: permissionPolicy.shellNetwork ?? "profile-default",
+    networkMode: permissionPolicy.shellNetwork === "allow" || (permissionPolicy.mode === "full-access" && permissionPolicy.shellNetwork !== "deny") ? "profile-default" : "deny",
   });
   return Object.freeze({
     backend: "codex-cli" as const,
@@ -139,7 +161,7 @@ export function createEffectiveSandboxPolicy(
     readableRoots: Object.freeze(normalizedReadableRoots),
     pathRules: Object.freeze(pathRules.map((rule) => Object.freeze({ ...rule }))),
     materializedControlPaths: Object.freeze(materializedControlPaths),
-    networkMode: permissionPolicy.shellNetwork ?? "profile-default",
+    networkMode: permissionPolicy.shellNetwork === "allow" || (permissionPolicy.mode === "full-access" && permissionPolicy.shellNetwork !== "deny") ? "profile-default" : "deny",
     environmentPolicy: "filtered-inherit" as const,
     approvalScope,
     revision,
@@ -163,8 +185,8 @@ function tomlString(value: string): string {
 
 /** Build a complete named profile override so user config cannot add permissions to it. */
 export function nativePermissionProfileArgs(policy: EffectiveSandboxPolicy): string[] {
-  if (policy.permissionProfile !== ":workspace") return ["-P", policy.permissionProfile];
-  const baseProfile = policy.pathRules.some((rule) => rule.access === "write") ? ":read-only" : ":workspace";
+  if (policy.permissionProfile === ":danger-full-access") return ["-P", policy.permissionProfile];
+  const baseProfile = policy.pathRules.some((rule) => rule.access === "write") ? ":read-only" : policy.permissionProfile;
   const filesystem = policy.pathRules
     .map((rule) => `${tomlString(rule.path)}=${tomlString(rule.access)}`)
     .join(",");
@@ -192,6 +214,8 @@ export function createLspSandboxPolicy(
   const workspace = canonicalExistingPath(workspaceRoot, platform);
   const deniedRoots = [
     ...CONTROL_DIRECTORIES.map((name) => pathApi(platform).join(workspace, name)),
+    ...sensitiveSandboxPaths(workspace),
+    ...sensitiveHomePaths(options.homeDirectory ?? os.homedir(), platform),
     ...applicationStateRoots(platform, options.env ?? process.env, options.homeDirectory ?? os.homedir()),
   ].map((root) => canonicalExistingPath(root, platform));
   const roots = [...new Set([workspace, ...readableRoots.map((root) => canonicalExistingPath(root, platform))])];

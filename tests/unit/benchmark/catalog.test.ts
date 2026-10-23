@@ -115,7 +115,7 @@ test("DeepSeek Node catalog contains ten pinned tasks", () => {
   assert.ok(tasks.every((task) => task.source.commit.length === 40));
   assert.ok(tasks.every((task) => task.fixture &&
     (task.fixture.dependencyLock === undefined || existsSync(resolve(fixtureRoot, task.fixture.dependencyLock))) &&
-    existsSync(resolve(fixtureRoot, task.fixture.seedPatch)) &&
+    existsSync(resolve(fixtureRoot, task.fixture.seedPatch!)) &&
     existsSync(resolve(fixtureRoot, task.fixture.referencePatch))));
   assert.ok(tasks.every((task) => task.acceptance?.args?.some((value) => value.includes("${FIXTURE_ROOT}"))));
 

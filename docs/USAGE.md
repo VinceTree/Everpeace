@@ -13,9 +13,12 @@ Summary compaction keeps a structured checkpoint of your goals and corrections, 
 
 For unfamiliar workspaces, the Agent can call `project_map` on demand in coding or Plan mode to inspect structure, package declarations, scripts, and document/test/config locations. It honors ignore rules and reports scan limits; filename entry candidates remain unconfirmed. Editing still requires reading the target file. `apply_patch` keeps exact replacement by default; an explicit `line_whitespace` mode can tolerate only leading/trailing spaces or tabs in a unique complete line block after an exact miss. Approval previews and results show the actual mode and matched lines.
 
+
+Display flags and fallback acceptance are documented in [terminal acceptance](TERMINAL_ACCEPTANCE.md) and [FAQ](FAQ.md). See [consumer installation status](INSTALLATION.md).
+
 ## Requirements
 
-- Node.js 22+
+- Node.js 22.19+
 - pnpm
 - Bash on macOS/Linux; Windows model commands use the system PowerShell inside the Codex sandbox
 - An API key for DeepSeek, OpenAI, or a compatible service

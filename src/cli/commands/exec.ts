@@ -1,4 +1,6 @@
+import {uiText} from '../../localization/messages.js';
 import type { ExecEvent, ExecModelRegistry, ExecOptions, ExecResult } from "../../exec/types.js";
+import { execErrorCode } from "../../exec/errors.js";
 import { runExec } from "../../exec/runtime.js";
 import { CliArgumentError, resolveExecPrompt, type ExecCliOptions } from "../args.js";
 import {
@@ -64,7 +66,7 @@ async function readProcessStdin(signal: AbortSignal): Promise<string> {
       const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw), "utf8");
       bytes += chunk.byteLength;
       if (bytes > MAX_STDIN_PROMPT_BYTES) {
-        throw new CliArgumentError(`Piped exec prompt exceeds ${MAX_STDIN_PROMPT_BYTES} bytes`);
+        throw new CliArgumentError(uiText('mc3c7212f5e6a', {p0: MAX_STDIN_PROMPT_BYTES}));
       }
       chunks.push(chunk);
     }
@@ -98,7 +100,7 @@ export function createProcessExecCommandHost(options: { outputStallMs?: number }
     failureHandlers.set(stream, handlers);
     handlers.add(handler);
     const failed = (error: Error) => { if (!disposing) handler(error); };
-    const closed = () => { if (!disposing) handler(new ExecOutputError("Exec output was closed")); };
+    const closed = () => { if (!disposing) handler(new ExecOutputError(uiText('m6c7eea86f920'))); };
     stream.on("error", failed);
     stream.on("close", closed);
     return () => { handlers.delete(handler); stream.off("error", failed); stream.off("close", closed); };
@@ -162,30 +164,30 @@ function jsonUsage(result: ExecResult): ExecJsonlUsage | undefined {
 
 function humanProgress(event: ExecEvent): string | undefined {
   switch (event.type) {
-    case "cost_estimated": return event.estimate.warning ? "Estimated cost warning threshold reached; in-flight billing may continue.\n" : undefined;
+    case "cost_estimated": return event.estimate.warning ? uiText('mfa35708f908b') : undefined;
     case "session_started":
-      return `Session ${event.sessionId} · ${event.modelName}${event.parentSessionId ? ` · continued from ${event.parentSessionId}` : ""}\n`;
+      return uiText('m2062d4a17337', {p0: event.sessionId, p1: event.modelName, p2: event.parentSessionId ? uiText('m9a54e3e543e6', {p0: event.parentSessionId}) : ""});
     case "agent_updated": case "agent_integrated":
-      return `Team ${event.agentId}: ${event.state} · ${event.role ?? "member"}\n`;
+      return uiText('m921fc638c7f5', {p0: event.agentId, p1: event.state, p2: event.role ?? "member"});
     case "tool_started":
-      return `Tool: ${event.name}\n`;
+      return uiText('mf899b388c225', {p0: event.name});
     case "workflow_updated":
       return event.result
-        ? `Workflow: ${event.phase} · ${event.result}\n`
-        : `Workflow: ${event.phase}\n`;
+        ? uiText('m84f82417e3da', {p0: event.phase, p1: event.result})
+        : uiText('m53cb39f64764', {p0: event.phase});
     case "interaction_required":
-      return `Interaction required: ${event.tool}\n`;
+      return uiText('m46eaf5198e15', {p0: event.tool});
     default:
       return undefined;
   }
 }
 
 function finalHumanMessage(result: ExecResult): string {
-  if (result.exitCode === 0) return `Host verification: ${result.workflowResult ?? result.status}\n`;
-  if (result.exitCode === 3) return `Host verification: ${result.workflowResult ?? "unverified"}\n`;
-  if (result.exitCode === 4) return `Execution stopped: ${result.stopReason ?? result.status}\n`;
-  if (result.exitCode === 5) return `Interaction required: ${result.interaction?.tool ?? "host input"}\n`;
-  return `Everpeace exec failed: ${result.error ?? result.status}\n`;
+  if (result.exitCode === 0) return uiText('m61ac482c6933', {p0: result.workflowResult ?? result.status});
+  if (result.exitCode === 3) return uiText('m61ac482c6933', {p0: result.workflowResult ?? "unverified"});
+  if (result.exitCode === 4) return uiText('m8bc8f205c1ef', {p0: result.stopReason ?? result.status});
+  if (result.exitCode === 5) return uiText('m46eaf5198e15', {p0: result.interaction?.tool ?? uiText('m2e69444228fd')});
+  return uiText('mbe2582ae77a9', {p0: result.error ?? result.status});
 }
 
 /** Execute one headless task and keep all process-specific I/O at the CLI edge. */
@@ -202,11 +204,11 @@ export async function runExecCommand(
   const removeSignalHandlers = host.onSignal((exitCode) => {
     signalExitCode = exitCode;
     if (runtimeOptions) runtimeOptions.signalExitCode = exitCode;
-    controller.abort(abortError(exitCode === 130 ? "Interrupted by SIGINT" : "Terminated by SIGTERM", "ExecSignalError"));
+    controller.abort(abortError(exitCode === 130 ? uiText('m55c3043a5650') : uiText('mf008e163888a'), "ExecSignalError"));
   });
   const outputFailed = (error: Error) => {
     outputClosed = true;
-    controller.abort(new ExecOutputError("Exec output failed or closed", { cause: error }));
+    controller.abort(new ExecOutputError(uiText('m5c0ddefa9894'), { cause: error }));
   };
   const removeStdoutHandler = host.onStdoutError(outputFailed);
   const removeStderrHandler = host.onStderrError?.(outputFailed);
@@ -226,7 +228,7 @@ export async function runExecCommand(
         : registry;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new CliArgumentError(`Exec startup configuration failed: ${message}`);
+      throw new CliArgumentError(uiText('mf0a8b57a862f', {p0: message}));
     }
     controller.signal.throwIfAborted();
     runtimeOptions = {
@@ -262,6 +264,7 @@ export async function runExecCommand(
         type: "run_finished",
         ...(result.sessionId ? { sessionId: result.sessionId } : {}),
         status: result.classification,
+        ...((result.errorCode ?? execErrorCode(result.classification, result.status)) ? { errorCode: result.errorCode ?? execErrorCode(result.classification, result.status)! } : {}),
         usageComplete: result.usageComplete,
         ...(result.stopReason ? { stopReason: result.stopReason } : {}),
         ...(result.workflowResult ? { workflowResult: result.workflowResult } : {}),
@@ -283,6 +286,7 @@ export async function runExecCommand(
           await emitter.finish({
             type: "run_finished",
             status: "cancelled",
+            errorCode: "CANCELLED",
             usageComplete: true,
             stopReason: "aborted",
           });
@@ -301,6 +305,7 @@ export async function runExecCommand(
         await emitter.finish({
           type: "run_finished",
           status: error instanceof CliArgumentError ? "configuration_error" : "runtime_error",
+          errorCode: error instanceof CliArgumentError ? "CONFIGURATION_ERROR" : "RUNTIME_ERROR",
           usageComplete: true,
         });
       }

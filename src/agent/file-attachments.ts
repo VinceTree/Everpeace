@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawnOwned as spawn } from "../tools/owned-process.js";
 import { runFileTool } from "../tools/files.js";
 import { ToolArgumentError } from "../tools/tool-feedback.js";
 import { resolveBundledRipgrep, type RipgrepPathResolver } from "../tools/ripgrep.js";

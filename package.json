@@ -1,6 +1,6 @@
 {
   "name": "everpeace",
-  "version": "0.6.0-rc.1",
+  "version": "0.6.0-rc.4",
   "private": true,
   "type": "module",
   "engines": {
@@ -22,14 +22,22 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "files:smoke": "node scripts/verify-file-install.mjs",
+    "process:smoke": "node scripts/verify-process-install.mjs",
+    "files:build": "node scripts/build-file-helper.mjs",
+    "files:verify": "node scripts/build-file-helper.mjs --test && tsx --test tests/unit/security/native-files.test.ts",
+    "pretest": "node scripts/build-file-helper.mjs && node scripts/build-file-helper.mjs --test",
+    "pretest:portable": "node scripts/build-file-helper.mjs && node scripts/build-file-helper.mjs --test",
+    "test:portable": "tsx --test --test-concurrency=4 tests/unit/storage/*.test.ts tests/unit/providers/*.test.ts tests/unit/network/*.test.ts tests/unit/util/*.test.ts tests/unit/status/*.test.ts tests/unit/security/*.test.ts tests/unit/permissions.test.ts",
     "lint": "node scripts/lint.mjs",
     "test": "tsx --test --test-concurrency=4 tests/**/*.test.{ts,tsx}",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node scripts/build.mjs",
     "install:verify": "node scripts/verify-source-install.mjs",
     "install:smoke": "node scripts/source-install-smoke.mjs",
     "install:clean": "node scripts/verify-clean-install.mjs",
     "benchmark": "tsx src/benchmark/campaign-cli.ts",
     "test:security": "node --import tsx --test tests/unit/security/*.test.ts",
+    "pretest:security": "node scripts/build-file-helper.mjs && node scripts/build-file-helper.mjs --test",
     "prove:web": "tsx tests/fixtures/prove-web-content.ts",
     "dev": "tsx src/cli/index.ts",
     "start": "node dist/cli/index.js",
@@ -43,7 +51,10 @@
     "benchmark:campaign": "tsx src/benchmark/campaign-cli.ts",
     "benchmark:prove-expanded": "tsx tests/fixtures/prove-expanded.ts",
     "benchmark:optimization": "tsx scripts/benchmark/run-optimization.ts",
-    "benchmark:memory": "tsx scripts/benchmark/evaluate-memory.ts"
+    "benchmark:memory": "tsx scripts/benchmark/evaluate-memory.ts",
+    "ui:verify": "node scripts/check-localization.mjs",
+    "docs:verify": "node scripts/check-public-docs.mjs",
+    "benchmark:product-plan": "node scripts/benchmark/prepare-product-plan.mjs"
   },
   "dependencies": {
     "@inkjs/ui": "2.0.0",
@@ -85,10 +96,13 @@
     "dist",
     "assets",
     "third_party/codex",
+    "native/files",
+    "native/process",
     "README.md",
     "README.zh-CN.md",
     "LICENSE",
-    "SECURITY.md"
+    "SECURITY.md",
+    "contracts"
   ],
   "bundleDependencies": [
     "node-pty"

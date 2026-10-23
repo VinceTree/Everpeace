@@ -82,3 +82,28 @@ test("preparation cleanup failure stops the entire campaign before another harne
   assert.ok(result.skipped.every((item) => item.reason === "cleanup_failed"));
   assert.equal(result.statisticsComplete, false);
 });
+
+test("unlimited campaigns stop globally after unknown usage", async () => {
+  let calls = 0;
+  const result = await runBenchmarkCampaign(tasks, [{ name: "unlimited", async run() { calls++; return { usage: { inputTokens: 10, outputTokens: 2, complete: false } }; } }], { campaignId: "unknown-null", seed: 1, repetitions: 1, liveApi: true, taskTokenBudget: null, campaignTokenBudget: null, prepareRun: async task => task });
+  assert.equal(calls, 1); assert.equal(result.tokenUsage, 12); assert.equal(result.stopCode, "usage_unknown");
+  assert.equal(result.skipped[0]?.reason, "usage_unknown");
+});
+
+test("paired admission reserves equal full arm budgets and retains unfinished pairs", async () => {
+  const budgets: number[] = [];
+  const arms = ["a", "b"].map(name => ({ name, async run(_task: BenchmarkTask, context: import("../../../src/benchmark/types.js").BenchmarkHarnessContext) { budgets.push(context.tokenBudgetRemaining!); return { usage: { inputTokens: 120, outputTokens: 0, complete: true } }; } }));
+  const options = { campaignId: "paired", seed: 1, repetitions: 1, ordering: "paired" as const, liveApi: true as const, taskTokenBudget: 100, prepareRun: async (task: BenchmarkTask) => task };
+  const insufficient = await runBenchmarkCampaign(tasks.slice(0, 1), arms, { ...options, campaignTokenBudget: 199 });
+  assert.equal(insufficient.results.length, 0); assert.equal(insufficient.skipped.length, 2);
+  const overrun = await runBenchmarkCampaign(tasks.slice(0, 1), arms, { ...options, campaignTokenBudget: 200 });
+  assert.deepEqual(budgets, [100]); assert.equal(overrun.results[0]?.effectiveTokenBudget, 100);
+  assert.equal(overrun.results[0]?.pairId, "one:1"); assert.equal(overrun.tokenUsage, 120); assert.equal(overrun.stopCode, "budget_exhausted");
+});
+
+test("result persistence failure stops admission and preserves settled usage", async () => {
+  let calls = 0;
+  const result = await runBenchmarkCampaign(tasks, [{ name: "a", async run() { calls++; return { usage: { inputTokens: 1, outputTokens: 2, complete: true } }; } }], { campaignId: "storage", seed: 1, repetitions: 1, liveApi: true, taskTokenBudget: 100, campaignTokenBudget: 1000, prepareRun: async task => task, async onResult() { throw Error("disk failure"); } });
+  assert.equal(calls, 1); assert.equal(result.results.length, 1); assert.equal(result.tokenUsage, 3);
+  assert.equal(result.stopCode, "storage_failed"); assert.equal(result.statisticsComplete, false);
+});

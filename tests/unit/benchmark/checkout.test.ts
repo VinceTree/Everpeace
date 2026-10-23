@@ -26,6 +26,15 @@ test("checkout identity binds revision, runtime source, and all built modules", 
 export const createProductionBenchmarkAdapter = ({ model, loopStrategy }) => ({
   async run(_task, context) {
     const attempt = context.requestAttemptLedger.begin('coding');
+    if (model.id === 'throw-known') {
+      context.requestAttemptLedger.settle(attempt, 'completed', {input_tokens: 7, output_tokens: 3, total_tokens: 10});
+      throw new Error('Failure after reliable metering');
+    }
+    if (model.id.startsWith('exit-known-')) {
+      context.requestAttemptLedger.settle(attempt, 'completed', {input_tokens: 7, output_tokens: 3, total_tokens: 10});
+      await context.requestAttemptLedger.flush();
+      process.exit(Number(model.id.slice('exit-known-'.length)));
+    }
     if (model.id === 'telemetry') {
       if (loopStrategy !== 'candidate') throw new Error('Candidate strategy was not forwarded');
       context.onPhase('tool_wait');
@@ -69,6 +78,18 @@ export const createProductionBenchmarkAdapter = ({ model, loopStrategy }) => ({
     assert.equal(result?.requestAttempts, 1);
     assert.equal(result?.usage?.inputTokens, 2);
     assert.ok(!artifacts.join("").includes("PRIVATE_BODY"));
+    const failing = createCheckoutBenchmarkAdapter({ ...expected, name: "failing", sessionsRoot: path.join(root, "sessions"), model: { id: "throw-known", base_url: "https://relay.invalid/v1", model_name: "raw-model", api_key: "dummy" } });
+    const failed = await failing.run(task, { task, signal: AbortSignal.timeout(15000), attempt: 1, phase: "implement", tokenBudgetRemaining: 100, onPhase() {}, onEvent() {} });
+    assert.equal(failed?.terminalOutcome, "stopped"); assert.equal(failed?.usage?.inputTokens, 7); assert.equal(failed?.usage?.outputTokens, 3); assert.equal(failed?.requestAccounting?.requests, 1);
+    for (const exitCode of [0, 1]) {
+      const exiting = createCheckoutBenchmarkAdapter({ ...expected, name: "exiting", sessionsRoot: path.join(root, "sessions"), model: { id: `exit-known-${exitCode}`, base_url: "https://relay.invalid/v1", model_name: "raw-model", api_key: "dummy" } });
+      const interrupted = await exiting.run(task, { task, signal: AbortSignal.timeout(15000), attempt: 1, phase: "implement", tokenBudgetRemaining: 100, onPhase() {}, onEvent() {} });
+      assert.equal(interrupted?.terminalOutcome, "stopped");
+      assert.equal(interrupted?.usage?.inputTokens, 7);
+      assert.equal(interrupted?.usage?.outputTokens, 3);
+      assert.equal(interrupted?.usage?.complete, false);
+      assert.equal(interrupted?.requestAccounting?.requests, 1);
+    }
     const importedRuntime = path.join(root, "dist", "runtime.mjs");
     await fs.writeFile(importedRuntime, "export const version = 1;\n");
     await assert.rejects(assertBenchmarkCheckoutIdentity(expected), /build digest changed/u);
@@ -85,6 +106,33 @@ export const createProductionBenchmarkAdapter = ({ model, loopStrategy }) => ({
     await fs.writeFile(path.join(root, "src", "new-runtime.ts"), "export const added = true;\n", "utf8");
     const withUntrackedSource = await captureBenchmarkCheckoutIdentity(root, entry);
     assert.notEqual(withUntrackedSource.sourceDigest, withTrackedChange.sourceDigest);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("dsh identity includes generated modules and excludes dependency installation trees", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-dsh-identity-"));
+  try {
+    await exec("git", ["init"], { cwd: root });
+    await fs.mkdir(path.join(root, "apps", "cli", "lib"), { recursive: true });
+    await fs.mkdir(path.join(root, "packages", "runtime", "lib"), { recursive: true });
+    await fs.mkdir(path.join(root, "packages", "runtime", "node_modules"), { recursive: true });
+    await fs.writeFile(path.join(root, "package.json"), '{"type":"module"}\n');
+    await exec("git", ["add", "package.json"], { cwd: root });
+    await exec("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "-c", "core.hooksPath=", "commit", "--quiet", "-m", "fixture"], { cwd: root });
+    const entry = path.join(root, "apps", "cli", "lib", "bin.js");
+    const runtime = path.join(root, "packages", "runtime", "lib", "index.js");
+    const dependency = path.join(root, "packages", "runtime", "node_modules", "ignored.js");
+    await fs.writeFile(entry, "export {};\n");
+    await fs.writeFile(runtime, "export const value = 1;\n");
+    const initial = await captureBenchmarkCheckoutIdentity(root, entry);
+    await fs.writeFile(dependency, "export const ignored = true;\n");
+    assert.equal((await captureBenchmarkCheckoutIdentity(root, entry)).buildDigest, initial.buildDigest);
+    await fs.writeFile(runtime, "export const value = 2;\n");
+    assert.notEqual((await captureBenchmarkCheckoutIdentity(root, entry)).buildDigest, initial.buildDigest);
+    await fs.writeFile(entry, "export const entry = true;\n");
+    assert.notEqual((await captureBenchmarkCheckoutIdentity(root, entry)).buildDigest, initial.buildDigest);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

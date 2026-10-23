@@ -32,7 +32,7 @@ async function until(predicate: () => boolean): Promise<void> {
 }
 
 test("real stdio SDK preserves first-page output validation and hides required-task tools", async (t) => {
-  const runtime = runtimeFor(config({ type: "stdio", command: process.execPath, args: ["--import", "tsx", fixturePath, "--stdio", "tools"] }));
+  const runtime = runtimeFor(config({ type: "stdio", isolation: "host", command: process.execPath, args: ["--import", "tsx", fixturePath, "--stdio", "tools"] }));
   t.after(() => runtime.close());
   const snapshot = await runtime.ensureReady();
   assert.equal(snapshot.servers[0]?.state, "ready");
@@ -47,7 +47,7 @@ test("real stdio SDK preserves first-page output validation and hides required-t
 test("real stdio resource-only, prompt-only and instructions-only servers become ready", async (t) => {
   for (const mode of ["resources", "prompts", "instructions"] as const) {
     await t.test(mode, async () => {
-      const runtime = runtimeFor(config({ type: "stdio", command: process.execPath, args: ["--import", "tsx", fixturePath, "--stdio", mode] }));
+      const runtime = runtimeFor(config({ type: "stdio", isolation: "host", command: process.execPath, args: ["--import", "tsx", fixturePath, "--stdio", mode] }));
       try {
         const snapshot = await runtime.ensureReady();
         assert.equal(snapshot.servers[0]?.state, "ready");

@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/tj/commander.js",
+  "change": "f4bd4700021c7f0258834c803f354f06241518be",
+  "parent": "b51c0ea3d012ea165d7e50bb375f4db67b9d8e75",
+  "changeUrl": "https://github.com/tj/commander.js/commit/f4bd4700021c7f0258834c803f354f06241518be",
+  "license": "MIT",
+  "patchSha256": "97eff015170df0eb3721aa4d7d92594f57758de940ef5e14f4c0967ea7a858a3",
+  "category": "cross_module_refactor"
+}

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawnOwned as spawn } from "./owned-process.js";
 import {
   BashOutputPreviewBuffer,
   type BashOutputPreview,
@@ -22,6 +22,7 @@ export const DEFAULT_MODEL_BASH_TIMEOUT_MS = 120_000;
 
 export interface BashResult {
   cleanupFailed?: boolean;
+  cleanupStatus?: import('./owned-process.js').ProcessState;
   truncated?: boolean;
   cancelled?: boolean;
   timedOut?: boolean;
@@ -109,6 +110,7 @@ export function serializeBashResult(result: BashResult): string {
     ...(result.truncated ? { truncated: true } : {}),
     ...(result.timedOut ? { timed_out: true } : {}),
     ...(result.cleanupFailed ? { cleanup_failed: true } : {}),
+    ...(result.cleanupStatus ? { cleanup_status: result.cleanupStatus } : {}),
     ...(result.error === undefined ? {} : { error: result.error }),
     ...commandFailureFeedback(result),
   });
@@ -212,6 +214,7 @@ async function runSandboxBash(
     cancelled: result.cancelled,
     ...(result.timedOut ? { timedOut: true } : {}),
     ...(result.cleanupFailed ? { cleanupFailed: true } : {}),
+    ...(result.cleanupStatus ? { cleanupStatus: result.cleanupStatus } : {}),
     ...(result.error ? { error: result.error } : {}),
   };
 }
@@ -292,6 +295,7 @@ export async function runBash(
     truncated: stdout.truncated || stderr.truncated, cancelled: result.cancelled,
     ...(result.timedOut ? { timedOut: true } : {}),
     ...(result.cleanupError ? { cleanupFailed: true } : {}),
+    ...(result.cleanupStatus ? { cleanupStatus: result.cleanupStatus } : {}),
     ...(error ? { error } : {}),
   };
 }

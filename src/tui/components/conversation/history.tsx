@@ -1,3 +1,4 @@
+import {uiText,translateHostText} from '../../../localization/messages.js';
 import { Box, Static, Text } from "ink";
 import React from "react";
 import type { TimelineEntry } from "../../app/types.js";
@@ -42,14 +43,14 @@ function HistoryLine({
         ? TUI_COLORS.error
         : TUI_COLORS.warning;
     const commandLabel = entry.command?.status === "cancelled"
-      ? entry.command.source === "user" ? "You cancelled" : "Cancelled"
+      ? entry.command.source === "user" ? uiText('mdaae96ed72c7') : "Cancelled"
       : entry.command?.status === "failed"
-        ? entry.command.source === "user" ? "Your command failed" : "Failed"
-        : entry.command?.source === "user" ? "You ran" : "Ran";
+        ? entry.command.source === "user" ? uiText('m14dd00d9193c') : "Failed"
+        : entry.command?.source === "user" ? uiText('mdce4274ce377') : "Ran";
     return (
       <Box marginBottom={1} paddingLeft={1} flexDirection="column">
         {entry.command ? <>
-          <Text bold color={statusColor}>• {commandLabel} <Text color={TUI_COLORS.secondary}>{entry.command.shell}</Text> <Text dimColor>({(entry.command.durationMs / 1000).toFixed(1)}s{entry.command.truncated ? " · truncated" : ""})</Text></Text>
+          <Text bold color={statusColor}>• {commandLabel} <Text color={TUI_COLORS.secondary}>{entry.command.shell}</Text> <Text dimColor>({(entry.command.durationMs / 1000).toFixed(1)}s{entry.command.truncated ? uiText('m533b274522ec') : ""})</Text></Text>
           <HighlightedCommand command={entry.command.command} shell={entry.command.shell} />
         </> : null}
         {entry.text ? <Box marginTop={entry.command ? 1 : 0}><Text dimColor>└ </Text><RichOutput text={entry.text} maximumLines={{ head: 2, tail: 4 }} /></Box> : null}
@@ -64,7 +65,7 @@ function HistoryLine({
     error: { marker: "×", color: "red" },
   } as const;
   const style = styles[entry.kind];
-  const text = entry.kind === "assistant" ? entry.text : translateLegacyUiText(entry.text);
+  const text = entry.kind === "system" || entry.kind === "error" || entry.kind === "tool" ? translateHostText(translateLegacyUiText(entry.text)) : entry.text;
 
   return (
     <Box marginBottom={1} paddingLeft={1}>

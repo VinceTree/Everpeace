@@ -57,6 +57,7 @@ function resolveAll(candidates: readonly ToolResultHistoryCandidate[]): ToolResu
 }
 
 const io = {
+  async requestUserInput(request: Parameters<NonNullable<import('../../../src/agent/react-agent.js').AgentIO['requestUserInput']>>[0]) { return { sensitive_access: request.questions[0]!.options[1]!.label }; },
   async confirmBash() { return false; },
   async runBash() { return { stdout: "", stderr: "", exitCode: 0, signal: null }; },
   writeAssistant() {},
@@ -460,6 +461,7 @@ test("pruned context survives restart while the omitted diagnostic remains retri
     let verificationRuns = 0;
     const workflow = new CodingWorkflowRuntime({
       workspacePath: workspace,
+      async confirmVerificationBasis() { return true; },
       onState: (state) => store.setWorkflow(session.id, state),
     });
     const executeVerification = async () => {

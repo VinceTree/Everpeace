@@ -1,3 +1,4 @@
+import {uiText} from '../../localization/messages.js';
 import type { TimelineEntry } from "../app/types.js";
 
 // These values mirror Codex's terminal-specific resize-reflow row caps.
@@ -61,7 +62,7 @@ function terminalRows(text: string, columns: number): number {
 function visibleOutputText(text: string): string {
   const lines = text.split("\n");
   if (lines.length <= 6) return text;
-  return [...lines.slice(0, 2), "output omitted", ...lines.slice(-4)].join("\n");
+  return [...lines.slice(0, 2), uiText('meaf49b52b6b0'), ...lines.slice(-4)].join("\n");
 }
 
 export function estimatedTimelineEntryRows(entry: TimelineEntry, columns: number): number {

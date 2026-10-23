@@ -105,8 +105,8 @@ export class CodingTaskRunner {
       while (true) {
       input.signal?.throwIfAborted();
       if (nextMode === "default" && !workflowStarted) {
-        if (taskSource === "session_resume") await this.#workflow.resumeTurn();
-        else await this.#workflow.beginTurn({ mode: "default", source: taskSource });
+        if (taskSource === "session_resume") await this.#workflow.resumeTurn(input.signal);
+        else await this.#workflow.beginTurn({ mode: "default", source: taskSource, ...(input.signal ? { signal: input.signal } : {}) });
         workflowStarted = true;
       } else if (nextMode === "default" && this.#workflow.state.phase === "diagnose") {
         const evaluationStop = this.#host.evaluationRepairDecision?.(this.#workflow.state);
@@ -193,6 +193,7 @@ export class CodingTaskRunner {
       const outcome = lastWorkflowResult.state.result;
       input.signal?.throwIfAborted();
       if (this.#agent.finishTeamVerification) await this.#agent.finishTeamVerification(outcome === "verified");
+      input.signal?.throwIfAborted();
       await this.#agent.finalizePendingGoalCompletion?.(outcome === "verified" || outcome === "no_changes");
       input.signal?.throwIfAborted();
       await this.#agent.finishMemoryTurn?.(

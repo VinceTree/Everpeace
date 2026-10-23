@@ -1,3 +1,5 @@
+import {currentLanguage} from '../../../localization/language.js';
+import {uiText} from '../../../localization/messages.js';
 import { Box, Text, useInput, useWindowSize } from "ink";
 import React, { useEffect, useMemo, useState } from "react";
 import type { ContextInspectionSnapshot } from "../../../agent/context-inspection.js";
@@ -9,46 +11,46 @@ export function formatContextInspection(snapshot: ContextInspectionSnapshot): st
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([kind, count]) => `- ${kind}: ${count}`);
   return [
-    `Model: ${snapshot.model}`,
-    `Provider: ${snapshot.provider}`,
-    `Runtime agent: ${snapshot.runtimeIdentity.agent}`,
-    `Protocol: ${snapshot.runtimeIdentity.protocol}`,
-    `Identity source: ${snapshot.runtimeIdentity.source}`,
-    `Workspace (cwd): ${snapshot.runtimeIdentity.workspacePath}`,
-    `Submitted: ${snapshot.submittedAt}`,
-    `Context revision: ${snapshot.contextRevision}`,
-    `Request fingerprint: ${snapshot.requestFingerprint.slice(0, 16)}…`,
-    `Estimated input: ${snapshot.estimatedInputTokens.toLocaleString("en-US")} tokens (${snapshot.estimateSource.replace(/_/gu, " ")})`,
-    `Output reserve: ${snapshot.outputReserveTokens.toLocaleString("en-US")} tokens`,
-    `Approximate component sizes: stable instructions ${snapshot.componentBytes.stableInstructions.toLocaleString("en-US")} bytes; dynamic instructions ${snapshot.componentBytes.dynamicInstructions.toLocaleString("en-US")} bytes (non-additive)`,
+    uiText('ma2de6a074eea', {p0: snapshot.model}),
+    uiText('m9864040d1a84', {p0: snapshot.provider}),
+    uiText('mb499fdbc8b58', {p0: snapshot.runtimeIdentity.agent}),
+    uiText('m6973763a8a88', {p0: snapshot.runtimeIdentity.protocol}),
+    uiText('m20c6f53244e8', {p0: snapshot.runtimeIdentity.source}),
+    uiText('m295e6807dafc', {p0: snapshot.runtimeIdentity.workspacePath}),
+    uiText('m6c305812750e', {p0: snapshot.submittedAt}),
+    uiText('m5682cd46ed94', {p0: snapshot.contextRevision}),
+    uiText('medd68a55dde1', {p0: snapshot.requestFingerprint.slice(0, 16)}),
+    uiText('m981fc6f18e93', {p0: snapshot.estimatedInputTokens.toLocaleString("en-US"), p1: snapshot.estimateSource.replace(/_/gu, " ")}),
+    uiText('mcac046538868', {p0: snapshot.outputReserveTokens.toLocaleString("en-US")}),
+    uiText('mfcae7ec687fb', {p0: snapshot.componentBytes.stableInstructions.toLocaleString("en-US"), p1: snapshot.componentBytes.dynamicInstructions.toLocaleString("en-US")}),
     "",
-    "Conversation items",
-    ...(counts.length ? counts : ["- none"]),
-    ...Object.entries(snapshot.opaqueItemBytes).map(([kind, bytes]) => `- ${kind} opaque size: ${bytes.toLocaleString("en-US")} bytes`),
+    uiText('m852070ddc6d7'),
+    ...(counts.length ? counts : [uiText('md789759bdc2f')]),
+    ...Object.entries(snapshot.opaqueItemBytes).map(([kind, bytes]) => uiText('mf89bb08fe61b', {p0: kind, p1: bytes.toLocaleString("en-US")})),
     "",
-    "Project rules",
+    uiText('m89c6c79f6a99'),
     ...(snapshot.projectRules.length
-      ? snapshot.projectRules.map((rule) => `- ${rule.path} · scope ${rule.scope} · ${rule.revision.slice(0, 12)}…`)
-      : ["- none"]),
-    ...snapshot.projectRuleDiagnostics.map((diagnostic) => `- warning: ${diagnostic.path} · ${diagnostic.reason}`),
+      ? snapshot.projectRules.map((rule) => uiText('m84c3eaaad62e', {p0: rule.path, p1: rule.scope, p2: rule.revision.slice(0, 12)}))
+      : [uiText('md789759bdc2f')]),
+    ...snapshot.projectRuleDiagnostics.map((diagnostic) => uiText('meb453a817374', {p0: diagnostic.path, p1: diagnostic.reason})),
     "",
-    `Skills advertised: ${snapshot.skills.advertised.join(", ") || "none"}`,
-    `Skills explicitly included: ${snapshot.skills.explicitlyIncluded.join(", ") || "none"}`,
-    `Memory revision: ${snapshot.memory.revision ?? "none"}`,
-    `Memory entries: ${snapshot.memory.entryIds.join(", ") || "none"}`,
-    `MCP servers: ${snapshot.mcp.servers.join(", ") || "none"}`,
-    `MCP tools: ${snapshot.mcp.tools.join(", ") || "none"}`,
-    `Advertised tools (${snapshot.advertisedTools.length}): ${snapshot.advertisedTools.join(", ") || "none"}`,
+    uiText('m33d52adddcad', {p0: snapshot.skills.advertised.join(", ") || "none"}),
+    uiText('mdf2c7e9d01fc', {p0: snapshot.skills.explicitlyIncluded.join(", ") || "none"}),
+    uiText('mc1bd8a60b0cb', {p0: snapshot.memory.revision ?? "none"}),
+    uiText('m9c1833289560', {p0: snapshot.memory.entryIds.join(", ") || "none"}),
+    uiText('mc8a1e601c9e2', {p0: snapshot.mcp.servers.join(", ") || "none"}),
+    uiText('m6ca6a4ec098f', {p0: snapshot.mcp.tools.join(", ") || "none"}),
+    uiText('me4d0af447ab3', {p0: snapshot.advertisedTools.length, p1: snapshot.advertisedTools.join(", ") || "none"}),
     "",
-    "Attached file excerpts",
+    uiText('m2bb2094515e9'),
     ...(snapshot.attachments.length
-      ? snapshot.attachments.map((attachment) => `- ${attachment.path}:${attachment.startLine}-${attachment.endLine} / ${attachment.totalLines}${attachment.truncated ? " · excerpt" : ""}`)
-      : ["- none"]),
+      ? snapshot.attachments.map((attachment) => `- ${attachment.path}:${attachment.startLine}-${attachment.endLine} / ${attachment.totalLines}${attachment.truncated ? uiText('mf0f35ac23ef5') : ""}`)
+      : [uiText('md789759bdc2f')]),
     "",
-    "Redacted previews",
+    uiText('m6512139e20a7'),
     ...(snapshot.previews.length
-      ? snapshot.previews.flatMap((preview) => [`[${preview.kind}] ${preview.label}`, preview.text || "(empty)", ""])
-      : ["No previewable sources were included."]),
+      ? snapshot.previews.flatMap((preview) => [`[${preview.kind}] ${preview.label}`, preview.text || uiText('md29a0939bcb5'), ""])
+      : [uiText('ma4b88877200f')]),
   ].join("\n").trimEnd();
 }
 
@@ -66,8 +68,8 @@ export function ContextSurface({
   const text = useMemo(() => snapshot
     ? formatContextInspection(snapshot)
     : getSnapshot
-      ? "No coding request has been submitted by the active agent in this process yet. Resumed Session history is not reconstructed as an exact request."
-      : "Context inspection is unavailable for the active agent integration.", [getSnapshot, snapshot]);
+      ? uiText('m4ef3e2975ad1')
+      : uiText('m6d2008068cc0'), [getSnapshot, snapshot,currentLanguage()]);
   const lines = text.split("\n");
   const maximumOffset = Math.max(0, lines.length - page);
   useEffect(() => setOffset((current) => Math.min(current, maximumOffset)), [maximumOffset]);
@@ -83,11 +85,11 @@ export function ContextSurface({
       setOffset(0);
     }
   });
-  return <CommandSurface title="/context · Last submitted coding request" onBack={onBack}>
+  return <CommandSurface title={uiText('m3484e5bf7b89')} onBack={onBack}>
     <Box flexDirection="column">
-      <Text dimColor>{lines.length === 0 ? "0 lines" : `${offset + 1}-${Math.min(lines.length, offset + page)} / ${lines.length}`}</Text>
+      <Text dimColor>{lines.length === 0 ? uiText('mcfc5bfc234ca') : `${offset + 1}-${Math.min(lines.length, offset + page)} / ${lines.length}`}</Text>
       <RichOutput text={text} range={{ start: offset, count: page }} />
-      <Text dimColor>↑↓ scroll · PgUp/PgDn page · Home/End · R refresh · Esc return</Text>
+      <Text dimColor>{uiText('m1ad4e69a7031')}</Text>
     </Box>
   </CommandSurface>;
 }

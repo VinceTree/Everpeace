@@ -41,6 +41,10 @@ import {
 import { textWidth } from "../../../src/tui/rendering/text-width.js";
 import { cloneTaskProgress, type TaskProgress } from "../../../src/workflow/task-progress.js";
 import { normalizePlanReview } from "../../../src/plan/runtime.js";
+import {setUiLanguage} from "../../../src/localization/language.js";
+import {uiText} from "../../../src/localization/messages.js";
+import {defaultPermissions,permissionPolicyRevision} from "../../../src/permissions/policy.js";
+import {ProcessCleanupError} from "../../../src/tools/process-completion.js";
 
 const renderedViews = new Set<ReturnType<typeof renderInk>>();
 
@@ -51,6 +55,7 @@ function render(tree: Parameters<typeof renderInk>[0]): ReturnType<typeof render
 }
 
 afterEach(() => {
+  setUiLanguage('en');
   for (const view of renderedViews) {
     view.cleanup();
     // The testing library retains its renderers after unmount; release captured
@@ -73,7 +78,8 @@ test("privacy confirmation defaults to cancel and perf remains a local command",
     await tick(); view.stdin.write("/privacy retention 90"); await tick(); view.stdin.write("\r");
     await waitFor(() => (view.lastFrame() ?? "").includes("Set retention to 90 days"));
     await new Promise<void>((resolve) => setTimeout(resolve, 30));
-    view.stdin.write("\r"); await tick(); assert.equal((await privacy.settings.read()).retentionDays, null);
+    view.stdin.write("\r"); await tick(); assert.equal((await privacy.settings.read()).retentionDays, 30);
+    assert.equal((await privacy.settings.read()).configured, false);
     await waitFor(() => !(view.lastFrame() ?? "").includes("Set retention to 90 days"));
     view.stdin.write("/privacy retention 90"); await tick(); view.stdin.write("\r");
     await waitFor(() => (view.lastFrame() ?? "").includes("Set retention to 90 days"));
@@ -439,6 +445,52 @@ function createFixture(options?: {
 }
 
 const planModel: RegisteredModel = { id: "plan-test", model_name: "offline", base_url: "https://example.com/v1", api_key: "fixture" };
+
+test('language switching preserves pending approval, request bytes, revision and draft',async()=>{
+ let decision:boolean|undefined;
+ const command='echo user_payload_中文';
+ const fixture=createFixture({initial:[planModel],createAgent:(_model,io)=>({async runTurn(_text,signal){decision=await io.confirmBash?.(command,signal);return {};}})});
+ const revision=permissionPolicyRevision(defaultPermissions());
+ const view=render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{available:[planModel],missing:[]}} onReplayOutput={update=>update()}/>);
+ try{
+  await tick();view.stdin.write('Request permission');await tick();view.stdin.write('\r');
+  await waitFor(()=> (view.lastFrame()??'').includes(command));
+  view.stdin.write('draft_组合é🙂');await tick();
+  setUiLanguage('zh-CN');
+  await waitFor(()=> (view.lastFrame()??'').includes(uiText('task.blocker',{p0:'等待审批'}))||(view.lastFrame()??'').includes('审批'));
+  assert.equal(decision,undefined);assert.equal(permissionPolicyRevision(defaultPermissions()),revision);
+  assert.ok((view.lastFrame()??'').includes(command));assert.ok((view.lastFrame()??'').includes('draft_组合é🙂'));
+  setUiLanguage('en');await tick();assert.equal(decision,undefined);assert.ok((view.lastFrame()??'').includes('draft_组合é🙂'));
+  view.stdin.write('\u0003');await waitFor(()=>decision===false);
+ }finally{view.unmount();setUiLanguage('en');}
+});
+
+test('cleanup failure remains visible and blocks another task',async()=>{
+ let turns=0;
+ const fixture=createFixture({initial:[planModel],createAgent:()=>({async runTurn(){turns++;throw new ProcessCleanupError('fixture unresolved tree');}})});
+ const view=render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{available:[planModel],missing:[]}} onReplayOutput={update=>update()}/>);
+ try{
+  await tick();view.stdin.write('first');await tick();view.stdin.write('\r');
+  await waitFor(()=> (view.lastFrame()??'').includes(uiText('task.cleanupFailed')));
+  assert.match(view.lastFrame()??'',/inspect_cleanup|cleanup|Cleanup/);
+  view.stdin.write('second');await tick();view.stdin.write('\r');await tick();assert.equal(turns,1);
+  assert.ok((view.lastFrame()??'').includes(uiText('task.cleanupFailed')));
+ }finally{view.unmount();}
+});
+
+test('late cleanup failure after clearing a Session blocks admission without publishing old output',async()=>{
+ let rejectTurn:((error:Error)=>void)|undefined,turns=0;
+ const fixture=createFixture({initial:[planModel],createAgent:()=>({async runTurn(){turns++;await new Promise<void>((_resolve,reject)=>{rejectTurn=reject;});return {};}})});
+ const view=render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{available:[planModel],missing:[]}} onReplayOutput={update=>update()}/>);
+ try{
+  await tick();view.stdin.write('old task');await tick();view.stdin.write('\r');await waitFor(()=>rejectTurn!==undefined);
+  view.stdin.write('/clear');await tick();view.stdin.write('\r');await tick();
+  rejectTurn!(new ProcessCleanupError('old task private detail'));
+  await waitFor(()=> (view.lastFrame()??'').includes('inspect_cleanup'));
+  assert.doesNotMatch(view.lastFrame()??'',/old task private detail/);
+  view.stdin.write('new task');await tick();view.stdin.write('\r');await tick();assert.equal(turns,1);
+ }finally{view.unmount();}
+});
 const approvedBody = "Inspect src/value.ts\n\nKeep the user's changes.\nUse exact replacement and run all checks.\n\nEND_OF_APPROVED_PLAN";
 
 function createPlanFixture(options: { endTask?: () => Promise<void>; coding?: (signal?: AbortSignal) => Promise<void> } = {}) {
@@ -1126,6 +1178,7 @@ test("active turns show provider-aware English sampling and tool phases", async 
   await tick();
   view.stdin.write("\r");
   await waitFor(() => /Waiting for DeepSeek \(\d+s • ctrl\+c to interrupt\)/u.test(view.lastFrame() ?? ""));
+  await waitFor(() => typeof continueToTools === "function");
   continueToTools?.();
   await waitFor(() => /Working \(\d+s • ctrl\+c to interrupt\)/u.test(view.lastFrame() ?? ""));
   finishTurn?.();
@@ -1173,7 +1226,8 @@ test("running turns keep a guidance composer and drain queued corrections", asyn
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("1 guidance message pending"));
   assert.match(view.lastFrame() ?? "", /use the safer approach/);
-  releaseFirst?.();
+  await waitFor(() => releaseFirst !== undefined);
+  releaseFirst!();
   await waitFor(() => (view.lastFrame() ?? "").includes("done: use the safer approach"));
   assert.deepEqual(calls, ["start task", "use the safer approach"]);
   view.unmount();
@@ -1217,7 +1271,8 @@ test("running composer sends guidance to agents with live steering support", asy
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("1 guidance message pending"));
   assert.deepEqual(corrections, ["avoid the unsafe command"]);
-  release?.();
+  await waitFor(() => release !== undefined);
+  release!();
   await waitFor(() => (view.lastFrame() ?? "").includes("applied avoid the unsafe command"));
   view.unmount();
 });
@@ -3009,7 +3064,7 @@ test("/resume restores transcript, workspace, context, and continues the same se
 
   view.stdin.write("\u001b[A");
   await waitFor(() => !(view.lastFrame() ?? "").includes("Ask Everpeace"));
-  assert.match((view.lastFrame() ?? "").split("\n").filter((line) => line.trimStart().startsWith("›")).at(-1) ?? "", /before restart/);
+  assert.doesNotMatch((view.lastFrame() ?? "").split("\n").filter((line) => line.trimStart().startsWith("›")).at(-1) ?? "", /before restart/);
   view.stdin.write("\u001b[B");
   await waitFor(() => (view.lastFrame() ?? "").includes("Ask Everpeace"));
   view.stdin.write("continue now");

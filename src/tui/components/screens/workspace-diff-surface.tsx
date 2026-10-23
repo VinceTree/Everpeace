@@ -1,3 +1,4 @@
+import {uiText} from '../../../localization/messages.js';
 import { Select, Spinner } from "@inkjs/ui";
 import { Box, Text, useInput, useWindowSize } from "ink";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -99,9 +100,9 @@ export function WorkspaceDiffSurface({
   });
 
   const lastResult = workflow?.result
-    ? `Last task result: ${workflow.result} · ${new Date(workflow.updated_at).toLocaleString("en-US")}`
-    : "Last task result: unavailable";
-  return <CommandSurface title="/diff · Workspace changes" onBack={() => {
+    ? uiText('m0fa017a40623', {p0: workflow.result, p1: new Date(workflow.updated_at).toLocaleString("en-US")})
+    : uiText('m4f4554ccb95c');
+  return <CommandSurface title={uiText('m1f88c1f77c26')} onBack={() => {
     if (detail) {
       controller.current?.abort();
       setDetail(undefined);
@@ -111,15 +112,15 @@ export function WorkspaceDiffSurface({
   }}>
     <Text dimColor>{lastResult}</Text>
     {error ? <Text color="red">{error}</Text> : null}
-    {loading ? <Spinner label={detail ? "Refreshing change detail" : "Reading workspace changes"} /> : null}
+    {loading ? <Spinner label={detail ? uiText('m6a9c07f25dc1') : uiText('m8345f7b39929')} /> : null}
     {detail ? <Box flexDirection="column">
       <Text bold>{detail.entry.kind.toUpperCase()} · {detail.entry.path}</Text>
-      <Text dimColor>{lines.length === 0 ? "0 lines" : `${offset + 1}-${Math.min(lines.length, offset + page)} / ${lines.length}`}{detail.truncated ? " · truncated" : ""}</Text>
+      <Text dimColor>{lines.length === 0 ? uiText('mcfc5bfc234ca') : `${offset + 1}-${Math.min(lines.length, offset + page)} / ${lines.length}`}{detail.truncated ? uiText('m533b274522ec') : ""}</Text>
       {detail.warning ? <Text color="yellow">{detail.warning}</Text> : null}
       <RichOutput text={detail.text} range={{ start: offset, count: page }} />
-      <Text dimColor>↑↓ scroll · PgUp/PgDn page · Home/End · R refresh · Esc file list</Text>
+      <Text dimColor>{uiText('m7f413317800b')}</Text>
     </Box> : index.entries.length > 0 ? <>
-      <Text dimColor>{index.entries.length} entries · captured {new Date(index.capturedAt).toLocaleTimeString("en-US")}</Text>
+      <Text dimColor>{index.entries.length}{uiText('m26af5089068b')}{new Date(index.capturedAt).toLocaleTimeString("en-US")}</Text>
       <Select
         visibleOptionCount={Math.min(8, index.entries.length)}
         options={index.entries.map((entry) => ({
@@ -131,10 +132,10 @@ export function WorkspaceDiffSurface({
           if (entry) load(entry);
         }}
       />
-      <Text dimColor>↑↓ select · Enter inspect · R refresh · Esc return</Text>
+      <Text dimColor>{uiText('m2edb2d3bc22f')}</Text>
     </> : <>
-      <Text>No staged, unstaged, or untracked changes.</Text>
-      <Text dimColor>R refresh · Esc return</Text>
+      <Text>{uiText('m48d79755f28b')}</Text>
+      <Text dimColor>{uiText('m67dd15aa52dc')}</Text>
     </>}
   </CommandSurface>;
 }

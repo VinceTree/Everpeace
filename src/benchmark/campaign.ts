@@ -7,6 +7,7 @@ export interface BenchmarkCampaignPlanItem {
   harness: string;
   taskId: string;
   repetition: number;
+  pairId?: string;
 }
 
 export interface BenchmarkCampaignResult {
@@ -18,6 +19,7 @@ export interface BenchmarkCampaignResult {
   tokenUsage: number;
   statisticsComplete: boolean;
   stopReason?: string;
+  stopCode?: BenchmarkSkippedRun["reason"];
 }
 
 export interface BenchmarkCampaignOptions {
@@ -31,6 +33,8 @@ export interface BenchmarkCampaignOptions {
   liveApi: true;
   signal?: AbortSignal;
   artifactSink?: BenchmarkArtifactSink;
+  /** Persist each settled run before another run may start. */
+  onResult?(result: BenchmarkRunResult): Promise<void>;
   prepareRun(task: BenchmarkTask, harness: string, repetition: number): Promise<BenchmarkTask>;
 }
 
@@ -70,7 +74,7 @@ export function createBenchmarkCampaignPlan(
     if (harnesses.length !== 2) throw new Error("Paired campaigns require exactly two harnesses");
     const pairs = Array.from({ length: values.length / 2 }, (_, index) => values.slice(index * 2, index * 2 + 2));
     for (let index = pairs.length - 1; index > 0; index--) { const swap = Math.floor(next() * (index + 1)); [pairs[index], pairs[swap]] = [pairs[swap]!, pairs[index]!]; }
-    return pairs.flatMap((pair, index) => index % 2 ? [...pair].reverse() : pair).map((value, index) => ({ index, ...value }));
+    return pairs.flatMap((pair, index) => (index % 2 ? [...pair].reverse() : pair).map(value => ({ ...value, pairId: `${value.taskId}:${value.repetition}` }))).map((value, index) => ({ index, ...value }));
   }
   for (let index = values.length - 1; index > 0; index -= 1) {
     const swap = Math.floor(next() * (index + 1));
@@ -87,20 +91,25 @@ export async function runBenchmarkCampaign(
 ): Promise<BenchmarkCampaignResult> {
   if (options.taskTokenBudget !== null) positiveInteger(options.taskTokenBudget, "taskTokenBudget");
   if (options.campaignTokenBudget !== null) positiveInteger(options.campaignTokenBudget, "campaignTokenBudget");
+  if (options.ordering === "paired" && (options.taskTokenBudget === null) !== (options.campaignTokenBudget === null)) throw new Error("Paired budgets must both be numeric or both explicitly null");
   const plan = createBenchmarkCampaignPlan(tasks, harnesses, options.repetitions, options.seed, options.ordering);
   const taskById = new Map(tasks.map((task) => [task.id, task]));
   const harnessByName = new Map(harnesses.map((adapter) => [adapter.name, adapter]));
   const results: BenchmarkRunResult[] = [];
   let tokens = 0;
   let stopReason: string | undefined;
+  let stopCode: BenchmarkSkippedRun["reason"] | undefined;
   for (const item of plan) {
-    if (options.signal?.aborted) { stopReason = "Campaign was cancelled"; break; }
+    if (options.signal?.aborted) { stopReason = "Campaign was cancelled"; stopCode = "cancelled"; break; }
     const remaining = options.campaignTokenBudget === null ? null : options.campaignTokenBudget - tokens;
-    if (remaining !== null && remaining <= 0) { stopReason = "Campaign token budget was exhausted"; break; }
+    const pairedBudget = options.ordering === "paired" && options.taskTokenBudget !== null;
+    const required = pairedBudget ? options.taskTokenBudget! * (item.index % 2 === 0 ? 2 : 1) : 1;
+    if (remaining !== null && remaining < required) { stopReason = "Campaign token budget cannot fund the next complete run or pair"; stopCode = "budget_exhausted"; break; }
     const task = taskById.get(item.taskId)!;
     const adapter = harnessByName.get(item.harness)!;
-    const runBudget = remaining === null ? options.taskTokenBudget : options.taskTokenBudget === null ? remaining : Math.min(remaining, options.taskTokenBudget);
-    const suite = await runBenchmarkSuite([task], adapter, {
+    const runBudget = pairedBudget ? options.taskTokenBudget : remaining === null ? options.taskTokenBudget : options.taskTokenBudget === null ? remaining : Math.min(remaining, options.taskTokenBudget);
+    let suite;
+    try { suite = await runBenchmarkSuite([task], adapter, {
       liveApi: true,
       totalTokenBudget: runBudget,
       taskTokenBudget: runBudget,
@@ -108,21 +117,29 @@ export async function runBenchmarkCampaign(
       ...(options.signal ? { signal: options.signal } : {}),
       ...(options.artifactSink ? { artifactSink: options.artifactSink } : {}),
       prepareRun: (value) => options.prepareRun(value, item.harness, item.repetition),
-    });
+    }); } catch {
+      stopCode = "runtime_error";
+      stopReason = "Campaign runner failed; retain settled records and pending runs";
+      break;
+    }
     const result = suite.results[0];
     if (!result) throw new Error(`Campaign item ${item.index} produced no result`);
-    const repeated = { ...result, repetition: item.repetition };
+    const repeated = { ...result, repetition: item.repetition, effectiveTokenBudget: runBudget, ...(item.pairId ? { pairId: item.pairId } : {}) };
     results.push(repeated);
+    tokens += (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
+    try { await options.onResult?.(repeated); } catch {
+      stopCode = "storage_failed"; stopReason = "Campaign result storage failed"; break;
+    }
+    if (result.storageFailed) { stopCode = "storage_failed"; stopReason = "Campaign artifact storage failed"; break; }
     if (result.cleanupFailed) {
-      tokens += (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
+      stopCode = "cleanup_failed";
       stopReason = "Campaign stopped because process cleanup failed";
       break;
     }
     if (result.preparationError) continue;
-    tokens += (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
-    if (result.isolationFailed) { stopReason = "Campaign stopped because native isolation failed"; break; }
+    if (result.isolationFailed) { stopReason = "Campaign stopped because native isolation failed"; stopCode = "isolation_failed"; break; }
     if (result.usage === undefined || result.usage.complete !== true) {
-      if (options.campaignTokenBudget === null && options.taskTokenBudget === null) continue;
+      stopCode = "usage_unknown";
       stopReason = "Campaign stopped because a model request had unknown usage";
       break;
     }
@@ -134,11 +151,7 @@ export async function runBenchmarkCampaign(
       adapter: item.harness,
       taskId: item.taskId,
       repetition: item.repetition,
-      reason: stopReason?.includes("cleanup") ? "cleanup_failed"
-        : stopReason?.includes("isolation") ? "isolation_failed"
-        : stopReason?.includes("unknown") ? "usage_unknown"
-        : stopReason?.includes("cancel") ? "cancelled"
-          : "budget_exhausted",
+      reason: stopCode ?? "runtime_error",
     }));
   return {
     campaignId: options.campaignId,
@@ -147,7 +160,8 @@ export async function runBenchmarkCampaign(
     results,
     skipped,
     tokenUsage: tokens,
-    statisticsComplete: results.length === plan.length && results.every((result) => result.usage?.complete === true && !result.cleanupFailed && !result.isolationFailed),
+    statisticsComplete: !stopCode && !options.signal?.aborted && results.length === plan.length && results.every((result) => result.usage?.complete === true && !result.preparationError && !result.cleanupFailed && !result.isolationFailed && !result.storageFailed),
     ...(stopReason ? { stopReason } : {}),
+    ...(stopCode ? { stopCode } : {}),
   };
 }

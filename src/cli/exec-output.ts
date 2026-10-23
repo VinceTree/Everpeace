@@ -1,4 +1,5 @@
 import type { TeamEvent } from "../team/types.js";
+import { isExecErrorCode, type ExecErrorCode } from "../exec/errors.js";
 import { stripVTControlCharacters } from "node:util";
 import { redactSecretsPreservingLayout } from "../util/redact-secrets.js";
 import { isVerificationEvidence } from "../workflow/verification-evidence.js";
@@ -85,6 +86,7 @@ export interface ExecJsonlUsage {
 }
 
 export interface ExecRunFinishedEvent {
+  errorCode?: ExecErrorCode;
   type: "run_finished";
   /** Absent only when startup failed before a Session could be created. */
   sessionId?: string;
@@ -244,6 +246,7 @@ function payload(event: ExecJsonlEvent, truncation: PayloadTruncation): Record<s
         ...(event.sessionId === undefined ? {} : { session_id: identifier(event.sessionId) }),
         status: event.status,
         usage_complete: event.usageComplete,
+        ...(isExecErrorCode(event.errorCode) ? { error_code: event.errorCode } : {}),
         ...(event.stopReason === undefined ? {} : { stop_reason: identifier(event.stopReason) }),
         ...(event.workflowResult === undefined ? {} : { workflow_result: event.workflowResult }),
         ...(usage === undefined ? {} : { usage }),

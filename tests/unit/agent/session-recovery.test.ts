@@ -17,6 +17,7 @@ const usage = { input_tokens: 5, output_tokens: 2, total_tokens: 7 };
 const call = (id: string, name: string, args: unknown): ToolCall => ({ type: "function_call", call_id: id, name, arguments: JSON.stringify(args) });
 const answer = { id: "done", output_text: "done", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "done" }] }], usage };
 const io: AgentIO = {
+  async requestUserInput(request) { return { sensitive_access: request.questions[0]!.options[1]!.label }; },
   confirmBash: async () => true,
   runBash: async () => ({ stdout: "", stderr: "", exitCode: 0, signal: null }),
   writeAssistant() {},

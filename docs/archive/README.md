@@ -1,5 +1,11 @@
 # 历史归档
 
+- [核心取消与恢复交接](HANDOFF-2026-10-24-core-recovery.md)：异步验证取消、独立资源收尾和持久验证债务的交付记录，不替代当前性能轮验证。
+
+- [构建与 MCP 收尾优化交接](HANDOFF-2026-10-23-build-mcp.md)：构建／检查脚本、隔离 fixture 和 MCP 未启动关闭修复的交付记录，不替代当前轮验证。
+
+- [可靠性与 Benchmark 交接](HANDOFF-2026-10-13-reliability-benchmark.md)：有界清理、持久编辑恢复和离线评测准备的历史验证，不代表当前工作树状态或本轮授权。
+
 - [安全、诊断与评测补丁交接](HANDOFF-2026-10-11-security-diagnostics.md)：问题 11–20 的既有交付与旧候选收据，不替代当前候选证据。
 
 - [分发与 CI 补丁交接](HANDOFF-2026-10-11-distribution.md)：问题 5–10 的既有交付及尚未准备的专用 Windows Runner，不替代当前候选证据。

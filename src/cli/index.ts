@@ -1,10 +1,12 @@
 #!/usr/bin/env node
+import {uiText} from '../localization/messages.js';
 
 import { pathToFileURL } from "node:url";
 import { realpathSync } from "node:fs";
 import { parseArgs, type CliCommand } from "./args.js";
 import type { CommandHandler } from "./commands/types.js";
-import { HELP } from "./help.js";
+import { presentationArgs } from "./presentation-args.js";
+import { initializeLanguage } from "../localization/language.js";
 
 type ManagementCommand = Exclude<CliCommand, "run" | "exec">;
 
@@ -26,6 +28,22 @@ async function createRegistry() {
 }
 
 export async function main(args = process.argv.slice(2)): Promise<number> {
+  let presentation;
+  try {
+    presentation = presentationArgs(args);
+    await initializeLanguage(presentation.language);
+    args = presentation.args;
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    return 2;
+  }
+  const HELP = uiText('help.main');
+  if (args[0] === 'recover-batch') { const { runRecoverBatch } = await import('./commands/recover-batch.js'); return runRecoverBatch(args.slice(1)); }
+  if (args[0] === 'recover-file') {
+    if (args.length !== 3) { process.stderr.write(uiText('security.recoveryUsage') + '\n'); return 2; }
+    try { const { recoverFile } = await import('../tools/file-recovery.js'); await recoverFile(args[1]!, args[2]!); process.stdout.write(uiText('security.recovered') + '\n'); return 0; }
+    catch (error) { process.stderr.write((error instanceof Error ? error.message : uiText('security.recoveryFailed')) + '\n'); return 1; }
+  }
   if (args[0] === 'memory') { const {runMemoryCommand} = await import('./commands/memory.js'); return runMemoryCommand(args.slice(1)); }
   if (args[0] === "privacy") {
     const { runPrivacyCommand } = await import("./commands/privacy.js");
@@ -45,6 +63,16 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     return 0;
   }
 
+  if (presentation.accessible && options.command !== "run") {
+    process.stderr.write(uiText('accessible.runOnly') + '\n');
+    return 2;
+  }
+
+  if (options.command === "run" && (!process.stdin.isTTY || !process.stdout.isTTY)) {
+    process.stderr.write(uiText('accessible.nonTTY') + '\n');
+    return 1;
+  }
+
   if (options.command === "exec") {
     try {
       const [{ runExecCommand }, { createRequire }] = await Promise.all([
@@ -56,7 +84,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
       return await runExecCommand(options, createRegistry, undefined, version === undefined ? {} : { version });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`Everpeace failed: ${message}\n`);
+      process.stderr.write(uiText('mbf1dbe4aa0f6', {p0: message}));
       return 2;
     }
   }
@@ -67,17 +95,21 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     registry = await createRegistry();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`Everpeace failed: ${message}\n`);
+    process.stderr.write(uiText('mbf1dbe4aa0f6', {p0: message}));
     return 1;
   }
 
   if (options.command === "run") {
     try {
+      if (presentation.accessible || process.env.TERM === 'dumb') {
+        const { runAccessible } = await import('./accessible.js');
+        return await runAccessible(registry);
+      }
       const { runTuiCommand } = await import("./commands/run.js");
       return await runTuiCommand(registry);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`Everpeace failed: ${message}\n`);
+      process.stderr.write(uiText('mbf1dbe4aa0f6', {p0: message}));
       return 1;
     }
   }
@@ -91,7 +123,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     ]);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`Everpeace failed: ${message}\n`);
+    process.stderr.write(uiText('mbf1dbe4aa0f6', {p0: message}));
     return 1;
   }
   const prompter = new TerminalPrompter();
@@ -100,7 +132,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     return await handlers[options.command]({ registry, prompter });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`Everpeace failed: ${message}\n`);
+    process.stderr.write(uiText('mbf1dbe4aa0f6', {p0: message}));
     return 1;
   } finally {
     prompter.close();

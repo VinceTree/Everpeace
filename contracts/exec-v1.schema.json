@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/VinceTree/Everpeace/blob/main/contracts/exec-v1.schema.json",
+  "title": "Exec JSONL v1 (not Session JSONL)",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "type",
+    "timestamp"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "type": {
+      "enum": [
+        "session_started",
+        "assistant_message",
+        "tool_started",
+        "tool_finished",
+        "workflow_updated",
+        "interaction_required",
+        "cost_estimated",
+        "performance_report",
+        "run_finished"
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "model_id": {
+      "type": "string"
+    },
+    "model_name": {
+      "type": "string"
+    },
+    "workspace_path": {
+      "type": "string"
+    },
+    "parent_session_id": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "call_id": {
+      "type": "string"
+    },
+    "output": {
+      "type": "string"
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "changed_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "usage_complete": {
+      "type": "boolean"
+    },
+    "error_code": {
+      "enum": [
+        "CONFIGURATION_ERROR",
+        "RUNTIME_ERROR",
+        "VERIFICATION_FAILED",
+        "LIMIT_REACHED",
+        "INTERACTION_REQUIRED",
+        "CANCELLED",
+        "OUTPUT_CLOSED",
+        "PERSISTENCE_FAILED",
+        "CLEANUP_FAILED"
+      ]
+    },
+    "usage": {
+      "type": "object",
+      "required": [
+        "input_tokens",
+        "output_tokens"
+      ],
+      "properties": {
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reasoning_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_write_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session_started"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "session_id",
+          "model_id",
+          "workspace_path"
+        ],
+        "properties": {}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "assistant_message"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "text"
+        ],
+        "properties": {}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "tool_started"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "name"
+        ],
+        "properties": {}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "tool_finished"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "name"
+        ],
+        "properties": {}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow_updated"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "phase"
+        ],
+        "properties": {
+          "phase": {
+            "enum": [
+              "understand",
+              "plan",
+              "implement",
+              "verify_fast",
+              "diagnose",
+              "verify_full",
+              "review",
+              "done",
+              "blocked"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "interaction_required"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "approval",
+              "question"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "run_finished"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "status",
+          "usage_complete"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "success",
+              "runtime_error",
+              "configuration_error",
+              "verification_failed",
+              "limit_reached",
+              "interaction_required",
+              "cancelled"
+            ]
+          },
+          "workflow_result": {
+            "enum": [
+              "verified",
+              "unverified",
+              "failed",
+              "no_changes"
+            ]
+          },
+          "stop_reason": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}
