@@ -33,6 +33,8 @@ pnpm dev
 
 根锁文件变化后同步审阅并冻结 `tests/fixtures/expanded/pnpm-lock.yaml`、`docs/benchmark/real-fixtures/evaluator-lock.yaml` 和 expanded setup 的实际渲染器版本。重新运行对应离线 proof；既有 evaluation 摘要、真实评测成绩和性能数据仍只属于原先冻结候选，不能当作新依赖的结果。
 
+审阅机器人生成的锁差异时也核对传递依赖的降级。新的直接依赖版本不保证所有既有补丁都被保留；无升级兼容性依据时，应保留已经验证的修复，并以实际安装和审计重新确认。
+
 依赖 PR 的直接版本更新不能替代传递依赖审计。用 `pnpm audit --registry=https://registry.npmjs.org --audit-level high --json` 获取官方审计结果；镜像缺少 audit endpoint 时属于服务不可用，不能记为安全通过。优先在上游声明范围内定向更新受影响的传递依赖，检查锁差异后重新冻结和验证；无上游修复的残留公告在 HANDOFF 明示，不通过忽略公告或放宽安全门禁消除。
 
 ### Windows、WSL 与原生依赖

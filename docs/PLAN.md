@@ -2,7 +2,11 @@
 
 按用户确认的优化计划分批执行；当前结果和验证证据只在 [HANDOFF](HANDOFF.md) 维护。
 
-## 当前：未合并 PR 的依赖整合
+## 当前：PR #20 的 MCP SDK 补丁升级
+
+在该 PR 的原始分支上补齐 evaluator lock 快照，保留既有传递依赖修复。运行真实 MCP/fixture 定向回归与完整 typecheck → lint → test → build，核对审计、文档和 workflow；推送后等待当前 head 的 Windows/Linux/security/Required checks 全部通过，再绑定该 SHA 合并。用户已明确授权处理并直接合并 #20，不创建 Release、tag 或调整产品展示版本；不自动扩大到随后新建的其他 PR。
+
+## 上轮：已完成的依赖整合
 
 在当前功能分支整合依赖 PR，保持 Node 22 运行时、系统 keyring、原生 sandbox 和既有验证边界。同步升级 React 与测试渲染器，适配 Ink 的普通 stream 类型和 resize 行为；Node 类型只更新当前主版本，并限制 Dependabot 跨主版本更新。重冻结 evaluator lock 后重新执行对应 proof，原候选性能与模型结果不迁移。
 
