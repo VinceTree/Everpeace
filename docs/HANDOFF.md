@@ -47,4 +47,6 @@ GitHub 当前九项未合并 PR：#11 为当前分支的 Draft 功能 PR，#12�
 
 真实 Windows Terminal、Linux/macOS、干净消费者安装、包含 secret/SBOM 的完整安全扫描及真实模型评测未执行；本轮 audit/许可证检查和当前源码安装 smoke 不替代这些证据。real-fixtures 上游联网 proof 未重跑，旧 proof 不算新依赖验收。当前安全文件支持范围仍为 Windows 本地 NTFS。
 
-正在按用户授权提交并推送当前修复组合，使用 `[skip publish]` 且保留 CI。核对 Release workflow 仅接受 main 上的显式 workflow_dispatch，push/merge 不会创建 Release，本轮不 dispatch。待当前候选 Required checks 成功后才合并；不使用 admin 绕过检查。#13 保持 Node 22 策略，不合并其 Node 26 更新；其余依赖变更已包含在组合中，远端结算以实际状态为准。
+修复提交为 `9bbcec5`。已逐项核对 #12、#14–#19 的原始提交只修改对应 manifest/lock 或 setup-python 固定 SHA，目标升级全部包含在已验证组合中；随后用保留当前内容的 merge 记录七项原始提交，每次核对 Git tree 完全不变，#13 不在整合历史中。最终通过 #11 的实际 Required checks 后以 merge commit 合入 main，保留这些提交的可达性，使 GitHub 能将对应依赖 PR 结算为间接合并；不能采用丢弃来源 ancestry 的 squash/rebase，也不单独接受旧依赖锁。
+
+正在按授权推送整合组合，所有新提交使用 `[skip publish]`，保留 CI。核对 main 的 Required checks 保护开启且管理员也适用、要求分支跟上 main；不更改保护或使用 admin 绕过检查。Release workflow 仅接受 main 上的显式 workflow_dispatch，push/merge 不会创建 Release，本轮不 dispatch。#13 保持 Node 22 策略，不合并其 Node 26 更新；远端结算以实际状态为准。
