@@ -60,7 +60,7 @@ importers:
         version: 1.1.0(patch_hash=f100f0202f6f42e4246d8a911b6c42e0988175cbb00aae12e23688cf2985965e)
       openai:
         specifier: 7.15.0
-        version: 7.15.0(undici@7.30.0)(ws@8.22.0)(zod@4.6.6)
+        version: 7.15.0(undici@7.30.1)(ws@8.22.0)(zod@4.6.6)
       proper-lockfile:
         specifier: 4.1.2
         version: 4.1.2
@@ -68,8 +68,8 @@ importers:
         specifier: 19.3.0
         version: 19.3.0
       undici:
-        specifier: 7.30.0
-        version: 7.30.0
+        specifier: 7.30.1
+        version: 7.30.1
       yaml:
         specifier: 2.9.1
         version: 2.9.1
@@ -1412,8 +1412,8 @@ packages:
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
-  undici@7.30.0:
-    resolution: {integrity: sha512-dkrQXeHSaoamnItlYbmzG0wFYrM0ZwDxCIg0A7aKjTyyhh9svRzCNFEzV+Vm05/yehjCzjDZ31KXfGEjYSztDQ==}
+  undici@7.30.1:
+    resolution: {integrity: sha512-03KrMbjIFDWQR5RNPrSw3bd1r12JpyFQl9/yxjUbJtqkjmllqC5lFjZh6ujeuJCKr8EOQvRW872Oy/az+nLYxg==}
     engines: {node: '>=20.18.1'}
 
   unpipe@1.0.0:
@@ -2308,9 +2308,9 @@ snapshots:
     dependencies:
       mimic-fn: 2.1.0
 
-  openai@7.15.0(undici@7.30.0)(ws@8.22.0)(zod@4.6.6):
+  openai@7.15.0(undici@7.30.1)(ws@8.22.0)(zod@4.6.6):
     optionalDependencies:
-      undici: 7.30.0
+      undici: 7.30.1
       ws: 8.22.0
       zod: 4.6.6
 
@@ -2554,7 +2554,7 @@ snapshots:
 
   undici-types@6.21.0: {}
 
-  undici@7.30.0: {}
+  undici@7.30.1: {}
 
   unpipe@1.0.0: {}
 
