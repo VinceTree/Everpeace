@@ -155,3 +155,5 @@ pnpm build
 源码安装使用 pnpm 和固定 node-pty 补丁。依次运行 `pnpm files:build`、`pnpm install:verify`、`pnpm build`、`pnpm files:smoke`、`pnpm process:smoke` 和 `pnpm install:smoke`。`pnpm install:clean` 在干净源码副本重新编译原生文件与进程组件；`pnpm files:verify` 验证原生竞争故障注入。打包器要求经过摘要核验的 Windows 文件与进程组件，记录其摘要并拒绝分发故障注入程序；普通 npm/pnpm pack 仍被拒绝。正式可移植打包和消费者安装须另行验收，npm registry 发布仍待完成。
 
 Node 22 CI 在 Windows 执行完整测试，在 Linux 执行可移植的隐私/网络/供应商测试。本候选的 Linux/macOS 工作区文件访问不可用，可移植测试不代表原生文件支持。正式 Release 仍须专用 Windows 和安装包验收，源码推送不会创建 Release。[Windows Runner 指南](docs/WINDOWS_RUNNER.md)。开发门禁按 `typecheck → lint → test → build` 首败停止，再核验文案、文档和安装；付费测试另需数值授权。
+
+Hosted Windows 不执行嵌套原生沙箱用例；专用原生验收强制执行，包括 MCP 发现、过滤和启动隔离。host MCP 的协议及清理用例仍在 hosted Windows 执行。

@@ -127,7 +127,7 @@ Test 与 Release 共用 [Validate](../.github/workflows/validate.yml)。PR/main 
 
 [Test workflow](../.github/workflows/test.yml) 在 PR/main push 调用共享 Windows/Linux Node 22 门禁：冻结安装、平台 optional dependency、补丁验证、workflow 静态检查、类型检查、lint、完整测试、构建、CLI/SDK/PTY 启动及差异检查。平台 image 固定为 ubuntu-24.04/windows-2025，job 最多 20 分钟，测试 step 最多 10 分钟。CI 不安装系统 rg，应用使用包内绝对路径。macOS 为实验性支持，尚未纳入完整验收。
 
-[native-mode fixture](../tests/fixtures/native-mode.ts) 只在明确 hosted 模式跳过 Windows 原生用例，不按 GITHUB_ACTIONS 一刀切。专用 required 模式强制 Windows、真实 backend 与五项原生/团队测试执行，skip/TODO/缺失均失败。部署、只读 Runner API 凭据、五分钟排队 watchdog、镜像清理、branch required-check 设置和真实 Windows 失败演练见 [WINDOWS_RUNNER](WINDOWS_RUNNER.md)。本机原生成功不等于专用 Runner 已注册；远端验收状态见 HANDOFF。
+[native-mode fixture](../tests/fixtures/native-mode.ts) 只在明确 hosted 模式跳过 Windows 原生用例，不按 GITHUB_ACTIONS 一刀切。MCP 的默认沙箱 discovery、filtering 和启动拒绝用例也使用该模式；host stdio 的协议、恢复、信任和后代清理在 hosted 中仍执行。host fixture 必须像生产一样通过 prepareMcpConfig 冻结安全环境，保留 Windows Node/OpenSSL 启动所需的 SYSTEMROOT，不以空环境启动。专用 required 模式强制 Windows、真实 backend 和固定原生验收清单，包含上述 MCP 用例；skip/TODO/缺失均失败。部署、只读 Runner API 凭据、五分钟排队 watchdog、镜像清理、branch required-check 设置和真实 Windows 失败演练见 [WINDOWS_RUNNER](WINDOWS_RUNNER.md)。本机原生成功不等于专用 Runner 已注册；远端验收状态见 HANDOFF。
 
 完整测试入口同时覆盖 [MCP 协议 fixture](../tests/unit/mcp/protocol.test.ts)、[stdio 恢复 fixture](../tests/unit/mcp/stdio-recovery.test.ts) 与 [exec 子进程 fixture](../tests/unit/cli/exec-process.test.ts)：MCP 测试实际启动 SDK stdio server 和本地 Streamable HTTP endpoint，并检查中断调用不重放、初始化失败的旧进程退出后才重连；exec 测试使用 fake provider 与真实 stdout/stderr 管道检验慢读、关闭、停滞和清理。这些测试在 Windows/Linux 都运行，不需要 keyring、模型网络调用或额外服务。Linux 使用真实 OS 信号；Windows fixture 通过 IPC 触发已注册的 SIGINT/SIGTERM handler，不能代替真实 Windows Terminal 的 Ctrl+C 验收。现有测试 glob 已纳入这些文件，无需再并行重复整套门禁。
 

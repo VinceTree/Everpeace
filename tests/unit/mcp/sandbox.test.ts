@@ -6,6 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { SandboxedMcpTransport } from '../../../src/mcp/sandbox-transport.js';
 import { prepareMcpConfig } from '../../../src/mcp/launch.js';
+import { windowsNativeSkip } from '../../fixtures/native-mode.js';
 
 test('explicit host MCP close owns detached descendants and remains bounded', { skip: process.platform !== 'win32', timeout: 10000 }, async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'everpeace-mcp-owner-'));
@@ -14,7 +15,10 @@ test('explicit host MCP close owns detached descendants and remains bounded', { 
 const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});
 process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:1,result:{pids:[process.pid,child.pid]}})+'\\n');
 process.stdin.resume();setInterval(()=>{},1000);`);
-  const transport = new SandboxedMcpTransport({ name: 'host-owner', enabled: true, transport: { type: 'stdio', isolation: 'host', command: process.execPath, args: [script] } }, root);
+  // Freeze the production allowlisted environment, including SYSTEMROOT for
+  // Node/OpenSSL startup on Windows, rather than launching with an empty env.
+  const config = await prepareMcpConfig({ name: 'host-owner', enabled: true, transport: { type: 'stdio', isolation: 'host', command: process.execPath, args: [script] } }, root);
+  const transport = new SandboxedMcpTransport(config, root);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const message = new Promise<unknown>((resolve, reject) => { transport.onmessage = resolve; transport.onerror = reject; timer = setTimeout(() => reject(new Error('Host MCP did not initialize')), 5000); });
   try {
@@ -26,7 +30,7 @@ process.stdin.resume();setInterval(()=>{},1000);`);
   } finally { clearTimeout(timer); await transport.close(); await fs.rm(root, { recursive: true, force: true }); }
 });
 
-test('default stdio sandbox denies sensitive startup reads and network before tool approval', { skip: process.platform !== 'win32', timeout: 30_000 }, async () => {
+test('default stdio sandbox denies sensitive startup reads and network before tool approval', { skip: windowsNativeSkip(), timeout: 30_000 }, async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'everpeace-mcp-sandbox-')); let network = 0;
   const server = http.createServer((_request, response) => { network++; response.end('unexpected'); });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));

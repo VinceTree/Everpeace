@@ -8,6 +8,8 @@
 
 同时核对依赖审计，对 MCP 链中仍存在的公告在既有 semver 范围内定向更新传递依赖，消除阻断安全门禁的漏洞；未提供修复的上游残留明确记录。依赖变化后重新执行最终门禁。
 
+远端 Windows 失败后对齐 CI 的 Node 补丁版复现，修复 host MCP fixture 的空环境启动；默认原生 MCP 回归接入现有 hosted/required 模式，并扩展专用 required 清单与执行文件，保留真实隔离验证和 host 协议覆盖。
+
 完成定向回归后串行执行 typecheck → lint → test → build，再检查 UI、文档、workflow 和安装状态。用户随后明确授权提交、推送并合并可以合并的 PR，禁止创建 Release；推送使用 `[skip publish]`，保留 CI，并仅在当前候选检查通过后合并。Node 26 类型更新不属于可接受候选。以下三批记录已完成的优化计划。
 
 ## 第一批：构建与检查可靠性

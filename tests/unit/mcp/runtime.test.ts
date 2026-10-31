@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { approvedMcpFixture } from "../../fixtures/mcp-trust.js";
+import { windowsNativeSkip } from "../../fixtures/native-mode.js";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -144,7 +145,7 @@ function config(overrides: Partial<McpServerConfig> = {}): McpServerConfig {
   };
 }
 
-test("MCP runtime discovers namespaced stdio tools, instructions, and calls", async (t) => {
+test("MCP runtime discovers namespaced stdio tools, instructions, and calls", { skip: windowsNativeSkip() }, async (t) => {
   const workspace = await mkdtemp(join(tmpdir(), "everpeace-mcp-discovery-"));
   const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: workspace,
@@ -179,7 +180,7 @@ test("MCP runtime discovers namespaced stdio tools, instructions, and calls", as
   assert.equal(prompt.messages[0]?.content?.text, "prompt-value");
 });
 
-test("MCP runtime respects Codex enabled tools and isolates server failures", async (t) => {
+test("MCP runtime respects Codex enabled tools and isolates server failures", { skip: windowsNativeSkip() }, async (t) => {
   const workspace = await mkdtemp(join(tmpdir(), "everpeace-mcp-filtered-"));
   const runtime = new McpRuntime({ trustStore: approvedMcpFixture(),
     workspacePath: workspace,
