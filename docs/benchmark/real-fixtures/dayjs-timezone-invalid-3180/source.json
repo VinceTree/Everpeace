@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/iamkun/dayjs",
+  "change": "dad46e6fe5198d77d87ed3b121937f77adaee0a6",
+  "parent": "ae3a55025cdf0f06c8705b5e8b61cd4edb33697a",
+  "changeUrl": "https://github.com/iamkun/dayjs/commit/dad46e6fe5198d77d87ed3b121937f77adaee0a6",
+  "license": "MIT",
+  "patchSha256": "251d0f2f56594d6057685368fffb5f2a8de86172b3ace8174a82ce7406ace463",
+  "category": "real_issue"
+}

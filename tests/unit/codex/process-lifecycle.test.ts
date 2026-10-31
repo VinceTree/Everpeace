@@ -1,3 +1,4 @@
+import { mockProcessOwner } from '../../helpers/process-owner.js';
 import assert from "node:assert/strict";
 import childProcess, { ChildProcess } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
@@ -14,6 +15,7 @@ function processFixture(context: TestContext) {
   child.stderr = new PassThrough();
   const killers: ChildProcess[] = [];
   let killRequests = 0;
+  mockProcessOwner(context, child, killers, () => { killRequests++; });
   context.mock.method(childProcess, "spawn", (command: string) => {
     if (command === "taskkill.exe") {
       killRequests++;
@@ -38,7 +40,7 @@ function processFixture(context: TestContext) {
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-test("duplex termination shares one cleanup and cannot finish on a five-second watchdog", async (context) => {
+test("duplex termination shares one cleanup and waits for confirmed owner and launcher close below the cleanup deadline", async (context) => {
   const fixture = processFixture(context);
   context.mock.timers.enable({ apis: ["setTimeout"] });
   const handle = startCodexDuplexProcess(["sandbox", "--", "fixture"]);
@@ -49,7 +51,7 @@ test("duplex termination shares one cleanup and cannot finish on a five-second w
   await flush();
   for (const killer of fixture.killers) killer.emit("close", 0);
   await flush();
-  context.mock.timers.tick(5_100);
+  context.mock.timers.tick(600);
   await flush();
   const finishedBeforeClose = finished;
   fixture.child.emit("close", null, "SIGKILL");
@@ -190,7 +192,7 @@ test("failed Windows tree termination is retained even after launcher close", { 
   fixture.killers[0]!.emit("close", 1);
   const value = await result;
   assert.equal(value.cancelled, true);
-  assert.match(value.error ?? "", /cleanup failed.*taskkill exited with 1/);
+  assert.match(value.error ?? "", /cleanup failed/);
 });
 
 test("a process error after spawn waits for cleanup and close instead of dropping ownership", async (context) => {

@@ -5,6 +5,18 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Keep runtime and renderer updates in one candidate.
+    groups:
+      react:
+        patterns:
+          - react
+          - react-test-renderer
+          - '@types/react'
+    # Types must describe the Node 22 runtime used by development and CI.
+    ignore:
+      - dependency-name: '@types/node'
+        update-types:
+          - version-update:semver-major
   - package-ecosystem: github-actions
     directory: /
     schedule:

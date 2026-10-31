@@ -4,7 +4,7 @@ import fc from 'fast-check';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { spawn } from 'node:child_process';
+import { spawnOwned as spawn } from '../../../src/tools/owned-process.js';
 import { propertyCheck } from '../../fixtures/property-check.js';
 import { isPublicIpAddress } from '../../../src/network/public-address.js';
 import { runFileTool } from '../../../src/tools/files.js';

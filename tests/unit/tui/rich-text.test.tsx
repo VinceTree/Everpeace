@@ -1,10 +1,38 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { PassThrough } from "node:stream";
+import { render as renderInk } from "ink";
 import { render } from "ink-testing-library";
 import React from "react";
 import { MarkdownText, RichOutput } from "../../../src/tui/rendering/rich-text.js";
 import { History } from "../../../src/tui/components/conversation/history.js";
 import { translateLegacyUiText } from "../../../src/tui/rendering/legacy-translation.js";
+
+test("Markdown renders on generic streams and reflows when dimensions become available", async () => {
+  const stdout = new PassThrough();
+  const stdin = new PassThrough();
+  const stderr = new PassThrough();
+  const frames: string[] = [];
+  stdout.on("data", (chunk: Buffer) => frames.push(chunk.toString()));
+  const instance = renderInk(<MarkdownText text={"| Key | Value |\n| --- | --- |\n| a | b |"} />, {
+    stdout, stdin, stderr, debug: true, exitOnCtrlC: false, patchConsole: false,
+  });
+  try {
+    await instance.waitUntilRenderFlush();
+    assert.match(frames.join(""), /Key │ Value/u);
+    for (const columns of [0, Number.NaN, 48, 100]) {
+      Object.defineProperty(stdout, "columns", { configurable: true, value: columns });
+      stdout.emit("resize");
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+      await instance.waitUntilRenderFlush();
+      assert.match(frames.at(-1) ?? "", columns === 48 ? /Key: a/u : /Key │ Value/u);
+    }
+  } finally {
+    instance.unmount();
+    instance.cleanup();
+    stdout.destroy(); stdin.destroy(); stderr.destroy();
+  }
+});
 
 test("many nested Markdown blocks share resize observation and release it on unmount", async () => {
   const view = render(<></>);

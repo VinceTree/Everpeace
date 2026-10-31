@@ -33,6 +33,8 @@ export interface BenchmarkTask {
 }
 
 export interface BenchmarkTaskFixture {
+  /** upstream starts at the actual pre-change revision and has no artificial seed. */
+  startingState?: "seeded" | "upstream";
   /** Optional evaluator-owned package-lock copied into a source that intentionally ships without one. */
   dependencyLock?: string;
   /** Optional deterministic dependency/bootstrap command run before any patch is applied. */
@@ -42,7 +44,7 @@ export interface BenchmarkTaskFixture {
   /** Required substrings in a seeded failure, so unrelated process errors are not proof. */
   seedFailureContains?: readonly string[];
   /** Patch applied to the pinned source to introduce the benchmark defect and its acceptance assertion. */
-  seedPatch: string;
+  seedPatch?: string;
   /** Patch applied after the seed to provide the reviewed reference repair. */
   referencePatch: string;
 }
@@ -117,6 +119,8 @@ export interface BenchmarkMetricsSnapshot {
 }
 
 export interface BenchmarkHarnessResult {
+  cleanupFailed?: boolean;
+  requestAccounting?: BenchmarkRunResult["requestAccounting"];
   teamMetrics?: { members: number; duplicateReads: number; repeatedFailures: number; conflicts: number };
   isolationFailed?: boolean;
   requestAttempts?: number;
@@ -184,6 +188,10 @@ export interface BenchmarkVerificationResult {
 }
 
 export interface BenchmarkRunResult {
+  storageFailed?: boolean;
+  pairId?: string;
+  effectiveTokenBudget?: number | null;
+  requestAccounting?: { requests: number; unknownRequests: number; rejectedRequests: number; reasons: Readonly<Record<string, number>> };
   editClassification?: import('./edit-classification.js').EditClassification;
   tags?: readonly string[];
   teamMetrics?: BenchmarkHarnessResult["teamMetrics"];
@@ -250,5 +258,5 @@ export interface BenchmarkSkippedRun {
   adapter?: string;
   taskId: string;
   repetition: number;
-  reason: "budget_exhausted" | "usage_unknown" | "cancelled" | "cleanup_failed" | "isolation_failed" | "unsupported_platform" | "missing_toolchain" | "preparation_failed";
+  reason: "budget_exhausted" | "usage_unknown" | "cancelled" | "cleanup_failed" | "isolation_failed" | "unsupported_platform" | "missing_toolchain" | "preparation_failed" | "runtime_error" | "storage_failed" | "identity_changed";
 }

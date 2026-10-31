@@ -1,8 +1,11 @@
+import {uiText,translateHostText} from '../../../localization/messages.js';
 import { Spinner } from "@inkjs/ui";
 import { Box, Text, useInput, useWindowSize } from "ink";
 import React, { type ReactNode } from "react";
 import type { StatusSnapshot } from "../../../status/model-status.js";
 import { StatusDetails } from "./status-card.js";
+import {TaskStatus}from'../conversation/task-status.js';
+import type{TaskStatusSnapshot}from'../../../status/task-status.js';
 
 export type CommandSurfaceTone = "default" | "error";
 
@@ -61,11 +64,11 @@ export function CommandSurface({
       borderColor={color}
       paddingX={1}
     >
-      <Text bold color={color}>{title}</Text>
+      <Text bold color={color}>{translateHostText(title)}</Text>
       <Box flexDirection="column" marginY={1}>
         {children}
       </Box>
-      {onBack ? <Text dimColor>Esc to return to session</Text> : null}
+      {onBack ? <Text dimColor>{uiText('m30c2566270e3')}</Text> : null}
     </Box>
   );
 }
@@ -85,21 +88,26 @@ export function CommandInfoSurface({
 }: CommandInfoSurfaceProps) {
   return (
     <CommandSurface title={title} tone={tone} onBack={onBack}>
-      <Text {...(tone === "error" ? { color: "red" } : {})}>{text}</Text>
+      <Text {...(tone === "error" ? { color: "red" } : {})}>{translateHostText(text)}</Text>
     </CommandSurface>
   );
 }
 
 export function StatusSurface({
   snapshot,
+  taskStatus,
+  maxOutputTokens,
   onBack,
 }: {
   snapshot: StatusSnapshot;
+  taskStatus?:TaskStatusSnapshot;
+  maxOutputTokens?:number;
   onBack(): void;
 }) {
   return (
-    <CommandSurface title="/status · Session status" onBack={onBack}>
+    <CommandSurface title={uiText('m03e23c1613d9')} onBack={onBack}>
       <StatusDetails snapshot={snapshot} />
+      {taskStatus?<TaskStatus snapshot={taskStatus} details {...(maxOutputTokens!==undefined?{maxOutputTokens}:{})}/>:null}
     </CommandSurface>
   );
 }
@@ -118,7 +126,7 @@ export function CommandLoadingSurface({
       title={title}
       {...(onBack === undefined ? {} : { onBack })}
     >
-      <Spinner label={label} />
+      <Spinner label={translateHostText(label)} />
     </CommandSurface>
   );
 }

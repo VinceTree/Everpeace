@@ -7,7 +7,7 @@ const require = createRequire(import.meta.url);
 const frozen = await readFile(new URL("./pnpm-lock.yaml", import.meta.url), "utf8");
 const actual = await readFile(new URL("../../../pnpm-lock.yaml", import.meta.url), "utf8");
 assert.equal(frozen.replaceAll("\r\n", "\n"), actual.replaceAll("\r\n", "\n"), "Evaluator dependency lock changed; refreeze the expanded suite");
-for (const [name, version] of Object.entries({ typescript: "7.0.2", "typescript-evaluator": "5.9.3", react: "19.3.0", "react-test-renderer": "19.3.0" })) assert.equal(require(`${name}/package.json`).version, version);
+for (const [name, version] of Object.entries({ typescript: "7.0.2", "typescript-evaluator": "5.9.3", react: "19.3.1", "react-test-renderer": "19.3.1" })) assert.equal(require(`${name}/package.json`).version, version);
 if (process.argv[2] === "typescript-python-protocol") await promisify(execFile)(process.platform === "win32" ? "python" : "python3", ["--version"], { windowsHide: true, timeout: 30_000 });
 if (process.argv[2] === "sqlite-migration") await import("node:sqlite");
 console.log("Frozen offline evaluator dependencies verified.");

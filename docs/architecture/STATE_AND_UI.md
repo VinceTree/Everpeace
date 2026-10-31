@@ -1,6 +1,10 @@
 # 状态、持久化与终端交互
 
-`/privacy`、无模型隐私 CLI、跨进程活动租约、安全导出及 `/perf` 的持久/兼容契约见 [验证、隐私与性能](VALIDATION_PRIVACY_PERFORMANCE.md)。默认保留永久；旧 Session 缺少解释字段和安全关闭证据时不推断成功或自动删除。
+取消期限、Job 进程归属、持久批次恢复、allow 迁移与子包验证的现行契约见 [可靠性加固](RELIABILITY_HARDENING.md)。
+
+当前安全加固契约（文件后端、敏感内容、验证依据、MCP 与隐私迁移）见 [安全加固](SECURITY_HARDENING.md)，与旧说明冲突时以该契约及当前实现为准。
+
+`/privacy`、无模型隐私 CLI、跨进程活动租约、安全导出及 `/perf` 的持久/兼容契约见 [验证、隐私与性能](VALIDATION_PRIVACY_PERFORMANCE.md)。首次保留期限需确认（推荐 30 天），旧策略保留；旧 Session 缺少解释字段和安全关闭证据时不推断成功或自动删除。
 
 这份文档回答“状态归谁所有、哪些内容可以恢复、UI 修改必须守住什么”。先按 [项目路由表](PROJECT_MAP.md) 找到入口；只有修改对应行为时才读取相关源码和测试。当前交付证据、环境限制和待办见 [HANDOFF](../HANDOFF.md)。
 
@@ -44,6 +48,8 @@
 
 `load`、`list` 与 `/resume` 搜索共用字节流记录读取器，在打开日志时固定 EOF，按 64 KiB 文件块逐条解析，不再同时保留整份原始文本、拆行数组和事件数组。`list` 只累积摘要所需状态；`load` 仍须保留最终 timeline 与有效 context，因此这不表示整个 Session 的内存恒定。重放不会新增拒绝超过 8 MiB 合法旧记录的限制；单条记录仍完整解析，旧 JSONL 与未终止末行的判定保持一致。模型历史工具自身的单行扫描上限保持独立。
 
+读取器把同一文件块里的完整记录作为一批交给消费者，减少逐记录 Promise 调度；每条 UTF-8 仍单独解码，跨块记录按原始字节拼接，避免切片字符串保留整个解码块。保留内存为一个块的记录及跨块未完成记录，不积累全部事件；每条搜索记录仍检查取消。`session_replay_batches` 只记录交接次数，不保存正文或路径。边界与多小记录回归见 [streaming](../../tests/unit/storage/session-streaming.test.ts)，对照方法见 [本地性能](../benchmark/LOCAL_PERFORMANCE.md)。
+
 | 事件 | 含义 |
 | --- | --- |
 | `session_created` | Session ID、标题、工作目录、无凭据模型引用、标题待生成、usage 跟踪标记，以及分支时的可选 lineage |
@@ -81,6 +87,8 @@
 恢复前先检查工作目录；目录不存在时保持当前会话不变。原模型缺失可选择替代，但含供应商专属加密/不透明 context 时不得跨供应商静默迁移。旧“新 Session”标题只在显示层翻译。
 
 恢复后重新读取项目规则与文件观察；权限读取当前配置，不从 JSONL 复活。`session_resume` 和 Goal 自动续跑必须保留修复计数与未验证债务，不能通过新的 `no_changes` 清除失败。后台命令和进程内 undo 检查点不可恢复。
+
+验证债务独立于变更路径列表：路径为空、旧事件缺少 pending 字段或当前 Git 不可用，不能抹掉 failed/unverified、受限追踪或中断阶段。恢复后须通过当前授权的完整检查才能清除，追踪不足继续显示 unverified；预取消不开始恢复快照或保存新的状态。JSONL 重开与取消回归见 [recovery boundaries](../../tests/unit/workflow/recovery-boundaries.test.ts)，具体判定见 [运行时](RUNTIME.md)。
 
 `session_resume` 恢复最后一个有效 `task_progress_updated`；repair 与同一顶层任务里的 Goal continuation 复用投影，新的用户 coding task 则先持久化空清单。清单随每次请求重新提供，包括 context 压缩之后；它始终是进度说明，不能推导 workflow 或 Goal 结果。旧 Session 没有该事件时按“尚无清单”处理。
 
@@ -147,7 +155,9 @@ workflow 提供路径列表时同时返回 `changed_paths_total` 和 `changed_pa
 
 详细目录职责见 [TUI_STRUCTURE](TUI_STRUCTURE.md)。界面始终 inline，使用终端原生 scrollback，不切换 alternate screen。主状态机拥有视图切换；展示组件不得自己创建 Agent、写 Session 或启动新任务。
 
-- 宿主界面英文；模型正文按其原始语言展示。Markdown、代码、shell 和严格 unified diff 分层高亮，超大或未知内容安全退回纯文本。
+Ink 的标准流按普通 Node stream 处理。App 和 Composer 用 `useWindowSize` 观察有效宽度，独立 Composer 挂载也能响应 resize；历史的去抖重放仍只在聊天窗口执行。Markdown 的嵌套块继续共用每个输出流的一份 resize 监听器，读取宽度前收窄属性类型，缺失、零或非有限值回退到 80 列，卸载后移除监听器。输入解析丢弃鼠标、焦点、光标位置等终端回报；正常按键、Kitty Enter 和 bracketed paste 保持原有提交语义。回归见 [rich text](../../tests/unit/tui/rich-text.test.tsx)、[Composer](../../tests/unit/tui/prompt-history.test.tsx) 和 [App](../../tests/unit/tui/app.test.tsx)。
+
+- 宿主文案集中管理并支持中英文切换；模型正文、源码和第三方输出保持原文。状态仅投影协调器、权限、计量及清理事实，清理失败保留准入阻塞。Markdown、代码、shell 和严格 unified diff 分层高亮，超大或未知内容安全退回纯文本。
 - 等待状态包含 provider、耗时与 Ctrl+C 提示；`/status` 显示模型、供应商、实际协议、压缩/推理设置、context 占用和累计 token/cache，缺失数据明确显示未知或不完整。
 - `/status`、`/outputs`、`/history`、`/terminal-setup`、信息窗口及 picker/wizard 使用独立命令窗口；`/new`、`/clear`、`/exit` 是立即动作。
 - `/fork` 使用可取消 loading/结果窗口；任务、审批、直接命令或其他 command load 活动时拒绝。只有子日志原子发布并加载成功后才重放并切换 UI。

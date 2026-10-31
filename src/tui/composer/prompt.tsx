@@ -1,4 +1,5 @@
-import { Box, Text, useInput, usePaste, useStdout } from "ink";
+import {uiText} from '../../localization/messages.js';
+import { Box, Text, useInput, usePaste, useWindowSize } from "ink";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   filterSlashCommands,
@@ -174,7 +175,7 @@ export function Prompt({
 }: PromptProps) {
   const localNavigation = useRef<{ index: number | undefined; draft: string }>({ index: undefined, draft: "" });
   const navigation = historyNavigationRef ?? localNavigation;
-  const { stdout } = useStdout();
+  const { columns } = useWindowSize();
   const localStateRef = useRef<ComposerState>(createComposerState());
   const stateRef = editorRef ?? localStateRef;
   const [state, setState] = useState(stateRef.current);
@@ -196,8 +197,8 @@ export function Prompt({
     };
   }, []);
   const placeholder = placeholderOverride ?? (activeModelName
-    ? "Ask Everpeace to do anything"
-    : "Enter /login to get started");
+    ? uiText('m7083c2087d57')
+    : uiText('m03d5daf8e826'));
   const updateState = (operation: (current: ComposerState) => ComposerState) => {
     const current = stateRef.current;
     const next = operation(current);
@@ -482,7 +483,7 @@ export function Prompt({
   const firstVisibleLine = Math.max(0, cursorLine - MAX_VISIBLE_LINES + 1);
   const visibleLines = lines.slice(firstVisibleLine, firstVisibleLine + MAX_VISIBLE_LINES);
   // Root padding, prompt padding, the marker and its gap consume five cells.
-  const availableWidth = Math.max(1, (stdout.columns ?? 80) - 5);
+  const availableWidth = Math.max(1, columns - 5);
 
   return (
     <Box width="100%" flexDirection="column">
@@ -559,7 +560,7 @@ export function Prompt({
       ) : null}
       {attachmentLabels.length > 0 ? (
         <Text dimColor wrap="truncate-end">
-          Attached once: {attachmentLabels.slice(0, 8).map((reference) => `${reference.path}${reference.startLine ? `:${reference.startLine}-${reference.endLine}` : ""}`).join(" · ")}
+          {uiText('m6418093875a0')}{attachmentLabels.slice(0, 8).map((reference) => `${reference.path}${reference.startLine ? `:${reference.startLine}-${reference.endLine}` : ""}`).join(" · ")}
         </Text>
       ) : null}
     </Box>

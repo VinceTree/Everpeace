@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { spawnOwned as spawn } from "../tools/owned-process.js";
+import { benchmarkRequestAccounting } from "./request-accounting.js";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type {
@@ -21,6 +22,7 @@ import { captureWorkspaceSnapshot } from "./workspace.js";
 import { RequestAttemptLedger } from "../agent/request-attempt-ledger.js";
 import { BenchmarkPreparationError } from "./preparation-failure.js";
 import { classifyEditScope, type EditClassification } from './edit-classification.js';
+import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 
 const DEFAULT_TASK_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_VERIFICATION_TIMEOUT_MS = 2 * 60 * 1000;
@@ -173,6 +175,8 @@ export async function runBenchmarkTask(
 
   let manualInterventions = 0;
   let requestAttempts: number | undefined;
+  let requestAccounting: BenchmarkRunResult["requestAccounting"];
+  let storageFailed = false;
   let unsafeActions = 0;
   let notes: string | undefined;
   let verification: BenchmarkVerificationResult | undefined;
@@ -209,6 +213,7 @@ export async function runBenchmarkTask(
         if (path !== undefined) artifactPaths.push(path);
         return path;
       } catch (error) {
+        storageFailed = true;
         notes = [notes, `Could not write artifact ${name}: ${errorMessage(error)}`].filter(Boolean).join("\n");
         return undefined;
       }
@@ -245,10 +250,16 @@ export async function runBenchmarkTask(
         }, controller.signal);
       } catch (error) {
         attemptError = error;
-        if (error instanceof ProcessCleanupError) cleanupFailed = true;
+        if (error instanceof ResourceCleanupError || error instanceof Error && error.name === "BenchmarkCleanupError") cleanupFailed = true;
       }
       manualInterventions += result?.manualInterventions ?? 0;
       if (result?.requestAttempts !== undefined) requestAttempts = (requestAttempts ?? 0) + result.requestAttempts;
+      if (result?.requestAccounting) {
+        const current = result.requestAccounting;
+        const reasons = { ...requestAccounting?.reasons };
+        for (const [reason, count] of Object.entries(current.reasons)) reasons[reason] = (reasons[reason] ?? 0) + count;
+        requestAccounting = { requests: (requestAccounting?.requests ?? 0) + current.requests, unknownRequests: (requestAccounting?.unknownRequests ?? 0) + current.unknownRequests, rejectedRequests: (requestAccounting?.rejectedRequests ?? 0) + current.rejectedRequests, reasons };
+      }
       unsafeActions += result?.unsafeActions ?? 0;
       if (result?.notes !== undefined) notes = [notes, result.notes].filter(Boolean).join("\n");
       if (result?.capabilities !== undefined) capabilities = result.capabilities;
@@ -258,6 +269,7 @@ export async function runBenchmarkTask(
       diagnosticRounds = result?.diagnosticRounds ?? diagnosticRounds;
       teamMetrics = result?.teamMetrics ?? teamMetrics;
       isolationFailed ||= result?.isolationFailed === true;
+      cleanupFailed ||= result?.cleanupFailed === true;
       firstVerificationSuiteStatus = result?.firstVerificationSuiteStatus ?? firstVerificationSuiteStatus;
       const ledgerAfter = requestAttemptLedger?.snapshot();
       const ledgerRecordedAttempt = ledgerBefore !== undefined
@@ -280,8 +292,8 @@ export async function runBenchmarkTask(
           inputTokens: (previous?.inputTokens ?? 0) + attemptUsage.inputTokens,
           outputTokens: (previous?.outputTokens ?? 0) + attemptUsage.outputTokens,
           reasoningTokens: (previous?.reasoningTokens ?? 0) + (attemptUsage.reasoningTokens ?? 0),
-          cachedInputTokens: (previous?.cachedInputTokens ?? 0) + (attemptUsage.cachedInputTokens ?? 0),
-          cacheObservedInputTokens: (previous?.cacheObservedInputTokens ?? 0) + (attemptUsage.cacheObservedInputTokens ?? 0),
+          ...(previous?.cachedInputTokens === undefined && attemptUsage.cachedInputTokens === undefined ? {} : { cachedInputTokens: (previous?.cachedInputTokens ?? 0) + (attemptUsage.cachedInputTokens ?? 0) }),
+          ...(previous?.cacheObservedInputTokens === undefined && attemptUsage.cacheObservedInputTokens === undefined ? {} : { cacheObservedInputTokens: (previous?.cacheObservedInputTokens ?? 0) + (attemptUsage.cacheObservedInputTokens ?? 0) }),
           complete: (previous?.complete ?? true) && attemptUsage.complete,
         };
         const consumed = usage.inputTokens + usage.outputTokens;
@@ -299,8 +311,8 @@ export async function runBenchmarkTask(
           inputTokens: previous?.inputTokens ?? 0,
           outputTokens: previous?.outputTokens ?? 0,
           reasoningTokens: previous?.reasoningTokens ?? 0,
-          cachedInputTokens: previous?.cachedInputTokens ?? 0,
-          cacheObservedInputTokens: previous?.cacheObservedInputTokens ?? 0,
+          ...(previous?.cachedInputTokens === undefined ? {} : { cachedInputTokens: previous.cachedInputTokens }),
+          ...(previous?.cacheObservedInputTokens === undefined ? {} : { cacheObservedInputTokens: previous.cacheObservedInputTokens }),
           complete: false,
         };
         status = "failed";
@@ -309,6 +321,7 @@ export async function runBenchmarkTask(
       }
 
       if (attemptError !== undefined) throw attemptError;
+      if (cleanupFailed) { status = "error"; failure = "Benchmark resource cleanup failed"; break; }
       if (isolationFailed) { status = "failed"; failure = "Native isolation failed; the campaign must stop"; break; }
 
       const terminalStopped = terminalOutcome !== undefined && terminalOutcome !== "completed";
@@ -367,7 +380,7 @@ export async function runBenchmarkTask(
       if (attempts > maxRepairAttempts) break;
     }
   } catch (error) {
-    cleanupFailed ||= error instanceof ProcessCleanupError;
+    cleanupFailed ||= error instanceof ResourceCleanupError;
     status = timedOut ? "timed_out" : "error";
     failure = errorMessage(error);
   } finally {
@@ -418,6 +431,8 @@ export async function runBenchmarkTask(
     startedAt,
     durationMs,
     attempts,
+    ...(requestAttemptLedger && requestAttemptLedger.snapshot().attempts.length ? { requestAccounting: benchmarkRequestAccounting(requestAttemptLedger.snapshot()) } : requestAccounting ? { requestAccounting } : {}),
+    ...(storageFailed ? { storageFailed: true } : {}),
     metrics: metrics.snapshot(now()),
     manualInterventions,
     ...(requestAttempts === undefined ? {} : { requestAttempts }),
@@ -442,6 +457,7 @@ export async function runBenchmarkTask(
   };
   if (writeArtifact !== undefined) {
     await writeArtifact("result.json", JSON.stringify(runResult, null, 2));
+    if (storageFailed) runResult.storageFailed = true;
   }
   return runResult;
 }

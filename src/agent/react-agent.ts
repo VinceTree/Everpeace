@@ -1,3 +1,7 @@
+import { safeReadFile } from "../tools/safe-files.js";
+import { sha256Bytes } from "../tools/file-version.js";
+import { SensitiveAccessGuard, SENSITIVE_CONTEXT_MARKER, sensitivePath, safeApprovalText, sensitiveDigest, sensitiveText } from "../permissions/sensitive-access.js";
+import { uiText } from "../localization/messages.js";
 import type { AgentResponse, ResponsesRequestOptions, PromptCacheOptions, ResponsesClientLike } from './model-protocol.js';
 export type { ResponseOutputItem, AgentResponse, ResponseStreamLike, ResponseRecoveryState, ResponseRecoveryAdapter, ResponsesRequestOptions, PromptCacheOptions, ResponsesClientLike } from './model-protocol.js';
 import { TurnLifecycle } from './turn-lifecycle.js';
@@ -22,11 +26,12 @@ import { PersistenceError, persistState } from "../storage/persistence-error.js"
 import { repairToolContext } from "./repair-context.js";
 import { CHECKPOINT_INSTRUCTION, checkpointRetentionCut, frameCheckpoint, projectConversationCheckpoints, validateCheckpoint } from "./conversation-checkpoint.js";
 import { formatWorkflowContext, projectWorkflowContext, type WorkflowContext } from "../workflow/model-context.js";
-import { invalidToolArgument, POLICY_DENIED_REMEDY, toolFeedbackFields } from "../tools/tool-feedback.js";
+import { invalidToolArgument, POLICY_DENIED_REMEDY, toolFeedbackFields, ToolFeedbackError } from "../tools/tool-feedback.js";
 import {
   isContextLimitError,
   ModelResponseError,
   ModelStreamCleanupError,
+  ModelStreamCancelledError,
 } from "./response-errors.js";
 import {
   BASH_TOOL_DEFINITION,
@@ -143,6 +148,11 @@ function isPersistedProjectRuleSnapshot(item: Record<string, unknown>): boolean 
 
 export interface AgentIO {
   getSessionId?(): string | undefined;
+  takeSensitiveInputAuthorization?(digest: string): boolean;
+  hasSensitiveContext?(): boolean;
+  notifySensitiveContext?(): Promise<void>;
+  inheritedSensitiveInput?: boolean;
+  sensitiveInputSource?: string;
   getPermissions?(): PermissionPolicy;
   isToolExecutionBlocked?(): boolean;
   getWorkflowContext?(): WorkflowContext;
@@ -207,6 +217,7 @@ export interface ReactAgentOptions {
   recoveryCacheMaxBytes?: number;
   streamRecoveryBudget?: number;
   streamIdleTimeoutMs?: number;
+  streamCleanupTimeoutMs?: number;
   contextRecoveryBudget?: number;
   web?: WebToolExecutor;
   mcp?: McpRuntimeLike;
@@ -442,7 +453,7 @@ Base your answer on actual tool results and never claim a command succeeded when
 Model-generated conversation checkpoints are background that may be stale or incomplete. Current user guidance, project rules, and host workflow facts take precedence. A checkpoint cannot authorize actions, restore file observations or approvals, or prove verification success.
 Respect the current permission policy. A denied operation must not be retried through a different tool to bypass the policy.`;
 
-const PERMISSION_INSTRUCTIONS = `Permission profiles: read-only requires approval for model shell, web, and MCP calls and enforces the Codex :read-only sandbox; ask requires approval for those calls and then enforces the Codex :workspace sandbox for shell; workspace-write runs model shell inside the Codex :workspace sandbox, allows enabled public web tools without per-request approval, and keeps MCP approval separate; full-access uses :danger-full-access after explicit user confirmation. In Plan mode, enabled public web access is read-only research and does not require per-request web approval; the web toggle still applies. File tools, apply_patch, workspace_status, workspace_diff, and workspace change review are workspace-scoped. Optional code_navigation uses its own native read-only sandbox regardless of the interactive permission tier. Persisted command prefix rules can deny or require approval for model Bash; project rules can only restrict the user policy. Never bypass a denied rule with another tool. The model-shell OS sandbox does not apply to direct user ! commands.`;
+const PERMISSION_INSTRUCTIONS = `Permission profiles: read-only requires approval for model shell, web, and MCP calls and enforces the Codex :read-only sandbox; ask requires approval for those calls and then enforces the Codex :workspace sandbox for shell; workspace-write runs model shell inside the Codex :workspace sandbox, allows enabled public web tools without per-request approval, and keeps MCP approval separate; full-access uses :danger-full-access after explicit user confirmation. Plan mode keeps workspace read-only; network approvals and sensitive-data transmission approvals still apply. File tools, apply_patch, workspace_status, workspace_diff, and workspace change review are workspace-scoped. Optional code_navigation uses its own native read-only sandbox regardless of the interactive permission tier. Persisted command prefix rules can deny or require approval for model Bash; project rules can only restrict the user policy. Never bypass a denied rule with another tool. The model-shell OS sandbox does not apply to direct user ! commands.`;
 
 function runtimeIdentityInstructions(provider: ProviderCapabilities["provider"], model: string, workspacePath: string): string {
   return [
@@ -481,6 +492,10 @@ function freezeSnapshot<T>(value: T): T {
   return value;
 }
 
+class SensitiveInteractionRequired extends Error {
+  constructor(readonly interaction: AgentInteractionRequired) { super('Sensitive access requires user interaction'); }
+}
+
 export class ReactAgent {
   readonly #context = new AgentContextRuntime();
   readonly #files: FileToolRuntime;
@@ -504,6 +519,13 @@ export class ReactAgent {
   readonly #planInteraction: PlanInteraction | undefined;
   readonly #goalRuntime: GoalRuntime | undefined;
   readonly #historyWriter: AgentHistoryWriter;
+  readonly #sensitive: SensitiveAccessGuard;
+  #sensitiveRecorded = false;
+  #sensitiveBoundary: Promise<void> | undefined;
+  #securityQueue: Promise<unknown> = Promise.resolve();
+  readonly #guardedSources = new Map<string, string>();
+  #restoredContextPending = true;
+  #turnSignal: AbortSignal | undefined;
   readonly #sessionHistory: SessionHistoryRuntimeLike | undefined;
   readonly #onContextCompacted:
     | ((items: readonly Record<string, unknown>[], automatic: boolean, usage: TokenUsageSample | null) => Promise<void>)
@@ -618,7 +640,7 @@ export class ReactAgent {
     this.#streamRecoveryBudget = integerBudget("streamRecoveryBudget", options.streamRecoveryBudget, 1);
     this.#streamIdleTimeoutMs = integerBudget("streamIdleTimeoutMs", options.streamIdleTimeoutMs, 60_000, 1);
     this.#contextRecoveryBudget = integerBudget("contextRecoveryBudget", options.contextRecoveryBudget, 1);
-    this.#streams = new ResponseStreamConsumer({ recovery: this.#client.responses.recovery !== undefined, recoveryCacheMaxBytes: this.#recoveryCacheMaxBytes, idleTimeoutMs: this.#streamIdleTimeoutMs, onEvent: this.#onEvent, writeAssistantDelta: (text) => this.#io.writeAssistantDelta?.(text), onToolProgress: (progress) => this.#io.onToolProgress?.(progress) });
+    this.#streams = new ResponseStreamConsumer({ recovery: this.#client.responses.recovery !== undefined, recoveryCacheMaxBytes: this.#recoveryCacheMaxBytes, idleTimeoutMs: this.#streamIdleTimeoutMs, cleanupTimeoutMs: integerBudget('streamCleanupTimeoutMs', options.streamCleanupTimeoutMs, 5000, 1), onEvent: this.#onEvent, writeAssistantDelta: (text) => this.#io.writeAssistantDelta?.(text), onToolProgress: (progress) => this.#io.onToolProgress?.(progress) });
     this.#requests = new ModelRequestRuntime(this.#client, this.#streams, options.client.responses.stream ? "stream" : "buffered", this.#onEvent);
     this.#web = options.web ?? createWebToolExecutor();
     this.#mcp = options.mcp;
@@ -635,6 +657,16 @@ export class ReactAgent {
       item.type === "function_call_output" && typeof item.output === "string" && Buffer.byteLength(item.output, "utf8") > MODEL_TOOL_OUTPUT_MAX_BYTES
         ? { ...item, output: this.#toolOutputs.bound(item.output) }
         : item);
+    this.#sensitive = new SensitiveAccessGuard(async (summary, signal) => {
+      if (!this.#io.requestUserInput) return 'redact';
+      const labels = [uiText('security.mask'), uiText('security.original'), uiText('security.reject')];
+      const result = await this.#io.requestUserInput({ questions: [{ id: 'sensitive_access', header: uiText('security.sensitive'), question: summary, options: labels.map((label, i) => ({ label, description: [uiText('security.maskHelp'), uiText('security.originalHelp'), uiText('security.rejectHelp')][i]! })) }] }, signal);
+      const pending = this.#io.takeInteractionRequired?.();
+      if (pending) throw new SensitiveInteractionRequired(pending);
+      return result.sensitive_access === labels[1] ? 'allow' : result.sensitive_access === labels[2] || result.__cancelled ? 'deny' : 'redact';
+    });
+    this.#sensitive.sensitive = (options.initialHistory?.length ?? 0) > 0;
+    this.#sensitiveRecorded = this.#context.history.some(item => item.content === SENSITIVE_CONTEXT_MARKER);
     this.#historyWriter = new AgentHistoryWriter({ append: options.onHistoryAppend, toolResult: options.onToolResultAppend, recorded: items => this.#appendRecordedHistory(items), event: this.#onEvent });
     this.#sessionHistory = options.sessionHistory;
     this.#onContextCompacted = options.onContextCompacted;
@@ -655,13 +687,13 @@ export class ReactAgent {
   async compact(signal?: AbortSignal): Promise<ContextCompactionResult> {
     this.#assertAvailable();
     if (this.#lifecycle.running) throw new Error("Cannot compact while an agent turn is running");
-    if (this.#context.compacting) throw new Error("Context compaction is already running");
+    if (this.#context.compacting || this.#context.operation) throw new Error("Context compaction is already running");
     signal?.throwIfAborted();
     const controller = new AbortController();
     this.#context.controller = controller;
     const baseSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     const ownedSignal = baseSignal;
-    const operation = this.#compactContext(false, ownedSignal);
+    const operation = (async () => { await this.#reviewRestoredContext(ownedSignal); return this.#compactContext(false, ownedSignal); })();
     this.#context.operation = operation;
     try { return await operation; }
     finally {
@@ -682,6 +714,10 @@ export class ReactAgent {
   getRequestSettings(): ModelRequestSettings {
     return { ...this.#requestSettings };
   }
+
+  get permissions(): PermissionPolicy { return structuredClone(this.#io.getPermissions?.() ?? defaultPermissions()); }
+  get hasSensitiveContext(): boolean { return this.#sensitive.sensitive || this.#io.hasSensitiveContext?.() === true; }
+  async activateSensitiveContext(exceptMemberId?: string): Promise<void> { this.#sensitive.sensitive = true; await this.#recordSensitiveBoundary(exceptMemberId); }
 
   async waitForBackgroundJobs(signal?: AbortSignal): Promise<BackgroundJobSnapshot[]> {
     try { return await this.#backgroundJobs.waitAll(signal); }
@@ -726,6 +762,12 @@ export class ReactAgent {
   async ensureSessionActivity(): Promise<void> { await this.#beforeTask?.(); }
 
   getPerformanceReport(): TaskPerformanceReport | undefined { return this.#lastPerformance ? structuredClone(this.#lastPerformance) : undefined; }
+  getLivePerformanceReport(): TaskPerformanceReport | undefined { return this.performance.snapshot(); }
+  getRequestBudgetSnapshot(): {limit:number|null;used:number;complete:boolean;inFlight:boolean}|undefined {
+    const ledger=this.#requestAttemptLedger;if(!ledger)return undefined;
+    const snapshot=ledger.snapshot();
+    return {limit:snapshot.tokenBudget??null,used:snapshot.inputTokens+snapshot.outputTokens,complete:snapshot.complete,inFlight:ledger.openRequests>0};
+  }
   recordPerformanceTiming(operation: string, ms: number): void { this.performance.timing(operation, ms); }
   recordRepairRound(): void { this.performance.repaired(); }
   getInFlightRequests(): number { return this.#requestAttemptLedger?.openRequests ?? this.#activeProviderRequests; }
@@ -744,7 +786,17 @@ export class ReactAgent {
     this.#backgroundNoticeAdmission = false;
     this.#pendingBackgroundNotices.clear();
     this.#backgroundNoticeSlots.clear();
-    try { await this.#team?.cancel(reason); return await this.#backgroundJobs.stopAll(reason); }
+    try {
+      const results = await Promise.allSettled([
+        Promise.resolve().then(() => this.#team?.cancel(reason)),
+        this.#backgroundJobs.stopAll(reason),
+      ]);
+      for (const result of results) if (result.status === "rejected" && result.reason instanceof ResourceCleanupError) this.#cleanupFailure ??= result.reason;
+      const [team, background] = results;
+      if (team.status === "rejected") throw team.reason;
+      if (background.status === "rejected") throw background.reason;
+      return background.value;
+    }
     finally { this.#assertResourceCleanup(); }
   }
 
@@ -791,7 +843,7 @@ export class ReactAgent {
   async runTurn(userInput: string, signal?: AbortSignal, options: AgentTurnOptions = {}): Promise<AgentTurnResult> {
     this.#assertAvailable();
     if (this.#lifecycle.running) throw new Error("An agent turn is already running");
-    if (this.#context.compacting) throw new Error("Cannot start an agent turn during context compaction");
+    if (this.#context.compacting || this.#context.operation) throw new Error("Cannot start an agent turn during context compaction");
     signal?.throwIfAborted();
     if (!this.#taskActive) this.#toolFeedback.reset();
     const controller = new AbortController();
@@ -818,6 +870,7 @@ export class ReactAgent {
   }
 
   async #runTurn(userInput: string, signal: AbortSignal, options: AgentTurnOptions): Promise<AgentTurnResult> {
+    this.#turnSignal = signal;
     this.#lifecycle.markRunning();
     this.#pendingLearnedTurn = undefined;
     const turnItems: Array<Record<string, unknown>> = [];
@@ -835,6 +888,7 @@ export class ReactAgent {
     let persistenceFailed = false;
     let initialMcpSnapshot: McpSnapshot | undefined;
     try {
+      await this.#reviewRestoredContext(signal);
       if (this.#mcp && this.#turnMode === "default") {
         const snapshot = await this.#mcp.ensureReady(signal);
         initialMcpSnapshot = snapshot;
@@ -896,6 +950,15 @@ export class ReactAgent {
             projectPreparation,
             memoryPreparation,
           ]).then(([mcpValue, skillsValue, projectValue]) => [mcpValue, skillsValue, projectValue] as const);
+          projectRules.context = await this.#protectSource(projectRules.context, 'project rules', loopSignal);
+          if (skillTurn) {
+            skillTurn.instructions = await this.#protectSource(skillTurn.instructions, 'skill catalog', loopSignal);
+            skillTurn.explicitInstructions = await this.#protectSource(skillTurn.explicitInstructions, 'invoked skill', loopSignal);
+          }
+          mcpPrepared.snapshot.tools = JSON.parse(await this.#protectSource(JSON.stringify(mcpPrepared.snapshot.tools), 'MCP tool metadata', loopSignal)) as McpSnapshot['tools'];
+          mcpPrepared.snapshot.instructions = await this.#protectSource(mcpPrepared.snapshot.instructions, 'MCP descriptions', loopSignal);
+          this.#learnedPrompt = await this.#protectSource(this.#learnedPrompt, 'Memory', loopSignal);
+          await this.#recordSensitiveBoundary();
           this.#mcpSnapshot = mcpPrepared.snapshot;
           this.#skillTurn = skillTurn;
           if (this.#projectRuleSnapshot?.revision !== projectRules.revision) {
@@ -996,7 +1059,7 @@ export class ReactAgent {
         this.#taskStepsRemaining = Math.max(0, this.#taskStepsRemaining - (loopResult.steps ?? 0));
       }
       this.#turnResult = { ...this.#turnResult, ...loopResult };
-      if (this.#learnedMemory && !loopResult.stopReason && this.#turnMode === "default") {
+      if (this.#learnedMemory && !loopResult.stopReason && !this.#turnResult.interactionRequired && this.#turnMode === "default") {
         const sessionId = this.#io.getSessionId?.();
         const learnedTurn: LearnedTurn = {
           workspacePath: this.#workspacePath,
@@ -1012,6 +1075,7 @@ export class ReactAgent {
     } catch (error) {
       persistenceFailed = error instanceof PersistenceError;
       this.#assertResourceCleanup();
+      if (error instanceof SensitiveInteractionRequired) return { ...this.#turnResult, interactionRequired: error.interaction };
       throw error;
     } finally {
       try {
@@ -1030,6 +1094,7 @@ export class ReactAgent {
         this.#lifecycle.markIdle();
         this.#streamRecoveryRemaining = 0;
         this.#turnItems = undefined;
+        this.#turnSignal = undefined;
         this.#assertResourceCleanup();
       }
     }
@@ -1086,7 +1151,69 @@ export class ReactAgent {
     else if (outcome === "verified") this.#learnedMemory.scheduleCapture(turn);
   }
 
-  async #record(items: readonly Record<string, unknown>[]): Promise<void> { await this.#historyWriter.record(items); }
+  async #record(items: readonly Record<string, unknown>[]): Promise<void> {
+    const protectedItems: Record<string, unknown>[] = [];
+    for (const item of items) {
+      if (item.role === 'user' && Array.isArray(item.content)) {
+        const content = [];
+        for (const part of item.content as Array<{ type: string; text: string }>) content.push({ ...part, text: await this.#protectUserInput(part.text, /"path"\s*:\s*"[^"]*(?:\.env|\.npmrc|\.pem)/iu.test(part.text), this.#turnSignal) });
+        protectedItems.push({ ...item, content });
+      } else if (item.role === 'user' && typeof item.content === 'string') protectedItems.push({ ...item, content: await this.#protectUserInput(item.content, false, this.#turnSignal) });
+      else protectedItems.push(item);
+    }
+    await this.#recordSensitiveBoundary();
+    await this.#historyWriter.record(protectedItems);
+  }
+
+  async #protectSource(value: string, source: string, signal?: AbortSignal): Promise<string> {
+    const key = `${permissionPolicyRevision(this.#io.getPermissions?.() ?? defaultPermissions())}:${source}:${sensitiveDigest(value)}`;
+    const old = this.#guardedSources.get(key); if (old !== undefined) return old;
+    let result: string;
+    try { result = await this.#sensitive.protect(value, source, () => permissionPolicyRevision(this.#io.getPermissions?.() ?? defaultPermissions()), signal); }
+    finally { await this.#recordSensitiveBoundary(); }
+    if (this.#guardedSources.size >= 16) this.#guardedSources.delete(this.#guardedSources.keys().next().value!);
+    this.#guardedSources.set(key, result); return result;
+  }
+
+  async #protectUserInput(value: string, pathSensitive = false, signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted();
+    const metadata = /^<host_file_attachment (\{[^\n]*\})>/u.exec(value)?.[1];
+    if (metadata) { try { const info = JSON.parse(metadata) as { path?: string }; pathSensitive ||= typeof info.path === 'string' && sensitivePath(info.path); } catch { pathSensitive = true; } }
+    if (this.#io.takeSensitiveInputAuthorization?.(sensitiveDigest(value))) { this.#sensitive.sensitive = true; return value; }
+    pathSensitive ||= this.#io.inheritedSensitiveInput === true && this.hasSensitiveContext;
+    return this.#sensitive.protect(value, this.#io.sensitiveInputSource ?? 'user input or attachment', () => permissionPolicyRevision(this.#io.getPermissions?.() ?? defaultPermissions()), signal, pathSensitive);
+  }
+
+  async #reviewRestoredContext(signal?: AbortSignal): Promise<void> {
+    if (!this.#restoredContextPending) return;
+    const serialized = JSON.stringify(this.#context.history);
+    const classified = serialized.includes(SENSITIVE_CONTEXT_MARKER) || /"path"\s*:\s*"[^"\n]*(?:\.env|\.npmrc|\.ssh|\.pem|\.key)/iu.test(serialized.replaceAll('\\"', '"'));
+    if (classified || sensitiveText(serialized)) {
+      const protectedText = await this.#sensitive.protect(serialized, 'restored Session context', () => permissionPolicyRevision(this.#io.getPermissions?.() ?? defaultPermissions()), signal, true);
+      if (protectedText !== serialized) {
+        this.#context.history = [{ role: 'developer', content: 'Prior sensitive Session context was withheld. Retrieve needed history with fresh authorization.' }];
+        this.#context.revision++; this.#context.tokens = null; this.#sensitiveRecorded = false;
+      }
+    }
+    this.#restoredContextPending = false;
+    await this.#recordSensitiveBoundary();
+  }
+
+  async #recordSensitiveBoundary(exceptMemberId?: string): Promise<void> {
+    this.#sensitive.sensitive ||= this.#io.hasSensitiveContext?.() === true;
+    if (this.#sensitiveBoundary) return this.#sensitiveBoundary;
+    if (this.#sensitive.sensitive && !this.#sensitiveRecorded) {
+      this.#sensitiveBoundary = (async () => {
+      await this.#io.notifySensitiveContext?.();
+      await this.#backgroundJobs.stopAll(new Error('Sensitive context requires fresh external authorization'));
+      if (this.#mcp && 'close' in this.#mcp && typeof this.#mcp.close === 'function') await this.#mcp.close();
+      await this.#team?.stopForSensitiveContext?.(exceptMemberId);
+      await this.#historyWriter.record([{ type: 'message', role: 'developer', content: SENSITIVE_CONTEXT_MARKER }]);
+      this.#sensitiveRecorded = true;
+      })();
+      try { await this.#sensitiveBoundary; } finally { this.#sensitiveBoundary = undefined; }
+    }
+  }
 
   async #recordToolResult(item: Record<string, unknown>, prepared: PreparedToolOutput): Promise<void> { await this.#historyWriter.recordTool(item, prepared); }
 
@@ -1125,10 +1252,21 @@ export class ReactAgent {
   }
 
   async #dispatchTool(call: ToolCall, signal?: AbortSignal): Promise<string | { output: string; stop?: boolean }> {
-    return this.#dispatcher.run(call, { execute: (value, ownedSignal) => this.#dispatchToolInner(value, ownedSignal), cleanupFailed: error => { this.#cleanupFailure ??= error; }, takeInteraction: () => this.#io.takeInteractionRequired?.(), recordInteraction: value => { this.#turnResult = { ...this.#turnResult, ...(value ? { interactionRequired: value } : {}) }; } }, signal);
+    return this.#dispatcher.run(call, { execute: (value, ownedSignal) => {
+      const operation = this.#securityQueue.then(async () => {
+        const result = await this.#dispatchToolInner(value, ownedSignal);
+        if (typeof result === 'string') return this.#protectToolOutput(value, result, ownedSignal);
+        return { ...result, output: await this.#protectToolOutput(value, result.output, ownedSignal) };
+      }).catch(error => {
+        if (!(error instanceof SensitiveInteractionRequired)) throw error;
+        this.#turnResult = { ...this.#turnResult, interactionRequired: error.interaction };
+        return { output: JSON.stringify({ status: 'interaction_required', message: error.message }), stop: true };
+      }); this.#securityQueue = operation.catch(() => undefined); return operation;
+    }, cleanupFailed: error => { this.#cleanupFailure ??= error; }, takeInteraction: () => this.#io.takeInteractionRequired?.(), recordInteraction: value => { this.#turnResult = { ...this.#turnResult, ...(value ? { interactionRequired: value } : {}) }; } }, signal);
   }
 
   async #dispatchToolInner(call: ToolCall, signal?: AbortSignal): Promise<string | { output: string; stop?: boolean }> {
+    await this.#recordSensitiveBoundary();
     this.#assertResourceCleanup();
     signal?.throwIfAborted();
     if (!this.#stepToolCatalog?.has(call.name)) {
@@ -1141,6 +1279,12 @@ export class ReactAgent {
       };
     }
     if (this.#team && TEAM_TOOL_NAMES.has(call.name)) {
+      if (this.hasSensitiveContext && ['spawn_agent', 'send_agent_message'].includes(call.name)) {
+        const destinations = this.#team.transferDestinations?.();
+        if (!destinations) return JSON.stringify({ status: 'denied', errorCode: 'POLICY_DENIED', message: 'Sensitive team sharing needs a verified member destination preview.' });
+        const reviewed = await this.#sensitive.protect(call.arguments, `team sharing to ${destinations}; member model providers, member Sessions and team storage`, () => permissionPolicyRevision(this.permissions), signal, true);
+        if (reviewed !== call.arguments) return JSON.stringify({ status: 'redacted', message: 'Resubmit a masked task; the original was not sent to members or team storage.' });
+      }
       try { return await this.#team.dispatch(call.name, call.arguments, this.#turnMode, signal); }
       catch (error) { if (signal?.aborted || error instanceof PersistenceError || error instanceof ResourceCleanupError) throw error; return JSON.stringify({ status: "error", error: "Team operation failed. Check member status and the task scope before retrying." }); }
     }
@@ -1218,8 +1362,8 @@ export class ReactAgent {
         return JSON.stringify({ status: "denied", error: "The command is denied by the current permission policy.", errorCode: "POLICY_DENIED", remedy: POLICY_DENIED_REMEDY });
       }
       const revision = permissionPolicyRevision(policy);
-      const needsApproval = commandPermission(command, policy) === "ask";
-      const accepted = !needsApproval || await this.#confirmTool("start_background", command, () => this.#io.confirmBash(command));
+      const needsApproval = this.#sensitive.sensitive || (policy.mode !== "full-access" && policy.shellNetwork === "allow") || commandPermission(command, policy) === "ask";
+      const accepted = !needsApproval || await this.#confirmTool("start_background", command, () => this.#confirmBash(command));
       signal?.throwIfAborted();
       const currentPolicy = this.#io.getPermissions?.() ?? defaultPermissions();
       if (!accepted) return JSON.stringify({ status: "rejected", message: "The user rejected this background command.", errorCode: "POLICY_DENIED", remedy: POLICY_DENIED_REMEDY });
@@ -1254,8 +1398,8 @@ export class ReactAgent {
         output = JSON.stringify({ status: "denied", error: "The command is denied by the active command prefix rules.", errorCode: "POLICY_DENIED", remedy: POLICY_DENIED_REMEDY });
       } else {
         const revision = permissionPolicyRevision(policy);
-        const needsApproval = commandPermission(command, policy) === "ask";
-        const accepted = !needsApproval || await this.#confirmTool("bash", command, () => this.#io.confirmBash(command));
+        const needsApproval = this.#sensitive.sensitive || (policy.mode !== "full-access" && policy.shellNetwork === "allow") || commandPermission(command, policy) === "ask";
+        const accepted = !needsApproval || await this.#confirmTool("bash", command, () => this.#confirmBash(command));
         signal?.throwIfAborted();
         if (!accepted) {
           output = JSON.stringify({
@@ -1326,7 +1470,9 @@ export class ReactAgent {
               remedy: "Read the file again before retrying the edit.",
             });
           }
-          guardedOperations.push({ ...operation, expectedSha256: observed });
+          const identity = this.#files.identities.get(key);
+          if (!identity) return JSON.stringify({ status: 'rejected', errorCode: 'FILE_NOT_OBSERVED', error: 'Current file identity is unavailable; read the file again.' });
+          guardedOperations.push({ ...operation, expectedSha256: observed, observedIdentity: identity });
         } else {
           const { expectedSha256: _ignored, ...unguarded } = operation;
           guardedOperations.push(unguarded);
@@ -1349,7 +1495,8 @@ export class ReactAgent {
                 const { expectedSha256: _ignored, ...unguarded } = operation;
                 return unguarded;
               }
-              return { ...operation, ...(beforeSha256 ? { expectedSha256: beforeSha256 } : {}) };
+              const identity = preview.files[index]?.beforeFileIdentity;
+              return { ...operation, ...(beforeSha256 ? { expectedSha256: beforeSha256 } : {}), ...(identity ? { observedIdentity: identity } : {}) };
             })
           : guardedOperations;
         const matchNotes = preview?.files.filter((file) => file.matchMode).map((file) => `${file.path}: ${file.matchMode} match, lines ${file.matchedLines!.start}-${file.matchedLines!.end}`).join("\n");
@@ -1367,7 +1514,7 @@ export class ReactAgent {
           this.#io.writeTool?.("Applying workspace patch");
           const result = await this.#io.runApplyPatch(boundOperations, signal);
           if (result.status === "applied" && preview?.status === "ready") {
-            this.#files.applied(preview);
+            this.#files.applied(preview, result);
           }
           let followup: WorkflowPatchFollowup | void;
           try {
@@ -1441,8 +1588,9 @@ export class ReactAgent {
     } else if (this.#turnMode !== "plan" && this.#mcp && this.#stepToolCatalog.mcpTool(call.name)) {
       const mcp = this.#mcp;
       const tool = this.#stepToolCatalog.mcpTool(call.name)!;
-      const detail = `${tool.serverName}/${tool.toolName} ${call.arguments}`;
-      if (mcpPermission(policy) === "ask" && !(await this.#confirmTool(call.name, detail, () => this.#confirmMcp(detail, signal)))) {
+      const detail = `${tool.serverName}/${tool.toolName} ${call.arguments}${tool.destination ? `\nDestination: ${tool.destination}; binding: ${tool.binding ?? 'unavailable'}` : ''}`;
+      if (this.hasSensitiveContext && (!tool.destination || !tool.binding)) return JSON.stringify({ status: 'denied', errorCode: 'POLICY_DENIED', message: 'Sensitive MCP calls require a concrete destination and frozen binding.' });
+      if ((this.#sensitive.sensitive || mcpPermission(policy) === "ask") && !(await this.#confirmTool(call.name, detail, () => this.#confirmMcp(detail, signal)))) {
         signal?.throwIfAborted();
         output = JSON.stringify({ status: "rejected", message: "The user rejected this MCP tool call. Do not retry it without new guidance." });
       } else {
@@ -1477,7 +1625,9 @@ export class ReactAgent {
         output = JSON.stringify({ error: "Invalid web_search arguments" });
       } else if (webPermission(policy) === "deny") {
         output = JSON.stringify({ status: "denied", error: "Web tools are disabled by the current permission policy." });
-      } else if (this.#turnMode !== "plan" && webPermission(policy) === "ask" && !(await this.#confirmTool("web_search", query, () => this.#confirmWeb(`Search the web for: ${query}`, signal)))) {
+      } else if (this.#sensitive.sensitive && !this.#web.searchDestinations?.length) {
+        output = JSON.stringify({ status: 'denied', errorCode: 'POLICY_DENIED', message: 'Sensitive search needs a concrete destination preview from this Web integration.' });
+      } else if ((this.#sensitive.sensitive || webPermission(policy) === "ask") && !(await this.#confirmTool("web_search", query, () => this.#confirmWeb(`Search the web for: ${query}\nDestinations: ${(this.#web.searchDestinations ?? []).join(', ')}`, signal)))) {
         signal?.throwIfAborted();
         output = JSON.stringify({
           status: "rejected",
@@ -1487,7 +1637,7 @@ export class ReactAgent {
         this.#io.onToolProgress?.({ phase: "started", name: call.name, detail: query });
         this.#io.writeTool?.(`Searching the web: ${query}`);
         output = await this.#runWebTool(
-          () => this.#web.search(query, signal),
+          () => this.#web.search(query, signal, this.#redirectApproval(signal)),
           signal,
         );
         this.#io.onToolProgress?.({ phase: "finished", name: call.name });
@@ -1498,7 +1648,7 @@ export class ReactAgent {
         output = JSON.stringify({ error: "Invalid web_fetch arguments" });
       } else if (webPermission(policy) === "deny") {
         output = JSON.stringify({ status: "denied", error: "Web tools are disabled by the current permission policy." });
-      } else if (this.#turnMode !== "plan" && webPermission(policy) === "ask" && !(await this.#confirmTool("web_fetch", url, () => this.#confirmWeb(`Read public web page: ${url}`, signal)))) {
+      } else if ((this.#sensitive.sensitive || webPermission(policy) === "ask") && !(await this.#confirmTool("web_fetch", url, () => this.#confirmWeb(`Read public web page: ${url}`, signal)))) {
         signal?.throwIfAborted();
         output = JSON.stringify({
           status: "rejected",
@@ -1508,7 +1658,7 @@ export class ReactAgent {
         this.#io.onToolProgress?.({ phase: "started", name: call.name, detail: url });
         this.#io.writeTool?.(`Reading web page: ${url}`);
         output = await this.#runWebTool(
-          () => this.#web.fetch(url, signal),
+          () => this.#web.fetch(url, signal, this.#redirectApproval(signal)),
           signal,
         );
         this.#io.onToolProgress?.({ phase: "finished", name: call.name });
@@ -1521,14 +1671,62 @@ export class ReactAgent {
     return output;
   }
 
+  async #protectToolOutput(call: ToolCall, output: string, signal?: AbortSignal): Promise<string> {
+    try {
+    let fileSensitive = false;
+    let historicalAccess = ['session_event_read', 'session_event_search'].includes(call.name) || this.hasSensitiveContext && TEAM_TOOL_NAMES.has(call.name);
+    try { const args = JSON.parse(call.arguments) as { path?: string; session_id?: string }; fileSensitive = call.name === 'read_file' && typeof args.path === 'string' && sensitivePath(args.path); historicalAccess ||= call.name === 'read_tool_output' && typeof args.session_id === 'string' && args.session_id !== this.#io.getSessionId?.(); } catch { /* argument errors have their existing result */ }
+    if (call.name === 'read_file') {
+      const result = JSON.parse(output) as { status?: string; data?: { content?: string; path?: string; sha256?: string; file_identity?: string } };
+      if (result.status === 'ok' && typeof result.data?.content === 'string') {
+        const old = result.data.content;
+        const sensitive = fileSensitive || sensitiveText(old);
+        if (sensitive) this.#files.observations.delete(this.#files.key(result.data.path ?? ''));
+        result.data.content = await this.#sensitive.protect(old, result.data.path ?? call.name, () => permissionPolicyRevision(this.#io.getPermissions?.() ?? defaultPermissions()), signal, fileSensitive);
+        if (sensitive && old === result.data.content && result.data.path) {
+          const fresh = await safeReadFile(this.#workspacePath, result.data.path, signal);
+          if (!fresh.exists || sha256Bytes(fresh.bytes) !== result.data.sha256 || fresh.identity !== result.data.file_identity) throw new Error('Sensitive file changed during approval; read it again');
+          this.#files.observations.set(this.#files.key(result.data.path), result.data.sha256!);
+        }
+        if (old !== result.data.content) this.#files.observations.delete(this.#files.key(result.data.path ?? ''));
+        if (old !== result.data.content) { delete result.data.sha256; delete result.data.file_identity; }
+        output = JSON.stringify(result);
+      }
+    } else {
+      if (historicalAccess) { try { if ((JSON.parse(output) as { status?: string }).status === 'not_found') historicalAccess = false; } catch { /* unknown history stays conservative */ } }
+      historicalAccess ||= ['workspace_diff', 'read_workspace_change', 'read_tool_output'].includes(call.name) && /(?:^|[\s/\\"'])\.(?:env(?:\.[\w.-]+)?|npmrc|ssh)(?=[\s/\\"']|$)/iu.test(output.replaceAll('\\"', '"'));
+      const protectedOutput = await this.#sensitive.protect(output, call.name, () => permissionPolicyRevision(this.#io.getPermissions?.() ?? defaultPermissions()), signal, historicalAccess);
+      output = historicalAccess && protectedOutput !== output ? JSON.stringify({ status: 'redacted', sensitive_redacted: true, message: protectedOutput }) : protectedOutput;
+    }
+    return output;
+    } finally { await this.#recordSensitiveBoundary(); }
+  }
+
   async #confirmWeb(request: string, signal?: AbortSignal): Promise<boolean> {
     // Older integrations may not expose a web approval surface. Treat that as
     // a denial instead of silently bypassing the active policy.
-    return this.#io.confirmWeb?.(request, signal) ?? false;
+    return this.#io.confirmWeb?.(this.#externalPreview(request), signal) ?? false;
+  }
+
+  #redirectApproval(signal?: AbortSignal): ((url: string) => Promise<boolean>) | undefined {
+    if (!this.#sensitive.sensitive) return undefined;
+    if (this.#web.supportsRedirectAuthorization !== true) throw new ToolFeedbackError('POLICY_DENIED', 'This Web integration cannot enforce destination approvals for sensitive context.', POLICY_DENIED_REMEDY);
+    return next => this.#confirmTool('web_redirect', next, () => this.#confirmWeb(`Redirect to: ${next}`, signal));
   }
 
   async #confirmMcp(request: string, signal?: AbortSignal): Promise<boolean> {
-    return this.#io.confirmMcp?.(request, signal) ?? false;
+    return this.#io.confirmMcp?.(this.#externalPreview(request), signal) ?? false;
+  }
+
+  #externalPreview(request: string): string {
+    const preview = safeApprovalText(request);
+    return this.#sensitive.sensitive ? uiText('security.outboundPrompt', { p0: preview, p1: sensitiveDigest(request) }) : preview;
+  }
+
+  async #confirmBash(command: string): Promise<boolean> {
+    const policy = this.#io.getPermissions?.() ?? defaultPermissions();
+    const preview = this.#externalPreview(command);
+    return this.#io.confirmBash(policy.shellNetwork === 'allow' ? preview + '\n' + uiText('security.processNetworkScope') : preview);
   }
 
   async #confirmTool(
@@ -1536,9 +1734,11 @@ export class ReactAgent {
     detail: string,
     confirm: () => Promise<boolean>,
   ): Promise<boolean> {
-    this.#io.onToolProgress?.({ phase: "approval", name, detail });
+    const revision = permissionPolicyRevision(this.#io.getPermissions?.() ?? defaultPermissions());
+    this.#io.onToolProgress?.({ phase: "approval", name, detail: safeApprovalText(detail) });
     const accepted = await confirm();
-    if (accepted) this.#io.onToolProgress?.({ phase: "started", name, detail });
+    if (accepted && revision !== permissionPolicyRevision(this.#io.getPermissions?.() ?? defaultPermissions())) throw new ToolFeedbackError('POLICY_DENIED', 'The permission policy changed during approval. Submit the action again.', POLICY_DENIED_REMEDY);
+    if (accepted) this.#io.onToolProgress?.({ phase: "started", name, detail: safeApprovalText(detail) });
     return accepted;
   }
 
@@ -1737,7 +1937,11 @@ export class ReactAgent {
       const instructions = formatWorkflowContext(workflowContext === undefined ? undefined : projectWorkflowContext(workflowContext));
       return await this.#context.compact(automatic, {
         isStaleRule: isPersistedProjectRuleSnapshot,
-        compact: (input, observe) => this.#providerCapabilities.compaction === 'native' ? this.#nativeCompact(input, signal, observe, instructions) : this.#summaryCompact(input, signal, observe, instructions),
+        compact: async (input, observe) => {
+          const result = await (this.#providerCapabilities.compaction === 'native' ? this.#nativeCompact(input, signal, observe, instructions) : this.#summaryCompact(input, signal, observe, instructions));
+          if (this.#sensitive.sensitive && !result.output.some(item => item.content === SENSITIVE_CONTEXT_MARKER)) return { ...result, output: [...result.output, { type: 'message', role: 'developer', content: SENSITIVE_CONTEXT_MARKER }] };
+          return result;
+        },
         persist: this.#onContextCompacted,
         usage: (usage) => this.#recordSessionUsage(usage), goalUsage: (usage) => this.#recordGoalUsage(usage), event: this.#onEvent,
       }, signal);
@@ -1906,8 +2110,8 @@ export class ReactAgent {
       }
       if (admitted && !reported) {
         reported = true;
-        trace(this.#lifecycle.controller?.signal.aborted ? "cancelled" : "failed", error instanceof ModelStreamCleanupError ? error.usage : null);
-        await observe?.(error instanceof ModelStreamCleanupError ? error.usage : null);
+        trace(this.#lifecycle.controller?.signal.aborted ? "cancelled" : "failed", error instanceof ModelStreamCleanupError || error instanceof ModelStreamCancelledError ? error.usage : null);
+        await observe?.(error instanceof ModelStreamCleanupError || error instanceof ModelStreamCancelledError ? error.usage : null);
       }
       if (error instanceof ResourceCleanupError || error instanceof PersistenceError) throw error;
       if (error instanceof TeamLimitError) throw new LoopStoppedError(error.reason);

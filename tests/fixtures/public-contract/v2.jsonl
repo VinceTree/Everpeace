@@ -1,0 +1,7 @@
+{"schema_version":2,"type":"session_started","timestamp":"2026-10-12T00:00:00.000Z","session_id":"fixture-session","model_id":"fixture-model","model_name":"fixture","workspace":"./fixture"}
+{"schema_version":2,"type":"agent_updated","timestamp":"2026-10-12T00:00:00.000Z","team_id":"fixture-team","agent_id":"fixture-agent","task_id":"fixture-task","state":"completed","role":"worker"}
+{"schema_version":2,"type":"tool_started","timestamp":"2026-10-12T00:00:00.000Z","name":"read_file","call_id":"fixture-call"}
+{"schema_version":2,"type":"tool_finished","timestamp":"2026-10-12T00:00:00.000Z","name":"read_file","call_id":"fixture-call","status":"completed"}
+{"schema_version":2,"type":"assistant_message","timestamp":"2026-10-12T00:00:00.000Z","text":"Scoped change checked."}
+{"schema_version":2,"type":"workflow_updated","timestamp":"2026-10-12T00:00:00.000Z","phase":"done","result":"verified","pending_verification":false}
+{"schema_version":2,"type":"run_finished","timestamp":"2026-10-12T00:00:00.000Z","session_id":"fixture-session","status":"success","usage_complete":true,"workflow_result":"verified","usage":{"input_tokens":20,"output_tokens":5}}

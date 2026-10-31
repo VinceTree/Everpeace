@@ -24,7 +24,10 @@ assert.ok(rootArg && ["prepare", "offline", "live"].includes(action!), "Use prep
 const root = path.resolve(rootArg);
 const relative = path.relative(repo, root);
 assert.ok(relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative), "Use an external isolated root");
-const baseUrl = "https://cc2.caaa.tech/v1", modelName = "deepseek-flash";
+const argument = (flag: string) => args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined;
+let baseUrl = args.includes("--official") ? "https://api.deepseek.com" : "https://cc2.caaa.tech/v1";
+let modelName = argument("--raw-model") ?? (args.includes("--official") ? "REQUIRES_RAW_MODEL_ID" : "deepseek-flash");
+const registrationId = argument("--model-id") ?? modelName;
 const cases = [
   { id: "text", prompt: "Reply OK only." },
   { id: "reasoning-tools", prompt: "Read first.txt, follow its instruction to read the next workspace file, and report that file's hidden marker. Do not edit files or run commands." },
@@ -42,7 +45,7 @@ if (action === "prepare") {
   }
   const expected = { model: modelName, reasoning: "high", maxOutputTokens: 32_768 };
   const harnesses = ["baseline", "candidate"].map((strategy) => ({ kind: "everpeace-checkout", name: strategy, loopStrategy: strategy, sourceRoot: repo, entryPath: identity.entryPath, revision: identity.revision, sourceDigest: identity.sourceDigest, buildDigest: identity.buildDigest, expected }));
-  const common = { catalogPath: path.join(repo, "docs/benchmark/DEEPSEEK_NODE_TASKS.json"), fixtureRoot: path.join(repo, "docs/benchmark/fixtures"), modelId: modelName, modelBaseUrl: baseUrl, responsesProfile: "deepseek", seed: 20261009, taskTokenBudget: 100_000, harnesses };
+  const common = { catalogPath: path.join(repo, "docs/benchmark/DEEPSEEK_NODE_TASKS.json"), fixtureRoot: path.join(repo, "docs/benchmark/fixtures"), modelId: registrationId, modelBaseUrl: baseUrl, responsesProfile: "deepseek", seed: 20261009, taskTokenBudget: 100_000, harnesses };
   const evaluationDigest = await captureBenchmarkEvaluationDigest(common.catalogPath, common.fixtureRoot);
   const catalog = JSON.parse(await readFile(common.catalogPath, "utf8")) as { tasks: Array<{ id: string }> };
   // Keep Git's workspace metadata below Windows path limits; reports stay external.
@@ -51,18 +54,20 @@ if (action === "prepare") {
   for (const stage of ["smoke", "comparison"]) {
     await save(`${stage}.json`, { ...common, evaluationDigest, campaignId: `ds-${stage}-${campaignSuffix}`, runsRoot: path.join(runRoot, stage), artifactsRoot: path.join(root, stage, "artifacts"), sessionsRoot: path.join(root, stage, "sessions"), repetitions: stage === "smoke" ? 1 : 3, campaignTokenBudget: stage === "smoke" ? 600_000 : 6_000_000, ...(stage === "smoke" ? { taskIds: catalog.tasks.slice(0, 3).map((task) => task.id) } : {}) });
   }
-  await save("plan.json", { identity, harnessDigest, model: modelName, baseUrl, responsesProfile: "deepseek", authorization: "prepared only; each live phase requires separate explicit numerical budget authorization", taskTokenBudget: 10_000, campaignTokenBudget: 20_000, maxOutputTokens: 1024, cases });
+  await save("plan.json", { identity, harnessDigest, registrationId, model: modelName, baseUrl, responsesProfile: "deepseek", authorization: "prepared only; each live phase requires separate explicit numerical budget authorization", taskTokenBudget: 10_000, campaignTokenBudget: 20_000, maxOutputTokens: 1024, cases });
   console.log(JSON.stringify({ prepared: root, liveRequests: 0 }));
 } else {
   const plan = JSON.parse(await readFile(path.join(root, "plan.json"), "utf8"));
+  baseUrl = plan.baseUrl; modelName = plan.model;
   assert.equal(plan.harnessDigest, harnessDigest);
   await assertBenchmarkCheckoutIdentity({ sourceRoot: repo, ...plan.identity });
   if (action === "live") assert.ok(args.includes("--token-budget") && args[args.indexOf("--token-budget") + 1] === "20000", "Live compatibility requires the separately authorized phase budget: --token-budget 20000");
   await save(`${action}-started.json`, { startedAt: new Date().toISOString(), identity: plan.identity });
   let model: RegisteredModel = { id: "offline", model_name: modelName, base_url: baseUrl, api_key: "offline-dummy", responses_profile: "deepseek", request_settings: { reasoningEffort: "high", maxOutputTokens: 1024 } };
   if (action === "live") {
+    assert.ok(!modelName.startsWith("REQUIRES_"), "Prepare a new reviewed plan with the supplier's actual raw model ID before live execution");
     const resolved = await new ModelRegistry({ authStorage: new SystemAuthStorage() }).resolveAll();
-    const matches = resolved.available.filter((entry) => entry.model_name === modelName && entry.base_url.replace(/\/+$/u, "") === baseUrl);
+    const matches = resolved.available.filter((entry) => (!plan.registrationId || entry.id === plan.registrationId) && entry.model_name === modelName && entry.base_url.replace(/\/+$/u, "") === baseUrl);
     assert.equal(matches.length, 1, "Register exactly one matching model in the local login UI");
     model = { ...matches[0]!, responses_profile: "deepseek", request_settings: model.request_settings! };
   }

@@ -4,6 +4,7 @@ export interface PublicBenchmarkReport {
   schema: 1; campaignId: string; evidence: "complete" | "insufficient"; planned: number | null;
   outcomes: { passed: number; failed: number; timedOut: number; error: number; cancelled: number; skipped: number };
   unknownUsage: number; realModelRuns: number;
+  requests?: { sent: number | null; unknown: number | null; rejected: number | null };
   records: Array<{ taskId: string; runId: string; adapter: string; repetition: number; outcome: string; usage: "known" | "unknown" | "not_requested"; preparationOutcome?: string; model?: string; endpointId?: string; manualInterventions: number; codeDigest?: string; buildDigest?: string; evaluationDigest?: string; sourceType?: string }>;
   skipped: BenchmarkCampaignResult["skipped"]; notes: string[];
 }
@@ -26,7 +27,10 @@ export function publicBenchmarkReport(campaign: BenchmarkCampaignResult, provena
   }
   if (seen.size !== plannedIds.size) throw new Error("Unaccounted planned runs; denominator cannot be reduced");
   const completeProvenance = records.every((record) => record.codeDigest && record.buildDigest && record.evaluationDigest && record.model && record.endpointId);
-  return { schema: 1, campaignId: campaign.campaignId, evidence: campaign.statisticsComplete && completeProvenance ? "complete" : "insufficient", planned: campaign.planned.length, outcomes, unknownUsage: records.filter((record) => record.usage === "unknown").length, realModelRuns: provenance.realModelRuns ? campaign.results.filter((result) => (result.requestAttempts ?? result.metrics.samplingAttempts) > 0).length : 0, records, skipped: campaign.skipped, notes: ["Unknown Usage is a metering dimension, not a task outcome.", "Real model runs count recorded request attempts, including failed requests; no-request preparations are excluded.", "Synthetic fixtures are not evidence of real-world repository performance."] };
+  const sentRuns = campaign.results.filter(run => !run.preparationError);
+  const counts = sentRuns.map(run => run.requestAccounting?.requests ?? run.requestAttempts);
+  const sum = (values: Array<number | undefined>) => values.every(value => value !== undefined) ? values.reduce<number>((total, value) => total + value!, 0) : null;
+  return { schema: 1, campaignId: campaign.campaignId, evidence: campaign.statisticsComplete && completeProvenance && !campaign.stopCode && !campaign.stopReason ? "complete" : "insufficient", planned: campaign.planned.length, outcomes, unknownUsage: records.filter((record) => record.usage === "unknown").length, realModelRuns: provenance.realModelRuns ? sentRuns.filter(run => (run.requestAccounting?.requests ?? run.requestAttempts ?? 0) > 0).length : 0, requests: { sent: sum(counts), unknown: sum(sentRuns.map(run => run.requestAccounting?.unknownRequests)), rejected: sum(sentRuns.map(run => run.requestAccounting?.rejectedRequests)) }, records, skipped: campaign.skipped, notes: ["Unknown Usage counts runs; request counts are separate and may be unavailable for historical evidence.", "Real model runs count runs with observed sent requests, including failures; preparation failures are excluded.", "Token admission budgets do not cap in-flight billing. Missing usage and prices prevent complete cost estimates.", "Synthetic fixtures are not evidence of real-world repository performance."] };
 }
 export function benchmarkMarkdown(report: PublicBenchmarkReport): string {
   const counts = report.outcomes;

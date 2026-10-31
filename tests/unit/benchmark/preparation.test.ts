@@ -142,3 +142,22 @@ test("suite runs the task returned by an isolated prepare hook", async () => {
   assert.equal(standalone.acceptance?.env?.FIXTURE_WORKSPACE, join(value.root, "standalone"));
   assert.equal(await readFile(join(value.root, "standalone", "package-lock.json"), "utf8"), "{\"lockfileVersion\":3}\n");
 });
+
+test("upstream fixtures start at the actual defective commit without a seed and retain phase evidence", async () => {
+  const value = await fixture();
+  const source = join(value.root, "source");
+  await writeFile(join(source, "value.mjs"), "export default 'bad';\n");
+  await exec("git", ["add", "value.mjs"], { cwd: source }); await exec("git", ["commit", "--quiet", "-m", "upstream defect"], { cwd: source });
+  const { stdout } = await exec("git", ["rev-parse", "HEAD"], { cwd: source });
+  const task: BenchmarkTask = {
+    ...value.task, source: { ...value.task.source!, sourceType: "upstream_issue", commit: stdout.trim() },
+    fixture: {
+      referencePatch: "reference.patch", startingState: "upstream",
+      pristineVerification: { command: process.execPath, args: ["-e", "import('./value.mjs').then(({default:value}) => process.exit(typeof value === 'string' ? 0 : 1))"] },
+    },
+  };
+  const phases: string[] = [];
+  const proof = await proveBenchmarkFixture(task, { fixtureRoot: value.fixtureRoot, destination: join(value.root, "upstream-proof"), sourceCache: source, async onVerification(phase) { phases.push(phase); } });
+  assert.deepEqual(phases, ["pristine", "defect", "reference"]);
+  assert.equal(proof.seeded.passed, false); assert.equal(proof.repaired.passed, true);
+});

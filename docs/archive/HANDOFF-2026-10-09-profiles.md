@@ -6,11 +6,11 @@
 
 用户本轮明确选择 **0.4.1**，已同步 package.json 与双语 README；单 Agent、Responses 与现有 TUI/exec/SDK 公共入口不变。沿用提交、推送授权；提交包含 `[skip publish]`，不使用 `[skip ci]`，不创建 tag、Release 或发布 npm。本轮只更新展示元数据并核算官方测试费用，没有取得独立 DeepSeek live 阶段授权，付费请求为零。
 
-当前交付本地根：`C:\Users\39850\Desktop\Everpeace-test-report-0.4.1\metadata-update-ae0b55f9fa774c43a4e611ccc98563fb`。上一实现提交为 `12ea59c29cc3ead6f87cf2c9ad7ec6511521d04a`，其 Windows/Linux CI 已通过。本轮最终提交与重新绑定的候选以新根的 `delivery-receipt.json`、`prepared-ci-fix/` 为准；旧 source digest 因 manifest 更新而过期，旧报告保留。
+当前交付本地根：`<LOCAL_EVIDENCE>`。上一实现提交为 `12ea59c29cc3ead6f87cf2c9ad7ec6511521d04a`，其 Windows/Linux CI 已通过。本轮最终提交与重新绑定的候选以新根的 `delivery-receipt.json`、`prepared-ci-fix/` 为准；旧 source digest 因 manifest 更新而过期，旧报告保留。
 
 本轮首次元数据提交 `85e08e05cfdba01c8dba87a650e6619ccc64940e` 的 Windows CI 通过，Linux 在真实取消验收中遇到 procfs ESRCH 竞态。测试现同时接受进程读取期间消失的 ENOENT/ESRCH，仍拒绝其他错误和存活状态；未改生产清理或放宽安全边界。原 CI 失败记录在本地保留，后续准确提交 CI 以交付收据为准。package 修改触发的 Release workflow 已实际 skipped，tag/Release 无变化。
 
-原始报告继续本地保存。README 保留既有 Grok 汇总图及明确范围，本轮只同步 profile 设置说明，不增加 DeepSeek 质量或成本宣称。本地报告根：`C:\Users\39850\Desktop\Everpeace-test-report-0.4.0\deepseek-loop-final-2001540786224eafb9e2b881d7008a49`。前次交接保存在该根的 `handoff-before.md`。
+原始报告继续本地保存。README 保留既有 Grok 汇总图及明确范围，本轮只同步 profile 设置说明，不增加 DeepSeek 质量或成本宣称。本地报告根：`<LOCAL_EVIDENCE>`。前次交接保存在该根的 `handoff-before.md`。
 
 保留原有未跟踪 `.everpeace-benchmark/`、`.patch-node-pty/`、`NUL`、`benchmark/`、`question/`、`test-me/`、`{}`；不纳入提交。工作起点为 `68ecccb6bc42d4a805e5099024b01327396e6030`，原始源码归档位于本地 `original-0.4.0.zip`。最终提交及 source/build/harness/evaluation digest 以本地 `delivery-receipt.json` 和提交后重新生成的 `prepared-final/` 为准，不复用修改前的候选身份。
 

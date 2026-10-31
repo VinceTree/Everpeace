@@ -14,6 +14,11 @@ import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult } from "./types.js
 import { TeamStore } from "../team/store.js";
 import type { TeamOptions } from "../team/types.js";
 import { CandidateRepairPolicy } from "./repair-policy.js";
+import { benchmarkLedgerUsage, benchmarkRequestAccounting } from "./request-accounting.js";
+import { EvaluationMemoryRuntime } from "./memory-pilot.js";
+import { createProviderRuntime } from "../providers/openai-compatible.js";
+import { RequestExecutor } from "../agent/request-executor.js";
+import { runBenchmarkVerification } from "./runner.js";
 
 export interface ProductionBenchmarkAdapterOptions {
   name?: string;
@@ -23,10 +28,24 @@ export interface ProductionBenchmarkAdapterOptions {
   permissionPolicy?: PermissionPolicy;
   loopStrategy?: import("../agent/tool-feedback-policy.js").LoopStrategy;
   team?: TeamOptions;
+  /** Evaluator-owned longitudinal pilot; ordinary benchmarks keep Memory disabled. */
+  memoryPilot?: { directory: string; enabled: boolean };
 }
 
 function safeName(value: string): string {
   return value.replace(/[^A-Za-z0-9._-]/gu, "-");
+}
+
+async function disposeBenchmarkServices(disposers: Array<() => Promise<void> | void | undefined>): Promise<void> {
+  const failures: unknown[] = [];
+  for (const dispose of disposers) {
+    try { await dispose(); } catch (error) { failures.push(error); }
+  }
+  if (failures.length) {
+    const error = new AggregateError(failures, "Benchmark services could not be disposed");
+    error.name = "BenchmarkCleanupError";
+    throw error;
+  }
 }
 
 /**
@@ -93,6 +112,14 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
           async confirm(_kind, tool) { return tool === "bash" || tool === "patch"; },
         },
       });
+      const memoryProvider = options.memoryPilot ? createProviderRuntime(options.model.base_url, options.model.api_key, comparisonSettings, options.model.model_name, options.model.responses_profile) : undefined;
+      const memoryExecutor = new RequestExecutor(context.requestAttemptLedger);
+      const memory = options.memoryPilot && memoryProvider ? new EvaluationMemoryRuntime({
+        store: new LearnedMemoryStore({ directory: options.memoryPilot.directory }), client: memoryProvider, model: options.model.model_name,
+        sessionId: () => session.id, idleDelayMs: 0, minTranscriptChars: 0,
+        policy: { readExisting: options.memoryPilot.enabled, captureFuture: options.memoryPilot.enabled },
+        runRequest: (run, scope) => scope.executor.execute("memory", () => memoryExecutor.execute("memory", () => run(scope.signal ? AbortSignal.any([scope.signal, context.signal]) : context.signal), { reservation: 0, signal: context.signal })),
+      }) : undefined;
       const handle = createProductionAgent({
         model: { ...options.model, request_settings: comparisonSettings },
         ...(options.team ? { team: { ...options.team, ...(context.tokenBudgetRemaining === undefined ? {} : { tokenBudget: Math.min(options.team.tokenBudget ?? context.tokenBudgetRemaining, context.tokenBudgetRemaining) }) }, teamStore: new TeamStore(join(options.sessionsRoot, safeName(task.id), String(context.attempt), "teams")) } : {}),
@@ -105,7 +132,8 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
         skills,
         mcp: null,
         learnedMemoryStore: new LearnedMemoryStore({ directory: join(options.sessionsRoot, safeName(task.id), String(context.attempt), "memory") }),
-        learnedMemoryPolicy: { readExisting: false, captureFuture: false },
+        ...(memory ? { learnedMemory: memory } : {}),
+        learnedMemoryPolicy: { readExisting: options.memoryPilot?.enabled ?? false, captureFuture: options.memoryPilot?.enabled ?? false },
         restore: {
           onHistoryAppend: (items) => sessionStore.appendContext(session.id, items),
           onContextCompacted: (items, automatic, usage) => sessionStore.compactContext(session.id, items, automatic, usage),
@@ -129,18 +157,19 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
           },
         });
         const result = await runner.run({ text: task.prompt, source: "benchmark", signal: context.signal });
+        if (memory) {
+          if (!task.acceptance) throw new Error("Memory coding pilot requires external acceptance");
+          const acceptance = await runBenchmarkVerification(task.acceptance, workspacePath, context.signal);
+          await memory.settleAccepted(result.workflowResult?.state.result === "verified" && acceptance.passed, context.signal);
+        }
         const snapshot = handle.team?.snapshot()?.usage ?? context.requestAttemptLedger.snapshot();
-        const saved = await sessionStore.load(session.id);
         const team = handle.team?.snapshot();
         return {
           ...(team ? { teamMetrics: { members: team.members.length, duplicateReads: team.diagnostics?.duplicateReads ?? 0, repeatedFailures: team.diagnostics?.repeatedFailures ?? 0, conflicts: team.members.filter((member) => member.state === "conflict").length }, isolationFailed: team.members.some((member) => ["failed", "cancelled"].includes(member.state) && member.errorCode === "SANDBOX_UNAVAILABLE") } : {}),
           manualInterventions: result.agentResult.interactionRequired ? 1 : 0,
           requestAttempts: snapshot.attempts.filter((attempt) => attempt.status !== "rejected").length,
-          usage: {
-            inputTokens: snapshot.inputTokens, outputTokens: snapshot.outputTokens, reasoningTokens: snapshot.reasoningTokens, complete: snapshot.complete,
-            ...(saved.usage.cached_input_tokens === undefined ? {} : { cachedInputTokens: saved.usage.cached_input_tokens }),
-            ...(saved.usage.cache_observed_input_tokens === undefined ? {} : { cacheObservedInputTokens: saved.usage.cache_observed_input_tokens }),
-          },
+          usage: benchmarkLedgerUsage(snapshot),
+          requestAccounting: benchmarkRequestAccounting(snapshot),
           terminalOutcome: result.disposition,
           ...(result.agentResult.stopReason ? { stopReason: result.agentResult.stopReason } : {}),
           ...(result.workflowResult?.state.result ? { workflowOutcome: result.workflowResult.state.result } : {}),
@@ -153,7 +182,9 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
           }),
         };
       } finally {
-        try { await handle.dispose(); }
+        try {
+          await disposeBenchmarkServices([() => handle.dispose(), () => memory?.dispose(), () => memoryProvider?.dispose?.()]);
+        }
         finally {
           const snapshot = handle.team?.snapshot();
           if (snapshot) context.requestAttemptLedger.importSettledAttempts(snapshot.teamId, snapshot.usage.attempts);

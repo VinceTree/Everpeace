@@ -1,0 +1,138 @@
+diff --git a/source/vendor/supports-color/browser.js b/source/vendor/supports-color/browser.js
+index 4e75e86..9fa6888 100644
+--- a/source/vendor/supports-color/browser.js
++++ b/source/vendor/supports-color/browser.js
+@@ -1,15 +1,26 @@
+ /* eslint-env browser */
+ 
+-const isBlinkBasedBrowser = navigator.userAgentData
+-	? navigator.userAgentData.brands.some(({brand}) => brand === 'Chromium')
+-	: /\b(Chrome|Chromium)\//.test(navigator.userAgent);
++const level = (() => {
++	if (navigator.userAgentData) {
++		const brand = navigator.userAgentData.brands.find(({brand}) => brand === 'Chromium');
++		if (brand && brand.version > 93) {
++			return 3;
++		}
++	}
+ 
+-const colorSupport = isBlinkBasedBrowser ? {
+-	level: 1,
++	if (/\b(Chrome|Chromium)\//.test(navigator.userAgent)) {
++		return 1;
++	}
++
++	return 0;
++})();
++
++const colorSupport = level !== 0 && {
++	level,
+ 	hasBasic: true,
+-	has256: false,
+-	has16m: false,
+-} : false;
++	has256: level >= 2,
++	has16m: level >= 3,
++};
+ 
+ const supportsColor = {
+ 	stdout: colorSupport,
+diff --git a/source/vendor/supports-color/index.d.ts b/source/vendor/supports-color/index.d.ts
+index 98e3618..db44a78 100644
+--- a/source/vendor/supports-color/index.d.ts
++++ b/source/vendor/supports-color/index.d.ts
+@@ -1,13 +1,13 @@
+-import {WriteStream} from 'node:tty';
++import type {WriteStream} from 'node:tty';
+ 
+-export interface Options {
++export type Options = {
+ 	/**
+ 	Whether `process.argv` should be sniffed for `--color` and `--no-color` flags.
+ 
+ 	@default true
+ 	*/
+ 	readonly sniffFlags?: boolean;
+-}
++};
+ 
+ /**
+ Levels:
+@@ -21,7 +21,7 @@ export type ColorSupportLevel = 0 | 1 | 2 | 3;
+ /**
+ Detect whether the terminal supports color.
+ */
+-export interface ColorSupport {
++export type ColorSupport = {
+ 	/**
+ 	The color level.
+ 	*/
+@@ -41,11 +41,11 @@ export interface ColorSupport {
+ 	Whether Truecolor 16 million colors are supported.
+ 	*/
+ 	has16m: boolean;
+-}
++};
+ 
+ export type ColorInfo = ColorSupport | false;
+ 
+-export function createSupportsColor(stream: WriteStream, options?: Options): ColorInfo;
++export function createSupportsColor(stream?: WriteStream, options?: Options): ColorInfo;
+ 
+ declare const supportsColor: {
+ 	stdout: ColorInfo;
+diff --git a/source/vendor/supports-color/index.js b/source/vendor/supports-color/index.js
+index 130c8b9..a7cea61 100644
+--- a/source/vendor/supports-color/index.js
++++ b/source/vendor/supports-color/index.js
+@@ -3,7 +3,7 @@ import os from 'node:os';
+ import tty from 'node:tty';
+ 
+ // From: https://github.com/sindresorhus/has-flag/blob/main/index.js
+-function hasFlag(flag, argv = process.argv) {
++function hasFlag(flag, argv = globalThis.Deno ? globalThis.Deno.args : process.argv) {
+ 	const prefix = flag.startsWith('-') ? '' : (flag.length === 1 ? '-' : '--');
+ 	const position = argv.indexOf(prefix + flag);
+ 	const terminatorPosition = argv.indexOf('--');
+@@ -80,6 +80,12 @@ function _supportsColor(haveStream, {streamIsTTY, sniffFlags = true} = {}) {
+ 		}
+ 	}
+ 
++	// Check for Azure DevOps pipelines.
++	// Has to be above the `!streamIsTTY` check.
++	if ('TF_BUILD' in env && 'AGENT_NAME' in env) {
++		return 1;
++	}
++
+ 	if (haveStream && !streamIsTTY && forceColor === undefined) {
+ 		return 0;
+ 	}
+@@ -105,7 +111,11 @@ function _supportsColor(haveStream, {streamIsTTY, sniffFlags = true} = {}) {
+ 	}
+ 
+ 	if ('CI' in env) {
+-		if (['TRAVIS', 'CIRCLECI', 'APPVEYOR', 'GITLAB_CI', 'GITHUB_ACTIONS', 'BUILDKITE', 'DRONE'].some(sign => sign in env) || env.CI_NAME === 'codeship') {
++		if ('GITHUB_ACTIONS' in env) {
++			return 3;
++		}
++
++		if (['TRAVIS', 'CIRCLECI', 'APPVEYOR', 'GITLAB_CI', 'BUILDKITE', 'DRONE'].some(sign => sign in env) || env.CI_NAME === 'codeship') {
+ 			return 1;
+ 		}
+ 
+@@ -116,12 +126,11 @@ function _supportsColor(haveStream, {streamIsTTY, sniffFlags = true} = {}) {
+ 		return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
+ 	}
+ 
+-	// Check for Azure DevOps pipelines
+-	if ('TF_BUILD' in env && 'AGENT_NAME' in env) {
+-		return 1;
++	if (env.COLORTERM === 'truecolor') {
++		return 3;
+ 	}
+ 
+-	if (env.COLORTERM === 'truecolor') {
++	if (env.TERM === 'xterm-kitty') {
+ 		return 3;
+ 	}
+ 

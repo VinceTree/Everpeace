@@ -1,5 +1,6 @@
-import { spawn } from "node:child_process";
-import { constants, promises as fs } from "node:fs";
+import { spawnOwned as spawn } from "./owned-process.js";
+import { promises as fs } from "node:fs";
+import { safeReadFile } from './safe-files.js';
 import path from "node:path";
 import { decodeTextFile } from "./file-version.js";
 
@@ -144,7 +145,7 @@ export async function listWorkspaceChanges(
     const renamed = x === "R" || x === "C" || y === "R" || y === "C";
     const oldPathValue = renamed ? normalizeGitPath(values[index++] ?? "") : undefined;
     const oldPath = oldPathValue === undefined ? undefined : workspaceRelativeGitPath(root, workspaceRoot, oldPathValue);
-    if (target === undefined) continue;
+    if (target === undefined || /\.everpeace-(?:recovery|stage|batch)-/u.test(target)) continue;
     if (x === "?" && y === "?") {
       entries.push({ id: `untracked:${target}`, path: target, kind: "untracked", status: "??" });
     } else {
@@ -180,19 +181,12 @@ async function untrackedDetail(
   const resolved = await fs.realpath(lexical);
   if (!inside(root, resolved)) throw new Error("Changed path resolves outside the active workspace");
   if (!stat.isFile()) return { entry, contentKind: "summary", text: `Untracked ${stat.isDirectory() ? "directory" : "non-regular file"}; no text preview.`, truncated: false };
-  const handle = await fs.open(resolved, process.platform === "win32" ? constants.O_RDONLY : constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  try {
-    const bytes = Buffer.alloc(Math.min(stat.size, MAX_DETAIL_BYTES) + (stat.size > MAX_DETAIL_BYTES ? 0 : 0));
-    let length = 0;
-    while (length < bytes.length) {
-      signal?.throwIfAborted();
-      const result = await handle.read(bytes, length, bytes.length - length, length);
-      if (result.bytesRead === 0) break;
-      length += result.bytesRead;
-    }
+    const value = await safeReadFile(workspacePath, entry.path, signal);
+    if (!value.exists) return { entry, contentKind: 'summary', text: 'File changed during review; refresh the captured changes.', truncated: false };
+    const bytes = value.bytes.subarray(0, MAX_DETAIL_BYTES);
     let decoded;
     try {
-      decoded = decodeTextFile(bytes.subarray(0, length)).text;
+      decoded = decodeTextFile(bytes).text;
     } catch {
       return { entry, contentKind: "summary", text: `Untracked binary or non-UTF-8 file (${stat.size} bytes); contents are not displayed.`, truncated: stat.size > MAX_DETAIL_BYTES };
     }
@@ -204,9 +198,6 @@ async function untrackedDetail(
       truncated: stat.size > MAX_DETAIL_BYTES || lineLimited.truncated,
       ...(stat.size > MAX_DETAIL_BYTES ? { warning: "Preview retained only the first 2 MiB." } : {}),
     };
-  } finally {
-    await handle.close();
-  }
 }
 
 export async function readWorkspaceChange(
@@ -215,12 +206,27 @@ export async function readWorkspaceChange(
   signal?: AbortSignal,
 ): Promise<WorkspaceChangeDetail> {
   signal?.throwIfAborted();
+  if ([entry.path, entry.oldPath ?? ''].some(name => /\.everpeace-(?:recovery|stage|batch)-/u.test(name))) return { entry, contentKind: 'summary', text: 'Host recovery materials require explicit user recovery; contents are not previewed.', truncated: false };
   if (entry.kind === "untracked") return untrackedDetail(workspacePath, entry, signal);
   const workspaceRoot = await fs.realpath(workspacePath);
   for (const changedPath of [entry.path, entry.oldPath].filter((value): value is string => value !== undefined)) {
     if (!inside(workspaceRoot, path.resolve(workspaceRoot, changedPath))) {
       throw new Error("Changed path escapes the active workspace");
     }
+  }
+  if (entry.kind === 'unstaged') {
+    const current = await safeReadFile(workspacePath, entry.path, signal);
+    const prefix = decodePrefix((await git(workspacePath, ['rev-parse', '--show-prefix'], { maxBytes: 64 * 1024, ...(signal ? { signal } : {}) })).bytes).trim();
+    const baseline = await git(workspacePath, ['show', `:${prefix}${entry.path}`], { maxBytes: MAX_DETAIL_BYTES, ...(signal ? { signal } : {}) });
+    let before: string; let after: string;
+    try { before = decodeTextFile(baseline.bytes).text; after = current.exists ? decodeTextFile(current.bytes.subarray(0, MAX_DETAIL_BYTES)).text : ''; }
+    catch { return { entry, contentKind: 'summary', text: 'Binary file change or non-UTF-8 text; contents are not displayed.', truncated: baseline.truncated || current.bytes.length > MAX_DETAIL_BYTES }; }
+    const removed = before.split('\n'); const added = after.split('\n');
+    const text = [`diff --git a/${entry.path} b/${entry.path}`, `--- a/${entry.path}`, current.exists ? `+++ b/${entry.path}` : '+++ /dev/null', `@@ -1,${removed.length} +1,${added.length} @@`, ...removed.map(line => `-${line}`), ...added.map(line => `+${line}`)].join('\n');
+    const limited = limitLines(text);
+    const byteLimited = Buffer.byteLength(limited.text) > MAX_DETAIL_BYTES;
+    const truncated = limited.truncated || baseline.truncated || current.bytes.length > MAX_DETAIL_BYTES || byteLimited;
+    return { entry, contentKind: 'diff', text: byteLimited ? decodePrefix(Buffer.from(limited.text).subarray(0, MAX_DETAIL_BYTES - 4)) : limited.text, truncated, ...(truncated ? { warning: 'Detail retained only the first 2 MiB or 10,000 lines.' } : {}) };
   }
   const args = [
     "-c", "core.quotepath=false",

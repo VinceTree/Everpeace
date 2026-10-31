@@ -19,7 +19,7 @@ import {
 
 test("workspace-write is the friction-free current-workspace default", () => {
   const policy = defaultPermissions();
-  assert.deepEqual(policy, { mode: "workspace-write", web: true });
+  assert.deepEqual(policy, { mode: "workspace-write", web: true, shellNetwork: "deny" });
   assert.equal(bashPermission(policy), "allow");
   assert.equal(webPermission(policy), "allow");
   assert.equal(mcpPermission(policy), "ask");
@@ -109,12 +109,34 @@ test("nested interpreters require approval and cannot hide an explicit deny", ()
   assert.equal(commandPermission("echo $(git status)", base), "ask");
 });
 
-test("ask profile cannot be relaxed by an allow prefix rule", () => {
+test("ask profile permits a simple user allow prefix rule", () => {
   assert.equal(commandPermission("npm test", {
     mode: "ask",
     web: true,
     commandRules: [{ prefix: "npm test", action: "allow" }],
-  }), "ask");
+  }), "allow");
+});
+test('user allow never outruns project restrictions or dynamic execution', () => {
+  const policy = { mode: 'ask' as const, web: true, commandRules: [{ prefix: 'git status', action: 'allow' as const }] };
+  assert.equal(commandPermission('git status && git status --short', policy), 'allow');
+  assert.equal(commandPermission('git status && echo next', policy), 'ask');
+  for (const command of ['git status > file', 'git status $args', 'git status $(echo x)']) assert.equal(commandPermission(command, policy), 'ask');
+  assert.equal(commandPermission('git status', { ...policy, mode: 'read-only' }), 'ask');
+  assert.equal(commandPermission('git status', { ...policy, legacyAllowPending: true }), 'ask');
+  assert.equal(commandPermission('git status', { ...policy, commandRules: [...policy.commandRules, { prefix: 'git', action: 'deny', source: 'project' }] }), 'deny');
+});
+test('legacy allow activation is explicit and survives unrelated policy saves', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'everpeace-allow-migration-'));
+  try {
+    const userPath = path.join(root, 'user.json'), projectPath = path.join(root, 'missing');
+    await fs.writeFile(userPath, JSON.stringify({ version: 1, policy: { mode: 'ask', web: true, commandRules: [{ prefix: 'git status', action: 'allow' }] } }));
+    const policy = await loadPermissionPolicy(root, { userPath, projectPath });
+    assert.equal(commandPermission('git status', policy), 'ask');
+    await savePermissionPolicy({ ...policy, web: false }, root, { userPath });
+    assert.equal((await loadPermissionPolicy(root, { userPath, projectPath })).legacyAllowPending, true);
+    await savePermissionPolicy({ ...policy, legacyAllowPending: false }, root, { userPath });
+    assert.equal(commandPermission('git status', await loadPermissionPolicy(root, { userPath, projectPath })), 'allow');
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
 test("permission policy paths are stable and persist without credentials", async () => {
@@ -127,7 +149,7 @@ test("permission policy paths are stable and persist without credentials", async
     await savePermissionPolicy({ mode: "ask", web: false, commandRules: [{ prefix: "pnpm test", action: "allow" }] }, root, { userPath, scope: "user" });
     await savePermissionPolicy({ mode: "workspace-write", web: true }, root, { projectPath, scope: "project" });
     const loaded = await loadPermissionPolicy(root, { userPath, projectPath });
-    assert.deepEqual(loaded, { mode: "ask", web: false, commandRules: [{ prefix: "pnpm test", action: "allow" }] });
+    assert.deepEqual(loaded, { mode: "ask", web: false, shellNetwork: "deny", commandRules: [{ prefix: "pnpm test", action: "allow" }] });
     assert.doesNotMatch(await fs.readFile(userPath, "utf8"), /api[_-]?key|token|secret/iu);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -143,7 +165,7 @@ test("permission policy writes serialize and leave no temporary files", async ()
       savePermissionPolicy({ mode: "read-only", web: false }, root, { userPath, scope: "user" }),
     ]);
     const loaded = await loadPermissionPolicy(root, { userPath, projectPath: path.join(root, "missing-project.json") });
-    assert.deepEqual(loaded, { mode: "read-only", web: false });
+    assert.deepEqual(loaded, { mode: "read-only", web: false, shellNetwork: "deny" });
     assert.deepEqual(await fs.readdir(root), ["user.json"]);
   } finally {
     await fs.rm(root, { recursive: true, force: true });

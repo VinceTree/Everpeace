@@ -1,8 +1,21 @@
 # Architecture Decisions
 
+## 运行时与界面依赖更新
+
+开发和 CI 继续以 Node 22 为基线，Node 类型定义与该主版本对齐，Dependabot 不自动升级到更高主版本。React 与测试渲染器使用相同精确版本并成组更新；Ink 大版本升级需复核普通 stream、输入解析和 inline resize 契约。App/Composer 使用公开尺寸 hook，Markdown 保留共享订阅及普通 Writable 的受检宽度回退。依赖变化同时重冻结 evaluator lock，旧候选证据不能迁移为新候选成功。执行规则见 [DEVELOPMENT](../DEVELOPMENT.md)。
+
+## 有界失败、Job 所有权和持久恢复
+
+流和进程清理采用共享截止时间；期限到达返回资源故障并关闭后续准入，不能把超时当作资源已释放。Windows 在进程创建时加入 Job，根退出不能替代后代核验；保留沙箱，不授权裸 PID 终止。多文件提交采用原始字节/身份绑定的持久批次和追加恢复意图，不承诺原子事务或硬件断电持久性。allow 用户规则与项目限制分开求值，旧 allow 激活需确认；子包覆盖证据绑定当前 workspace revision，恢复不重放。详见 [可靠性加固](RELIABILITY_HARDENING.md)。
+
+
+## 安全文件提交与敏感外传
+
+采用 Windows 原生句柄相对访问与保全原文件后排他安装，放弃单步原子替换承诺；无可靠后端的平台拒绝操作，不回退。恢复、回滚与 undo 共用原始字节版本保护。敏感读取授权与外传授权分开，恢复不沿用旧审批。stdio MCP 默认沙箱禁网，宿主模式独立确认；验证依据变化及恢复缺基线需要新授权。实现边界、兼容迁移和未测范围见 [安全加固](SECURITY_HARDENING.md)。
+
 ## 验证解释、数据生命周期与观测
 
-项目报告只提供检查/计量证据，不提升为宿主独立功能证明；覆盖未知不改变现有 verified 结算。隐私保留默认永久，启用及对话导出均绑定具体预览，自动删除必须确认安全关闭及无保留团队归属。Session 原始协议不盲目脱敏改写，诊断默认采用字段白名单。项目经验到期暂停召回，人工纠正保留来源及修订关系；每次真实请求重新校验。性能由当前任务所有者按请求身份/generation 去重，私密参数摘要只留内存。
+项目报告只提供检查/计量证据，不提升为宿主独立功能证明；覆盖未知不改变现有 verified 结算。首次隐私设置推荐 30 天，未确认前不启用自动清理；已有配置保留原策略，启用及对话导出均绑定具体预览，自动删除必须确认安全关闭及无保留团队归属。Session 原始协议不盲目脱敏改写，诊断默认采用字段白名单。项目经验到期暂停召回，人工纠正保留来源及修订关系；每次真实请求重新校验。性能由当前任务所有者按请求身份/generation 去重，私密参数摘要只留内存。
 
 团队授权子目录与 Git 根分离，快照不能扩大到整个仓库。ReactAgent 沿传输、上下文和文件观察状态抽取，仍保留准入、权限及最终清理。评测候选修复规则只能收紧 benchmark 修复数；默认三轮及单 Agent 不根据离线 fixture 改变。固定技术语料明确为许可文档的渲染快照，指标不代表全网。[详细契约与未测范围](VALIDATION_PRIVACY_PERFORMANCE.md)。
 
@@ -292,7 +305,7 @@ Responses usage 中的 `input_tokens_details.cached_tokens` 与 `cache_write_tok
 
 - 模型轮次运行时保留一个可编辑 guidance composer。用户提交的普通消息立即写入可恢复 transcript；真实 Agent 支持时会中止当前 sampling，并在已持久化上下文的安全检查点应用 guidance，工具执行中的消息等待当前工具结果落盘后生效，未启动调用补齐 `steered` output。Ctrl+C 取消时先将待处理 guidance 写入模型 context，避免遗留给未来轮次。旧 AgentSession 替身仍按 FIFO 下一轮兼容。模型 Bash 的非交互输出不会夺取输入焦点。直接 `!` 运行时仍将 stdin 独占给 PTY，Ctrl+C 取消当前命令。
 
-- TUI 自有文案使用英文；用户和 assistant 正文保持原文。已知旧 system/tool/error timeline 文案在渲染时映射为英文，持久化文件与 Responses context 均不迁移、不改写。
+- TUI 自有文案集中管理，自动选择英文/简体中文且允许切换；用户、assistant、源码与第三方正文保持原文。已知旧 system/tool/error 宿主提示仅在显示层精确映射到当前语言，持久化与 Responses context 不按关键词迁移或改写。
 - Agent loop 的 `sampling` / `tools` phase 及 `LoopEvent` 通过构造回调进入 TUI：Responses SSE 的文字 delta、审批、工具开始/结束、重试和 steering 都即时展示，兼容端点退回 buffered 阶段显示。阶段状态和增量内容不持久化；耗时小于一分钟显示秒，超过一分钟显示 `m+s`，超过一小时显示 `h+m+s`。
 - assistant timeline 以 GFM token 渲染标题、列表、强调、链接、表格和代码；代码语言由围栏或 shell 元数据确定。高亮限制为 512 KiB、10,000 行、单行 4 KiB，未知语言、越界内容或解析失败退回纯文本。原始 Markdown 仍是唯一持久化内容。
 - 模型命令、用户直接命令分别以 Ran/You ran 卡片显示；失败和取消保留文本状态而不只依赖颜色。新命令不再额外写入重复 `! command` 和成功提示，审计信息继续由 output timeline 的可选 command 元数据承担，旧 timeline 保持可读。
@@ -394,6 +407,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 - 后台完成 callback 只携带 job ID、终态、退出码和时间，并受 runner invocation generation 限制；下一普通 step 通过 durable context 保存后才确认通知。运行 job 与未送达通知共用 20 个槽位，任务结束关闭准入并丢弃余项，通知不唤醒 Session，输出仍由 `poll_background` 获取。
 - 搜索 continuation 只在 Agent 进程内保留最多 16 个搜索和 8 MiB 序列化 UTF-8 payload，按创建顺序淘汰；读完最后一页或 dispose 立即释放。单次 ripgrep 的 2 MiB 输入限额同时计算未终止记录，`has_more` 与 `incomplete` 保持不同含义。
 - `CodingTaskRunner` 是最终结算的唯一入口。验证完成后、Goal/Memory 写入前必须重查取消；异常路径统一拒绝待完成 Goal、停止后台作业并以 failed/stopped 结算学习。benchmark 必须返回 runner 的真实终态、workflow outcome、诊断轮和首次 suite，独立 acceptance 不能把 stopped/预算失败改写成整体成功。
+- 恢复的验证债务与本次 Git 差异是独立事实。空路径列表、缺失的旧 pending 字段和不可用的 Git 都不能推断债务已消除；现有 failed/unverified、tracking/checkpoint 和中断阶段以既有 pending 字段继续保存，完整检查与当前授权才能结算，不新增 Session schema。取消贯穿恢复基线和冷快照，团队验证的异步收尾后再次复核；团队与根后台资源分别收束并共同等待，任一 typed 故障关闭后续准入。
 - provider request 通过 `RequestExecutor` 在实际 attempt 边界准入和结算。已发送但没有可靠 usage 的 attempt 使对应 task/campaign 永久 incomplete；被预算或 incomplete ledger 拒绝的 attempt 记录为 rejected，但不伪造 provider 消耗。coding 与 auxiliary 累计分开显示。每个 stream attempt 拥有独立 AbortController，iterator 和 transport 关闭前不得启动 retry。
 - 文件版本的规范表示是原始字节 SHA-256。`read_file`、patch preview、执行、审批绑定和 rollback 使用同一摘要；文本编辑解码 UTF-8 后保留 BOM 和原有 LF/CRLF。模型读取到的正文规范化仅用于展示，不能成为并发保护的 hash 来源。
 - 项目规则是 workspace root 到目标目录的 `AGENTS.md` chain。宿主保存 scope、content hash、诊断和 target revision；新 scope 或更新未到达模型时拒绝结构化 edit 并要求下一 sampling boundary。规则 revision 通过现有 context channel 持久化，但请求只采用当前 workspace snapshot，历史快照不能在 compaction 后重新取得权威。
@@ -429,6 +443,8 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 
 ## 安全、诊断与评测补丁决策
 
+- 离线性能优化绑定相同合成 fixture、原生组件与双臂源码／构建摘要，交错新进程采样，保留原始样本和无收益候选。Session 只合并块内异步交接，不批量解码并保留整块字符串；项目源码分析最多四路安全读取，全部收尾后按文件顺序应用预算，清理错误优先。冷 CLI help 不是终端首 prompt，合成数据收益不外推模型成功率、Token 或跨平台收益。
+
 完整门禁暴露的 Windows 输出代理关闭竞态一并修复在既有 node-pty 分发补丁中：仅接管 EPIPE/ECONNRESET，detach 后继续排空 Conpty 防止关闭死锁；其他错误不屏蔽。源码安装与消费者产物都验证此补丁，更新锁文件及外置评分器的冻结锁，不用重跑掩盖失败。流生命周期语义参考 [Node stream 文档](https://nodejs.org/api/stream.html)；安装目录回归使用真实 stream 的错误回调与尾部输出。
 
 - GitHub 私密报告与原生 Secret Scanning/Push Protection 配合固定 Gitleaks、本地完整 pnpm audit、SPDX 解析和 Syft 多层 SBOM；扫描服务失败、缺报告和摘要不符拒绝必需门禁。例外绑定准确组件或公开测试文件完整摘要。
@@ -436,3 +452,7 @@ benchmark 只作为协议变更证据，不是自动路由或近期重构理由�
 - 搜索改 DOM，Brave 由用户明确选择、Keyring 保存；固定 LLM Context HTTPS、零自动付费重试、全部重定向拒绝。响应清理保留原租约实现，仅以压力验收验证。
 - doctor 分阶段证据与配置假设分开，默认取消、有限预算、未知 Usage 停后续；费用为用户价格的逐请求快照估算，按币种汇总，不承诺硬预算或在途停止计费。
 - 扩展九类固定任务，合成/上游 Issue 明确分开；公开成绩以计划分母和独立候选逐次账本为准，缺数据不推算，正式 DeepSeek 付费证据未完成。
+
+- 问题 24–41 的官方端点、原始模型 ID、Usage、串行配对、12 项实际上游任务与 Memory/web/performance pilot 独立冻结；离线 proof 和 preflight 不构成供应商兼容、成功率、成本或长期生产力证据。有限配对必须保留完整双臂预算，Unknown Usage、清理、隔离、存储和身份故障停止 admission；价格模板的 null 只能表示未知。
+
+- 问题 24–41 的官方端点、原始模型 ID、Usage、串行配对、12 项实际上游任务与 Memory/web/performance pilot 独立冻结；离线 proof 和 preflight 不构成供应商兼容、成功率、成本或长期生产力证据。有限配对必须保留完整双臂预算，Unknown Usage、清理、隔离、存储和身份故障停止 admission；价格模板的 null 只能表示未知。

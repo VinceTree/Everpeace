@@ -45,7 +45,19 @@ test('a replaced destination directory never writes through a junction',async t=
   const result=await integrateTeamBytes(record,changes.byteOperations,['nested'],randomUUID(),()=>{});assert.equal(result.status,'failed');assert.deepEqual(await fs.readdir(outside),[]);
 });
 test('staging disk failure does not change source or discard the worker artifact',async t=>{
-  const record=await fixture(t);await fs.writeFile(path.join(record.workspace,'asset.bin'),Buffer.from([0,9]));const changes=await workspaceOperations(record,['.']);const original=fs.open;
-  t.mock.method(fs,'open',async(...args:Parameters<typeof fs.open>)=>{if(String(args[0]).endsWith('.after'))throw Object.assign(new Error('synthetic disk full'),{code:'ENOSPC'});return original(...args);});
+  const record=await fixture(t);await fs.writeFile(path.join(record.workspace,'asset.bin'),Buffer.from([0,9]));const changes=await workspaceOperations(record,['.']);const original=fs.writeFile;
+  t.mock.method(fs,'writeFile',async(...args:Parameters<typeof fs.writeFile>)=>{if(String(args[0]).endsWith('.after'))throw Object.assign(new Error('synthetic disk full'),{code:'ENOSPC'});return original(...args);});
   const result=await integrateTeamBytes(record,changes.byteOperations,['.'],randomUUID(),()=>{});assert.equal(result.status,'failed');assert.deepEqual(await fs.readFile(path.join(record.source,'asset.bin')),Buffer.from([0,255,1,2]));assert.deepEqual(await fs.readFile(path.join(record.workspace,'asset.bin')),Buffer.from([0,9]));
+});
+
+test('a save after byte staging is preserved by the native final commit', async t => {
+  const record = await fixture(t); await fs.writeFile(path.join(record.workspace, 'asset.bin'), Buffer.from([0, 9]));
+  const changes = await workspaceOperations(record, ['asset.bin']); let calls = 0;
+  const user = Buffer.from([0, 7, 8]);
+  const result = await integrateTeamBytes(record, changes.byteOperations, ['asset.bin'], randomUUID(), async () => {
+    if (++calls === 2) await fs.writeFile(path.join(record.source, 'asset.bin'), user);
+  });
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(await fs.readFile(path.join(record.source, 'asset.bin')), user);
+  assert.deepEqual(await fs.readFile(path.join(record.workspace, 'asset.bin')), Buffer.from([0, 9]));
 });

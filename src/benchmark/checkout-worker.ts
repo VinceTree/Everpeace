@@ -5,6 +5,8 @@ import type { BenchmarkHarnessAdapter, BenchmarkHarnessResult, BenchmarkTask } f
 import { projectBenchmarkEvent } from "./event-projection.js";
 import type { LoopStrategy } from "../agent/tool-feedback-policy.js";
 import type { TeamOptions } from "../team/types.js";
+import { benchmarkLedgerUsage, benchmarkRequestAccounting } from "./request-accounting.js";
+import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 
 interface CheckoutWorkerInput {
   mode?: "run" | "preflight";
@@ -16,6 +18,7 @@ interface CheckoutWorkerInput {
   loopStrategy?: LoopStrategy;
   repairStrategy?: "baseline" | "candidate";
   team?: TeamOptions;
+  memoryPilot?: { directory: string; enabled: boolean };
 }
 
 interface PreflightBoundaryEvidence {
@@ -34,13 +37,7 @@ async function input(): Promise<CheckoutWorkerInput> {
 }
 
 function usage(ledger: RequestAttemptLedger): NonNullable<BenchmarkHarnessResult["usage"]> {
-  const snapshot = ledger.snapshot();
-  return {
-    inputTokens: snapshot.inputTokens,
-    outputTokens: snapshot.outputTokens,
-    reasoningTokens: snapshot.reasoningTokens,
-    complete: snapshot.complete,
-  };
+  return benchmarkLedgerUsage(ledger.snapshot());
 }
 
 function installPreflightProviderBoundary(expectedModel: string, team?: TeamOptions): { evidence(): PreflightBoundaryEvidence } {
@@ -113,7 +110,7 @@ export async function main(): Promise<void> {
     ? installPreflightProviderBoundary(request.model.model_name, request.team)
     : undefined;
   const module = await import(request.productionModule) as {
-    createProductionBenchmarkAdapter?: (options: { model: RegisteredModel; sessionsRoot: string; loopStrategy?: LoopStrategy; team?: TeamOptions; repairStrategy?: "baseline" | "candidate" }) => BenchmarkHarnessAdapter;
+    createProductionBenchmarkAdapter?: (options: { model: RegisteredModel; sessionsRoot: string; loopStrategy?: LoopStrategy; team?: TeamOptions; repairStrategy?: "baseline" | "candidate"; memoryPilot?: CheckoutWorkerInput["memoryPilot"] }) => BenchmarkHarnessAdapter;
   };
   if (typeof module.createProductionBenchmarkAdapter !== "function") throw new Error("Checkout production module does not export createProductionBenchmarkAdapter");
   if (!request.model || !request.task || !request.sessionsRoot) throw new Error("Checkout worker run input is incomplete");
@@ -121,9 +118,13 @@ export async function main(): Promise<void> {
     throw new Error("Checkout benchmark requires high reasoning and 32768 output tokens");
   }
   const ledger = new RequestAttemptLedger((request.tokenBudget === undefined ? {} : { tokenBudget: request.tokenBudget }));
-  const adapter = module.createProductionBenchmarkAdapter({ model: request.model, sessionsRoot: request.sessionsRoot, ...(request.loopStrategy === undefined ? {} : { loopStrategy: request.loopStrategy }), ...(request.team ? { team: request.team } : {}), ...(request.repairStrategy === undefined ? {} : { repairStrategy: request.repairStrategy }) });
+  if (request.mode !== "preflight") ledger.flush = async () => {
+    process.stdout.write(`EVERPEACE_CHECKOUT_USAGE ${JSON.stringify({ usage: usage(ledger), requestAccounting: benchmarkRequestAccounting(ledger.snapshot()) })}\n`);
+  };
+  const adapter = module.createProductionBenchmarkAdapter({ model: request.model, sessionsRoot: request.sessionsRoot, ...(request.memoryPilot ? { memoryPilot: request.memoryPilot } : {}), ...(request.loopStrategy === undefined ? {} : { loopStrategy: request.loopStrategy }), ...(request.team ? { team: request.team } : {}), ...(request.repairStrategy === undefined ? {} : { repairStrategy: request.repairStrategy }) });
   const controller = new AbortController();
-  const result = await adapter.run(request.task, {
+  let result: BenchmarkHarnessResult | void;
+  try { result = await adapter.run(request.task, {
     task: request.task,
     signal: controller.signal,
     attempt: 1,
@@ -135,7 +136,11 @@ export async function main(): Promise<void> {
       const projected = projectBenchmarkEvent(event);
       if (projected && request.mode !== "preflight") process.stdout.write(`EVERPEACE_CHECKOUT_EVENT ${JSON.stringify(projected)}\n`);
     },
-  });
+  }); } catch (error) {
+    if (request.mode === "preflight") throw error;
+    const cleanupFailed = error instanceof ResourceCleanupError || error instanceof Error && error.name === "BenchmarkCleanupError";
+    result = { terminalOutcome: "stopped", stopReason: cleanupFailed ? "resource_cleanup_failed" : "checkout_run_failed", ...(cleanupFailed ? { cleanupFailed: true } : {}) };
+  }
   if (request.mode === "preflight") {
     const evidence = preflightBoundary!.evidence();
     const ledgerSnapshot = ledger.snapshot();
@@ -147,7 +152,7 @@ export async function main(): Promise<void> {
     })}\n`);
     return;
   }
-  process.stdout.write(`EVERPEACE_CHECKOUT_RESULT ${JSON.stringify({ ...result, usage: { ...result?.usage, ...usage(ledger) } })}\n`);
+  process.stdout.write(`EVERPEACE_CHECKOUT_RESULT ${JSON.stringify({ ...result, usage: usage(ledger), requestAttempts: benchmarkRequestAccounting(ledger.snapshot()).requests, requestAccounting: benchmarkRequestAccounting(ledger.snapshot()) })}\n`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

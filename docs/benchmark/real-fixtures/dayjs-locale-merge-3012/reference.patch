@@ -1,0 +1,21 @@
+diff --git a/src/plugin/updateLocale/index.js b/src/plugin/updateLocale/index.js
+index 7126f7e..bf3e538 100644
+--- a/src/plugin/updateLocale/index.js
++++ b/src/plugin/updateLocale/index.js
+@@ -5,7 +5,15 @@ export default (option, Dayjs, dayjs) => {
+     if (!localeConfig) return
+     const customConfigKeys = customConfig ? Object.keys(customConfig) : []
+     customConfigKeys.forEach((c) => {
+-      localeConfig[c] = customConfig[c]
++      if (localeConfig[c] && customConfig[c] && typeof localeConfig[c] === 'object' && typeof customConfig[c] === 'object'
++        && !Array.isArray(localeConfig[c])) {
++        localeConfig[c] = {
++          ...localeConfig[c],
++          ...customConfig[c]
++        }
++      } else {
++        localeConfig[c] = customConfig[c]
++      }
+     })
+     return localeConfig // eslint-disable-line consistent-return
+   }

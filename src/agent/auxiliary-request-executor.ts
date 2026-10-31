@@ -2,6 +2,8 @@ import { applyUsageSample, createEmptySessionUsage, type SessionUsage } from "..
 import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 import { RequestAttemptLedger } from "./request-attempt-ledger.js";
 import { RequestExecutor, type RequestAccountingScope } from "./request-executor.js";
+import { CleanupDeadline } from '../util/cleanup-deadline.js';
+import { ModelStreamCleanupError } from './response-errors.js';
 
 type AuxiliaryPurpose = "title" | "skill" | "memory" | "doctor";
 interface RequestScope extends RequestAccountingScope {
@@ -78,7 +80,8 @@ export class AuxiliaryRequestExecutor {
       this.#disposed = true;
       const reason = new Error("Auxiliary requests have been disposed");
       for (const controller of this.#controllers) controller.abort(reason);
-      await Promise.allSettled(this.#pending);
+      try { await new CleanupDeadline().wait(Promise.allSettled(this.#pending), 'auxiliary_requests'); }
+      catch (error) { this.#cleanupFailure ??= new ModelStreamCleanupError(error); }
       if (this.#cleanupFailure) throw this.#cleanupFailure;
     })();
   }

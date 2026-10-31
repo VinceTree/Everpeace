@@ -67,7 +67,7 @@ test("workflow requires the complete Node verification suite before completion",
 
 test("workflow re-discovers checks created during the current turn", async () => {
   await withWorkspace(async (workspace) => {
-    const runtime = new CodingWorkflowRuntime({ workspacePath: workspace });
+    const runtime = new CodingWorkflowRuntime({ workspacePath: workspace, async confirmVerificationBasis() { return true; } });
     await runtime.beginTurn();
     const operations: ApplyPatchOperation[] = [{
       path: "package.json",

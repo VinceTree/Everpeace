@@ -1,12 +1,12 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
+import { maintainedFiles } from "./maintained-files.mjs";
 
 const require = createRequire(import.meta.url);
 const launcher = join(dirname(require.resolve("oxlint/package.json")), "bin", "oxlint");
 // Include prospective additions only in maintained code roots; user fixture directories stay outside the gate.
-const files = [...new Set(execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "src", "tests", "scripts"], { encoding: "utf8" }).split("\0"))]
-  .filter((file) => /\.(?:[cm]?[jt]s|[jt]sx)$/u.test(file)).sort();
+const files = maintainedFiles(["src", "tests", "scripts"], /\.(?:[cm]?[jt]s|[jt]sx)$/u);
 if (!files.length) throw new Error("Lint found no maintained source files");
 // Windows has a finite process command-line length; each batch still rejects every warning.
 let batch = []; let length = 0;

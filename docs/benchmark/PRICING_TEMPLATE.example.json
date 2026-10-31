@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "kind": "review-template-not-active-settings",
+  "provider": "DeepSeek official",
+  "endpoint": "https://api.deepseek.com",
+  "originalModelId": null,
+  "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing",
+  "reviewedAt": null,
+  "unit": "currency per 1000000 tokens",
+  "currency": null,
+  "input": null,
+  "cachedInput": null,
+  "output": null,
+  "warningThreshold": null,
+  "notes": "Fill and review current provider rates before using /cost. Relay prices require a separate template. Null means unknown, never zero. Estimates exclude taxes, exchange rates and provider adjustments; token admission and warnings are not billing caps."
+}

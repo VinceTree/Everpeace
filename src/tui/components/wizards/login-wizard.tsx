@@ -1,3 +1,4 @@
+import {uiText} from '../../../localization/messages.js';
 import { PasswordInput, Select, Spinner, TextInput } from "@inkjs/ui";
 import { Box, Text, useInput } from "ink";
 import React, { useEffect, useRef, useState } from "react";
@@ -80,7 +81,7 @@ export function LoginWizard({
   const loadModels = (value: string) => {
     const normalizedKey = value.trim();
     if (!normalizedKey) {
-      setError("API Key cannot be empty");
+      setError(uiText('m711c7dc1ec2c'));
       return;
     }
 
@@ -95,7 +96,7 @@ export function LoginWizard({
       .then((availableModels) => {
         if (controller.signal.aborted || !mounted.current) return;
         if (availableModels.length === 0) {
-          throw new Error("The endpoint returned no models");
+          throw new Error(uiText('m67b406354aee'));
         }
         const ordered = providerKind(baseUrl) === "deepseek" && availableModels.includes("deepseek-flash")
           ? ["deepseek-flash", ...availableModels.filter((model) => model !== "deepseek-flash")]
@@ -124,7 +125,7 @@ export function LoginWizard({
           (candidate) =>
             candidate.base_url === baseUrl && candidate.model_name === modelName,
         );
-        if (!model) throw new Error("Saved model credential could not be loaded");
+        if (!model) throw new Error(uiText('mac2331981189'));
         setApiKey("");
         onComplete(model);
       })
@@ -142,8 +143,7 @@ export function LoginWizard({
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="#D4AF37" paddingX={1}>
       <Text bold color="#D4AF37">
-        /login · Model sign-in
-      </Text>
+        {uiText('mc059499407d8')}</Text>
 
       {error ? <Text color="red">{error}</Text> : null}
 
@@ -158,7 +158,7 @@ export function LoginWizard({
               label: openai.displayName,
               value: "openai",
             },
-            { label: "Custom OpenAI-compatible endpoint", value: "custom" },
+            { label: uiText('m7eab6c328d7f'), value: "custom" },
           ]}
           onChange={selectProvider}
         />
@@ -166,27 +166,27 @@ export function LoginWizard({
 
       {step === "base-url" ? (
         <Box>
-          <Text color="#4EC9B0">Base URL ❯ </Text>
+          <Text color="#4EC9B0">{uiText('m670acd071f35')}</Text>
           <TextInput placeholder="https://api.example.com/v1" onSubmit={submitBaseUrl} />
         </Box>
       ) : null}
 
       {step === "api-key" ? (
         <Box>
-          <Text color="#4EC9B0">API Key ❯ </Text>
+          <Text color="#4EC9B0">{uiText('mcd44c006b6f9')}</Text>
           <PasswordInput
-            placeholder="Input is hidden"
+            placeholder={uiText('m1a8fbe079ca4')}
             onChange={setApiKey}
             onSubmit={loadModels}
           />
         </Box>
       ) : null}
 
-      {step === "loading" ? <Spinner label="Loading model list" /> : null}
+      {step === "loading" ? <Spinner label={uiText('m12272d9dbe13')} /> : null}
 
       {step === "model" ? (
         <Box flexDirection="column">
-          <Text dimColor>Choose a model. Names retain the server's original IDs:</Text>
+          <Text dimColor>{uiText('m4465ed82e097')}</Text>
           <Select
             options={models.map((model) => ({ label: model, value: model }))}
             visibleOptionCount={Math.min(8, models.length)}
@@ -195,10 +195,10 @@ export function LoginWizard({
         </Box>
       ) : null}
 
-      {step === "saving" ? <Spinner label="Securely saving credentials and enabling model" /> : null}
+      {step === "saving" ? <Spinner label={uiText('m840d126fb5ef')} /> : null}
 
       {step !== "saving" ? (
-        <Text dimColor>Enter confirm · Esc to return to session</Text>
+        <Text dimColor>{uiText('mda601e30da78')}</Text>
       ) : null}
     </Box>
   );

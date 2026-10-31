@@ -102,7 +102,7 @@ test("file tools read and list within the workspace and reject escapes and unsup
       await assert.rejects(runFileTool("read_file", JSON.stringify({ path: name }), root), /workspace/);
     }
     await fs.symlink(parent, path.join(root, "escape"), process.platform === "win32" ? "junction" : "dir");
-    await assert.rejects(runFileTool("read_file", '{"path":"escape/outside.txt"}', root), /workspace/);
+    await assert.rejects(runFileTool("read_file", '{"path":"escape/outside.txt"}', root), { code: 'POLICY_DENIED' });
     await assert.rejects(runFileTool("read_file", '{"path":"binary"}', root), /Binary/);
     await assert.rejects(runFileTool("read_file", '{"path":"large"}', root), /limit/);
     await assert.rejects(runFileTool("read_file", '{"path":"."}', root));

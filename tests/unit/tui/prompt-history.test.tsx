@@ -3,8 +3,38 @@ import { test } from "node:test";
 import React from "react";
 import { render } from "ink-testing-library";
 import { Prompt } from "../../../src/tui/composer/prompt.js";
+import { textWidth } from "../../../src/tui/rendering/text-width.js";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+test("standalone composer follows resize without losing its draft or accepting terminal replies", async () => {
+  const submissions: string[] = [];
+  const draft = `keep-${"0123456789".repeat(8)}中文`;
+  const view = render(<Prompt activeModelName="test" onSubmit={(text) => { submissions.push(text); }} />);
+  try {
+    await tick();
+    view.stdin.write(draft);
+    await tick();
+    for (const columns of [40, 100, 52]) {
+      Object.defineProperty(view.stdout, "columns", { configurable: true, value: columns });
+      view.stdout.emit("resize");
+      await tick();
+      const frame = view.lastFrame() ?? "";
+      assert.match(frame, /中文/u);
+      assert.equal(frame.match(/›/gu)?.length, 1);
+      assert.ok(frame.split("\n").every((line) => textWidth(line) <= columns));
+      assert.deepEqual(submissions, []);
+    }
+    for (const reply of ["\u001b[I", "\u001b[O", "\u001b[<64;5;5M", "\u001b[12;40R"]) {
+      view.stdin.write(reply);
+      await tick();
+    }
+    assert.deepEqual(submissions, []);
+    view.stdin.write("\r");
+    await waitFor(() => submissions.length === 1);
+    assert.deepEqual(submissions, [draft]);
+  } finally { view.unmount(); }
+});
 
 async function waitFor(check: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {

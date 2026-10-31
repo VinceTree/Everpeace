@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/tj/commander.js",
+  "change": "373f660f6febb720b82635220eea72dd9b7e0cba",
+  "parent": "987f28966c71baecb0ef4a36780e727bcd575b31",
+  "changeUrl": "https://github.com/tj/commander.js/commit/373f660f6febb720b82635220eea72dd9b7e0cba",
+  "license": "MIT",
+  "patchSha256": "1623d2ef8a13fd8187a846aff5152acee485d22f12ad0745dca040b300019866",
+  "category": "dependency_compatibility"
+}

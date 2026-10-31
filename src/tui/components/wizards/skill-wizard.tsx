@@ -1,3 +1,4 @@
+import {uiText} from '../../../localization/messages.js';
 import path from "node:path";
 import type { SkillLifecyclePreview } from "../../../skills/manager.js";
 import { ConfirmInput, Select, Spinner, TextInput } from "@inkjs/ui";
@@ -61,8 +62,8 @@ function message(error: unknown): string {
 
 function scopeOptions() {
   return [
-    { label: "Current project · .agents/skills", value: "project" },
-    { label: "User · $CODEX_HOME/skills", value: "user" },
+    { label: uiText('mec7586da63ae'), value: "project" },
+    { label: uiText('m3914ced880a3'), value: "user" },
   ];
 }
 
@@ -74,13 +75,13 @@ function skillScopeLabel(scope: ManagedSkill["scope"]): string {
 }
 
 function skillStatus(skill: ManagedSkill): string {
-  if (skill.conflict) return "conflict · resolve duplicate before use";
-  if (!skill.usable) return "unavailable · inspect the source or path";
-  return "ready to use";
+  if (skill.conflict) return uiText('m7eb8d2239597');
+  if (!skill.usable) return uiText('m8300958c5325');
+  return uiText('m592847dc0e1b');
 }
 
 function wrapSkillDescription(value: string, width: number, maximumLines = 2): string[] {
-  const words = (value.trim() || "No description provided.").split(/\s+/u);
+  const words = (value.trim() || uiText('m2527a18acbad')).split(/\s+/u);
   const lines: string[] = [];
   let current = "";
   let consumed = 0;
@@ -151,8 +152,8 @@ function InstalledSkillList({
   if (!skills.length) {
     return (
       <Box flexDirection="column" marginTop={1}>
-        <Text color="#D4AF37" bold>No installed Skills</Text>
-        <Text dimColor>Create one or install a public Skill to see it here.</Text>
+        <Text color="#D4AF37" bold>{uiText('m9e9a769a8fe2')}</Text>
+        <Text dimColor>{uiText('m7ad7984bd632')}</Text>
       </Box>
     );
   }
@@ -163,10 +164,10 @@ function InstalledSkillList({
   return (
     <Box flexDirection="column">
       <Box justifyContent="space-between">
-        <Text bold color="#D4AF37">Installed Skills</Text>
+        <Text bold color="#D4AF37">{uiText('med416e3fcb42')}</Text>
         <Text dimColor>{`${selected + 1}/${skills.length}`}</Text>
       </Box>
-      <Text dimColor>Browse a Skill to inspect its instructions and invoke it.</Text>
+      <Text dimColor>{uiText('mf59b024b6129')}</Text>
       <Box flexDirection="column" marginTop={1}>
         {visibleSkills.map((skill, index) => {
           const absoluteIndex = offset + index;
@@ -178,7 +179,7 @@ function InstalledSkillList({
                 <Text color={isSelected ? "#4EC9B0" : "#6A9955"}>{isSelected ? "› " : "  "}</Text>
                 <Text bold {...(isSelected ? { color: "#4EC9B0" } : {})}>{truncateEnd(skill.name, nameWidth)}</Text>
                 <Text dimColor>{` · ${skillScopeLabel(skill.scope)}`}</Text>
-                {skill.conflict ? <Text color="yellow">{" · conflict"}</Text> : null}
+                {skill.conflict ? <Text color="yellow">{uiText('m79449bf83995')}</Text> : null}
               </Text>
               {wrapSkillDescription(skill.description, descriptionWidth).map((line, lineIndex) => (
                 <Text key={`${skill.name}-description-${lineIndex}`} dimColor>{`  ${line}`}</Text>
@@ -188,7 +189,7 @@ function InstalledSkillList({
           );
         })}
       </Box>
-      <Text dimColor>{`↑↓ browse · Enter inspect · PgUp/PgDn jump · ${offset + 1}-${Math.min(skills.length, offset + visibleCount)} shown`}</Text>
+      <Text dimColor>{uiText('m71c349f58eb3', {p0: offset + 1, p1: Math.min(skills.length, offset + visibleCount)})}</Text>
     </Box>
   );
 }
@@ -200,9 +201,9 @@ function SkillIdentity({ skill }: { skill: ManagedSkill }) {
         <Text bold color="#4EC9B0">{skill.name}</Text>
         <Text dimColor>{skillScopeLabel(skill.scope)}</Text>
       </Box>
-      <Text>{skill.description || "No description provided."}</Text>
+      <Text>{skill.description || uiText('m2527a18acbad')}</Text>
       <Text dimColor>{skillStatus(skill)}</Text>
-      {skill.managed ? <Text dimColor wrap="truncate-end">{`Managed source: ${skill.sourceUrl ?? "local creation"}`}</Text> : null}
+      {skill.managed ? <Text dimColor wrap="truncate-end">{uiText('m25c395acf060', {p0: skill.sourceUrl ?? uiText('maa1b8f556e89')})}</Text> : null}
     </Box>
   );
 }
@@ -221,7 +222,7 @@ function PagedSkill({ markdown, footer }: { markdown: string; footer?: React.Rea
   });
   return (
     <Box flexDirection="column">
-      <Text dimColor>{`${offset + 1}-${Math.min(lines.length, offset + page)} / ${lines.length} · PgUp/PgDn scroll`}</Text>
+      <Text dimColor>{uiText('m93e481b37e81', {p0: offset + 1, p1: Math.min(lines.length, offset + page), p2: lines.length})}</Text>
       <RichOutput text={markdown} range={{ start: offset, count: page }} />
       {footer}
     </Box>
@@ -263,9 +264,9 @@ function SkillEditor({ initialValue, error, onSave, onCancel }: {
   const cursor = lineAndColumn(editor);
   const offset = Math.max(0, Math.min(cursor.line - visibleCount + 1, Math.max(0, lines.length - visibleCount)));
   return (
-    <CommandSurface title="/skills · Edit SKILL.md">
+    <CommandSurface title={uiText('m1468a0eb0ff9')}>
       {error ? <Text color="red">{error}</Text> : null}
-      <Text dimColor>{`${cursor.line + 1}:${cursor.column + 1} · Ctrl+S save draft · Esc discard edits`}</Text>
+      <Text dimColor>{uiText('m91c08597157e', {p0: cursor.line + 1, p1: cursor.column + 1})}</Text>
       {lines.slice(offset, offset + visibleCount).map((line, index) => {
         const lineNumber = offset + index;
         if (lineNumber !== cursor.line) return <Text key={lineNumber}>{line || " "}</Text>;
@@ -318,13 +319,13 @@ export function SkillWizard({ manager, activeModel, generateDraft, reviseDraft, 
   };
 
   const loadSkills = () => {
-    if (!manager) { setState({ kind: "success", title: "/skills · Unavailable", text: "Skill management is unavailable in this integration." }); return; }
+    if (!manager) { setState({ kind: "success", title: uiText('mae7c4d319234'), text: uiText('mb20e298e06cd') }); return; }
     const previous: State = { kind: "menu" };
     run(
-      { kind: "loading", title: "/skills · Installed skills", label: "Discovering skills", returnState: previous },
+      { kind: "loading", title: uiText('m7341124acb72'), label: uiText('m5e155e9c5927'), returnState: previous },
       () => manager.list(),
       (skills) => setState({ kind: "skills-list", skills }),
-      (error) => ({ kind: "success", title: "/skills · Could not load", text: error }),
+      (error) => ({ kind: "success", title: uiText('m135ce4433912'), text: error }),
     );
   };
 
@@ -353,11 +354,11 @@ export function SkillWizard({ manager, activeModel, generateDraft, reviseDraft, 
   }
 
   return (
-    <CommandSurface title={state.kind === "menu" ? "/skills · Skill manager" : "/skills"} onBack={back}>
+    <CommandSurface title={state.kind === "menu" ? uiText('md779172794a5') : "/skills"} onBack={back}>
       {state.kind === "menu" ? <Select options={[
-        { label: "Create a skill", value: "create" },
-        { label: "Install from URL", value: "install" },
-        { label: "View installed skills", value: "view" },
+        { label: uiText('m7356acceb0c5'), value: "create" },
+        { label: uiText('mc7d5009dc83d'), value: "install" },
+        { label: uiText('m6333b6daace8'), value: "view" },
       ]} onChange={(value) => {
         if (value === "create") setState({ kind: "create-scope" });
         else if (value === "install") setState({ kind: "install-url" });
@@ -365,19 +366,19 @@ export function SkillWizard({ manager, activeModel, generateDraft, reviseDraft, 
       }} /> : null}
 
       {state.kind === "create-scope" ? <>
-        <Text dimColor>Choose where this Skill will be available.</Text>
+        <Text dimColor>{uiText('m02d72dcc85f8')}</Text>
         <Select options={scopeOptions()} onChange={(value) => setState({ kind: "create-description", scope: value as SkillTargetScope })} />
       </> : null}
 
       {state.kind === "create-description" ? <>
         {state.error ? <Text color="red">{state.error}</Text> : null}
-        <Text>Describe the task, workflow, and important constraints.</Text>
-        <Box><Text color="#4EC9B0">Description ❯ </Text><TextInput placeholder="What should this Skill teach the agent?" onSubmit={(description) => {
-          if (!activeModel || !generateDraft) { setState({ ...state, error: "An active model is required. Use /login first." }); return; }
-          if (!description.trim()) { setState({ ...state, error: "Description cannot be empty." }); return; }
+        <Text>{uiText('mfa7ae39ff55a')}</Text>
+        <Box><Text color="#4EC9B0">{uiText('m965329ade08a')}</Text><TextInput placeholder={uiText('mf759e9df377f')} onSubmit={(description) => {
+          if (!activeModel || !generateDraft) { setState({ ...state, error: uiText('m72cf358a6012') }); return; }
+          if (!description.trim()) { setState({ ...state, error: uiText('m7e0c8db60d22') }); return; }
           const previous = state;
           run(
-            { kind: "loading", title: "/skills · Create", label: "Generating SKILL.md", returnState: previous },
+            { kind: "loading", title: uiText('mcca78266997c'), label: uiText('m288cfab22ede'), returnState: previous },
             (signal) => generateDraft(activeModel, description.trim(), signal),
             (draft) => setState({ kind: "review", scope: state.scope, draft }),
             (error) => ({ ...state, error }),
@@ -388,28 +389,28 @@ export function SkillWizard({ manager, activeModel, generateDraft, reviseDraft, 
       {state.kind === "review" ? <>
         {state.error ? <Text color="red">{state.error}</Text> : null}
         <PagedSkill markdown={state.draft} footer={<Select options={[
-          { label: "Validate and improve with AI", value: "validate" },
-          { label: "Edit manually", value: "edit" },
-          { label: "Confirm and save", value: "save" },
+          { label: uiText('m0a72f9da99b6'), value: "validate" },
+          { label: uiText('m3b85f6c15327'), value: "edit" },
+          { label: uiText('mc08a9d732b6e'), value: "save" },
         ]} onChange={(value) => {
           if (value === "edit") { setState({ kind: "edit", scope: state.scope, draft: state.draft }); return; }
           if (value === "validate") {
-            if (!activeModel || !reviseDraft) { setState({ ...state, error: "An active model is required for AI validation." }); return; }
+            if (!activeModel || !reviseDraft) { setState({ ...state, error: uiText('me22a2fa8d200') }); return; }
             const previous = state;
             run(
-              { kind: "loading", title: "/skills · Validate", label: "Validating and improving SKILL.md", returnState: previous },
+              { kind: "loading", title: uiText('m3ef74b4094b3'), label: uiText('me9754371b3f1'), returnState: previous },
               (signal) => reviseDraft(activeModel, state.draft, signal),
               (draft) => setState({ kind: "review", scope: state.scope, draft }),
               (error) => ({ ...state, error }),
             );
             return;
           }
-          if (!manager) { setState({ ...state, error: "Skill management is unavailable." }); return; }
+          if (!manager) { setState({ ...state, error: uiText('m383132de72fb') }); return; }
           const previous = state;
           run(
-            { kind: "loading", title: "/skills · Save", label: "Saving Skill", returnState: previous },
+            { kind: "loading", title: uiText('m9735bd3bdd98'), label: uiText('m051d86afb0b5'), returnState: previous },
             () => manager.saveCreated(state.draft, state.scope),
-            (result) => setState({ kind: "success", title: "/skills · Created", text: `${result.name} is available now. Use $${result.name} or let the agent match it automatically.\n${result.directory}` }),
+            (result) => setState({ kind: "success", title: uiText('mc99641b64419'), text: uiText('m9cae2fd919d2', {p0: result.name, p1: result.name, p2: result.directory}) }),
             (error) => ({ ...state, error }),
           );
         }} />} />
@@ -417,12 +418,12 @@ export function SkillWizard({ manager, activeModel, generateDraft, reviseDraft, 
 
       {state.kind === "install-url" ? <>
         {state.error ? <Text color="red">{state.error}</Text> : null}
-        <Text>Public GitHub folder, Git repository, SKILL.md, or ZIP URL.</Text>
-        <Box><Text color="#4EC9B0">URL ❯ </Text><TextInput placeholder="https://github.com/owner/repo/tree/main/path" onSubmit={(url) => {
-          if (!manager) { setState({ ...state, error: "Skill management is unavailable." }); return; }
+        <Text>{uiText('m715a1b214d5e')}</Text>
+        <Box><Text color="#4EC9B0">{uiText('mff37d2374746')}</Text><TextInput placeholder="https://github.com/owner/repo/tree/main/path" onSubmit={(url) => {
+          if (!manager) { setState({ ...state, error: uiText('m383132de72fb') }); return; }
           const previous = state;
           run(
-            { kind: "loading", title: "/skills · Install", label: "Downloading and validating Skill", returnState: previous },
+            { kind: "loading", title: uiText('m5c8befc06bd3'), label: uiText('m25449e279eb3'), returnState: previous },
             (signal) => manager.prepareInstall(url, signal),
             (prepared) => {
               preparedId.current = prepared.id;
@@ -435,7 +436,7 @@ export function SkillWizard({ manager, activeModel, generateDraft, reviseDraft, 
       </> : null}
 
       {state.kind === "install-select" ? <>
-        <Text dimColor>Select one Skill from this source.</Text>
+        <Text dimColor>{uiText('m0cbf855ed049')}</Text>
         <Select visibleOptionCount={Math.min(8, state.prepared.candidates.length)} options={state.prepared.candidates.map((candidate) => ({ label: `${candidate.name} · ${candidate.description}`, value: candidate.id }))} onChange={(id) => {
           const candidate = state.prepared.candidates.find((item) => item.id === id);
           if (candidate) setState({ kind: "install-preview", prepared: state.prepared, candidate });
@@ -443,54 +444,54 @@ export function SkillWizard({ manager, activeModel, generateDraft, reviseDraft, 
       </> : null}
 
       {state.kind === "install-preview" ? <PagedSkill markdown={state.candidate.skillMarkdown} footer={<>
-        <Text dimColor>{`${state.candidate.files.length} files · ${state.prepared.sourceUrl}`}</Text>
-        <Select options={[{ label: "Install this Skill", value: "install" }, { label: "Choose another", value: "back" }]} onChange={(value) => value === "install" ? setState({ kind: "install-scope", prepared: state.prepared, candidate: state.candidate }) : setState({ kind: "install-select", prepared: state.prepared })} />
+        <Text dimColor>{uiText('mdcf4827ffc51', {p0: state.candidate.files.length, p1: state.prepared.sourceUrl})}</Text>
+        <Select options={[{ label: uiText('ma6d25da738b8'), value: "install" }, { label: uiText('m8a2bca07ae99'), value: "back" }]} onChange={(value) => value === "install" ? setState({ kind: "install-scope", prepared: state.prepared, candidate: state.candidate }) : setState({ kind: "install-select", prepared: state.prepared })} />
       </>} /> : null}
 
       {state.kind === "install-scope" ? <>
-        <Text dimColor>Choose where this Skill will be available.</Text>
+        <Text dimColor>{uiText('m02d72dcc85f8')}</Text>
         <Select options={scopeOptions()} onChange={(value) => setState({ kind: "install-confirm", prepared: state.prepared, candidate: state.candidate, scope: value as SkillTargetScope })} />
       </> : null}
 
       {state.kind === "install-confirm" ? <>
-        <Text>{`Install ${state.candidate.name} into ${state.scope === "project" ? "the current project" : "the user Skill directory"}?`}</Text>
+        <Text>{uiText('m5841ec394c8a', {p0: state.candidate.name, p1: state.scope === "project" ? uiText('m6daed5798649') : uiText('md34fdc96ba9a')})}</Text>
         <ConfirmInput defaultChoice="cancel" onCancel={() => setState({ kind: "install-scope", prepared: state.prepared, candidate: state.candidate })} onConfirm={() => {
           if (!manager) return;
           const previous = state;
           run(
-            { kind: "loading", title: "/skills · Install", label: "Installing Skill", returnState: previous },
+            { kind: "loading", title: uiText('m5c8befc06bd3'), label: uiText('mcad2956642af'), returnState: previous },
             () => manager.installPrepared(state.prepared.id, state.candidate.id, state.scope),
-            (result) => { preparedId.current = undefined; setState({ kind: "success", title: "/skills · Installed", text: `${result.name} is available now. Use $${result.name} or let the agent match it automatically.\n${result.directory}` }); },
-            (error) => ({ kind: "success", title: "/skills · Installation failed", text: error }),
+            (result) => { preparedId.current = undefined; setState({ kind: "success", title: uiText('mbf03177f32cf'), text: uiText('m9cae2fd919d2', {p0: result.name, p1: result.name, p2: result.directory}) }); },
+            (error) => ({ kind: "success", title: uiText('m900166fbb7cf'), text: error }),
           );
         }} />
       </> : null}
 
       {state.kind === "lifecycle-confirm" ? <PagedSkill markdown={state.preview.diff} footer={<>
         <Text>{state.preview.sourceUrl ?? state.preview.directory}</Text>
-        <Text>{`Confirm ${state.preview.action} of ${state.preview.name}?`}</Text>
-        <ConfirmInput defaultChoice="cancel" onCancel={loadSkills} onConfirm={() => run({ kind: "loading", title: "/skills · Apply", label: "Applying confirmed change", returnState: state }, async () => { if (!manager?.commitLifecycle) throw new Error("Skill management is unavailable"); await manager.commitLifecycle(state.preview.id); }, () => { preparedId.current = undefined; setState({ kind: "success", title: "/skills · Updated", text: `${state.preview.action} complete` }); }, (error) => ({ kind: "success", title: "/skills · Could not apply", text: error }))} />
+        <Text>{uiText('mc8ed47a5f503', {p0: state.preview.action, p1: state.preview.name})}</Text>
+        <ConfirmInput defaultChoice="cancel" onCancel={loadSkills} onConfirm={() => run({ kind: "loading", title: uiText('m17b981f966e3'), label: uiText('m68dc671ffd12'), returnState: state }, async () => { if (!manager?.commitLifecycle) throw new Error(uiText('md1aaf2b6c9a8')); await manager.commitLifecycle(state.preview.id); }, () => { preparedId.current = undefined; setState({ kind: "success", title: uiText('mf8e7d6fe2286'), text: uiText('m41dfb480d6fd', {p0: state.preview.action}) }); }, (error) => ({ kind: "success", title: uiText('m37fa6f941502'), text: error }))} />
       </>} /> : null}
       {state.kind === "skills-list" ? <InstalledSkillList skills={state.skills} onSelect={(skill) => setState({ kind: "skill-detail", skill })} /> : null}
 
       {state.kind === "skill-detail" ? <>
         <SkillIdentity skill={state.skill} />
         <PagedSkill markdown={state.skill.skillMarkdown} footer={<>
-          {state.skill.conflict ? <Text color="yellow">This name is ambiguous. Resolve duplicate installations before using it.</Text> : <Select options={[{ label: "Use in next prompt", value: "use" }, ...(state.skill.managed ? [{ label: "Preview update from source", value: "update" }, { label: "Preview uninstall", value: "uninstall" }] : []), { label: "Back to list", value: "back" }]} onChange={(value) => {
+          {state.skill.conflict ? <Text color="yellow">{uiText('m7808b6c5af88')}</Text> : <Select options={[{ label: uiText('m0a4e73454f06'), value: "use" }, ...(state.skill.managed ? [{ label: uiText('m9685c1e97b7e'), value: "update" }, { label: uiText('mdf0807a57a40'), value: "uninstall" }] : []), { label: uiText('m5da8f7fbc29d'), value: "back" }]} onChange={(value) => {
             if (value === "use") { onUse(state.skill.name); return; }
             if (value === "back") { loadSkills(); return; }
             const directory = path.dirname(state.skill.path);
-            run({ kind: "loading", title: "/skills · Preview", label: "Checking managed installation", returnState: state }, async (signal) => {
+            run({ kind: "loading", title: uiText('md2a4ad796230'), label: uiText('m65eaf0466c0e'), returnState: state }, async (signal) => {
               const preview = value === "update" ? await manager?.previewUpdate?.(directory, signal) : await manager?.previewUninstall?.(directory);
-              if (!preview) throw new Error("Skill lifecycle management is unavailable");
+              if (!preview) throw new Error(uiText('m4b0d4b73385b'));
               return preview;
-            }, (preview) => { preparedId.current = preview.id; setState({ kind: "lifecycle-confirm", preview }); }, (error) => ({ kind: "success", title: "/skills · Preview failed", text: error }));
+            }, (preview) => { preparedId.current = preview.id; setState({ kind: "lifecycle-confirm", preview }); }, (error) => ({ kind: "success", title: uiText('ma264a0182b04'), text: error }));
           }} />}
         </>} />
       </> : null}
 
       {state.kind === "loading" ? <Spinner label={state.label} /> : null}
-      {state.kind === "success" ? <><Text bold>{state.title}</Text><Text>{state.text}</Text><Select options={[{ label: "Back to Skill manager", value: "back" }]} onChange={returnToMenu} /></> : null}
+      {state.kind === "success" ? <><Text bold>{state.title}</Text><Text>{state.text}</Text><Select options={[{ label: uiText('mfd19fcd5f8c6'), value: "back" }]} onChange={returnToMenu} /></> : null}
     </CommandSurface>
   );
 }

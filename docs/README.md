@@ -6,6 +6,8 @@
 
 `docs/` 是唯一维护目录。[dosc/](../dosc/README.md) 保留为拼写导航入口。面向用户的安装及命令说明继续维护在 [English README](../README.md) 和 [中文 README](../README.zh-CN.md)。
 
+新人贡献从 [CONTRIBUTING](../CONTRIBUTING.md) / [中文贡献指南](../CONTRIBUTING.zh-CN.md) 开始，无需先读内部交接。公开接口见 [兼容契约](COMPATIBILITY.md)，本轮状态见 [核心体验实施](core-experience/STATUS.md)。
+
 ## 文档地图
 
 | 文件 | 解决什么问题 | 何时读取 |
@@ -25,12 +27,16 @@
 | [PLAN](PLAN.md) | 当前里程碑、剩余证据、后续顺序 | 规划工作 |
 | [DECISIONS](architecture/DECISIONS.md) | 跨模块约束及设计理由 | 改变既有契约 |
 | [AGENT_LOOP](architecture/AGENT_LOOP.md) | 循环细节、顺序、停止、上游出处 | 修改调度/stream/steering |
+| [SECURITY_HARDENING](architecture/SECURITY_HARDENING.md) | 文件竞态、敏感外传、验证依据、MCP 和隐私加固 | 修改安全边界 |
+| [RELIABILITY_HARDENING](architecture/RELIABILITY_HARDENING.md) | 有界取消、进程归属、持久恢复、权限规则与子包验证 | 修改问题 13–23 |
 | [PERMISSIONS](architecture/PERMISSIONS.md) | 审批 profile、持久策略及差异 | 修改权限和审批 |
 | [SANDBOX](architecture/SANDBOX.md) | 原生执行边界、平台限制和后续加固 | 修改 shell/进程隔离 |
 | [CODEX_CAPABILITIES](architecture/CODEX_CAPABILITIES.md) | MCP/Skills/原生后端集成范围 | 修改外部集成 |
 | [MEMORY](architecture/MEMORY.md) | 召回、聊天策略、后台学习与存储 | 修改 Memory |
 | [TUI_STRUCTURE](architecture/TUI_STRUCTURE.md) | 终端目录职责与依赖方向 | 增加/移动 UI 模块 |
 | [BENCHMARKING](BENCHMARKING.md) | fixtures、执行器、独立评分和预算 | 跑离线证明或筹备 live 比较 |
+| [本地性能对照](benchmark/LOCAL_PERFORMANCE.md) | CLI、Session、历史搜索与项目扫描 | 复测离线延迟与资源成本 |
+| [编码竞争力评测](benchmark/CODING_COMPETITIVENESS.md) | 官方 DeepSeek、真实任务、计量和 pilots | 修改或验收问题 24–41 |
 | [实测准备](benchmark/READINESS.md) | 个人四任务、十项固定 proof、候选身份与三阶段预算 | 准备 DeepSeek 实测 |
 | [团队实测准备](benchmark/TEAM_READINESS.md) | 当前候选冻结、单 Agent/团队无凭据 preflight 与待授权配置 | 筹备当前团队对照 |
 | [English usage](USAGE.md) / [中文使用](USAGE.zh-CN.md) | 完整命令、SDK、恢复与交互契约 | README 上手后查阅细节 |

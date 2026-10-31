@@ -75,6 +75,7 @@ export interface ExecOptions {
 }
 
 export interface ExecResult {
+  errorCode?: import("./errors.js").ExecErrorCode;
   performanceReport?: import("../performance/task-report.js").TaskPerformanceReport;
   team?: TeamSnapshot;
   exitCode: number;

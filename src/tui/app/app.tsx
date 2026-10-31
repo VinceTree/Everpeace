@@ -1,8 +1,17 @@
+import { sensitiveText, sensitiveDigest } from "../../permissions/sensitive-access.js";
+import {localizeHostReport} from '../../localization/reports.js';
+import {uiText,translateHostText} from '../../localization/messages.js';
+import {subscribeLanguage,currentLanguage,changeLanguage,isLanguagePreference}from'../../localization/language.js';
+import {projectTaskStatus,type TaskStatusFacts}from'../../status/task-status.js';
+import {TaskStatus}from'../components/conversation/task-status.js';
+import {ResourceCleanupError}from'../../util/resource-cleanup-error.js';
+import {PersistenceError}from'../../storage/persistence-error.js';
+import {ProcessCleanupError}from'../../tools/process-completion.js';
 import { TeamSurface } from "../components/screens/team-surface.js";
 import { normalizeTeamOptions, type TeamOptions, type TeamSnapshot } from "../../team/types.js";
 import { Spinner } from "@inkjs/ui";
 import { Box, Text, useApp, useInput, usePaste, useStdout, useWindowSize } from "ink";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { AgentIO } from "../../agent/react-agent.js";
 import { LoopStoppedError, type LoopPhase } from "../../agent/agent-loop.js";
 import { commandPermission, defaultPermissions, permissionPolicyRevision } from "../../permissions/policy.js";
@@ -45,7 +54,7 @@ import {
   type WorkspaceChangeIndex,
 } from "../../tools/workspace-review.js";
 import { selectAgentOutputPreview } from "../rendering/command-output-preview.js";
-import { parseTuiInput, TUI_HELP } from "../commands/slash-commands.js";
+import { parseTuiInput, getTuiHelp } from "../commands/slash-commands.js";
 import { ApprovalConfirmation } from "../components/feedback/approval-confirmation.js";
 import {
   CommandInfoSurface,
@@ -155,7 +164,7 @@ type View =
 type CommandView = Exclude<View, { kind: "chat" }>;
 
 interface PendingConfirmation {
-  kind: "bash" | "patch" | "web" | "mcp" | "goal";
+  kind: "bash" | "patch" | "web" | "mcp" | "goal" | "verification_basis";
   request: string;
   resolve(accepted: boolean): void;
 }
@@ -183,7 +192,7 @@ function initialActiveModel(models: RegisteredModel[]): RegisteredModel | undefi
 
 function initialView(models: RegisteredModel[]): View {
   return models.length > 1
-    ? { kind: "model-picker", title: "Choose a model for this session", models }
+    ? { kind: "model-picker", title: uiText('m9401a005aae1'), models }
     : { kind: "chat" };
 }
 
@@ -217,7 +226,7 @@ function settingsForModel(model: RegisteredModel | undefined): ModelRequestSetti
 
 function fallbackSessionTitle(firstQuestion: string): string {
   const normalized = firstQuestion.replace(/\s+/g, " ").trim();
-  return truncateEnd(normalized || "Untitled Session", 60);
+  return truncateEnd(normalized || uiText('me8580917ff93'), 60);
 }
 
 export function formatElapsed(seconds: number): string {
@@ -225,8 +234,8 @@ export function formatElapsed(seconds: number): string {
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const remaining = total % 60;
-  if (hours > 0) return `${hours}h ${minutes}m ${remaining}s`;
-  if (minutes > 0) return `${minutes}m ${remaining}s`;
+  if (hours > 0) return uiText('m9ea05ef23384', {p0: hours, p1: minutes, p2: remaining});
+  if (minutes > 0) return uiText('mb9e8aac7e53d', {p0: minutes, p1: remaining});
   return `${remaining}s`;
 }
 
@@ -293,7 +302,7 @@ function TerminalActivity({
   const previewLines = [
     ...headLines,
     ...(omittedLines > 0
-      ? [isAgentPreview ? `… +${omittedLines} lines` : `… ${omittedLines} earlier lines`]
+      ? [isAgentPreview ? uiText('m92786c92b3fe', {p0: omittedLines}) : uiText('m6f6a29c2655d', {p0: omittedLines})]
       : []),
     ...tailLines,
   ];
@@ -302,7 +311,7 @@ function TerminalActivity({
     <Box flexDirection="column">
       {previewLines.length ? <RichOutput text={previewLines.join("\n")} marginLeft={3} /> : null}
       <Box paddingLeft={1}>
-        <Text dimColor>└ Command is still running</Text>
+        <Text dimColor>{uiText('m1d604b51d0dc')}</Text>
       </Box>
     </Box>
   );
@@ -315,6 +324,7 @@ export function EverpeaceApp({
 }: EverpeaceAppProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
+  const { columns } = useWindowSize();
   const firstActiveModel = initialActiveModel(initialModels.available);
   const initialTimeline = useMemo<TimelineEntry[]>(() => {
     const entries: TimelineEntry[] = [
@@ -330,7 +340,7 @@ export function EverpeaceApp({
       entries.push({
         id: index + 1,
         kind: "error",
-        text: `Missing credentials for ${model.model_name}. Use /login to repair or /logout to remove it.`,
+        text: uiText('mb939d0c8ef6e', {p0: model.model_name}),
       });
     });
     return entries;
@@ -338,8 +348,18 @@ export function EverpeaceApp({
 
   const nextId = useRef(initialTimeline.length);
   const [coordinator] = useState(() => new ApplicationCoordinator<AgentSession>());
+  const language=useSyncExternalStore(subscribeLanguage,currentLanguage,currentLanguage);
+  const previousLanguage=useRef(language);
+  const [workflowProjection,setWorkflowProjection]=useState<WorkflowState>();
+  const [taskOutcome,setTaskOutcome]=useState<TaskStatusFacts['outcome']>();
+  const [taskFailure,setTaskFailure]=useState<TaskStatusFacts['failure']>();
+  const [taskFinishedAt,setTaskFinishedAt]=useState<number>();
+  const [taskStageStartedAt,setTaskStageStartedAt]=useState(Date.now);
+  const [cleanupFailed,setCleanupFailed]=useState(false);
+  const [lastTaskStartedAt,setLastTaskStartedAt]=useState<number>();
   const titleControllers = useRef(new Set<AbortController>());
   const confirmationRef = useRef<PendingConfirmation | undefined>(undefined);
+  const verificationBasisReview = useRef<(summary: string, signal?: AbortSignal) => Promise<boolean>>(() => Promise.resolve(false));
   const permissions = useRef(defaultPermissions());
   const permissionsReady = useRef<Promise<void>>(Promise.resolve());
   const terminalCommandRunning = useRef(false);
@@ -348,7 +368,8 @@ export function EverpeaceApp({
   const forkResumePending = useRef(false);
   const [timeline, setTimeline] = useState(initialTimeline);
   const [timelineEpoch, setTimelineEpoch] = useState(0);
-  const [terminalColumns, setTerminalColumns] = useState(() => Math.max(1, stdout.columns ?? 80));
+  useEffect(()=>{if(previousLanguage.current===language)return;previousLanguage.current=language;onReplayOutput(()=>setTimelineEpoch(epoch=>epoch+1));},[language,onReplayOutput]);
+  const terminalColumns = Math.max(1, columns);
   const displayTimeline = useMemo(
     () => visibleHistory(timeline, { columns: terminalColumns }),
     [terminalColumns, timeline],
@@ -415,6 +436,8 @@ export function EverpeaceApp({
   const [terminalOutput, setTerminalOutput] = useState<string>();
   const [agentTerminalPreview, setAgentTerminalPreview] = useState<BashOutputPreview>();
   const [activeCommand, setActiveCommand] = useState<{ command: string; shell: string; source: "model" | "user"; cancelling?: boolean }>();
+  const sensitiveInputGrants = useRef(new Map<string, string>());
+  const skipInputHistory = useRef(false);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [resumedInputHistory, setResumedInputHistory] = useState<string[]>();
   const editorRef = useRef(createComposerState());
@@ -425,6 +448,7 @@ export function EverpeaceApp({
   const attachmentController = useRef<AbortController | undefined>(undefined);
   useEffect(() => { activeGoalProjection.current = activeGoal; }, [activeGoal]);
   useEffect(() => { activeTaskProgressProjection.current = activeTaskProgress; }, [activeTaskProgress]);
+  useEffect(()=>{if(coordinator.activeTask||directController.current||coordinator.cleanupBlocked||cleanupFailed)return;setTaskOutcome(undefined);setTaskFailure(undefined);setTaskFinishedAt(undefined);setLastTaskStartedAt(undefined);setWorkflowProjection(undefined);},[sessionEpoch,workspacePath]);
   const resumeGoalPending = useRef(false);
   const runChatRef = useRef<((text: string, timelineRecorded?: boolean, mode?: AgentMode, taskSource?: WorkflowTaskSource, attachments?: readonly FileAttachment[]) => Promise<void>) | undefined>(undefined);
   useEffect(() => {
@@ -433,7 +457,7 @@ export function EverpeaceApp({
     return () => { active = false; directController.current?.abort(); };
   }, [dependencies.inputHistory]);
   useEffect(() => () => {
-    attachmentController.current?.abort(new Error("Session or workspace changed"));
+    attachmentController.current?.abort(new Error(uiText('m9ae3e8b0bdcb')));
     attachmentController.current = undefined;
   }, [sessionEpoch, workspacePath]);
   useEffect(() => {
@@ -489,18 +513,27 @@ export function EverpeaceApp({
   );
 
   const ensureWorkflow = useCallback((initialState?: WorkflowState, workflowWorkspace = workspacePath): CodingWorkflowRuntime => {
+    let owner:CodingWorkflowRuntime;
+    let ownerSessionId=coordinator.sessionId;
     const runtimeOptions = {
       workspacePath: workflowWorkspace,
+      confirmVerificationBasis: (summary: string, signal?: AbortSignal) => verificationBasisReview.current(summary, signal),
+      permissionRevision: () => permissionPolicyRevision(permissions.current),
       ...(initialState ? { initialState } : {}),
       onState: async (state: WorkflowState) => {
-        const sessionId = coordinator.sessionId;
+        if(owner===workflowRuntime.current)ownerSessionId??=coordinator.sessionId;
+        const sessionId = ownerSessionId;
+        const runtime=owner;
+        const task=coordinator.activeTask;
         if (sessionId) await dependencies.sessionStore.setWorkflow?.(sessionId, state);
+        if(sessionId===coordinator.sessionId&&runtime===workflowRuntime.current&&task===coordinator.activeTask&&runtime?.state.task_id===state.task_id)setWorkflowProjection(state);
       },
     };
     if (workflowRuntime.current?.workspacePath !== workflowWorkspace || initialState !== undefined) {
-      workflowRuntime.current = new CodingWorkflowRuntime(runtimeOptions);
+      owner=new CodingWorkflowRuntime(runtimeOptions);
+      workflowRuntime.current = owner;
     }
-    if (!workflowRuntime.current) workflowRuntime.current = new CodingWorkflowRuntime(runtimeOptions);
+    if (!workflowRuntime.current) {owner=new CodingWorkflowRuntime(runtimeOptions);workflowRuntime.current=owner;}
     return workflowRuntime.current;
   }, [dependencies.sessionStore, workspacePath]);
 
@@ -525,7 +558,7 @@ export function EverpeaceApp({
           const message = error instanceof Error ? error.message : String(error);
           setTimeline((current) => [
             ...current,
-            { id: errorId, kind: "error", text: `Session save failed: ${message}` },
+            { id: errorId, kind: "error", text: uiText('me4c6f6efcfb7', {p0: message}) },
           ]);
         });
     }
@@ -547,7 +580,7 @@ export function EverpeaceApp({
     const id = nextId.current++;
     setTimeline((current) => [...current, { ...entry, id }]);
     const sessionId = coordinator.sessionId;
-    if (sessionId) void dependencies.sessionStore.appendTimeline(sessionId, entry).catch((e: unknown) => appendTransient("error", `Session save failed: ${String(e)}`));
+    if (sessionId) void dependencies.sessionStore.appendTimeline(sessionId, entry).catch((e: unknown) => appendTransient("error", uiText('me4c6f6efcfb7', {p0: String(e)})));
   }, [dependencies.sessionStore, appendTransient]);
 
   const returnQueuedGuidanceToDraft = useCallback(() => {
@@ -558,7 +591,7 @@ export function EverpeaceApp({
     editorRef.current = createComposerState(draft);
     historyNavigationRef.current = { index: undefined, draft: "" };
     setInputKey((current) => current + 1);
-    appendTransient("system", "Pending guidance was returned to your draft. Submit it when ready.");
+    appendTransient("system", uiText('m1bb38300b1e9'));
   }, [appendTransient]);
 
   const enterCommandView = useCallback((nextView: CommandView) => {
@@ -625,15 +658,15 @@ export function EverpeaceApp({
       setConfirmation(undefined);
       if (!accepted) {
       const label = pending?.kind === "web"
-          ? "Web request rejected"
+          ? uiText('m88748080c82c')
           : pending?.kind === "mcp"
-            ? "MCP tool call rejected"
+            ? uiText('m58879d3f6629')
             : pending?.kind === "goal"
-            ? "Goal change rejected"
+            ? uiText('m1f10522dfa61')
             : pending?.kind === "patch"
-              ? "Patch rejected"
-            : "Shell command rejected";
-        append("system", pending?.kind === "mcp" ? label : `${label}: ${pending?.request ?? "unknown request"}`);
+              ? uiText('md423169c838d')
+            : uiText('maae9fd3dfc9b');
+        append("system", pending?.kind === "mcp" ? label : `${label}: ${pending?.request ?? uiText('mc46f95764b82')}`);
       }
       pending?.resolve(accepted);
     },
@@ -659,6 +692,7 @@ export function EverpeaceApp({
   }, []);
   const requestBashConfirmation = useCallback((request: string, signal?: AbortSignal) => requestApproval("bash", request, signal), [requestApproval]);
   const requestPatchConfirmation = useCallback((request: string, signal?: AbortSignal) => requestApproval("patch", request, signal), [requestApproval]);
+  verificationBasisReview.current = (summary, signal) => requestApproval("verification_basis", summary, signal);
   const requestWebConfirmation = useCallback((request: string, signal?: AbortSignal) => requestApproval("web", request, signal), [requestApproval]);
   const requestMcpConfirmation = useCallback((request: string, signal?: AbortSignal) => requestApproval("mcp", request, signal), [requestApproval]);
   const requestGoalConfirmation = useCallback((request: string, signal?: AbortSignal) => requestApproval("goal", request, signal), [requestApproval]);
@@ -666,7 +700,7 @@ export function EverpeaceApp({
   const requestUserInput = useCallback((request: PlanRequest, signal?: AbortSignal, mode: AgentMode = "default"): Promise<Record<string, string>> => (
     new Promise((resolve, reject) => {
       if (signal?.aborted) {
-        reject(signal.reason ?? new Error("Question cancelled"));
+        reject(signal.reason ?? new Error(uiText('me8960873b52b')));
         return;
       }
       let finished = false;
@@ -686,7 +720,7 @@ export function EverpeaceApp({
         complete: finish,
         cancel: mode === "plan"
           ? cancel
-          : () => coordinator.cancelTask(new Error("Question cancelled by user")),
+          : () => coordinator.cancelTask(new Error(uiText('m2cf21d4057cf'))),
       });
     })
   ), [enterCommandView, returnToChat]);
@@ -708,7 +742,7 @@ export function EverpeaceApp({
       const cancel = () => decide("cancel");
       signal?.addEventListener("abort", cancel, { once: true });
       enterCommandView({ kind: "plan-review", submitted, decide, cancelTask: () => {
-        coordinator.cancelTask(new Error("Plan review cancelled by user"));
+        coordinator.cancelTask(new Error(uiText('mc68128be37ac')));
         cancel();
       } });
     })
@@ -717,7 +751,7 @@ export function EverpeaceApp({
   const executeBash = useCallback(
     async (command: string, signal?: AbortSignal, timeoutMs?: number): Promise<BashResult> => {
       const started = Date.now();
-      setActiveCommand({ command, shell: process.platform === "win32" ? "PowerShell · Codex sandbox" : "Bash · Codex sandbox", source: "model" });
+      setActiveCommand({ command, shell: process.platform === "win32" ? uiText('m9543cbaf45a8') : uiText('m20eb47762dd7'), source: "model" });
       let generation = 0;
       let finished = false;
       setTerminalBusy(true);
@@ -732,7 +766,7 @@ export function EverpeaceApp({
       let result: BashResult;
       try { result = await dependencies.runBash(command, permissions.current, signal, preview, timeoutMs); }
       finally { finished = true; setTerminalBusy(false); setTerminalOutput(undefined); setAgentTerminalPreview(undefined); setActiveCommand(undefined); }
-      if (result === undefined) throw new Error("Bash did not return a result");
+      if (result === undefined) throw new Error(uiText('m3306b05f39bd'));
       const output = await renderTerminalOutput(commandOutput(result));
       const retained = retainOutput(output);
       appendCommand(retained.text, { id: randomUUID(), command, shell: process.platform === "win32" ? "PowerShell" : "Bash", workspace: workspacePath, source: "model", status: result.cancelled ? "cancelled" : result.error || result.exitCode !== 0 ? "failed" : "completed", durationMs: Date.now() - started, truncated: retained.truncated || result.truncated === true });
@@ -747,13 +781,13 @@ export function EverpeaceApp({
       const revision = permissionPolicyRevision(reviewedPolicy);
       const permission = commandPermission(command, reviewedPolicy);
       if (permission === "deny") {
-        return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "Verification command denied by the active command rules" };
+        return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: uiText('m1362815cc293') };
       }
-      if (!userInitiated && permission === "ask" && !(await requestBashConfirmation(`Run verification: ${command}`))) {
-        return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "Verification command was not approved" };
+      if (!userInitiated && permission === "ask" && !(await requestBashConfirmation(uiText('mc2b87b48c813', {p0: command})))) {
+        return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: uiText('m8e9d6272e54a') };
       }
       if (!userInitiated && permissionPolicyRevision(permissions.current) !== revision) {
-        return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: "Permission policy changed while the verification command was being reviewed" };
+        return { stdout: "", stderr: "", exitCode: null, signal: null, cancelled: false, error: uiText('m8c7c4cbae03e') };
       }
       return executeBash(command, signal, timeoutMs);
     },
@@ -781,6 +815,7 @@ export function EverpeaceApp({
       const output = commandOutput(result);
       const retained = retainOutput(output);
       appendCommand(retained.text, { id: randomUUID(), command, shell, workspace: workspacePath, source: "user", status: result.cancelled ? "cancelled" : result.error || result.exitCode !== 0 ? "failed" : "completed", durationMs: Date.now() - started, truncated: retained.truncated || result.truncated === true });
+      if(result.cleanupFailed) { const error = new ProcessCleanupError(result.error ?? uiText('task.cleanupFailed')); await ensureWorkflow().recordCleanupFailure(error); throw error; }
       return result;
     },
     [appendCommand, dependencies, workspacePath],
@@ -802,7 +837,7 @@ export function EverpeaceApp({
         },
         async setGoal(goal) {
           const sessionId = coordinator.sessionId;
-          if (!sessionId) throw new Error("Goals require an active session");
+          if (!sessionId) throw new Error(uiText('mc37e4cde06b1'));
           await dependencies.sessionStore.setGoal(sessionId, goal);
           activeGoalProjection.current = goal;
           setActiveGoal(goal);
@@ -814,8 +849,8 @@ export function EverpeaceApp({
         },
         async setTaskProgress(progress) {
           const sessionId = coordinator.sessionId;
-          if (!sessionId) throw new Error("Task progress requires an active session");
-          if (!dependencies.sessionStore.setTaskProgress) throw new Error("Task progress persistence is unavailable");
+          if (!sessionId) throw new Error(uiText('m5bb9ac28b375'));
+          if (!dependencies.sessionStore.setTaskProgress) throw new Error(uiText('m0bfb5c833e38'));
           await dependencies.sessionStore.setTaskProgress(sessionId, progress);
           const next = cloneTaskProgress(progress);
           activeTaskProgressProjection.current = next;
@@ -823,7 +858,9 @@ export function EverpeaceApp({
         },
       },
       interaction: {
+        takeSensitiveInputAuthorization(digest) { const allowed = sensitiveInputGrants.current.get(digest) === permissionPolicyRevision(permissions.current); sensitiveInputGrants.current.delete(digest); return allowed; },
         confirm(_kind, tool, prompt, signal) {
+          if (tool === "verification_basis") return requestApproval("verification_basis", prompt, signal);
           if (tool === "bash") return requestBashConfirmation(prompt, signal);
           if (tool === "patch") return requestPatchConfirmation(prompt, signal);
           if (tool === "web") return requestWebConfirmation(prompt, signal);
@@ -847,23 +884,23 @@ export function EverpeaceApp({
           const detail = event.detail?.replace(/\s+/g, " ").trim();
           const suffix = detail ? ` ${truncateEnd(detail, 160)}` : "";
           if (event.phase === "approval") {
-            setLiveToolStatus(`Waiting for approval: ${event.name}${suffix}`);
+            setLiveToolStatus(uiText('m64d54f47f8f1', {p0: event.name, p1: suffix}));
           } else if (event.phase === "streaming") {
-            setLiveToolStatus(`Preparing ${event.name}${suffix}`);
+            setLiveToolStatus(uiText('m29fb8dfed7f8', {p0: event.name, p1: suffix}));
           } else if (event.phase === "started") {
             setLiveToolStatus(`${event.name}${detail ? `: ${truncateEnd(detail, 160)}` : ""}`);
           } else if (event.phase === "finished") {
-            setLiveToolStatus(`${event.name} finished`);
+            setLiveToolStatus(uiText('m5c56ad59190c', {p0: event.name}));
           }
         },
       },
     }),
-    [append, clearLiveAssistant, dependencies.sessionStore, ensureWorkflow, executeBash, executeVerification, queueAssistantDelta, requestBashConfirmation, requestGoalConfirmation, requestMcpConfirmation, requestPatchConfirmation, requestUserInput, requestWebConfirmation, reviewPlan, workspacePath],
+    [append, clearLiveAssistant, dependencies.sessionStore, ensureWorkflow, executeBash, executeVerification, queueAssistantDelta, requestApproval, requestBashConfirmation, requestGoalConfirmation, requestMcpConfirmation, requestPatchConfirmation, requestUserInput, requestWebConfirmation, reviewPlan, workspacePath],
   );
 
   useEffect(() => {
     let active = true;
-    void dependencies.getTeamConfig?.().then((config) => { if (active && !coordinator.activeTask) setTeamConfig(config); }).catch(() => appendTransient("error", "Team configuration could not be loaded."));
+    void dependencies.getTeamConfig?.().then((config) => { if (active && !coordinator.activeTask) setTeamConfig(config); }).catch(() => appendTransient("error", uiText('m9604b9c46a33')));
     return () => { active = false; };
   }, [dependencies]);
   const contextWindow = activeModel
@@ -887,14 +924,14 @@ export function EverpeaceApp({
             },
             async onContextCompacted(items, automatic, usage) {
               const sessionId = coordinator.sessionId;
-              if (sessionId === undefined) throw new Error("Context compaction requires an active session");
+              if (sessionId === undefined) throw new Error(uiText('mce021e50b209'));
               await dependencies.sessionStore.compactContext(sessionId, items, automatic, usage);
               setSessionUsage((current) => applyCompactionUsage(current, usage));
             },
             async onContextPruned(items, metadata) {
               const sessionId = coordinator.sessionId;
               if (sessionId === undefined || !dependencies.sessionStore.pruneContext) {
-                throw new Error("Context pruning requires an active persistent session");
+                throw new Error(uiText('ma038c3ea984d'));
               }
               await dependencies.sessionStore.pruneContext(sessionId, items, metadata);
               setSessionUsage((current) => ({ ...current, context_tokens: null }));
@@ -915,40 +952,40 @@ export function EverpeaceApp({
               setAgentPhase(phase);
             },
             onEvent(event) {
-              if (event.type === "cost_estimated" && event.estimate.warning) appendTransient("system", "Estimated cost warning threshold reached. In-flight billing may continue; this is not a hard spending limit.");
+              if (event.type === "cost_estimated" && event.estimate.warning) appendTransient("system", uiText('m36dafc16eeba'));
               if (event.type === "sampling_started") {
                 clearLiveAssistant();
                 setLiveToolStatus(undefined);
                 setReasoningStartedAt(undefined);
               } else if (event.type === "reasoning_started") {
-                setLiveToolStatus("Thinking");
+                setLiveToolStatus(uiText('ma20d12c5e9c4'));
                 setReasoningStartedAt(Date.now());
               } else if (event.type === "reasoning_finished") {
                 setLiveToolStatus(undefined);
                 setReasoningStartedAt(undefined);
               } else if (event.type === "retrying") {
                 clearLiveAssistant();
-                setLiveToolStatus(`Retrying model request (attempt ${event.attempt}${event.category ? ` · ${event.category.replace(/_/g, " ")}` : ""})`);
+                setLiveToolStatus(uiText('ma3b29557426e', {p0: event.attempt, p1: event.category ? ` · ${event.category.replace(/_/g, " ")}` : ""}));
               } else if (event.type === "stream_recovery_started") {
-                setLiveToolStatus("Resuming interrupted model stream");
+                setLiveToolStatus(uiText('md7c1670069d9'));
               } else if (event.type === "stream_recovery_finished") {
-                setLiveToolStatus(event.success === false ? "Stream resume failed; retrying request" : "Model stream resumed");
+                setLiveToolStatus(event.success === false ? uiText('md53e91ac8869') : uiText('m2a233558efbd'));
               } else if (event.type === "steering_applied") {
                 setQueuedGuidanceCount((current) => Math.max(0, current - event.count));
                 clearLiveAssistant();
-                setLiveToolStatus("Guidance applied; continuing with the updated task");
+                setLiveToolStatus(uiText('me357e27b5210'));
               } else if (event.type === "tool_started") {
-                setLiveToolStatus(`Preparing ${event.call.name}`);
+                setLiveToolStatus(uiText('m2706eac57fae', {p0: event.call.name}));
               } else if (event.type === "tool_finished") {
-                setLiveToolStatus(`${event.call.name} finished`);
+                setLiveToolStatus(uiText('m5c56ad59190c', {p0: event.call.name}));
               } else if (event.type === "tool_batch_started") {
-                setLiveToolStatus(`Running ${event.calls.length} read-only tools in parallel`);
+                setLiveToolStatus(uiText('m8c00ce9df2a0', {p0: event.calls.length}));
               } else if (event.type === "tool_batch_finished") {
-                setLiveToolStatus(`Finished ${event.calls.length} parallel tools`);
+                setLiveToolStatus(uiText('m5db96086042c', {p0: event.calls.length}));
               } else if (event.type === "compaction_started") {
-                setLiveToolStatus(event.automatic ? "Compacting context automatically" : "Compacting context");
+                setLiveToolStatus(event.automatic ? uiText('m70b8c999b0ea') : uiText('m67afcd229f27'));
               } else if (event.type === "compaction_completed") {
-                setLiveToolStatus("Context compacted");
+                setLiveToolStatus(uiText('m99ca2ce25713'));
               }
             },
           }),
@@ -957,7 +994,7 @@ export function EverpeaceApp({
 
   coordinator.setAgent(agent);
   const configureTeam = async (config: TeamOptions) => {
-    if (coordinator.activeTask || directController.current) throw new Error("Wait for the active task to finish before changing team settings");
+    if (coordinator.activeTask || directController.current) throw new Error(uiText('mf92cb5a0a043'));
     const next = normalizeTeamOptions(config);
     await dependencies.configureTeam?.(next);
     const sessionId = coordinator.sessionId;
@@ -969,11 +1006,11 @@ export function EverpeaceApp({
       if (args === "on" || args === "off") await configureTeam({ ...teamConfig, enabled: args === "on" });
       const resolved = await dependencies.registry.resolveAll();
       const requestedTeam = args && args !== "on" && args !== "off" ? args : undefined;
-      if (requestedTeam && !/^[a-f0-9-]{36}$/u.test(requestedTeam)) throw new Error("Use /team, /team on, /team off or /team <team-id>");
-      if (requestedTeam && !coordinator.sessionId) throw new Error("Resume the owning root Session before inspecting a retained team");
+      if (requestedTeam && !/^[a-f0-9-]{36}$/u.test(requestedTeam)) throw new Error(uiText('m4d54c33d4447'));
+      if (requestedTeam && !coordinator.sessionId) throw new Error(uiText('m045366e71893'));
       const snapshot = requestedTeam ? await dependencies.inspectTeam?.(coordinator.sessionId!, requestedTeam) : dependencies.getTeamSnapshot?.() ?? (coordinator.sessionId ? await dependencies.inspectTeam?.(coordinator.sessionId) : undefined);
       enterCommandView({ kind: "team", models: resolved.available.map((model) => ({ id: model.id, name: model.model_name })), ...(snapshot ? { snapshot } : {}) });
-    } catch (error) { openInfo("/team · Could not load", error instanceof Error ? error.message : "Team operation failed", "error"); }
+    } catch (error) { openInfo(uiText('m58fca75f9b7e'), error instanceof Error ? error.message : uiText('m4a0487b903a3'), "error"); }
   };
 
 
@@ -986,7 +1023,7 @@ export function EverpeaceApp({
   }, [agent, requestSettings]);
 
   useEffect(() => {
-    void agent?.ensureSessionActivity?.().catch(() => appendTransient("error", "Session activity ownership could not be acquired. Requests remain blocked."));
+    void agent?.ensureSessionActivity?.().catch(() => appendTransient("error", uiText('m768be4e3cb8e')));
   }, [agent, sessionEpoch, appendTransient]);
 
   useEffect(() => {
@@ -996,13 +1033,13 @@ export function EverpeaceApp({
       if (id && dependencies.acquireSessionActivity) lease = await dependencies.acquireSessionActivity(id);
       if (ended) { await lease?.(); return; }
       const result = await dependencies.privacy?.autoCleanup();
-      if (result && !ended) appendTransient("system", `Privacy cleanup: ${result.deleted} deleted, ${result.failed} failed, ${result.excluded} excluded.`);
-    })().catch(() => { if (!ended) appendTransient("error", "Privacy ownership or automatic cleanup could not complete. Use /privacy to inspect and retry."); });
+      if (result && !ended) appendTransient("system", uiText('m3100c73c9c2b', {p0: result.deleted, p1: result.failed, p2: result.excluded}));
+    })().catch(() => { if (!ended) appendTransient("error", uiText('mf2b83dd35718')); });
     return () => { ended = true; void lease?.().catch(() => undefined); };
   }, [dependencies.acquireSessionActivity, dependencies.privacy, sessionEpoch, appendTransient]);
 
   const activateModel = useCallback(
-    (model: RegisteredModel, message = `Enabled model ${model.model_name}`) => {
+    (model: RegisteredModel, message = uiText('mc75afeb23340', {p0: model.model_name})) => {
       const nextSettings = settingsForModel(model);
       coordinator.invalidatePlan();
       clearQueuedGuidance();
@@ -1012,7 +1049,7 @@ export function EverpeaceApp({
         void dependencies.sessionStore
           .selectModel(sessionId, toSessionModel(model, nextSettings), false)
           .catch((error: unknown) => {
-            appendTransient("error", `Session save failed: ${error instanceof Error ? error.message : String(error)}`);
+            appendTransient("error", uiText('me4c6f6efcfb7', {p0: error instanceof Error ? error.message : String(error)}));
           });
       }
       returnToChat(() => {
@@ -1021,7 +1058,7 @@ export function EverpeaceApp({
         setSessionContext([]);
         setSessionUsage((current) => resetContextUsage(current, false));
         setSessionEpoch((current) => current + 1);
-        appendTransient("system", `${message}; conversation context was reset.`);
+        appendTransient("system", uiText('mf9eab913dd9e', {p0: message}));
       });
     },
     [appendTransient, clearQueuedGuidance, dependencies.sessionStore, returnToChat],
@@ -1029,21 +1066,21 @@ export function EverpeaceApp({
 
   const showModels = useCallback(async () => {
     const operation = startCommandLoad(
-      "/models · Model status",
-      "Reading model registry",
+      uiText('mec7cb903c497'),
+      uiText('m60d658dbe1e4'),
     );
     try {
       const models = await dependencies.registry.listStatuses();
       if (!isCurrentCommandOperation(operation)) return;
       if (models.length === 0) {
         replaceCommandView(infoView(
-          "/models · Model status",
-          "No models are registered. Use /login first.",
+          uiText('mec7cb903c497'),
+          uiText('me5f62626e5d0'),
         ));
         return;
       }
       replaceCommandView(infoView(
-        "/models · Model status",
+        uiText('mec7cb903c497'),
         models
           .map(
             (model) =>
@@ -1054,7 +1091,7 @@ export function EverpeaceApp({
     } catch (error) {
       if (!isCurrentCommandOperation(operation)) return;
       replaceCommandView(infoView(
-        "/models · Could not load",
+        uiText('me5f5eb796893'),
         error instanceof Error ? error.message : String(error),
         "error",
       ));
@@ -1068,47 +1105,47 @@ export function EverpeaceApp({
   ]);
 
   const showMcp = useCallback(async () => {
-    const operation = startCommandLoad("/mcp · MCP servers", "Connecting to MCP servers");
+    const operation = startCommandLoad(uiText('m17cf1e9a821e'), uiText('m8c6c68dbc8ab'));
     try {
       const text = dependencies.getMcpStatus
         ? await dependencies.getMcpStatus()
-        : "MCP runtime is unavailable in this integration.";
+        : uiText('m42ddd6b00014');
       if (!isCurrentCommandOperation(operation)) return;
-      replaceCommandView(infoView("/mcp · MCP servers", text));
+      replaceCommandView(infoView(uiText('m17cf1e9a821e'), text));
     } catch (error) {
       if (!isCurrentCommandOperation(operation)) return;
-      replaceCommandView(infoView("/mcp · Could not load", error instanceof Error ? error.message : String(error), "error"));
+      replaceCommandView(infoView(uiText('m3b0640dc8813'), error instanceof Error ? error.message : String(error), "error"));
     }
   }, [dependencies, isCurrentCommandOperation, replaceCommandView, startCommandLoad]);
 
   const reviewMcpTrust = useCallback(async (name: string) => {
     const controller = new AbortController();
     const cancel = () => { controller.abort(); returnToChat(); };
-    const operation = startCommandLoad("/mcp · Startup trust", "Reading MCP startup configuration", true, true, cancel);
+    const operation = startCommandLoad(uiText('m741279c7487a'), uiText('m6e65c2412f43'), true, true, cancel);
     try {
-      if (!dependencies.previewMcpTrust || !dependencies.approveMcpTrust) throw new Error("MCP trust management is unavailable.");
+      if (!dependencies.previewMcpTrust || !dependencies.approveMcpTrust) throw new Error(uiText('m5b9291a0cf22'));
       const preview = await dependencies.previewMcpTrust(name, controller.signal);
       if (!isCurrentCommandOperation(operation)) return;
       let submitted = false;
       replaceCommandView({ kind: "mcp-trust", preview, cancel, approve() {
         if (submitted || !isCurrentCommandOperation(operation)) return;
         submitted = true;
-        const approval = startCommandLoad("/mcp · Startup trust", "Saving startup approval", true, true, cancel);
+        const approval = startCommandLoad(uiText('m741279c7487a'), uiText('md7018da0e36f'), true, true, cancel);
         void dependencies.approveMcpTrust!(preview, controller.signal).then(() => {
-          if (isCurrentCommandOperation(approval)) replaceCommandView(infoView("/mcp · Startup trusted", "Approval saved. Use /mcp reconnect to start the service."));
+          if (isCurrentCommandOperation(approval)) replaceCommandView(infoView(uiText('m26a4279d9f7f'), uiText('m4d3846c83688')));
         }).catch(() => {
-          if (isCurrentCommandOperation(approval)) replaceCommandView(infoView("/mcp · Approval failed", "Configuration or trust changed, or storage is unavailable. Review a new preview.", "error"));
+          if (isCurrentCommandOperation(approval)) replaceCommandView(infoView(uiText('m97093e4d27ba'), uiText('m60ef53fa9bd8'), "error"));
         });
       } });
     } catch {
-      if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/mcp · Could not review", "The server is unavailable or violates the MCP transport policy.", "error"));
+      if (isCurrentCommandOperation(operation)) replaceCommandView(infoView(uiText('mc87904e38258'), uiText('m2e5d2edfc42b'), "error"));
     }
   }, [dependencies, isCurrentCommandOperation, replaceCommandView, returnToChat, startCommandLoad]);
 
   const showMemory = useCallback(async (enterFromChat = true) => {
     const operation = startCommandLoad(
-      "/memory · Learned experience",
-      "Reading learned experience",
+      uiText('medeae9cc8394'),
+      uiText('m0b8a57645714'),
       enterFromChat,
     );
     try {
@@ -1120,7 +1157,7 @@ export function EverpeaceApp({
     } catch (error) {
       if (!isCurrentCommandOperation(operation)) return;
       replaceCommandView(infoView(
-        "/memory · Could not load",
+        uiText('m4c4767a2290e'),
         error instanceof Error ? error.message : String(error),
         "error",
       ));
@@ -1129,25 +1166,25 @@ export function EverpeaceApp({
 
   const showMemoryPrompt = useCallback(async () => {
     const operation = startCommandLoad(
-      "/memory view · Injected experience",
-      "Reading memory snapshot",
+      uiText('md8fa10ae6778'),
+      uiText('m9d7159068408'),
     );
     try {
       const snapshot = agent?.getMemorySnapshot?.();
       const text = snapshot
-        ? `Snapshot ${snapshot.revision} loaded ${snapshot.loadedAt}\n\n${snapshot.text || "No learned experience was injected."}`
+        ? uiText('m7061decf5008', {p0: snapshot.revision, p1: snapshot.loadedAt, p2: snapshot.text || uiText('m2b5501316f7b')})
         : dependencies.getMemoryPrompt
           ? await dependencies.getMemoryPrompt(workspacePath)
-          : "Memory is unavailable in this integration.";
+          : uiText('m02f9e2933d63');
       if (!isCurrentCommandOperation(operation)) return;
       replaceCommandView(infoView(
-        "/memory view · Injected experience",
-        text || "No learned experience is currently injected.",
+        uiText('md8fa10ae6778'),
+        text || uiText('m21c42184b890'),
       ));
     } catch (error) {
       if (!isCurrentCommandOperation(operation)) return;
       replaceCommandView(infoView(
-        "/memory view · Could not load",
+        uiText('m59edbfa760ab'),
         error instanceof Error ? error.message : String(error),
         "error",
       ));
@@ -1161,7 +1198,7 @@ export function EverpeaceApp({
         await showMemory(false);
       } catch (error) {
         replaceCommandView(infoView(
-          "/memory · Could not update",
+          uiText('ma0b1f3635165'),
           error instanceof Error ? error.message : String(error),
           "error",
         ));
@@ -1175,7 +1212,7 @@ export function EverpeaceApp({
     agent?.setMemoryPolicy?.(patch);
     const sessionId = coordinator.sessionId;
     if (sessionId) void dependencies.sessionStore.setMemoryPolicy?.(sessionId, next).catch((error: unknown) => {
-      appendTransient("error", `Memory policy save failed: ${error instanceof Error ? error.message : String(error)}`);
+      appendTransient("error", uiText('m867143612558', {p0: error instanceof Error ? error.message : String(error)}));
     });
     void showMemory(false);
   }, [agent, appendTransient, dependencies.sessionStore, memoryPolicy, showMemory]);
@@ -1187,7 +1224,7 @@ export function EverpeaceApp({
         await showMemory(false);
       } catch (error) {
         replaceCommandView(infoView(
-          "/memory · Could not clear",
+          uiText('m2aafc055b558'),
           error instanceof Error ? error.message : String(error),
           "error",
         ));
@@ -1202,7 +1239,7 @@ export function EverpeaceApp({
         await showMemory(false);
       } catch (error) {
         replaceCommandView(infoView(
-          "/memory · Could not archive",
+          uiText('ma9cfbb692002'),
           error instanceof Error ? error.message : String(error),
           "error",
         ));
@@ -1212,11 +1249,11 @@ export function EverpeaceApp({
 
   const rememberMemory = useCallback((text: string) => {
     if (!activeModel || !dependencies.rememberMemory) {
-      openInfo("/memory · Cannot remember", "No active model is available for memory extraction.", "error");
+      openInfo(uiText('mb5cdfe71a027'), uiText('mb2754b3a5cf9'), "error");
       return;
     }
     const controller = new AbortController();
-    const operation = startCommandLoad("/memory · Remember preference", "Extracting user preference", true, true, () => {
+    const operation = startCommandLoad(uiText('m68be26ae1efd'), uiText('m85fd7ed9aae0'), true, true, () => {
       controller.abort();
       returnToChat();
     });
@@ -1225,7 +1262,7 @@ export function EverpeaceApp({
       .catch((error: unknown) => {
         if (!isCurrentCommandOperation(operation) || controller.signal.aborted) return;
         replaceCommandView(infoView(
-          "/memory · Could not remember",
+          uiText('m7be662aefeab'),
           error instanceof Error ? error.message : String(error),
           "error",
         ));
@@ -1234,28 +1271,28 @@ export function EverpeaceApp({
 
   const openModelPicker = useCallback(async () => {
     const operation = startCommandLoad(
-      "/model · Switch model",
-      "Reading available models",
+      uiText('md8e1d3abdb55'),
+      uiText('m0cfe5e8b3e36'),
     );
     try {
       const resolved = await dependencies.registry.resolveAll();
       if (!isCurrentCommandOperation(operation)) return;
       if (resolved.available.length === 0) {
         replaceCommandView(infoView(
-          "/model · Switch model",
-          "No models are available. Use /login first.",
+          uiText('md8e1d3abdb55'),
+          uiText('md41f04a008d1'),
         ));
         return;
       }
       replaceCommandView({
         kind: "model-picker",
-        title: "Switch the active model",
+        title: uiText('m058220d40b4a'),
         models: resolved.available,
       });
     } catch (error) {
       if (!isCurrentCommandOperation(operation)) return;
       replaceCommandView(infoView(
-        "/model · Could not load",
+        uiText('m43f53417b72e'),
         error instanceof Error ? error.message : String(error),
         "error",
       ));
@@ -1269,16 +1306,16 @@ export function EverpeaceApp({
 
   const openLogout = useCallback(async () => {
     const operation = startCommandLoad(
-      "/logout · Remove models",
-      "Reading model registry",
+      uiText('m64cf305db8b5'),
+      uiText('m60d658dbe1e4'),
     );
     try {
       const models = await dependencies.registry.listStatuses();
       if (!isCurrentCommandOperation(operation)) return;
       if (models.length === 0) {
         replaceCommandView(infoView(
-          "/logout · Remove models",
-          "No models are registered.",
+          uiText('m64cf305db8b5'),
+          uiText('mefc970475c5e'),
         ));
         return;
       }
@@ -1286,7 +1323,7 @@ export function EverpeaceApp({
     } catch (error) {
       if (!isCurrentCommandOperation(operation)) return;
       replaceCommandView(infoView(
-        "/logout · Could not load",
+        uiText('m5477dd064d57'),
         error instanceof Error ? error.message : String(error),
         "error",
       ));
@@ -1313,7 +1350,7 @@ export function EverpeaceApp({
             !resolveProviderCapabilities(model.base_url, model.model_name, model.responses_profile).encryptedReasoning) &&
           hasOpaqueProviderContext(loaded.context)
         ) {
-          throw new Error("This session contains provider-specific opaque context. Select the original provider or start a new session; the saved session was left unchanged.");
+          throw new Error(uiText('m1bcf0af0d680'));
         }
         const restoredWorkspace = await dependencies.changeWorkspace(
           loaded.summary.workspace_path,
@@ -1361,11 +1398,7 @@ export function EverpeaceApp({
         resumeGoalPending.current = !pendingForkResume && loaded.goal?.status === "active" && loaded.workflow?.phase !== "blocked";
         onReplayOutput(() => {
           setTimeline(restoredTimeline);
-          setResumedInputHistory(loaded.timeline.flatMap((entry) => {
-            if (entry.kind === "user") return [entry.text];
-            if (entry.kind === "output" && entry.command?.source === "user") return [`!${entry.command.command}`];
-            return [];
-          }));
+          setResumedInputHistory(undefined);
           editorRef.current = createComposerState();
           historyNavigationRef.current = { index: undefined, draft: "" };
           setTimelineEpoch((current) => current + 1);
@@ -1401,8 +1434,8 @@ export function EverpeaceApp({
   const chooseSession = useCallback(
     async (summary: SessionSummary) => {
       let operation = startCommandLoad(
-        "/resume · Resume session",
-        "Reading session",
+        uiText('mfe2ee5028847'),
+        uiText('m1d70e0029cf2'),
         false,
       );
       try {
@@ -1420,8 +1453,8 @@ export function EverpeaceApp({
 
         if (originalModel) {
           operation = startCommandLoad(
-            "/resume · Resume session",
-            "Restoring session",
+            uiText('mfe2ee5028847'),
+            uiText('mfe958bef9fde'),
             false,
             false,
           );
@@ -1429,22 +1462,22 @@ export function EverpeaceApp({
         } else if (resolved.available.length > 0) {
           replaceCommandView({
             kind: "model-picker",
-            title: `The original model ${loaded.summary.model.model_name} is unavailable; choose a replacement`,
+            title: uiText('me53e089bf5fc', {p0: loaded.summary.model.model_name}),
             models: resolved.available,
             resumeSession: loaded,
           });
         } else {
           replaceCommandView(infoView(
-            "/resume · Restore failed",
-            "The original session model is unavailable. Register a model with /login first.",
+            uiText('m8d94f4cf7cd3'),
+            uiText('m28d2d8520375'),
             "error",
           ));
         }
       } catch (error) {
         if (!isCurrentCommandOperation(operation)) return;
         replaceCommandView(infoView(
-          "/resume · Restore failed",
-          `Session restore failed: ${error instanceof Error ? error.message : String(error)}`,
+          uiText('m8d94f4cf7cd3'),
+          uiText('m3905310128fc', {p0: error instanceof Error ? error.message : String(error)}),
           "error",
         ));
       }
@@ -1488,8 +1521,8 @@ export function EverpeaceApp({
 
   const openResume = useCallback(async (initialQuery = "") => {
     const operation = startCommandLoad(
-      "/resume · Resume session",
-      "Reading sessions",
+      uiText('mfe2ee5028847'),
+      uiText('m0b859f50a5c9'),
     );
     try {
       const result = await searchSessions(initialQuery, false, 0);
@@ -1502,8 +1535,8 @@ export function EverpeaceApp({
     } catch (error) {
       if (!isCurrentCommandOperation(operation)) return;
       replaceCommandView(infoView(
-        "/resume · Could not load",
-        `Session list failed: ${error instanceof Error ? error.message : String(error)}`,
+        uiText('m01d2c013f8cf'),
+        uiText('madcbddea31b9', {p0: error instanceof Error ? error.message : String(error)}),
         "error",
       ));
     }
@@ -1531,19 +1564,19 @@ export function EverpeaceApp({
   const createNewSession = useCallback(async () => {
     if (!activeModel) {
       openInfo(
-        "/new · Cannot create session",
-        "No model is active. Use /login or /model first.",
+        uiText('ma0c53930b530'),
+        uiText('m805ea5bb295f'),
         "error",
       );
       return;
     }
 
     clearQueuedGuidance();
-    setBusyLabel("Creating a new session");
-    const message = "New session created. Its title will be generated after your first message.";
+    setBusyLabel(uiText('m1477ce4e3c37'));
+    const message = uiText('m9b18f23cbe8d');
     try {
       const session = await dependencies.sessionStore.create({
-        title: "New Session",
+        title: uiText('mfc0bb85f3867'),
         titlePending: true,
         workspacePath,
         model: toSessionModel(activeModel, requestSettings),
@@ -1577,8 +1610,8 @@ export function EverpeaceApp({
       });
     } catch (error) {
       openInfo(
-        "/new · Creation failed",
-        `Session creation failed: ${error instanceof Error ? error.message : String(error)}`,
+        uiText('m2a555b5e93c0'),
+        uiText('mfbae80eb57f5', {p0: error instanceof Error ? error.message : String(error)}),
         "error",
       );
     } finally {
@@ -1629,8 +1662,8 @@ export function EverpeaceApp({
       attachmentController.current
     ) {
       openInfo(
-        "/fork · Busy",
-        "Wait for the active task, approval, command, or cleanup to finish before forking.",
+        uiText('m3dc905bb389a'),
+        uiText('mdcff5ff640b3'),
         "error",
       );
       return;
@@ -1638,16 +1671,16 @@ export function EverpeaceApp({
     const sourceSessionId = coordinator.sessionId;
     if (!sourceSessionId) {
       openInfo(
-        "/fork · No active session",
-        "Start or resume a local session before forking it.",
+        uiText('ma33b5c335733'),
+        uiText('mbec9e31c112f'),
         "error",
       );
       return;
     }
     if (!dependencies.sessionStore.fork) {
       openInfo(
-        "/fork · Unavailable",
-        "This session store does not support forking.",
+        uiText('m7a3157774743'),
+        uiText('me8ff70266048'),
         "error",
       );
       return;
@@ -1656,13 +1689,13 @@ export function EverpeaceApp({
     const controller = new AbortController();
     directController.current = controller;
     const cancel = () => {
-      controller.abort(new Error("Session fork cancelled"));
+      controller.abort(new Error(uiText('mb053ddab14a3')));
       if (directController.current === controller) directController.current = undefined;
       returnToChat();
     };
     let operation = startCommandLoad(
-      "/fork · Fork session",
-      "Preparing an independent session copy",
+      uiText('m8eb20c2a1a80'),
+      uiText('ma264d9066b30'),
       true,
       true,
       cancel,
@@ -1681,7 +1714,7 @@ export function EverpeaceApp({
             candidate.base_url === source.summary.model.base_url),
       );
       if (!sourceModel) {
-        throw new Error(`The session model ${source.summary.model.model_name} is unavailable. Register it before forking.`);
+        throw new Error(uiText('m3a34c0d87833', {p0: source.summary.model.model_name}));
       }
 
       const title = requestedTitle.trim();
@@ -1696,15 +1729,15 @@ export function EverpeaceApp({
       if (!isCurrentCommandOperation(operation) || coordinator.sessionId !== sourceSessionId) return;
 
       operation = startCommandLoad(
-        "/fork · Fork session",
-        "Entering the forked session",
+        uiText('m8eb20c2a1a80'),
+        uiText('mff64277b0ad2'),
         false,
         false,
       );
       if (directController.current === controller) directController.current = undefined;
       await completeResume(loaded, sourceModel, false);
       if (!isCurrentCommandOperation(operation)) return;
-      appendTransient("system", `Forked session created: ${child.title}`);
+      appendTransient("system", uiText('mf694aae288e6', {p0: child.title}));
     } catch (error) {
       if (controller.signal.aborted) {
         if (isCurrentCommandOperation(operation)) returnToChat();
@@ -1712,7 +1745,7 @@ export function EverpeaceApp({
       }
       if (isCurrentCommandOperation(operation)) {
         replaceCommandView(infoView(
-          "/fork · Could not fork",
+          uiText('me2b412a6ecb6'),
           error instanceof Error ? error.message : String(error),
           "error",
         ));
@@ -1724,7 +1757,7 @@ export function EverpeaceApp({
 
   const deleteSessions = useCallback(async (sessionIds: string[]): Promise<void> => {
     if (coordinator.activeTask || directController.current) {
-      throw new Error("A model turn or direct command is active. Wait for it to finish before deleting sessions.");
+      throw new Error(uiText('md5910ed75003'));
     }
     await dependencies.sessionStore.deleteMany(sessionIds);
     if (coordinator.sessionId && sessionIds.includes(coordinator.sessionId)) {
@@ -1758,8 +1791,8 @@ export function EverpeaceApp({
     void runtimeForGoal(sessionId).update("paused").then((goal) => {
       activeGoalProjection.current = goal;
       setActiveGoal(goal);
-      returnToChat(() => appendTransient("system", "Goal paused."));
-    }).catch((error: unknown) => openInfo("/goal · Could not pause", error instanceof Error ? error.message : String(error), "error"));
+      returnToChat(() => appendTransient("system", uiText('m79e2d50db66c')));
+    }).catch((error: unknown) => openInfo(uiText('m742b8e3895ad'), error instanceof Error ? error.message : String(error), "error"));
   }, [appendTransient, openInfo, returnToChat, runtimeForGoal, showGoalStatus]);
 
   const resumeGoal = useCallback(() => {
@@ -1768,14 +1801,14 @@ export function EverpeaceApp({
     void runtimeForGoal(sessionId).resume().then((goal) => {
       activeGoalProjection.current = goal;
       setActiveGoal(goal);
-      returnToChat(() => appendTransient("system", "Goal resumed."));
+      returnToChat(() => appendTransient("system", uiText('ma8a9ed0fe1df')));
       setTimeout(() => void runChatRef.current?.("Continue working toward the active session goal. Call get_goal first, then proceed until the objective is verified complete.", true, "default"), 0);
-    }).catch((error: unknown) => openInfo("/goal · Could not resume", error instanceof Error ? error.message : String(error), "error"));
+    }).catch((error: unknown) => openInfo(uiText('mc13800578b5e'), error instanceof Error ? error.message : String(error), "error"));
   }, [appendTransient, openInfo, returnToChat, runtimeForGoal, showGoalStatus]);
 
   const createGoal = useCallback(async (objective: string, tokenBudget?: number) => {
     if (!activeModel) {
-      openInfo("/goal · Cannot create", "No model is active. Use /login or /model first.", "error");
+      openInfo(uiText('m90cf943c0eb7'), uiText('m805ea5bb295f'), "error");
       return;
     }
     let sessionId = coordinator.sessionId;
@@ -1788,7 +1821,7 @@ export function EverpeaceApp({
     }
     const goal = await runtimeForGoal(sessionId).create({ objective, ...(tokenBudget === undefined ? {} : { tokenBudget }) });
     setAgentMode("default");
-    returnToChat(() => appendTransient("system", "Goal created; continuing until it is complete, paused, blocked, or limited."));
+    returnToChat(() => appendTransient("system", uiText('m74480ce93fc5')));
     setTimeout(() => void runChatRef.current?.(objective, false, "default"), 0);
     activeGoalProjection.current = goal;
     setActiveGoal(goal);
@@ -1804,11 +1837,11 @@ export function EverpeaceApp({
       enterCommandView({
         kind: "goal-confirm", objective: command.objective,
         ...(command.tokenBudget === undefined ? {} : { tokenBudget: command.tokenBudget }),
-        confirm: () => void createGoal(command.objective, command.tokenBudget).catch((error: unknown) => openInfo("/goal · Could not create", error instanceof Error ? error.message : String(error), "error")),
+        confirm: () => void createGoal(command.objective, command.tokenBudget).catch((error: unknown) => openInfo(uiText('mbce4be22a138'), error instanceof Error ? error.message : String(error), "error")),
         cancel: returnToChat,
       });
     } catch (error) {
-      openInfo("/goal · Invalid command", error instanceof Error ? error.message : String(error), "error");
+      openInfo(uiText('m1c531d38036c'), error instanceof Error ? error.message : String(error), "error");
     }
   }, [createGoal, enterCommandView, openInfo, pauseGoal, resumeGoal, returnToChat, showGoalStatus]);
 
@@ -1836,7 +1869,7 @@ export function EverpeaceApp({
         protocol: capabilities?.protocol ?? "responses",
         ...(capabilities ? { compaction: capabilities.compaction } : {}),
         reasoning_effort: requestSettings.reasoningEffort,
-        ...(capabilities ? { responses_profile: capabilities.responsesProfile ?? "generic", capability_source: capabilities.source, reasoning_sent: requestReasoningEffort(capabilities, requestSettings.reasoningEffort) ?? "Not sent" } : {}),
+        ...(capabilities ? { responses_profile: capabilities.responsesProfile ?? "generic", capability_source: capabilities.source, reasoning_sent: requestReasoningEffort(capabilities, requestSettings.reasoningEffort) ?? uiText('mcd5f943d5863') } : {}),
         ...(sessionUsage.reasoning_tokens === undefined ? {} : { reasoning_tokens: sessionUsage.reasoning_tokens }),
         ...(auxiliaryUsage === undefined ? {} : {
           auxiliary_input_tokens: auxiliaryUsage.input_tokens,
@@ -1850,8 +1883,8 @@ export function EverpeaceApp({
         ...(sessionUsage.cache_usage_complete === undefined ? {} : { cache_usage_complete: sessionUsage.cache_usage_complete }),
         ...(sessionUsage.cache_write_usage_complete === undefined ? {} : { cache_write_usage_complete: sessionUsage.cache_write_usage_complete }),
         usage_complete: sessionUsage.complete,
-        configuration_status: activeModel ? "model and credentials loaded" : "model not selected",
-        workflow_status: workflowRuntime.current?.state.result ?? "not settled",
+        configuration_status: activeModel ? uiText('mb747c510125e') : uiText('mb236c2397c15'),
+        workflow_status: workflowRuntime.current?.state.result ?? uiText('mbfe1f62ec901'),
         ...(agent?.getTeamSnapshot?.() ? { team_state: agent.getTeamSnapshot!()!.state, team_tokens: agent.getTeamSnapshot!()!.usage.inputTokens + agent.getTeamSnapshot!()!.usage.outputTokens, team_usage_complete: agent.getTeamSnapshot!()!.usage.complete } : {}),
       },
     });
@@ -1867,24 +1900,24 @@ export function EverpeaceApp({
   const setResponsesProfile = useCallback(async (args: string) => {
     const profile = args.trim().toLowerCase();
     if (!isResponsesProfile(profile)) {
-      openInfo("/model · Invalid profile", "Use /model profile auto|generic|deepseek.", "error");
+      openInfo(uiText('m745ebe40f3ee'), uiText('mcc6a3f6c1376'), "error");
       return;
     }
     if (coordinator.activeTask || directController.current) {
-      openInfo("/model · Busy", "Wait for the active task to finish before changing the Responses profile.", "error");
+      openInfo(uiText('m78ac945f1362'), uiText('m71a66875fa9b'), "error");
       return;
     }
     if (!activeModel || !dependencies.registry.setResponsesProfile) {
-      openInfo("/model · Unavailable", "Select a registered model in a host supporting profile settings.", "error");
+      openInfo(uiText('m86c05fa99b2a'), uiText('mfc4d16ff076b'), "error");
       return;
     }
-    const operation = startCommandLoad("/model · Responses profile", "Saving model settings");
+    const operation = startCommandLoad(uiText('m0f3721048c69'), uiText('m3490975ad746'));
     try {
       const sessionId = coordinator.sessionId;
       const loaded = sessionId ? await dependencies.sessionStore.load(sessionId) : undefined;
       const capabilities = resolveProviderCapabilities(activeModel.base_url, activeModel.model_name, profile);
       if (loaded && hasOpaqueProviderContext(loaded.context) && !capabilities.encryptedReasoning) {
-        throw new Error("This Session contains opaque provider context. Start a new Session before selecting this profile.");
+        throw new Error(uiText('m190780410fca'));
       }
       if (!isCurrentCommandOperation(operation) || coordinator.activeTask) return;
       const saved = await dependencies.registry.setResponsesProfile(activeModel, profile);
@@ -1902,28 +1935,28 @@ export function EverpeaceApp({
       setActiveModel(nextModel);
       setRequestSettings(settingsForModel(nextModel));
       setSessionEpoch((epoch) => epoch + 1);
-      replaceCommandView(infoView("/model · Responses profile", `Profile is ${profile}. Configured capabilities are not proof of endpoint support; run a separately authorized compatibility test before evaluation.`));
+      replaceCommandView(infoView(uiText('m0f3721048c69'), uiText('mec6ea58d14de', {p0: profile})));
     } catch (error) {
-      if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/model · Could not save", error instanceof Error ? error.message : String(error), "error"));
+      if (isCurrentCommandOperation(operation)) replaceCommandView(infoView(uiText('m5be10207f4c9'), error instanceof Error ? error.message : String(error), "error"));
     }
   }, [activeModel, dependencies.registry, dependencies.sessionStore, startCommandLoad, isCurrentCommandOperation, replaceCommandView, openInfo]);
 
   const setReasoning = useCallback((args: string) => {
     const effort = args.trim().toLowerCase();
     if (!isReasoningEffort(effort)) {
-      openInfo("/reasoning · Invalid setting", "Use /reasoning off|low|high|max.", "error");
+      openInfo(uiText('m1b3ee45108b1'), uiText('m8e4a1b1f3da9'), "error");
       return;
     }
     if (coordinator.activeTask || directController.current) {
-      openInfo("/reasoning · Busy", "Wait for the active task to finish. The setting is captured at the start of a turn.", "error");
+      openInfo(uiText('md06db0a59f74'), uiText('mde800a4ee518'), "error");
       return;
     }
     if (!activeModel || !agent) {
-      openInfo("/reasoning · No model", "Select a model with /login or /model first.", "error");
+      openInfo(uiText('m589b35213c11'), uiText('m7905157c2902'), "error");
       return;
     }
     if (!resolveProviderCapabilities(activeModel.base_url, activeModel.model_name, activeModel.responses_profile).reasoningEffort) {
-      openInfo("/reasoning · Unsupported", "This endpoint and model do not declare a reasoning-effort request capability.", "error");
+      openInfo(uiText('me6f4fe4e98e0'), uiText('m709b87200ba3'), "error");
       return;
     }
     const next = { ...requestSettings, reasoningEffort: effort };
@@ -1932,26 +1965,26 @@ export function EverpeaceApp({
     const sessionId = coordinator.sessionId;
     if (sessionId) {
       void dependencies.sessionStore.selectModel(sessionId, toSessionModel(activeModel, next), true)
-        .catch((error: unknown) => appendTransient("error", `Reasoning setting could not be saved: ${error instanceof Error ? error.message : String(error)}`));
+        .catch((error: unknown) => appendTransient("error", uiText('ma8a058288481', {p0: error instanceof Error ? error.message : String(error)})));
     }
-    openInfo("/reasoning · Request setting", `Reasoning is ${effort}. The next task will use this setting.`);
+    openInfo(uiText('m566e19959205'), uiText('m190922f2b9d5', {p0: effort}));
   }, [activeModel, agent, appendTransient, dependencies.sessionStore, openInfo, requestSettings]);
 
   const runDoctor = useCallback((args: string) => {
     const normalized = args.trim().toLowerCase();
     if (normalized && normalized !== "--live") {
-      openInfo("/doctor · Invalid command", "Use /doctor or /doctor --live.", "error");
+      openInfo(uiText('m766a5aa67c78'), uiText('m22682217d459'), "error");
       return;
     }
     if (!dependencies.doctor) {
-      openInfo("/doctor · Unavailable", "Runtime diagnostics are unavailable in this host.", "error");
+      openInfo(uiText('m284c569e2319'), uiText('md56ae237d62f'), "error");
       return;
     }
     const execute = () => {
       const controller = new AbortController();
       const operation = startCommandLoad(
-        "/doctor · Runtime diagnostics",
-      normalized === "--live" ? "Checking runtime and model connectivity" : "Checking local runtime",
+        uiText('m8c3f2a6c8801'),
+      normalized === "--live" ? uiText('m78a17fd2cc64') : uiText('m972827cbfbcd'),
       true,
       normalized === "--live",
       () => {
@@ -1962,44 +1995,44 @@ export function EverpeaceApp({
       void dependencies.doctor!(activeModel, permissions.current, normalized === "--live", controller.signal)
       .then((result) => {
         if (!isCurrentCommandOperation(operation)) return;
-        replaceCommandView(infoView("/doctor · Runtime diagnostics", result));
+        replaceCommandView(infoView(uiText('m8c3f2a6c8801'), result));
       })
       .catch((error: unknown) => {
         if (!isCurrentCommandOperation(operation) || controller.signal.aborted) return;
-        replaceCommandView(infoView("/doctor · Diagnostics failed", modelErrorGuidance(error), "error"));
+        replaceCommandView(infoView(uiText('meabc1e196ed0'), modelErrorGuidance(error), "error"));
       });
     };
     if (normalized === "--live") {
-      if (!activeModel) { openInfo("/doctor · Model required", "Select a model before live diagnostics.", "error"); return; }
-      enterCommandView({ kind: "action-confirm", text: `Live diagnostic: ${activeModel.model_name}\nEndpoint: ${diagnosticEndpoint(activeModel)}\nStages: streaming text, tool call, continuous tool rounds, reasoning, usage, cancellation (last).\nAt most 8 requests, Request token budget 20000, output at most 1024/request, timeout 30 seconds/request.\nThese requests may incur charges. Unknown usage stops later stages. Results do not change the configured profile.`, start: execute, cancel: returnToChat });
+      if (!activeModel) { openInfo(uiText('mc64e9b985def'), uiText('mbd21cd1504ef'), "error"); return; }
+      enterCommandView({ kind: "action-confirm", text: uiText('m44f7bf66b899', {p0: activeModel.model_name, p1: diagnosticEndpoint(activeModel)}), start: execute, cancel: returnToChat });
     } else execute();
   }, [activeModel, dependencies, enterCommandView, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad]);
 
   const runCompact = useCallback((args: string) => {
     if (args.trim()) {
-      openInfo("/compact · Invalid command", "Use /compact without arguments.", "error");
+      openInfo(uiText('m6077c3782e44'), uiText('maee6205f363b'), "error");
       return;
     }
     if (coordinator.activeTask || directController.current) {
-      openInfo("/compact · Busy", "A model turn or direct command is active. Wait for it to finish before compacting context.", "error");
+      openInfo(uiText('m6e18d9f31956'), uiText('mf12e6bcde17d'), "error");
       return;
     }
     if (!activeModel) {
-      openInfo("/compact · Cannot compact", "No model is active. Use /login or /model first.", "error");
+      openInfo(uiText('m79a2bccd17fd'), uiText('m805ea5bb295f'), "error");
       return;
     }
     if (!coordinator.sessionId) {
-      openInfo("/compact · Nothing to compact", "There is no active session context to compact.", "error");
+      openInfo(uiText('mb3d1832586c8'), uiText('m700477b1d77e'), "error");
       return;
     }
     if (!agent?.compact) {
-      openInfo("/compact · Unsupported", "The active provider does not support Responses context compaction.", "error");
+      openInfo(uiText('m767233e3c869'), uiText('m30bd58904532'), "error");
       return;
     }
     const controller = new AbortController();
     const operation = startCommandLoad(
-      "/compact · Compacting context",
-      "Compacting context",
+      uiText('m47b06c6c10b9'),
+      uiText('m67afcd229f27'),
       true,
       true,
       () => {
@@ -2010,21 +2043,29 @@ export function EverpeaceApp({
     void agent.compact(controller.signal)
       .then(() => {
         if (!isCurrentCommandOperation(operation)) return;
-        returnToChat(() => appendTransient("system", "Context compacted; the full transcript remains available."));
+        returnToChat(() => appendTransient("system", uiText('m60af6f33a617')));
       })
       .catch((error: unknown) => {
         if (!isCurrentCommandOperation(operation) || controller.signal.aborted) return;
         replaceCommandView(infoView(
-          "/compact · Could not compact",
+          uiText('m4c5a0b05dff2'),
           error instanceof LoopStoppedError && error.reason === "usage_limited"
-            ? "Context compaction stopped because model usage is incomplete. No further request was sent."
+            ? uiText('m678d6621f843')
             : error instanceof LoopStoppedError && error.reason === "budget_limited"
-              ? "Context compaction stopped because the Request token budget is exhausted. No further request was sent."
+              ? uiText('mea83419c4871')
               : error instanceof Error ? error.message : String(error),
           "error",
         ));
       });
   }, [activeModel, agent, appendTransient, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad]);
+
+  const reviewMcpIsolation = useCallback(async (name: string, mode: 'sandbox' | 'host') => {
+    if (!dependencies.previewMcpIsolation || !dependencies.setMcpIsolation) return;
+    const preview = await dependencies.previewMcpIsolation(name, mode);
+    enterCommandView({ kind: 'action-confirm', text: preview.summary + '\n' + uiText('security.mcpModeHelp'), startLabel: uiText('security.mcpModeConfirm'), cancel: returnToChat,
+      start: () => { void dependencies.setMcpIsolation!(name, mode).then(() => openInfo('/mcp', uiText('security.mcpModeSaved'))).catch(error => openInfo('/mcp', error instanceof Error ? error.message : String(error), 'error')); },
+    });
+  }, [dependencies, enterCommandView, returnToChat, openInfo]);
 
   const runChat = useCallback(
     async (
@@ -2034,21 +2075,42 @@ export function EverpeaceApp({
       taskSource: WorkflowTaskSource = "user",
       attachments: readonly FileAttachment[] = [],
       executeApprovedPlan = false,
+      inputHistoryText?: string,
     ) => {
       await permissionsReady.current;
       if (directController.current) return;
+      if (dependencies.privacy && (await dependencies.privacy.settings.read()).configured === false) {
+        const preview = await dependencies.privacy.preview(30, false);
+        const result = await requestUserInput({ questions: [{ id: 'session_retention', header: uiText('privacy.retentionHeader'), question: uiText('privacy.retentionChoice', { p0: preview.candidates.length, p1: preview.excluded.length }), options: [
+          { label: uiText('privacy.days30'), description: uiText('privacy.days30Help') },
+          { label: uiText('privacy.days7'), description: uiText('privacy.days7Help') },
+          { label: uiText('privacy.forever'), description: uiText('privacy.foreverHelp') },
+        ] }] });
+        if (result.__cancelled) return;
+        const chosen = result.session_retention;
+        const days = chosen === uiText('privacy.days30') ? 30 : chosen === uiText('privacy.days7') ? 7 : chosen === uiText('privacy.forever') ? null : Number(chosen);
+        const selected = await dependencies.privacy.preview(days);
+        const review = await requestUserInput({ questions: [{ id: 'retention_review', header: uiText('privacy.retentionHeader'), question: uiText('privacy.retentionReview', { p0: days ?? uiText('privacy.forever'), p1: selected.candidates.length, p2: selected.excluded.length }), options: [
+          { label: uiText('privacy.savePolicy'), description: uiText('privacy.savePolicyHelp') },
+          { label: uiText('security.reject'), description: uiText('privacy.keepExisting') },
+        ] }] });
+        if (review.__cancelled || review.retention_review !== uiText('privacy.savePolicy')) return;
+        await dependencies.privacy.configure(selected.token);
+      }
       if (!agent || !activeModel) {
-        append("error", "No model is active. Use /login or /model first.");
+        append("error", uiText('m805ea5bb295f'));
         return;
       }
       const admission = coordinator.beginTask(agent, mode, executeApprovedPlan);
       if (admission.status !== "started") {
         if (admission.status === "no_approved_plan") {
-          appendTransient("system", "No approved plan is available. Submit and approve a plan first.");
+          appendTransient("system", uiText('ma0963593147f'));
         }
         return;
       }
       const task = admission.task;
+      setWorkflowProjection(undefined);
+      setLastTaskStartedAt(Date.now());setTaskFinishedAt(undefined);setTaskOutcome(undefined);setTaskFailure(undefined);
       if (admission.approvedPlan) {
         const approved = admission.approvedPlan;
         text = `Implement the following plan, which the user approved and explicitly started with /plan execute. Inspect current files and project rules before editing, respect current permissions, and verify the result.\n\nTitle: ${approved.title}\n\n${approved.plan}`;
@@ -2056,7 +2118,7 @@ export function EverpeaceApp({
       }
 
       if (coordinator.sessionId === undefined) {
-        setBusyLabel("Creating session");
+        setBusyLabel(uiText('m1739d06cf79b'));
         try {
           const session = await dependencies.sessionStore.create({
             title: fallbackSessionTitle(text),
@@ -2075,7 +2137,8 @@ export function EverpeaceApp({
           startTitleGeneration(session.id, activeModel, text);
         } catch (error) {
           if (coordinator.matchesTaskContext(task)) {
-            append("error", `Session creation failed: ${error instanceof Error ? error.message : String(error)}`);
+            setTaskOutcome('failed');setTaskFinishedAt(Date.now());
+            append("error", uiText('mfbae80eb57f5', {p0: error instanceof Error ? error.message : String(error)}));
             clearQueuedGuidance();
           }
           setBusyLabel(undefined);
@@ -2083,7 +2146,7 @@ export function EverpeaceApp({
           return;
         }
       } else if (sessionTitlePending.current) {
-        setBusyLabel("Initializing session");
+        setBusyLabel(uiText('mf0e757983637'));
         const sessionId = coordinator.sessionId;
         try {
           await dependencies.sessionStore.updateTitle(
@@ -2100,7 +2163,7 @@ export function EverpeaceApp({
           startTitleGeneration(sessionId, activeModel, text);
         } catch (error) {
           if (coordinator.matchesTaskContext(task)) {
-            append("error", `Session initialization failed: ${error instanceof Error ? error.message : String(error)}`);
+            append("error", uiText('md6f9dfa004a3', {p0: error instanceof Error ? error.message : String(error)}));
             clearQueuedGuidance();
           }
           setBusyLabel(undefined);
@@ -2109,6 +2172,9 @@ export function EverpeaceApp({
         }
       }
 
+      if (inputHistoryText !== undefined && coordinator.sessionId) {
+        await dependencies.inputHistory?.append(inputHistoryText, { sessionId: coordinator.sessionId }).catch(() => appendTransient('error', uiText('m807d2bac6f8f')));
+      }
       if (!timelineRecorded) append("user", text);
       const metadata = resolveModelStatusMetadata(activeModel.base_url, activeModel.model_name);
       const waitingTarget = metadata.provider === "OpenAI-compatible"
@@ -2116,7 +2182,7 @@ export function EverpeaceApp({
         : metadata.provider;
       setAgentPhase("sampling");
       setTurnStartedAt(Date.now());
-      setBusyLabel(`Waiting for ${waitingTarget}`);
+      setBusyLabel(uiText('mba82609db10b', {p0: waitingTarget}));
       clearLiveAssistant();
       setLiveToolStatus(undefined);
       try {
@@ -2156,6 +2222,8 @@ export function EverpeaceApp({
         });
         task.signal.throwIfAborted();
         if (!coordinator.matchesTaskContext(task)) return;
+        setTaskFailure(result.agentResult.stopReason?'limit':undefined);
+        setTaskOutcome(result.agentResult.stopReason?'failed':result.disposition==='plan_cancelled'?'cancelled':result.disposition==='plan_approved'||result.workflowResult?.state.result==='verified'||result.workflowResult?.state.result==='no_changes'?'success':'failed');
         const forkResumeSettled =
           mode === "default" &&
           forkResumePending.current &&
@@ -2165,28 +2233,32 @@ export function EverpeaceApp({
         if (forkResumeSettled) {
           const sessionId = coordinator.sessionId;
           if (!sessionId || !dependencies.sessionStore.setForkPendingResume) {
-            throw new Error("Fork continuation state could not be persisted");
+            throw new Error(uiText('m407537777597'));
           }
           await dependencies.sessionStore.setForkPendingResume(sessionId, false);
           if (coordinator.sessionId === sessionId) forkResumePending.current = false;
         }
         if (result.disposition === "plan_approved") {
           if (!result.agentResult.approvedPlan || !result.agentResult.approvedPlanTitle) {
-            throw new Error("Approved plan content is missing");
+            throw new Error(uiText('m265de9ce82c6'));
           }
           if (coordinator.approvePlan(task, { title: result.agentResult.approvedPlanTitle, plan: result.agentResult.approvedPlan })) {
             setAgentMode("plan");
-            appendTransient("system", "Plan approved. Run /plan execute to start.");
+            appendTransient("system", uiText('m47862783953e'));
           }
         } else if (result.disposition === "plan_cancelled") {
           setAgentMode("default");
-          appendTransient("system", "Plan mode cancelled.");
+          appendTransient("system", uiText('mca789d6817de'));
         }
       } catch (error) {
         await agent.finalizePendingGoalCompletion?.(false).catch(() => undefined);
         await agent.finishMemoryTurn?.(task.signal.aborted ? "cancelled" : "failed").catch(() => undefined);
+        // Cleanup debt belongs to the process owner, even after navigation has
+        // invalidated the old task's permission to publish conversation output.
+        if(error instanceof ResourceCleanupError){coordinator.markCleanupFailed(task);setCleanupFailed(true);setTaskOutcome('cleanup_failed');setBusyLabel(uiText('task.cleanupFailed'));if(coordinator.matchesTaskContext(task))append('error',uiText('task.cleanupFailed'));return;}
         if (!coordinator.matchesTaskContext(task)) return;
         if (task.signal.aborted) {
+          setTaskOutcome('cancelled');
           const sessionId = coordinator.sessionId;
           if (mode === "default" && sessionId) {
             const goal = activeGoalProjection.current;
@@ -2197,12 +2269,14 @@ export function EverpeaceApp({
               setActiveGoal(paused);
             }
           }
-          append("system", "Model request cancelled.");
+          append("system", uiText('m4670e6f4fb99'));
         } else {
-          append("error", `Model request failed: ${modelErrorGuidance(error)}`);
+          setTaskOutcome('failed');setTaskFailure(error instanceof PersistenceError?'persistence':'runtime');
+          append("error", uiText('m47d42e68fd0d', {p0: modelErrorGuidance(error)}));
         }
       } finally {
         const matchesContext = coordinator.matchesTaskContext(task);
+        if(matchesContext)setTaskFinishedAt(Date.now());
         const ownsTask = coordinator.finishTask(task);
         // oxlint-disable-next-line no-unsafe-finally -- A task that lost ownership must not update the active conversation.
         if (!ownsTask) return;
@@ -2229,7 +2303,7 @@ export function EverpeaceApp({
         }
       }
     },
-    [activeModel, agent, agentMode, append, appendTransient, clearLiveAssistant, clearQueuedGuidance, dependencies.sessionStore, ensureWorkflow, executeVerification, requestSettings, returnQueuedGuidanceToDraft, startTitleGeneration, workspacePath],
+    [activeModel, agent, agentMode, append, appendTransient, clearLiveAssistant, clearQueuedGuidance, dependencies, ensureWorkflow, executeVerification, requestSettings, returnQueuedGuidanceToDraft, startTitleGeneration, workspacePath],
   );
 
   useEffect(() => {
@@ -2251,18 +2325,22 @@ export function EverpeaceApp({
     async (command: string) => {
       if (coordinator.activeTask || directController.current) return;
       if (!command) {
-        append("error", "Usage: !<command>");
+        append("error", uiText('mb707ac43cd2c'));
         return;
       }
-      directController.current = new AbortController();
+directController.current = new AbortController();setLastTaskStartedAt(Date.now());setTaskFinishedAt(undefined);setTaskOutcome(undefined);setTaskFailure(undefined);
       setTerminalOutput(undefined);
       setTerminalBusy(true);
+      let retainedCleanupDebt=false;
       try {
-        await executeTerminalCommand(command, setTerminalOutput);
+        const result=await executeTerminalCommand(command, setTerminalOutput);
+        setTaskOutcome(result.cancelled||directController.current.signal.aborted?'cancelled':result.error||result.exitCode!==0?'failed':'success');
       } catch (error) {
+        if(error instanceof ResourceCleanupError){retainedCleanupDebt=true;setCleanupFailed(true);setTaskOutcome('cleanup_failed');}else setTaskOutcome(directController.current?.signal.aborted?'cancelled':'failed');
         append("error", error instanceof Error ? error.message : String(error));
       } finally {
-        directController.current = undefined;
+        setTaskFinishedAt(Date.now());
+        if(!retainedCleanupDebt)directController.current = undefined;
         setTerminalOutput(undefined);
         setTerminalBusy(false);
       }
@@ -2276,7 +2354,7 @@ export function EverpeaceApp({
     if (confirmationRef.current) finishConfirmation(false);
     if (agentMode !== "plan" && agent?.requestSteering?.(text, attachments)) {
       setQueuedGuidanceCount((current) => current + 1);
-      setLiveToolStatus("Guidance received; applying at the next safe checkpoint");
+      setLiveToolStatus(uiText('m3382f0c7f9bf'));
       return;
     }
     queuedGuidance.current.push({ text, timelineRecorded, attachments });
@@ -2284,7 +2362,7 @@ export function EverpeaceApp({
   }, [agent, agentMode, append, finishConfirmation]);
 
   const showWorkspaceDiff = useCallback(async () => {
-    const operation = startCommandLoad("/diff · Workspace changes", "Reading Git diff");
+    const operation = startCommandLoad(uiText('m1f88c1f77c26'), uiText('m0e2e22ca18e8'));
     try {
       const index = await listWorkspaceChanges(workspacePath);
       if (isCurrentCommandOperation(operation)) {
@@ -2297,7 +2375,7 @@ export function EverpeaceApp({
       }
     } catch (error) {
       if (isCurrentCommandOperation(operation)) replaceCommandView(infoView(
-        "/diff · Could not inspect workspace",
+        uiText('mc20ec6668165'),
         error instanceof Error ? error.message : String(error),
         "error",
       ));
@@ -2307,7 +2385,7 @@ export function EverpeaceApp({
   const runManualVerification = useCallback(async (requested: string) => {
     await permissionsReady.current;
     if (coordinator.activeTask || directController.current) {
-      openInfo("/verify · Busy", "Wait for the active task or command to finish.", "error");
+      openInfo(uiText('m611ee54e10ad'), uiText('m73804da3c881'), "error");
       return;
     }
     const controller = new AbortController();
@@ -2317,40 +2395,53 @@ export function EverpeaceApp({
       if (directController.current === controller) directController.current = undefined;
       returnToChat();
     };
-    const operation = startCommandLoad("/verify · Workspace checks", "Discovering verification commands", true, true, cancel);
+    const operation = startCommandLoad(uiText('m7736fef88d36'), uiText('m388d25d7c04d'), true, true, cancel);
     try {
+      if (requested.trim().startsWith('--package')) {
+        const relative = requested.trim().slice('--package'.length).trim();
+        if (!relative) throw new Error(uiText('reliability.packageUsage'));
+        const revision = permissionPolicyRevision(permissions.current);
+        const result = await ensureWorkflow().runPackageVerification(relative, async (command, cwd, signal, timeoutMs) => {
+          if (permissionPolicyRevision(permissions.current) !== revision || commandPermission(command, permissions.current) === 'deny') throw new Error(uiText('m0fbbd0957e31'));
+          const result = await dependencies.runBash(command, permissions.current, signal, undefined, timeoutMs, cwd);
+          if (permissionPolicyRevision(permissions.current) !== revision) throw new Error(uiText('m0fbbd0957e31'));
+          return result;
+        }, controller.signal);
+        if (isCurrentCommandOperation(operation)) replaceCommandView(infoView(uiText('m9765081cd0f3'), JSON.stringify(result, null, 2), result.status === 'passed' ? 'default' : 'error'));
+        return;
+      }
       const commands = await discoverVerificationCommands(workspacePath);
       controller.signal.throwIfAborted();
       if (!isCurrentCommandOperation(operation)) return;
       const supplemental = requested.trim().length > 0;
       const selected = supplemental
-        ? [{ id: "manual", label: "Manual verification", command: requested.trim(), tier: "full" as const, timeoutMs: 120_000 }]
+        ? [{ id: "manual", label: uiText('mb1b737731381'), command: requested.trim(), tier: "full" as const, timeoutMs: 120_000 }]
         : selectVerificationCommands(commands, "full");
       if (selected.length === 0) {
-        replaceCommandView(infoView("/verify · No checks discovered", "No conventional verification command was found. Use /verify <command> to run an explicit supplemental check."));
+        replaceCommandView(infoView(uiText('m3c00ab2235c2'), uiText('mf866a9e5696a')));
         return;
       }
-      replaceCommandView({ kind: "loading", title: "/verify · Running", label: selected.map((command) => command.command).join(" · "), cancellable: true, onCancel: cancel });
+      replaceCommandView({ kind: "loading", title: uiText('m4a2a26c52759'), label: selected.map((command) => command.command).join(" · "), cancellable: true, onCancel: cancel });
       const verificationPermissionRevision = permissionPolicyRevision(permissions.current);
       const result = await ensureWorkflow().runManualVerification(
         selected,
         async (value, signal, timeoutMs) => {
           if (permissionPolicyRevision(permissions.current) !== verificationPermissionRevision) {
-            return { stdout: "", stderr: "", exitCode: null, signal: null, error: "Permission policy changed during manual verification" };
+            return { stdout: "", stderr: "", exitCode: null, signal: null, error: uiText('m0fbbd0957e31') };
           }
           const executed = await executeVerification(value, signal, timeoutMs, true);
           return permissionPolicyRevision(permissions.current) === verificationPermissionRevision
             ? executed
-            : { ...executed, exitCode: null, error: "Permission policy changed during manual verification" };
+            : { ...executed, exitCode: null, error: uiText('m0fbbd0957e31') };
         },
         { supplemental, signal: controller.signal },
       );
       if (isCurrentCommandOperation(operation)) {
-        const note = supplemental ? "\n\nThis explicit command is supplemental evidence and does not replace the complete project suite." : "";
-        replaceCommandView(infoView("/verify · Result", `${JSON.stringify(result, null, 2)}${note}`, result.status === "passed" ? "default" : "error"));
+        const note = supplemental ? uiText('m25a96f873082') : "";
+        replaceCommandView(infoView(uiText('m9765081cd0f3'), `${JSON.stringify(result, null, 2)}${note}`, result.status === "passed" ? "default" : "error"));
       }
     } catch (error) {
-      if (!controller.signal.aborted && isCurrentCommandOperation(operation)) replaceCommandView(infoView("/verify · Failed", error instanceof Error ? error.message : String(error), "error"));
+      if (!controller.signal.aborted && isCurrentCommandOperation(operation)) replaceCommandView(infoView(uiText('mf8e281a207d6'), error instanceof Error ? error.message : String(error), "error"));
     } finally {
       if (directController.current === controller) directController.current = undefined;
     }
@@ -2358,103 +2449,126 @@ export function EverpeaceApp({
 
   const undoWorkflow = useCallback(async () => {
     if (coordinator.activeTask || directController.current) {
-      appendTransient("system", "Cannot undo while a command or model turn is active.");
+      appendTransient("system", uiText('md275364bd803'));
       return;
     }
     const result = await ensureWorkflow().undo();
     appendTransient("system", result.status === "undone"
-      ? `Undid Agent changes: ${result.restored.join(", ") || "none"}`
+      ? uiText('m2a7df3f8adb8', {p0: result.restored.join(", ") || "none"})
       : result.status === "conflict"
-        ? `Undo skipped files changed after the Agent turn: ${result.conflicts.join(", ")}`
+        ? uiText('m029548ed6950', {p0: result.conflicts.join(", ")})
         : result.status === "empty"
-          ? "There is no Agent turn to undo."
-          : "The last Agent checkpoint is unavailable after restart.");
+          ? uiText('m99f3c84c264d')
+          : uiText('m5a15583ebb95'));
   }, [appendTransient, ensureWorkflow]);
 
   const runPrivacy = useCallback(async (args: string) => {
     const privacy = dependencies.privacy;
-    if (!privacy) { openInfo("/privacy · Unavailable", "Privacy management is unavailable in this host.", "error"); return; }
-    if (coordinator.activeTask || directController.current) { openInfo("/privacy · Busy", "Wait for the active task or command to finish."); return; }
-    const operation = startCommandLoad("/privacy · Local storage", "Reading local privacy state", true, false);
+    if (!privacy) { openInfo(uiText('m02c093d511ba'), uiText('m455206f15f1e'), "error"); return; }
+    if (coordinator.activeTask || directController.current) { openInfo(uiText('m7ed5f4885f81'), uiText('m73804da3c881')); return; }
+    const operation = startCommandLoad(uiText('m4d871c057078'), uiText('m9ae6f80c1dd1'), true, false);
     try {
       const [action, ...rest] = args.trim().split(/\s+/u);
       const current = () => isCurrentCommandOperation(operation);
       const confirm = (text: string, work: () => Promise<unknown>) => {
         if (!current()) return;
-        enterCommandView({ kind: "action-confirm", text, startLabel: "Confirm privacy change", cancel: returnToChat, start: () => {
-          const pending = startCommandLoad("/privacy · Working", "Updating local privacy state", true, false);
-          void work().then((result) => { if (isCurrentCommandOperation(pending)) replaceCommandView(infoView("/privacy · Result", typeof result === "string" ? result : JSON.stringify(result ?? { saved: true }))); }).catch(() => { if (isCurrentCommandOperation(pending)) replaceCommandView(infoView("/privacy · Failed", "Storage, ownership or preview changed. Preview again before retrying.", "error")); });
+        enterCommandView({ kind: "action-confirm", text, startLabel: uiText('md4d8b7dcb91d'), cancel: returnToChat, start: () => {
+          const pending = startCommandLoad(uiText('mda72440a5095'), uiText('mdea9dad0fb18'), true, false);
+          void work().then((result) => { if (isCurrentCommandOperation(pending)) replaceCommandView(infoView(uiText('m86b31a7fd46f'), typeof result === "string" ? result : JSON.stringify(result ?? { saved: true }))); }).catch(() => { if (isCurrentCommandOperation(pending)) replaceCommandView(infoView(uiText('m1d7c1e9d18d7'), uiText('m33cefab96588'), "error")); });
         } });
       };
       if (action === "retention") {
         const days = rest[0] === "forever" ? null : Number(rest[0]);
         const preview = await privacy.preview(days);
-        confirm(`Set retention to ${days === null ? "forever" : days + " days"}?\nEligible: ${preview.candidates.length} sessions, ${preview.candidates.reduce((n, c) => n + c.bytes, 0)} log bytes.\nExcluded: ${preview.excluded.length}; invalid records: ${preview.invalidRecords}.\n${[...new Set(preview.excluded.map((e) => e.reason))].join(", ")}\nCleanup also removes owned attachments. Memory, credentials and exports are retained.`, () => privacy.configure(preview.token));
+        confirm(uiText('mdb23ca779c32', {p0: days === null ? "forever" : days + uiText('mb1c503166f16'), p1: preview.candidates.length, p2: preview.candidates.reduce((n, c) => n + c.bytes, 0), p3: preview.excluded.length, p4: preview.invalidRecords, p5: [...new Set(preview.excluded.map((e) => e.reason))].join(", ")}), () => privacy.configure(preview.token));
       } else if (action === "cleanup") {
         const settings = await privacy.settings.read(); const preview = await privacy.preview(settings.retentionDays);
-        confirm(`Delete ${preview.candidates.length} expired sessions and their owned attachments?\nExcluded: ${preview.excluded.length}; invalid: ${preview.invalidRecords}.\nThis removes application files. Backups and external copies are unaffected.`, () => privacy.cleanup(preview.token));
+        confirm(uiText('ma2ccf99bc129', {p0: preview.candidates.length, p1: preview.excluded.length, p2: preview.invalidRecords}), () => privacy.cleanup(preview.token));
       } else if (action === "scan") {
-        if (!coordinator.sessionId) throw new Error("No Session");
-        const report = await privacy.scan(coordinator.sessionId); if (current()) replaceCommandView(infoView("/privacy · Sensitive output scan", JSON.stringify(report, null, 2) + "\nOnly rule counts are shown. Unrecognized customer data may remain."));
+        if (!coordinator.sessionId) throw new Error(uiText('mdbaeb8bee86e'));
+        const report = await privacy.scan(coordinator.sessionId); if (current()) replaceCommandView(infoView(uiText('m4dc5cb068fcd'), JSON.stringify(report, null, 2) + uiText('m06f2ef137f56')));
       } else if (action === "export" || action === "export-conversation") {
-        const sessionId = coordinator.sessionId; if (!sessionId || !rest.length) throw new Error("Session and target required");
+        const sessionId = coordinator.sessionId; if (!sessionId || !rest.length) throw new Error(uiText('m4a69d7e35eee'));
         const target = rest.join(" ");
         const scan = await privacy.scan(sessionId);
         const conversation = action === "export-conversation" ? await privacy.previewExport(sessionId) : undefined;
-        const preview = conversation?.text ?? "Diagnostic metadata only; conversation, tool bodies, source code, paths and reasoning are excluded.";
+        const preview = conversation?.text ?? uiText('mbe1fdad321db');
         const { redactSecretsPreservingLayout } = await import("../../util/redact-secrets.js");
-        confirm(`Export ${action === "export" ? "diagnostic summary" : "redacted conversation"} to a new file?\nSensitive findings: ${scan.findings}.\n${redactSecretsPreservingLayout(preview)}\nAutomated redaction cannot identify all business data.`, () => privacy.export(sessionId, target, action === "export-conversation", conversation?.fingerprint));
+        confirm(uiText('m32c1f2a64f2b', {p0: action === "export" ? uiText('m104d9a10da6e') : uiText('mb0466dcf5e30'), p1: scan.findings, p2: redactSecretsPreservingLayout(preview)}), () => privacy.export(sessionId, target, action === "export-conversation", conversation?.fingerprint));
       } else {
-        const text = await privacy.describe(); if (current()) replaceCommandView(infoView("/privacy · Local storage", text + "\n\n/privacy retention forever|30|90|180|<days>\n/privacy cleanup\n/privacy scan\n/privacy export <new-file>\n/privacy export-conversation <new-file>"));
+        const text = localizeHostReport(await privacy.describe()); if (current()) replaceCommandView(infoView(uiText('m4d871c057078'), text + uiText('m12dd24867346')));
       }
-    } catch { if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/privacy · Failed", "Use a valid retention, Session and new export file. Storage may be unavailable.", "error")); }
+    } catch { if (isCurrentCommandOperation(operation)) replaceCommandView(infoView(uiText('m1d7c1e9d18d7'), uiText('mfb94068f0874'), "error")); }
   }, [dependencies, enterCommandView, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad]);
 
   const runMemoryReview = useCallback(async (args: string) => {
-    if (coordinator.activeTask || directController.current) { openInfo("/memory · Busy", "Wait for the active task or command to finish."); return; }
-    const operation = startCommandLoad("/memory · Review", "Reading learned entries", true, false);
+    if (coordinator.activeTask || directController.current) { openInfo(uiText('m95a62c02a35f'), uiText('m73804da3c881')); return; }
+    const operation = startCommandLoad(uiText('m608fe03ea871'), uiText('mb24d46af2ef5'), true, false);
     try {
       const [action, scope, id, ...rest] = args.split(/\s+/u);
       const status = await dependencies.getMemoryStatus?.(workspacePath); const entries = status?.entries ?? status?.recent ?? [];
       const { memoryEntryRevision, memoryEntryExpired } = await import("../../memory/learned-memory.js");
       if (!isCurrentCommandOperation(operation)) return;
-      if (action === "list") { replaceCommandView(infoView("/memory · Entries", entries.map((e) => `${e.scope}#${e.id} · ${e.status}${memoryEntryExpired(e) ? " · expired, recall paused" : ""}\n${e.lesson}`).join("\n\n") || "No entries.")); return; }
-      const entry = entries.find((e) => e.scope === scope && e.id === id); if (!entry) throw new Error("Entry not found");
+      if (action === "list") { replaceCommandView(infoView(uiText('m97d5b7cda343'), entries.map((e) => `${e.scope}#${e.id} · ${e.status}${memoryEntryExpired(e) ? uiText('me2c18e1ca315') : ""}\n${e.lesson}`).join("\n\n") || uiText('mfeed98ce586a'))); return; }
+      const entry = entries.find((e) => e.scope === scope && e.id === id); if (!entry) throw new Error(uiText('mf36668ddf224'));
       const revision = memoryEntryRevision(entry);
       const sources = await Promise.all((entry.sourceSessionIds ?? (entry.sourceSessionId ? [entry.sourceSessionId] : [])).map(async (source) => {
-        try { await dependencies.sessionStore.load(source); return `${source} (available)`; } catch { return `${source} (unavailable)`; }
+        try { await dependencies.sessionStore.load(source); return uiText('ma8d2e9b6f76d', {p0: source}); } catch { return uiText('me2cff71a5b6c', {p0: source}); }
       }));
       if (!isCurrentCommandOperation(operation)) return;
-      const detail = `${entry.scope}#${entry.id}\n${entry.lesson}\nApply when: ${entry.applyWhen}\nExtraction confidence: ${entry.confidence}\nCreated: ${entry.createdAt}\nExpires: ${entry.expiresAt ?? "no automatic expiry"}\nStatus: ${entry.status}${memoryEntryExpired(entry) ? "; expired, recall paused" : ""}\nSource sessions: ${sources.join(", ") || "unknown"}\nRevision: ${revision}`;
-      if (action === "inspect") { replaceCommandView(infoView("/memory · Entry", detail + '\n\n/memory renew|disable|delete <scope> <id>\n/memory correct <scope> <id> {"lesson":"...","applyWhen":"..."}')); return; }
-      if (!["renew", "disable", "delete", "correct"].includes(action!) || !dependencies.reviewMemory) throw new Error("Invalid action");
+      const detail = uiText('mcd36c152b3a5', {p0: entry.scope, p1: entry.id, p2: entry.lesson, p3: entry.applyWhen, p4: entry.confidence, p5: entry.createdAt, p6: entry.expiresAt ?? uiText('m1d5a0712256b'), p7: entry.status, p8: memoryEntryExpired(entry) ? uiText('mc66bcf3ff4f9') : "", p9: sources.join(", ") || "unknown", p10: revision});
+      if (action === "inspect") { replaceCommandView(infoView(uiText('md7e68f3c0338'), detail + uiText('m30bba58c7424'))); return; }
+      if (!["renew", "disable", "delete", "correct"].includes(action!) || !dependencies.reviewMemory) throw new Error(uiText('mbeeb7fd0a49e'));
       const reviewAction = action as "renew" | "disable" | "delete" | "correct";
       let correction: { lesson: string; applyWhen: string } | undefined;
-      if (action === "correct") { const value: unknown = JSON.parse(rest.join(" ")); if (!value || typeof value !== "object" || !("lesson" in value) || !("applyWhen" in value) || typeof value.lesson !== "string" || typeof value.applyWhen !== "string") throw new Error("Invalid correction"); correction = { lesson: value.lesson, applyWhen: value.applyWhen }; }
-      enterCommandView({ kind: "action-confirm", text: `${detail}\n\nConfirm ${action}?${correction ? "\n" + JSON.stringify(correction) : ""}`, startLabel: "Confirm Memory review", cancel: returnToChat, start: () => {
-        const pending = startCommandLoad("/memory · Saving review", "Applying revision-bound review", true, false);
-        void dependencies.reviewMemory!(entry.scope, workspacePath, entry.id, revision, reviewAction, correction).then(() => { if (isCurrentCommandOperation(pending)) replaceCommandView(infoView("/memory · Reviewed", "Entry updated. Inspect again before another action.")); }).catch(() => { if (isCurrentCommandOperation(pending)) replaceCommandView(infoView("/memory · Failed", "Entry or storage changed; inspect again.", "error")); });
+      if (action === "correct") { const value: unknown = JSON.parse(rest.join(" ")); if (!value || typeof value !== "object" || !("lesson" in value) || !("applyWhen" in value) || typeof value.lesson !== "string" || typeof value.applyWhen !== "string") throw new Error(uiText('m38289a9f594a')); correction = { lesson: value.lesson, applyWhen: value.applyWhen }; }
+      enterCommandView({ kind: "action-confirm", text: uiText('mce5ea24c50bf', {p0: detail, p1: action, p2: correction ? "\n" + JSON.stringify(correction) : ""}), startLabel: uiText('mb804c4e8f298'), cancel: returnToChat, start: () => {
+        const pending = startCommandLoad(uiText('m695198e89c8a'), uiText('mf9f89c8e9e48'), true, false);
+        void dependencies.reviewMemory!(entry.scope, workspacePath, entry.id, revision, reviewAction, correction).then(() => { if (isCurrentCommandOperation(pending)) replaceCommandView(infoView(uiText('mf5b5cf06a801'), uiText('m8bac2573dd14'))); }).catch(() => { if (isCurrentCommandOperation(pending)) replaceCommandView(infoView(uiText('me67da28946d9'), uiText('mb453ac09a92c'), "error")); });
       } });
-    } catch { if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/memory · Review unavailable", "Use /memory list, then inspect, renew, disable, delete or correct <scope> <id>.", "error")); }
+    } catch { if (isCurrentCommandOperation(operation)) replaceCommandView(infoView(uiText('ma53f17ee7d93'), uiText('mb4472347ff79'), "error")); }
   }, [dependencies, enterCommandView, isCurrentCommandOperation, openInfo, replaceCommandView, returnToChat, startCommandLoad, workspacePath]);
 
   const handleSubmit = useCallback(
     (input: string): boolean | Promise<boolean> => {
       const parsed = parseTuiInput(input);
       if (parsed.kind === "empty") return false;
+      const sensitivePayload = parsed.kind === 'chat' ? parsed.text : parsed.kind === 'slash' && parsed.command === '/plan' ? parsed.args ?? '' : '';
+      if (sensitiveText(sensitivePayload) && !sensitiveInputGrants.current.has(sensitiveDigest(sensitivePayload))) {
+        return (async () => {
+          const revision = permissionPolicyRevision(permissions.current);
+          const result = await requestUserInput({ questions: [{ id: 'sensitive_input', header: uiText('security.sensitive'), question: uiText('security.originalHelp'), options: [uiText('security.mask'), uiText('security.original'), uiText('security.reject')].map(label => ({ label, description: label })) }] });
+          if (revision !== permissionPolicyRevision(permissions.current) || result.__cancelled || result.sensitive_input === uiText('security.reject')) return false;
+          if (result.sensitive_input === uiText('security.original')) sensitiveInputGrants.current.set(sensitiveDigest(sensitivePayload), revision);
+          else { const { redactSecretsPreservingLayout } = await import('../../util/redact-secrets.js'); input = redactSecretsPreservingLayout(input); }
+          skipInputHistory.current = true;
+          return handleSubmit(input);
+        })();
+      }
+      if (parsed.kind === 'slash' && parsed.command === '/history' && parsed.args === 'no-save') {
+        skipInputHistory.current = true; appendTransient('system', uiText('privacy.noHistory')); return true;
+      }
+      if (parsed.kind === 'slash' && parsed.command === '/history' && parsed.args === 'clear') {
+        return (async () => { await dependencies.inputHistory?.clear(); setInputHistory([]); setResumedInputHistory([]); return true; })();
+      }
       const submitResolved = (attachments: readonly FileAttachment[]): boolean => {
+        const saveHistory = !skipInputHistory.current && !sensitiveText(input);
+        const historyInTask = parsed.kind === 'chat' && !coordinator.activeTask || parsed.kind === 'slash' && parsed.command === '/plan' && !!parsed.args && !['execute', 'exit'].includes(parsed.args);
+        if (saveHistory) {
         setInputHistory((current) => current.at(-1) === input ? current : [...current, input].slice(-1000));
         setResumedInputHistory((current) => current === undefined ? undefined : current.at(-1) === input ? current : [...current, input].slice(-1000));
-        void dependencies.inputHistory?.append(input).catch(() => appendTransient("error", "Input history could not be saved"));
+        if (!historyInTask) void dependencies.inputHistory?.append(input, coordinator.sessionId ? { sessionId: coordinator.sessionId } : {}).catch(() => appendTransient("error", uiText('m807d2bac6f8f')));
+        }
+        skipInputHistory.current = false;
 
         if (parsed.kind === "chat") {
           if (coordinator.activeTask) queueGuidance(parsed.text, attachments);
-          else void runChat(parsed.text, false, agentMode, "user", attachments);
+          else void runChat(parsed.text, false, agentMode, "user", attachments, false, saveHistory ? input : undefined);
           return true;
         }
         if (parsed.kind === "bash") {
           if (coordinator.activeTask) {
-            appendTransient("system", "A model turn is active. Add guidance as a message or press Ctrl+C first.");
+            appendTransient("system", uiText('mf1062f8e6fcd'));
             return true;
           }
           void runDirectBash(parsed.command);
@@ -2462,13 +2576,18 @@ export function EverpeaceApp({
         }
         if (parsed.kind === "unknown") {
           openInfo(
-            "Slash command error",
-            `Unknown command: ${parsed.command}. Enter /help to see available commands.`,
+            uiText('m31f6c687be1d'),
+            uiText('mb3497210f20d', {p0: parsed.command}),
             "error",
           );
           return true;
         }
 
+        if(parsed.command==='/language'){
+          if(!isLanguagePreference(parsed.args)){openInfo(uiText('language.title'),uiText('language.help',{p0:currentLanguage()}));}
+          else{void changeLanguage(parsed.args).then(language=>{openInfo(uiText('language.title'),uiText('language.saved',{p0:language}));}).catch(()=>openInfo(uiText('language.title'),uiText('language.failed'),'error'));}
+          return true;
+        }
         if (parsed.command === "/login") enterCommandView({ kind: "login" });
         if (parsed.command === "/model") {
           if (parsed.args?.toLowerCase().startsWith("profile ")) void setResponsesProfile(parsed.args.slice(8));
@@ -2478,12 +2597,12 @@ export function EverpeaceApp({
         if (parsed.command === "/status") showStatus();
         if (parsed.command === "/privacy") void runPrivacy(parsed.args ?? "");
         if (parsed.command === "/perf") {
-          const operation = startCommandLoad("/perf · Task performance", "Loading local performance report", true, false);
+          const operation = startCommandLoad(uiText('mec45e9585c56'), uiText('m81c7b3e2d9e8'), true, false);
           void import("../../performance/task-report.js").then(async ({ formatTaskPerformance }) => {
             const sessionId = coordinator.sessionId;
             const report = sessionId ? (await dependencies.sessionStore.load(sessionId)).performanceReport : undefined;
-            if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/perf · Task performance", formatTaskPerformance(report)));
-          }).catch(() => { if (isCurrentCommandOperation(operation)) replaceCommandView(infoView("/perf · Unavailable", "The local report could not be read.", "error")); });
+            if (isCurrentCommandOperation(operation)) replaceCommandView(infoView(uiText('mec45e9585c56'), localizeHostReport(formatTaskPerformance(report))));
+          }).catch(() => { if (isCurrentCommandOperation(operation)) replaceCommandView(infoView(uiText('m270e3f4df929'), uiText('m2376480c3776'), "error")); });
         }
         if (parsed.command === "/context") enterCommandView({ kind: "context" });
         if (parsed.command === "/team") void showTeam(parsed.args ?? "");
@@ -2503,15 +2622,20 @@ export function EverpeaceApp({
         if (parsed.command === "/permissions") enterCommandView({ kind: "permissions" });
         if (parsed.command === "/mcp") {
           const args = parsed.args?.trim() ?? "";
-          if (args.startsWith("trust ")) {
-            if (coordinator.activeTask || directController.current) appendTransient("system", "Wait for the active task before approving MCP startup.");
+          if (args.startsWith('mode ')) {
+            const [, name, mode] = args.split(/\s+/u);
+            if (coordinator.activeTask || directController.current) appendTransient('system', uiText('mfbddd6f152ac'));
+            else if (name && (mode === 'sandbox' || mode === 'host')) void reviewMcpIsolation(name, mode).catch(error => openInfo('/mcp', error instanceof Error ? error.message : String(error), 'error'));
+            else openInfo('/mcp', uiText('security.mcpModeUsage'), 'error');
+          } else if (args.startsWith("trust ")) {
+            if (coordinator.activeTask || directController.current) appendTransient("system", uiText('mfbddd6f152ac'));
             else void reviewMcpTrust(args.slice(6).trim());
           } else if (args.startsWith("revoke ")) {
             coordinator.cancelTask();
-            void dependencies.revokeMcpTrust?.(args.slice(7).trim()).then(showMcp).catch(() => openInfo("/mcp · Revoke failed", "MCP startup was blocked locally, but persistent trust could not be updated.", "error"));
+            void dependencies.revokeMcpTrust?.(args.slice(7).trim()).then(showMcp).catch(() => openInfo(uiText('mb808e6a384cf'), uiText('md3ba2cf24f28'), "error"));
           } else if (args === "reconnect") {
-            if (coordinator.activeTask || directController.current) appendTransient("system", "Wait for the active task before reconnecting MCP.");
-            else void dependencies.reconnectMcp?.().then(showMcp).catch(() => openInfo("/mcp · Reconnect failed", "Inspect connection configuration and retry explicitly.", "error"));
+            if (coordinator.activeTask || directController.current) appendTransient("system", uiText('m79a7deafd318'));
+            else void dependencies.reconnectMcp?.().then(showMcp).catch(() => openInfo(uiText('m6f392ee21284'), uiText('maa50009ccf83'), "error"));
           } else void showMcp();
         }
         if (parsed.command === "/skills") enterCommandView({ kind: "skills" });
@@ -2528,7 +2652,7 @@ export function EverpeaceApp({
           const args = parsed.args?.trim() ?? "";
           const action = args.toLowerCase();
           if (coordinator.activeTask || directController.current) {
-            appendTransient("system", "A task or command is active. Wait for it to finish before using /plan.");
+            appendTransient("system", uiText('m8a1974abf54f'));
           } else if (action === "execute") {
             void runChat("", false, "default", "user", [], true);
           } else if (action === "show") {
@@ -2536,17 +2660,17 @@ export function EverpeaceApp({
             if (approved) {
               enterCommandView({ kind: "approved-plan", submitted: approved });
             } else {
-              appendTransient("system", "No approved plan is available. Submit and approve a plan first.");
+              appendTransient("system", uiText('ma0963593147f'));
             }
           } else if (action === "exit") {
             setAgentMode("default");
-            appendTransient("system", "Plan mode disabled.");
+            appendTransient("system", uiText('maa24aa1a6109'));
           } else if (!args) {
             setAgentMode("plan");
-            appendTransient("system", "Plan mode enabled. The agent can inspect and plan, but cannot use mutating tools.");
+            appendTransient("system", uiText('mdcfb041122d5'));
           } else {
             setAgentMode("plan");
-            void runChat(args, false, "plan");
+            void runChat(args, false, "plan", "user", [], false, saveHistory ? input : undefined);
           }
         }
         if (parsed.command === "/goal") handleGoal(parsed.args?.trim() ?? "");
@@ -2558,7 +2682,7 @@ export function EverpeaceApp({
         if (parsed.command === "/resume") void openResume(parsed.args ?? "");
         if (parsed.command === "/logout") void openLogout();
         if (parsed.command === "/clear") clearConversation();
-        if (parsed.command === "/help") openInfo("/help · Help", TUI_HELP);
+        if (parsed.command === "/help") openInfo(uiText('m60535e64ce89'), getTuiHelp());
         if (parsed.command === "/exit") exit(0);
         return true;
       };
@@ -2568,20 +2692,20 @@ export function EverpeaceApp({
       }
       return (async () => {
         const controller = new AbortController();
-        attachmentController.current?.abort(new Error("Superseded attachment resolution"));
+        attachmentController.current?.abort(new Error(uiText('m973166832978')));
         attachmentController.current = controller;
         const capturedSessionId = coordinator.sessionId;
         const capturedWorkspace = workspacePath;
         try {
           const attachments = await resolveFileAttachments(parsed.text, capturedWorkspace, controller.signal);
           if (coordinator.sessionId !== capturedSessionId || workspacePath !== capturedWorkspace) {
-            appendTransient("error", "File attachments were cancelled because the session or workspace changed.");
+            appendTransient("error", uiText('md53f2692d757'));
             return false;
           }
           return submitResolved(attachments);
         } catch (error) {
           if (!controller.signal.aborted) {
-            appendTransient("error", `File attachment failed: ${error instanceof Error ? error.message : String(error)}`);
+            appendTransient("error", uiText('m20e5e33000b3', {p0: error instanceof Error ? error.message : String(error)}));
           }
           return false;
         } finally {
@@ -2629,7 +2753,7 @@ export function EverpeaceApp({
 
   const finishLogout = useCallback(
     (removedIds: string[]) => {
-      const message = `Removed ${removedIds.length} model${removedIds.length === 1 ? "" : "s"} and associated system credentials.`;
+      const message = uiText('mb85a781f1870', {p0: removedIds.length, p1: removedIds.length === 1 ? "" : "s"});
       if (!activeModel || !removedIds.includes(activeModel.id)) {
         returnToChat(() => appendTransient("system", message));
         return;
@@ -2641,8 +2765,8 @@ export function EverpeaceApp({
       setSessionUsage((current) => resetContextUsage(current, false));
       setSessionEpoch((current) => current + 1);
       const operation = startCommandLoad(
-        "/logout · Remove models",
-        "Refreshing available models",
+        uiText('m64cf305db8b5'),
+        uiText('ma50bd04957cd'),
         false,
         false,
       );
@@ -2651,23 +2775,23 @@ export function EverpeaceApp({
         .then((resolved) => {
           if (!isCurrentCommandOperation(operation)) return;
           if (resolved.available.length === 1) {
-            activateModel(resolved.available[0]!, `Automatically switched to ${resolved.available[0]!.model_name}`);
+            activateModel(resolved.available[0]!, uiText('m72bca6c1071f', {p0: resolved.available[0]!.model_name}));
           } else if (resolved.available.length > 1) {
             replaceCommandView({
               kind: "model-picker",
-              title: "The active model was removed; choose a new model",
+              title: uiText('md08a0cc79f6d'),
               models: resolved.available,
             });
           } else {
             returnToChat(() => {
-              appendTransient("system", "No models are available. Use /login first.");
+              appendTransient("system", uiText('md41f04a008d1'));
             });
           }
         })
         .catch((error: unknown) => {
           if (!isCurrentCommandOperation(operation)) return;
           replaceCommandView(infoView(
-            "/logout · Refresh failed",
+            uiText('m455174ae62f0'),
             error instanceof Error ? error.message : String(error),
             "error",
           ));
@@ -2738,7 +2862,6 @@ export function EverpeaceApp({
   useEffect(() => {
     let redrawTimer: ReturnType<typeof setTimeout> | undefined;
     const redrawAfterResize = () => {
-      setTerminalColumns(Math.max(1, stdout.columns ?? 80));
       if (redrawTimer !== undefined) clearTimeout(redrawTimer);
       // Command surfaces contain no Static transcript to replay. Ink already
       // resizes them; clearing again can leave its unchanged frame blank until
@@ -2761,9 +2884,18 @@ export function EverpeaceApp({
     };
   }, [onReplayOutput, stdout, view.kind]);
 
-  const displayedToolStatus = liveToolStatus === "Thinking"
-    ? `Thinking · ${formatElapsed(reasoningElapsedSeconds)}`
+  const displayedToolStatus = reasoningStartedAt !== undefined
+    ? `${translateHostText('Thinking')} · ${formatElapsed(reasoningElapsedSeconds)}`
     : liveToolStatus;
+
+  const isDirectTask=directController.current!==undefined;
+  const isTaskActive=coordinator.activeTask!==undefined||isDirectTask;
+  const taskReport=isTaskActive?agent?.getLivePerformanceReport?.():agent?.getPerformanceReport?.();
+  const requestBudget=!isTaskActive||taskReport!==undefined?agent?.getRequestBudgetSnapshot?.():undefined;
+  const team=agent?.getTeamSnapshot?.();
+  const taskUsed=taskReport?Object.values(taskReport.usage).reduce((sum,usage)=>sum+(usage?.inputTokens??0)+(usage?.outputTokens??0),0):null;
+  const taskStatus=projectTaskStatus({active:isTaskActive,...(coordinator.sessionId?{sessionId:coordinator.sessionId}:{}),...(workflowProjection?.task_id?{taskId:workflowProjection.task_id}:{}),cancelled:coordinator.activeTask?.signal.aborted===true||directController.current?.signal.aborted===true,cleanupFailed:cleanupFailed||coordinator.cleanupBlocked,approval:confirmation!==undefined,question:view.kind==='plan-questions',mode:isDirectTask?'default':agentMode,...(isDirectTask?{loopPhase:'tools'}:agentPhase?{loopPhase:agentPhase}:{}),...(!isDirectTask&&workflowProjection?{workflow:workflowProjection}:{}),...(lastTaskStartedAt?{startedAt:lastTaskStartedAt}:{}),stageStartedAt:taskStageStartedAt,...(taskFinishedAt?{finishedAt:taskFinishedAt}:{}),...(taskOutcome?{outcome:taskOutcome}:{}),...(taskFailure?{failure:taskFailure}:{}),...(isDirectTask?{operation:uiText('task.directShell')} :busyLabel?{operation:translateHostText(busyLabel)}:{}),budgets:isDirectTask?[]:[...(requestBudget?[{scope:'request' as const,...requestBudget}]:[]),{scope:'task',limit:team?.options.tokenBudget??null,used:team?team.usage.inputTokens+team.usage.outputTokens:taskUsed,complete:team?team.usage.complete:taskReport!==undefined&&Object.values(taskReport.usage).every(usage=>usage?.unknown===0),inFlight:agentPhase==='sampling'||(team?.openRequests??0)>0},...(activeGoal?[{scope:'goal' as const,limit:activeGoal.token_budget,used:activeGoal.tokens_used,complete:activeGoal.usage_complete,inFlight:agentPhase==='sampling'||(team?.openRequests??0)>0}]:[])]});
+  useEffect(()=>{setTaskStageStartedAt(Date.now());},[taskStatus.stage,taskStatus.taskId]);
 
   if (view.kind !== "chat") {
     return (
@@ -2772,25 +2904,28 @@ export function EverpeaceApp({
       <Box width="100%" paddingRight={1} flexDirection="column">
       <CommandScreen>
         {view.kind === "outputs" ? (
-          <TextBrowser title="/outputs" entries={timeline.filter((entry) => entry.kind === "output").map((entry) => ({ label: entry.kind === "output" ? entry.command?.command ?? entry.text.split("\n")[0] ?? "Output" : "", text: entry.kind === "output" ? entry.text : "", ...(entry.kind === "output" && entry.command ? { command: entry.command } : {}) })).reverse()} onBack={returnToChat} />
+          <TextBrowser title="/outputs" entries={timeline.filter((entry) => entry.kind === "output").map((entry) => ({ label: entry.kind === "output" ? entry.command?.command ?? entry.text.split("\n")[0] ?? uiText('mb2439bcb8dee') : "", text: entry.kind === "output" ? entry.text : "", ...(entry.kind === "output" && entry.command ? { command: entry.command } : {}) })).reverse()} onBack={returnToChat} />
         ) : view.kind === "input-history" ? (
           <TextBrowser title="/history" entries={[...inputHistory].reverse().map((text) => ({ label: text, text }))} onBack={returnToChat} onClear={async () => { await dependencies.inputHistory?.clear(); setInputHistory([]); }} />
         ) : view.kind === "terminal-setup" ? (
           <TerminalSetup onBack={returnToChat} />
         ) : view.kind === "permissions" ? (
           <PermissionsPicker
+            plan={agentMode === "plan"}
             policy={permissions.current}
             workspace={workspacePath}
             onChange={(policy) => {
               void (async () => {
                 try {
-                  coordinator.cancelTask(new Error("Permission policy changed"));
+                  coordinator.cancelTask(new Error(uiText('m71bcaf700a0c')));
                   await dependencies.savePermissions?.(workspacePath, policy);
                   permissions.current = dependencies.loadPermissions
                     ? await dependencies.loadPermissions(workspacePath)
                     : policy;
-                } catch {
-                  // Keep the prior effective policy when persistence or reload fails.
+                } catch (error) {
+                  if (dependencies.loadPermissions) permissions.current = await dependencies.loadPermissions(workspacePath);
+                  if (error instanceof ProcessCleanupError) await ensureWorkflow().recordCleanupFailure(error);
+                  // Persistence errors preserve the current effective stored policy.
                 } finally {
                   returnToChat();
                 }
@@ -2799,11 +2934,13 @@ export function EverpeaceApp({
             onSaveProject={(policy) => {
               void (async () => {
                 try {
-                  coordinator.cancelTask(new Error("Permission policy changed"));
+                  coordinator.cancelTask(new Error(uiText('m71bcaf700a0c')));
                   await dependencies.savePermissions?.(workspacePath, policy, "project");
                   if (dependencies.loadPermissions) permissions.current = await dependencies.loadPermissions(workspacePath);
-                } catch {
-                  // Keep the prior effective policy when persistence or reload fails.
+                } catch (error) {
+                  if (dependencies.loadPermissions) permissions.current = await dependencies.loadPermissions(workspacePath);
+                  if (error instanceof ProcessCleanupError) await ensureWorkflow().recordCleanupFailure(error);
+                  // Persistence errors preserve the current effective stored policy.
                 } finally {
                   returnToChat();
                 }
@@ -2847,7 +2984,7 @@ export function EverpeaceApp({
             onCancel={view.cancel}
           />
         ) : view.kind === "action-confirm" ? (
-          <ActionConfirmation text={view.text} start={view.start} cancel={view.cancel} {...(view.startLabel ? { startLabel: view.startLabel } : {})} />
+          <ActionConfirmation text={translateHostText(view.text)} start={view.start} cancel={view.cancel} {...(view.startLabel ? { startLabel: view.startLabel } : {})} />
         ) : view.kind === "web" ? (
           <WebSurface configure={dependencies.configureWeb} onBack={returnToChat} />
         ) : view.kind === "cost" ? (
@@ -2877,7 +3014,7 @@ export function EverpeaceApp({
             onAction={async (action, id) => {
               if (action === "continue") {
                 await configureTeam({ ...teamConfig, enabled: true, resumeTeamId: id });
-                returnToChat(() => appendTransient("system", "Team continuation prepared. Submit guidance to explicitly continue the retained task."));
+                returnToChat(() => appendTransient("system", uiText('m37e6aeaa8f91')));
               } else {
                 await dependencies.manageTeam?.(action, id, coordinator.sessionId, view.snapshot?.teamId);
                 if (coordinator.sessionId) {
@@ -2892,12 +3029,12 @@ export function EverpeaceApp({
         ) : view.kind === "login" ? (
           <LoginWizard
             dependencies={dependencies}
-            onComplete={(model) => activateModel(model, `Signed in and enabled ${model.model_name}`)}
+            onComplete={(model) => activateModel(model, uiText('m757f3a884b51', {p0: model.model_name}))}
             onCancel={returnToChat}
           />
         ) : view.kind === "model-picker" ? (
           <ModelPicker
-            title={view.title}
+            title={translateHostText(view.title)}
             models={view.models}
             onSelect={(model) => {
               if (!view.resumeSession) {
@@ -2906,8 +3043,8 @@ export function EverpeaceApp({
               }
               const loaded = view.resumeSession;
               const operation = startCommandLoad(
-                "/resume · Resume session",
-                "Restoring session",
+                uiText('mfe2ee5028847'),
+                uiText('mfe958bef9fde'),
                 false,
                 false,
               );
@@ -2915,8 +3052,8 @@ export function EverpeaceApp({
                 .catch((error: unknown) => {
                   if (!isCurrentCommandOperation(operation)) return;
                   replaceCommandView(infoView(
-                    "/resume · Restore failed",
-                    `Session restore failed: ${error instanceof Error ? error.message : String(error)}`,
+                    uiText('m8d94f4cf7cd3'),
+                    uiText('m3905310128fc', {p0: error instanceof Error ? error.message : String(error)}),
                     "error",
                   ));
                 });
@@ -2955,6 +3092,7 @@ export function EverpeaceApp({
         ) : (
           <StatusSurface
             snapshot={(view as Extract<View, { kind: "status" }>).snapshot}
+            taskStatus={taskStatus} maxOutputTokens={requestSettings.maxOutputTokens}
             onBack={returnToChat}
           />
         )}
@@ -2972,6 +3110,7 @@ export function EverpeaceApp({
         workspacePath={workspacePath}
       />
 
+      <TaskStatus snapshot={taskStatus}/>
       {confirmation ? (
         <Box flexDirection="column">
           <ApprovalConfirmation
@@ -2981,13 +3120,13 @@ export function EverpeaceApp({
             onConfirm={() => finishConfirmation(true)}
             onCancel={() => finishConfirmation(false)}
           />
-          {turnStartedAt !== undefined ? <Text dimColor>Waiting for approval · {formatElapsed(elapsedSeconds)}</Text> : null}
+          {turnStartedAt !== undefined ? <Text dimColor>{uiText('m55f1cec9a608')}{formatElapsed(elapsedSeconds)}</Text> : null}
           {liveAssistant ? <Box marginLeft={2}><RichOutput text={liveAssistant} /></Box> : null}
           {displayedToolStatus ? <Text color={TUI_COLORS.secondary}>• {displayedToolStatus}</Text> : null}
           <Prompt
             key={`prompt-${inputKey}`}
             activeModelName={activeModel?.model_name}
-            placeholder="Add guidance while waiting for approval"
+            placeholder={uiText('m8ee119dfd26a')}
             onApprovalChoice={finishConfirmation}
             history={resumedInputHistory ?? inputHistory}
             editorRef={editorRef}
@@ -3000,7 +3139,7 @@ export function EverpeaceApp({
       ) : terminalBusy ? (
         <Box flexDirection="column">
           <Text bold color={activeCommand?.cancelling ? TUI_COLORS.warning : TUI_COLORS.status} wrap="truncate-end">
-            • {activeCommand?.cancelling ? "Cancelling" : "Running"} <Text color={TUI_COLORS.secondary}>{activeCommand?.shell}</Text>{turnStartedAt === undefined ? "" : ` (${formatElapsed(elapsedSeconds)})`}
+            • {activeCommand?.cancelling ? uiText('m20d55e8c3373') : uiText('mf4ccae29e1bb')} <Text color={TUI_COLORS.secondary}>{activeCommand?.shell}</Text>{turnStartedAt === undefined ? "" : ` (${formatElapsed(elapsedSeconds)})`}
           </Text>
           {activeCommand ? <HighlightedCommand command={activeCommand.command} shell={activeCommand.shell} /> : null}
           <TerminalActivity
@@ -3011,11 +3150,11 @@ export function EverpeaceApp({
             <>
               {liveAssistant ? <Box marginLeft={2}><RichOutput text={liveAssistant} /></Box> : null}
               {displayedToolStatus ? <Text color={TUI_COLORS.secondary}>• {displayedToolStatus}</Text> : null}
-              {queuedGuidanceCount > 0 ? <Text dimColor>{queuedGuidanceCount} guidance message{queuedGuidanceCount === 1 ? "" : "s"} pending</Text> : null}
+              {queuedGuidanceCount > 0 ? <Text dimColor>{queuedGuidanceCount}{uiText('m17b21415b2d8')}{queuedGuidanceCount === 1 ? "" : "s"}{uiText('mf9ad5e1de7d0')}</Text> : null}
               <Prompt
                 key={`prompt-${inputKey}`}
                 activeModelName={activeModel?.model_name}
-                placeholder="Add guidance while working"
+                placeholder={uiText('m4fb81cb2da45')}
                 history={resumedInputHistory ?? inputHistory}
                 editorRef={editorRef}
                 historyNavigationRef={historyNavigationRef}
@@ -3028,14 +3167,14 @@ export function EverpeaceApp({
         </Box>
       ) : busyLabel ? (
         <Box flexDirection="column">
-          <Spinner label={`${agentPhase === "tools" ? "Working" : agentPhase === "sampling" ? `Waiting · ${busyLabel}` : busyLabel}${turnStartedAt === undefined ? "" : ` (${formatElapsed(elapsedSeconds)} • ctrl+c to interrupt)`}`} />
+          <Spinner label={`${agentPhase === "tools" ? uiText('ma92f0449a9f7') : agentPhase === "sampling" ? uiText('mcb5cb11b8e5f', {p0: busyLabel}) : busyLabel}${turnStartedAt === undefined ? "" : uiText('m1ee447087e68', {p0: formatElapsed(elapsedSeconds)})}`} />
           {liveAssistant ? <Box marginLeft={2}><RichOutput text={liveAssistant} /></Box> : null}
           {displayedToolStatus ? <Text color={TUI_COLORS.secondary}>• {displayedToolStatus}</Text> : null}
-          {queuedGuidanceCount > 0 ? <Text dimColor>{queuedGuidanceCount} guidance message{queuedGuidanceCount === 1 ? "" : "s"} pending</Text> : null}
+          {queuedGuidanceCount > 0 ? <Text dimColor>{queuedGuidanceCount}{uiText('m17b21415b2d8')}{queuedGuidanceCount === 1 ? "" : "s"}{uiText('mf9ad5e1de7d0')}</Text> : null}
           <Prompt
             key={`prompt-${inputKey}`}
             activeModelName={activeModel?.model_name}
-            placeholder="Add guidance while working"
+            placeholder={uiText('m4fb81cb2da45')}
             history={resumedInputHistory ?? inputHistory}
             editorRef={editorRef}
             historyNavigationRef={historyNavigationRef}

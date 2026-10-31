@@ -1,0 +1,19 @@
+name: Feature request / 功能建议
+description: Explain one user scenario and measurable acceptance / 用户场景和可衡量验收
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Scenario and current obstacle / 场景与当前障碍
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Expected result and how to verify it / 预期结果及验收方式
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Compatibility, platform or safety constraints / 兼容、平台或安全约束

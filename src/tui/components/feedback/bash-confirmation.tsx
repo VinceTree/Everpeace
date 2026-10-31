@@ -1,3 +1,4 @@
+import {uiText} from '../../../localization/messages.js';
 import { ConfirmInput } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import React from "react";
@@ -16,10 +17,10 @@ export function BashConfirmation({
 }: BashConfirmationProps) {
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
-      <Text color="yellow">The model wants to run Bash:</Text>
+      <Text color="yellow">{uiText('m243a4acff95c')}</Text>
       <HighlightedCommand command={command} shell="Bash" />
       <Box>
-        <Text>Run this command? </Text>
+        <Text>{uiText('m29c33691ecb3')}</Text>
         <ConfirmInput defaultChoice="cancel" onConfirm={onConfirm} onCancel={onCancel} />
       </Box>
     </Box>

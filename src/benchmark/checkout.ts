@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawnOwned as spawn } from "../tools/owned-process.js";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { lstat, mkdtemp, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
@@ -52,6 +52,7 @@ export interface CheckoutBenchmarkAdapterOptions {
   team?: TeamOptions;
   repairStrategy?: "baseline" | "candidate";
   sessionsRoot: string;
+  memoryPilot?: { directory: string; enabled: boolean };
 }
 
 function inside(root: string, target: string): boolean {
@@ -68,15 +69,21 @@ export async function captureBenchmarkCheckoutIdentity(sourceRoot: string, entry
   const root = await realpath(path.resolve(sourceRoot));
   const entry = await realpath(path.resolve(entryPath));
   if (!inside(root, entry) || !(await stat(entry)).isFile()) throw new Error("Benchmark checkout entry must be a file inside sourceRoot");
+  const dshLayout = path.relative(root, entry).split(path.sep).join("/") === "apps/cli/lib/bin.js";
   const { stdout: revisionOutput } = await execFileAsync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" });
-  const { stdout: trackedOutput } = await execFileAsync("git", ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "src", "package.json", "pnpm-lock.yaml", "tsconfig.json", "tsconfig.build.json"], { encoding: "buffer", maxBuffer: 16 * 1024 * 1024 });
-  const files = trackedOutput.toString("utf8").split("\0").filter(Boolean).sort();
+  const paths = dshLayout ? ["apps", "packages", "vendor", "native", "package.json", "pnpm-lock.yaml"] : ["src", "native", "scripts/build-file-helper.mjs", "package.json", "pnpm-lock.yaml", "tsconfig.json", "tsconfig.build.json"];
+  const gitArgs = dshLayout
+    ? ["-C", root, "ls-files", "-z", "--cached", "--", ...paths]
+    : ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ...paths];
+  const { stdout: trackedOutput } = await execFileAsync("git", gitArgs, { encoding: "buffer", maxBuffer: 128 * 1024 * 1024 });
+  const files = trackedOutput.toString("utf8").split("\0").filter(file => file && (!dshLayout || !file.split("/").includes("node_modules"))).sort();
   const sourceHash = createHash("sha256");
   for (const file of files) {
     try { addHashPart(sourceHash, file, await readFile(path.resolve(root, file))); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      addHashPart(sourceHash, `deleted:${file}`, Buffer.alloc(0));
+      // Sparse or polyglot checkouts may omit a conventional root manifest.
+      if (!dshLayout) addHashPart(sourceHash, `deleted:${file}`, Buffer.alloc(0));
     }
   }
   const buildHash = createHash("sha256");
@@ -89,12 +96,28 @@ export async function captureBenchmarkCheckoutIdentity(sourceRoot: string, entry
     const metadata = await lstat(target);
     if (metadata.isSymbolicLink()) throw new Error("Benchmark artifact tree must not contain symlinks");
     if (metadata.isDirectory()) {
-      for (const name of (await readdir(target)).sort()) await hashArtifact(path.join(target, name));
+      for (const name of (await readdir(target)).sort()) {
+        if (dshLayout && name === "node_modules") continue;
+        await hashArtifact(path.join(target, name));
+      }
     } else if (metadata.isFile()) {
       addHashPart(buildHash, path.relative(root, target).split(path.sep).join("/"), await readFile(target));
     } else throw new Error("Benchmark artifact tree must contain ordinary files");
   };
-  await hashArtifact(artifactRoot);
+  if (dshLayout) {
+    // Generated lib modules are often untracked; include each runtime tree
+    // without descending into the dependency installation directories.
+    for (const directory of ["apps", "packages", "vendor", "native"]) {
+      const target = path.join(root, directory);
+      try { await lstat(target); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
+      await hashArtifact(target);
+    }
+  } else await hashArtifact(artifactRoot);
+  for (const file of [`native/files/bin/${process.platform}-${process.arch}/everpeace-files.exe`, `native/process/bin/${process.platform}-${process.arch}/everpeace-process.exe`]) {
+    try { addHashPart(buildHash, file, await readFile(path.join(root, file))); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; addHashPart(buildHash, `missing:${file}`, Buffer.alloc(0)); }
+  }
   return {
     revision: revisionOutput.trim(),
     sourceDigest: sourceHash.digest("hex"),
@@ -203,6 +226,7 @@ export function createCheckoutBenchmarkAdapter(options: CheckoutBenchmarkAdapter
         productionModule: pathToFileURL(identity.entryPath).href, task,
         ...(options.team ? { team: options.team } : {}),
         tokenBudget: context.tokenBudgetRemaining, sessionsRoot: options.sessionsRoot,
+        ...(options.memoryPilot ? { memoryPilot: options.memoryPilot } : {}),
         ...(options.loopStrategy === undefined ? {} : { loopStrategy: options.loopStrategy }),
         ...(options.repairStrategy === undefined ? {} : { repairStrategy: options.repairStrategy }),
         model: { ...options.model, request_settings: { reasoningEffort: "high", maxOutputTokens: 32_768 } },
@@ -213,6 +237,7 @@ export function createCheckoutBenchmarkAdapter(options: CheckoutBenchmarkAdapter
       });
       const protocolController = new AbortController();
       let protocolError: Error | undefined;
+      let latestAccounting: Pick<BenchmarkHarnessResult, "usage" | "requestAccounting"> | undefined;
       const owned = observeProcessCompletion(child, { signal: AbortSignal.any([context.signal, protocolController.signal]) });
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
@@ -226,6 +251,7 @@ export function createCheckoutBenchmarkAdapter(options: CheckoutBenchmarkAdapter
         try {
           if (pendingLines.length > MAX_OUTPUT_BYTES) throw new Error("Oversized worker telemetry line");
           for (const line of lines) {
+            if (line.startsWith("EVERPEACE_CHECKOUT_USAGE ")) latestAccounting = JSON.parse(line.slice("EVERPEACE_CHECKOUT_USAGE ".length)) as typeof latestAccounting;
             if (line.startsWith("EVERPEACE_CHECKOUT_EVENT ")) context.onEvent(JSON.parse(line.slice(25)) as import("../agent/agent-loop.js").LoopEvent);
             if (line.startsWith("EVERPEACE_CHECKOUT_PHASE ")) context.onPhase(line.slice(25).trim() as import("../agent/agent-loop.js").LoopPhase);
           }
@@ -237,14 +263,19 @@ export function createCheckoutBenchmarkAdapter(options: CheckoutBenchmarkAdapter
       child.stderr.on("data", (chunk: string) => { if (!owned.closed) stderr.append(chunk); });
       child.stdin.end(input);
       const result = await owned.completion;
-      if (result.cleanupError) throw result.cleanupError;
-      if (protocolError) throw protocolError;
-      context.signal.throwIfAborted();
-      if (result.error) throw result.error;
       await context.writeArtifact?.("checkout-stdout.txt", stdout.text);
       await context.writeArtifact?.("checkout-stderr.txt", stderr.text);
-      if (result.exitCode !== 0) throw new Error(`${options.name} worker exited with ${result.exitCode ?? "no exit code"}: ${stderr.text.trim() || "no error output"}`);
-      return { ...parseWorkerResult(stdout.text), notes: `${options.name} ${identity.revision.slice(0, 8)} source ${identity.sourceDigest.slice(0, 12)} build ${identity.buildDigest.slice(0, 12)}` };
+      const failedResult = (): BenchmarkHarnessResult => ({
+          terminalOutcome: "stopped", stopReason: result.cleanupError ? "process_cleanup_failed" : context.signal.aborted ? "checkout_cancelled" : "checkout_worker_failed",
+          ...(result.cleanupError ? { cleanupFailed: true } : {}),
+          ...(latestAccounting ? { ...latestAccounting, usage: { ...latestAccounting.usage!, complete: false }, ...(latestAccounting.requestAccounting ? { requestAttempts: latestAccounting.requestAccounting.requests } : {}) } : {}),
+      });
+      if (result.cleanupError || protocolError || context.signal.aborted || result.error || result.exitCode !== 0) return failedResult();
+      try {
+        return { ...parseWorkerResult(stdout.text), notes: `${options.name} ${identity.revision.slice(0, 8)} source ${identity.sourceDigest.slice(0, 12)} build ${identity.buildDigest.slice(0, 12)}` };
+      } catch {
+        return failedResult();
+      }
     },
   };
 }

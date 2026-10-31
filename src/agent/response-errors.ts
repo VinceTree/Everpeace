@@ -1,16 +1,26 @@
 import { normalizeTokenUsageSample, type TokenUsageSample } from "../status/model-status.js";
 import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
+import { CleanupTimeoutError } from '../util/cleanup-deadline.js';
 
 export class ModelStreamCleanupError extends ResourceCleanupError {
   readonly resource = "model_stream";
   readonly usage: TokenUsageSample | null;
+  readonly stage: string;
+  readonly reason: 'deadline_exceeded' | 'close_failed';
 
   constructor(cause: unknown, usage?: unknown) {
     const message = cause instanceof Error ? cause.message : String(cause);
     super(`Model stream cleanup failed: ${message}`, { cause });
     this.name = "ModelStreamCleanupError";
     this.usage = normalizeTokenUsageSample(usage);
+    this.stage = cause instanceof CleanupTimeoutError ? cause.stage : 'stream_close';
+    this.reason = cause instanceof CleanupTimeoutError ? 'deadline_exceeded' : 'close_failed';
   }
+}
+/** Cancellation may discard output while retaining a reliable terminal billing sample. */
+export class ModelStreamCancelledError extends Error {
+  readonly usage: TokenUsageSample | null;
+  constructor(reason: unknown, usage: unknown) { super('Model stream cancelled', { cause: reason }); this.name = 'AbortError'; this.usage = normalizeTokenUsageSample(usage); }
 }
 
 interface ErrorMetadata {

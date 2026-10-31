@@ -1,3 +1,4 @@
+import {uiText} from '../../../localization/messages.js';
 import { ConfirmInput, MultiSelect, Spinner } from "@inkjs/ui";
 import { Box, Text, useInput } from "ink";
 import React, { useState } from "react";
@@ -30,7 +31,7 @@ export function LogoutWizard({
 
   const submitSelection = (ids: string[]) => {
     if (ids.length === 0) {
-      setError("Select at least one model");
+      setError(uiText('m41fd5ed68cdb'));
       return;
     }
     setSelectedIds(ids);
@@ -52,8 +53,7 @@ export function LogoutWizard({
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="#D4AF37" paddingX={1}>
       <Text bold color="#D4AF37">
-        /logout · Remove models
-      </Text>
+        {uiText('m64cf305db8b5')}</Text>
       {error ? <Text color="red">{error}</Text> : null}
 
       {step === "select" ? (
@@ -66,19 +66,19 @@ export function LogoutWizard({
             visibleOptionCount={Math.min(8, models.length)}
             onSubmit={submitSelection}
           />
-          <Text dimColor>↑↓ move · Space select · Enter continue · Esc to return to session</Text>
+          <Text dimColor>{uiText('mcca2fd47f7b6')}</Text>
         </>
       ) : null}
 
       {step === "confirm" ? (
         <Box flexDirection="column">
-          <Text>Remove {selectedIds.length} model{selectedIds.length === 1 ? "" : "s"} and associated system credentials?</Text>
+          <Text>{uiText('m5948954e3b49')}{selectedIds.length}{uiText('ma791e1e893ea')}{selectedIds.length === 1 ? "" : "s"}{uiText('m1f829fc4890d')}</Text>
           <ConfirmInput defaultChoice="cancel" onConfirm={remove} onCancel={onCancel} />
-          <Text dimColor>Esc to return to session</Text>
+          <Text dimColor>{uiText('m30c2566270e3')}</Text>
         </Box>
       ) : null}
 
-      {step === "deleting" ? <Spinner label="Removing models and credentials" /> : null}
+      {step === "deleting" ? <Spinner label={uiText('ma126919a7a56')} /> : null}
     </Box>
   );
 }

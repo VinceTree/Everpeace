@@ -9,6 +9,23 @@ export const nativeTests = [
   "native team sandbox proves root/state/Git denial before coding, or fails closed",
   "two production workers integrate independently and only the root native check determines success",
   "native subdirectory and linked worktree isolation protects Git and sibling roots",
+  "native access rejects junctions, hard links, and stale-byte commits",
+  "the process retains workspace identity across requests after root replacement",
+  "native pinned parents and target handles block concurrent replacement and saves",
+  "a concurrent save into the commit gap survives with a recoverable original",
+  "crash after moving the original allows explicit exclusive recovery",
+  "crash recovery refuses a later object with identical post-image bytes",
+  "default stdio sandbox denies sensitive startup reads and network before tool approval",
+  "MCP runtime discovers namespaced stdio tools, instructions, and calls",
+  "MCP runtime respects Codex enabled tools and isolates server failures",
+  "explicit host MCP close owns detached descendants and remains bounded",
+  'Windows owned Job cancels parent and detached descendants without killing a control',
+  'Windows parent natural exit cleans its remaining descendants',
+  'Windows owner crash fails closed and kill-on-close terminates payload',
+  'owner IPC denial terminates the bootstrap without launching payload',
+  'crashed multi-file batch recovers from durable intent',
+  'crashed multi-file batch preserves a later save',
+  'a failed second file rolls back the first and preserves the concurrent user object',
 ];
 
 export function candidateSha(value) {

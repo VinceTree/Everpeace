@@ -1,5 +1,7 @@
 # Codex Sandbox、MCP 与 Skill 接入
 
+当前安全加固契约（文件后端、敏感内容、验证依据、MCP 与隐私迁移）见 [安全加固](SECURITY_HARDENING.md)，与旧说明冲突时以该契约及当前实现为准。
+
 ## 对标基线
 
 本轮先读取 OpenAI 官方 [Permissions](https://developers.openai.com/es-419/docs/permissions)、[MCP](https://developers.openai.com/es-419/docs/extend/mcp?surface=cli) 和 [Skills](https://developers.openai.com/es-419/docs/build-skills) 文档，再检查 `openai/codex` 源码提交 [`78245b47af2a7aafcabe025828ceecca69db4df1`](https://github.com/openai/codex/tree/78245b47af2a7aafcabe025828ceecca69db4df1)。重点映射如下：
@@ -41,7 +43,7 @@ Windows 的 Codex restricted-token backend 可以运行系统 PowerShell，但 G
 
 ### 启动信任与 HTTP 边界
 
-stdio 的宿主进程启动与 MCP tool-call 审批是独立权限边界。默认没有启动授权；`/mcp trust <server>` 读取有效 Codex 配置，展示工作区、解析后的程序、cwd、脱敏参数、环境名称和来源。CLI 不能证明配置文件来源时明确显示 unknown。确认默认 Cancel；批准只保存权限，`/mcp reconnect` 才显式启动。允许启动相当于允许运行该程序，其权限仍为宿主用户；本轮没有添加 MCP 原生沙箱，也不验证程序及依赖完整性。
+stdio 的宿主进程启动与 MCP tool-call 审批是独立权限边界。默认没有启动授权；`/mcp trust <server>` 读取有效 Codex 配置，展示工作区、解析后的程序、cwd、脱敏参数、环境名称和来源。CLI 不能证明配置文件来源时明确显示 unknown。确认默认 Cancel；批准只保存权限，`/mcp reconnect` 才显式启动。默认 stdio 使用原生 sandbox，限制工作区访问、默认禁网并过滤环境；初始化失败不回退宿主。显式 host 模式需另行确认，仍用私有 Job 管理后代，不获得沙箱隔离。启动身份纳入可执行文件、入口脚本、包清单/锁文件及隔离配置，不能证明全部传递依赖；动态身份每次授权。Windows host 入口须为明确的可执行程序，不能直接运行 `.cmd`/`.bat`，可配置已核验解释器与脚本。详见 [可靠性加固](RELIABILITY_HARDENING.md) 与 [安全专题](SECURITY_HARDENING.md)。
 
 [信任存储](../../src/mcp/trust.ts)在平台用户配置目录保存 `mcp-trust.json` schema v1，记录规范化工作区、服务名、授权种类和 HMAC 指纹；密钥仅通过 AuthStorage/keyring 保存。fingerprint 包含 transport、实际解析的 command、args、cwd 和冻结的完整环境，HTTP 例外绑定完整 URL、header 来源和实际凭据。项目配置不能授予信任，Session 也不恢复授权。文件读写使用跨进程锁和原子替换；坏文件、丢失密钥、keyring 或写入异常均不能自动放行。审批提交及落盘前重读配置并核对预览指纹、存储 revision 与 runtime generation。确认取消不授予权限。
 
@@ -52,6 +54,10 @@ stdio 的宿主进程启动与 MCP tool-call 审批是独立权限边界。默�
 真实进程门禁、持久/跨进程授权、撤销与迟到初始化、HTTP 与 TLS、SDK SSE 重定向回归见 [security tests](../../tests/unit/mcp/security.test.ts)。既有 MCP 协议 fixture 通过显式注入测试授权，不访问用户 keyring。TUI 确认/取消/resize 和 headless preflight 分别在 app 与 exec 回归中覆盖；实际终端验收状态只在 HANDOFF 记录。
 
 每个 server 有独立 supervisor。瞬时启动失败或断连使用 500 ms 起步、30 秒封顶的指数退避，最多重试十次；连接连续稳定 30 秒才清零计数。配置不支持、认证不可用、stdio executable 明确缺失等永久错误直接进入 failed。断连先从目录原子移除该 server 的全部 callable，再关闭旧 client；初始化未完成的 client 也由 supervisor 管理，关闭同时等待 SDK close 完成及 transport 的实际 close 事件。五秒内不能确认关闭时停止自动恢复，不能同时建立替代连接。退出、切换工作区、`/mcp reconnect` 主动刷新都会取消旧 generation 的连接和 timer，迟到 callback 不能复活它。默认 TUI 在正常退出和启动失败路径都等待共享 `TuiDependencies.dispose()`；它关闭活动 Memory runtime 与 `McpRuntime`，即使清理失败也继续恢复终端模式。
+
+stdio transport 尚未创建进程时，close 同样发出恰好一次终态通知，使 SDK 和 supervisor 完成关闭；沙箱准备失败保留启动原因，不因缺失事件误报进程清理不明。close 先登记共享 Promise 再通知观察者，重复或重入关闭复用同一结果，并立即禁止新 start/send。已创建进程仍等待真实退出与必要的进程树终止；真实清理失败继续阻止替代连接和成功结算。回归见 [transport lifecycle](../../tests/unit/mcp/transport-lifecycle.test.ts)、[原生 sandbox](../../tests/unit/mcp/sandbox.test.ts) 和 [恢复](../../tests/unit/mcp/stdio-recovery.test.ts)。
+
+默认沙箱的真实 discovery/filtering 与启动隔离回归遵循显式 hosted/required 原生模式：hosted Windows 不具有嵌套后端，专用 required 清单强制这些用例执行并拒绝 skip；生产不因此回退 host。显式 host 的真实协议、信任、恢复及后代清理仍在 hosted 运行；测试同样使用生产配置准备来冻结安全环境，避免空环境导致 Windows Node/OpenSSL 无法初始化。
 
 恢复只影响后续调用。断连时正在进行的 tool call 不自动重放；普通业务错误、单次 tool timeout 和用户取消不会单独触发 reconnect。Streamable HTTP 已有 session ID 收到 404 时，宿主将该会话视为失效，通过同一关闭/重连流程建立后续连接；SDK 自身的 SSE 流恢复仍由 SDK 管理。`tools/list_changed` 通知以 50 ms 合并；每次先完整读取分页结果，再原子替换该 server 的工具定义和执行校验器。失败时保持上一份完整目录并在 status 中记录错误，真正断连则立即移除。发现最多 100 页、1,000 个工具和 2 MiB 定义，连接、发现及校验器编译共享配置的启动期限；重复 cursor、重复原始工具名及超限都明确失败。
 
@@ -65,7 +71,7 @@ stdio 的宿主进程启动与 MCP tool-call 审批是独立权限边界。默�
 
 MCP 文本投影保留文本、URI 和 MIME；只处理协议明确的 tool `content[]`、prompt `messages[].content`、resource `contents[]` 及其中嵌入的 resource 内容块，将 image/audio/blob 的 base64 替换为类型与大小说明。`structuredContent`、各层 `_meta` 和列表 metadata 不递归改写，业务字段即使名为 `blob` 或形如 image 也保持原值。普通结果连同截断 envelope 保持有效 JSON 且最多 1 MiB。Client 声明 `roots: { listChanged: true }` 并应答 `roots/list`，把当前工作区作为唯一 root 提供给 server；`setWorkspace` 通过断开重连让新工作区生效。Codex OAuth 凭据复用、`http_headers_helper`、elicitation、sampling、tasks 和按工具持久审批策略尚未接入。OAuth/header-helper server 会以明确失败状态显示；不得声称与完整 Codex MCP runtime 等价。
 
-模型文件编辑通过兼容的 `apply_patch` function tool 接入，支持有界 unified diff；生产 update/delete 强制匹配宿主读版本，审批绑定 preview hash 与权限 revision。更新逐文件原子替换，创建排他执行；批量失败仅回滚仍匹配本次 post-image 的已写文件，冲突或回滚错误明确报告，不保证整个批次原子成功。详见 [TOOLS](TOOLS.md)；它不是完整 Codex 原生 `apply_patch_call` wire protocol。
+模型文件编辑通过兼容的 `apply_patch` function tool 接入，支持有界 unified diff；生产 update/delete 强制匹配宿主读版本，审批绑定 preview hash 与权限 revision。更新保全原文件后以不覆盖方式安装，路径可能短暂不存在；创建排他执行；批量失败仅回滚仍匹配本次 post-image 的已写文件，冲突或回滚错误明确报告，不保证整个批次原子成功。详见 [TOOLS](TOOLS.md)；它不是完整 Codex 原生 `apply_patch_call` wire protocol。
 
 MCP 的真实 stdio 恢复回归见 [stdio-recovery.test.ts](../../tests/unit/mcp/stdio-recovery.test.ts)。fixture 启动期限覆盖 Node／tsx／SDK 冷启动，首代主动不回应初始化以触发超时；仍严格检查恰好两代、旧进程先退出、binding 失效和不重放。测试时间预算见 [开发指南](../DEVELOPMENT.md#独立测试-ci-与证据范围)，不会修改生产默认期限或恢复策略。
 
