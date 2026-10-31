@@ -324,6 +324,7 @@ export function EverpeaceApp({
 }: EverpeaceAppProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
+  const { columns } = useWindowSize();
   const firstActiveModel = initialActiveModel(initialModels.available);
   const initialTimeline = useMemo<TimelineEntry[]>(() => {
     const entries: TimelineEntry[] = [
@@ -368,7 +369,7 @@ export function EverpeaceApp({
   const [timeline, setTimeline] = useState(initialTimeline);
   const [timelineEpoch, setTimelineEpoch] = useState(0);
   useEffect(()=>{if(previousLanguage.current===language)return;previousLanguage.current=language;onReplayOutput(()=>setTimelineEpoch(epoch=>epoch+1));},[language,onReplayOutput]);
-  const [terminalColumns, setTerminalColumns] = useState(() => Math.max(1, stdout.columns ?? 80));
+  const terminalColumns = Math.max(1, columns);
   const displayTimeline = useMemo(
     () => visibleHistory(timeline, { columns: terminalColumns }),
     [terminalColumns, timeline],
@@ -2861,7 +2862,6 @@ directController.current = new AbortController();setLastTaskStartedAt(Date.now()
   useEffect(() => {
     let redrawTimer: ReturnType<typeof setTimeout> | undefined;
     const redrawAfterResize = () => {
-      setTerminalColumns(Math.max(1, stdout.columns ?? 80));
       if (redrawTimer !== undefined) clearTimeout(redrawTimer);
       // Command surfaces contain no Static transcript to replay. Ink already
       // resizes them; clearing again can leave its unchanged frame blank until

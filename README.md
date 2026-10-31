@@ -125,6 +125,7 @@ Team JSONL uses schema v2; ordinary execution retains v1. Interrupted or conflic
 - Changed verification scripts or a restored task without a trusted baseline require review; rejection keeps the task unverified.
 - Restored verification debt remains pending even when no changed paths are known. Fresh authorized checks must pass; unavailable workspace tracking keeps the result unverified.
 - `Ctrl+C` cancels active work and waits for cleanup. While idle it clears a draft, then exits. User-written `!` commands run in a separate host PTY, own terminal input and stay outside model context.
+- Resizing preserves the composer draft and reflows history. Terminal mouse, focus and cursor reports are ignored by the composer.
 - Request budgets include retries, compaction and repair. Unknown usage prevents another bounded request; reasoning tokens are a subset of output tokens. Token budgets are not strict billing caps.
   Failed requests with unknown usage retain safe HTTP/error categories without logging provider error bodies or headers.
 

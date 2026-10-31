@@ -29,6 +29,12 @@ pnpm dev
 
 已有工作区先检查差异，不要为了安装成功删除用户目录、重置 lockfile 或重新生成无关依赖。确需修改依赖时，同步审查 manifest、lockfile 和相关补丁。
 
+依赖升级沿用 Node 22 开发和 CI 基线，`@types/node` 保持同主版本；Dependabot 忽略其跨主版本更新。React 与 `react-test-renderer` 使用相同精确版本，Dependabot 将这两项及 React 类型定义归为同组。升级 Ink 时核对流类型、输入解析、resize、草稿与 inline 重放回归；不要用 TTY 类型断言掩盖普通 Writable 的兼容性。
+
+根锁文件变化后同步审阅并冻结 `tests/fixtures/expanded/pnpm-lock.yaml`、`docs/benchmark/real-fixtures/evaluator-lock.yaml` 和 expanded setup 的实际渲染器版本。重新运行对应离线 proof；既有 evaluation 摘要、真实评测成绩和性能数据仍只属于原先冻结候选，不能当作新依赖的结果。
+
+依赖 PR 的直接版本更新不能替代传递依赖审计。用 `pnpm audit --registry=https://registry.npmjs.org --audit-level high --json` 获取官方审计结果；镜像缺少 audit endpoint 时属于服务不可用，不能记为安全通过。优先在上游声明范围内定向更新受影响的传递依赖，检查锁差异后重新冻结和验证；无上游修复的残留公告在 HANDOFF 明示，不通过忽略公告或放宽安全门禁消除。
+
 ### Windows、WSL 与原生依赖
 
 同一 checkout 的 `node_modules` 必须与运行它的 Node 平台一致。Windows 安装的 esbuild、TypeScript 平台二进制、keyring 和 node-pty 不能直接交给 WSL Linux Node；反向亦然。需要双平台开发时使用各自 checkout 和安装目录。

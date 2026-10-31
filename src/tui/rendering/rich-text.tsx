@@ -18,7 +18,12 @@ function useMarkdownColumns(): number {
     const listeners = new Set<() => void>();
     const onResize = () => { for (const listener of listeners) listener(); };
     store = {
-      getSnapshot: () => stdout.columns || 80,
+      getSnapshot() {
+        const columns = "columns" in stdout ? stdout.columns : undefined;
+        return typeof columns === "number" && Number.isFinite(columns) && columns > 0
+          ? columns
+          : 80;
+      },
       subscribe(listener) {
         // Restored transcripts and nested lists can mount many blocks at once.
         // Share the stream listener without raising or suppressing its limit.

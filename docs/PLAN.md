@@ -2,6 +2,14 @@
 
 按用户确认的优化计划分批执行；当前结果和验证证据只在 [HANDOFF](HANDOFF.md) 维护。
 
+## 当前：未合并 PR 的依赖整合
+
+在当前功能分支整合依赖 PR，保持 Node 22 运行时、系统 keyring、原生 sandbox 和既有验证边界。同步升级 React 与测试渲染器，适配 Ink 的普通 stream 类型和 resize 行为；Node 类型只更新当前主版本，并限制 Dependabot 跨主版本更新。重冻结 evaluator lock 后重新执行对应 proof，原候选性能与模型结果不迁移。
+
+同时核对依赖审计，对 MCP 链中仍存在的公告在既有 semver 范围内定向更新传递依赖，消除阻断安全门禁的漏洞；未提供修复的上游残留明确记录。依赖变化后重新执行最终门禁。
+
+完成定向回归后串行执行 typecheck → lint → test → build，再检查 UI、文档、workflow 和安装状态。用户随后明确授权提交、推送并合并可以合并的 PR，禁止创建 Release；推送使用 `[skip publish]`，保留 CI，并仅在当前候选检查通过后合并。Node 26 类型更新不属于可接受候选。以下三批记录已完成的优化计划。
+
 ## 第一批：构建与检查可靠性
 
 - 证明模块删除／改名后旧构建产物残留，修复为清理固定 `dist` 后重建；拒绝已有输出链接，编译失败不输出。
@@ -27,4 +35,4 @@ MCP 启动前关闭事件修复已完成交付。本轮继续修复已复现的�
 
 原有可靠性、隐私与评测契约见 [可靠性加固](architecture/RELIABILITY_HARDENING.md)、[安全加固](architecture/SECURITY_HARDENING.md) 和 [编码竞争力评测](benchmark/CODING_COMPETITIVENESS.md)。Windows 本地 NTFS 仍是安全文件后端的支持范围，生产默认单 Agent、最多三轮修复。
 
-本轮授权覆盖实施、验证、提交和推送；不包含调整展示版本、tag、Release 或真实模型付费评测。官方模型 ID、数值预算和价格快照仍待另行明确授权。
+前三批优化的历史授权覆盖实施、验证、提交和推送；不延伸到本次依赖整合，不包含调整展示版本、tag、Release 或真实模型付费评测。官方模型 ID、数值预算和价格快照仍待另行明确授权。

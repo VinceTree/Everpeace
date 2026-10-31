@@ -1,46 +1,50 @@
 # 当前交接
 
-2026-10-24：第三轮按用户授权测量 CLI 冷启动、长 Session 恢复、历史搜索和项目扫描，依据复测优化，完整门禁后提交并推送。分支 `codex/public-contract-core-experience`，起点 `85695e8fd187d710fcd18d9200ad86309a9f0eb5`，开始时工作树干净；展示候选仍为 `0.6.0-rc.4`。未读取 keyring 或真实 Session，未调用模型、付费评测、改版本、打 tag 或创建 Release。
+2026-10-31：按用户“修改全部 PR”的要求，在 `codex/public-contract-core-experience` 整合未合并 PR 对应依赖更新并修复兼容性。起点 `dae8a9a`，开始时工作树干净，展示版本仍为 `0.6.0-rc.4`。用户随后明确授权提交、推送及合并可以合并的 PR，禁止创建 Release；不改展示版本、不打 tag、不调用付费模型。
 
-上轮取消、清理失败和持久恢复修复已提交推送，证据在 [历史交接](archive/HANDOFF-2026-10-24-core-recovery.md)；旧结果不作为本轮门禁。原有 ignored 用户目录及私有材料保持原样，所有性能数据为新建隔离合成 fixture。
+上轮离线性能测量及交付收据移至 [历史交接](archive/HANDOFF-2026-10-24-local-performance.md)。其性能数字绑定旧依赖与候选，本轮不复用为新候选证据。原有 ignored 用户目录及私有材料保持原样，不读取 keyring 或真实 Session。
 
-## 测量与结果
+## PR 处理范围
 
-入口 [local-performance.mjs](../scripts/benchmark/local-performance.mjs)，协议见 [本地性能对照](benchmark/LOCAL_PERFORMANCE.md)。基线为上述 Git revision 的只读 archive 独立构建，链接同一依赖；两臂原生组件摘要相同。每场景每臂九次，奇偶轮交换顺序、串行创建新 Node 进程。测量前后核对 fixture、源码、构建与原生身份，全部正确性断言通过。
+GitHub 当前九项未合并 PR：#11 为当前分支的 Draft 功能 PR，#12–#19 为 Dependabot 更新。已 fetch 远端并读取八个依赖分支的实际差异；功能 PR 无 review。官方 gh 没有独立登录，现通过 Git 已有的 GitHub credential helper 在内存中向 gh 子进程提供认证，不落盘凭据。认证后核对当前九项均因既有 CI 失败而 BLOCKED，须推送新候选并等待实际 Required checks；不能以本地通过代替远端通过。
 
-Windows x64、本地 NTFS、Node 22.19.0、pnpm 10.30.3，Intel Core Ultra 5 125H。原始逐次墙钟／CPU／峰值 RSS／trace／身份保留在 `.cache/performance-round3-final/paired.json`，fixture manifest 同目录 `fixture.json`；基线构建在 `.cache/performance-round3-v3/baseline`。fixture SHA-256 `aae98281858fa211d9034914534fc7d48b3296015c2cacd9457cbf1584c4f652`，runner SHA-256 `473ffa92acf21d7e0edfd1ae1797bb7b0ea6db67aa7ca611a28b488d198e2b84`。
+| PR | 本地处理 |
+| --- | --- |
+| #12 | marked 更新至 18.1.1 |
+| #13 | 保持 Node 22 基线，采用同主版本最新类型补丁 22.20.5，不采用 Node 26 类型；Dependabot 忽略 Node 类型跨主版本更新 |
+| #14 | tsx 更新至 4.23.15 |
+| #15 | Ink 更新至 8.0.0，适配普通 stream 类型与 resize |
+| #16 | React 更新至 19.3.1，同步 react-test-renderer 至相同精确版本；Dependabot 将 React、renderer 和 React types 归组 |
+| #17 | MCP SDK 更新至 1.32.0 |
+| #18 | setup-python 更新至 7.1.0，保留 PR 的完整固定 SHA |
+| #19 | undici 更新至 7.30.1 |
 
-| 场景 | 优化前中位 ms | 优化后中位 ms | p95 前 → 后 ms | 结论 |
-| --- | ---: | ---: | ---: | --- |
-| CLI `--lang en --help` | 96.08 | 94.99 | 104.05 → 99.48 | 持平，未修改 CLI |
-| 长 Session 恢复 | 537.53 | 499.91 | 544.98 → 539.66 | 下降 7.0% |
-| 历史搜索冷缓存 | 223.54 | 209.68 | 226.97 → 214.13 | 下降 6.2% |
-| 历史搜索暖缓存 | 18.73 | 18.67 | 22.32 → 19.16 | 持平 |
-| 项目地图扫描 | 7215.16 | 4957.00 | 7373.56 → 5109.03 | 下降 31.3% |
+## 兼容性与冻结身份
 
-九次样本的 nearest-rank p95 即样本最大值，不承诺稳定尾延迟。CLI 是新进程帮助启动，未清空 OS 缓存，不含终端首 prompt；恢复计时不含 Ink 渲染。合成目录不证明真实大型仓库、跨平台或模型收益。
+- App/Composer 通过公开 `useWindowSize` 获取宽度；独立 Composer 也响应 resize。聊天历史的去抖重放与命令窗口保持原有边界。
+- Markdown 继续按输出流共享一份 resize 订阅，收窄普通 Writable 的可选列宽；缺失、零、非有限值回退到 80 列，卸载移除监听器。
+- 新增通用 PassThrough 输出流的表格重排，以及独立 Composer 连续缩放、中文长草稿保留、终端回报丢弃和只提交一次的回归。
+- 根锁文件、expanded 与 real-fixtures evaluator lock 同步重冻结，expanded setup 同步 React/renderer 精确版本。旧 evaluation 摘要、真实模型成绩及性能数据仍绑定旧身份；本轮不修改历史报告或参考解。
+- 同步双语 README、开发指南、终端专题、评测指南、计划与决策。未修改产品版本、公共 CLI/SDK 或 Session schema。
 
-- 长日志 103,956,100 字节／80,002 记录，恢复 40,000 条 timeline 与最终一项压缩 context；两臂读量相同，最大输入缓冲均 66,840 字节。异步交接从逐条降至 1,587 批。峰值 RSS 中位 255,520,768 → 253,362,176 字节，不宣称稳定内存下降。
-- 搜索 100 个 Session、32,100 记录，冷读均 11,283,100 字节；总匹配 100、返回 50、skipped 0，暖缓存 100 次命中且没有新增日志读取。缓存上限和正文匹配语义不变。
-- 项目 fixture 为 20 包、422 个可枚举文件，含 ignore 内容；两臂都完整枚举，唯一 incomplete 原因为既有 `source_insight_limit`。原生启动均 128 次且退出已确认；未通过减少检查或漏扫提速。项目峰值 RSS 中位 70,397,952 → 73,805,824 字节，宿主 system CPU 中位 328,000 → 422,000 微秒；并发以少量内存和 CPU 开销换取墙钟收益。
+## 依赖安全审计
 
-## 瓶颈与修改
+原 PR 组合的 npm 官方审计仍报告一项 high、三项 moderate 和三项 low。先在独立锁候选中按现有上游范围定向更新 body-parser 2.4.0、fast-uri 3.1.9 和 qs 6.17.1，审阅确认仅替换这三项传递依赖，直接 manifest、补丁及 importer 不变，不新增 overrides；随后应用到根锁并以 frozen-lockfile、strict-peer-dependencies 安装成功，重新同步两份 evaluator lock。
 
-- 初始完整扫描中位约 7.37 秒，128 次安全原生进程访问的累计所有者时间约 5.9 秒；改为每批最多四个源码候选读取，全部仍经原生安全访问、workspace pin、固定进程所有者与清理。每批全部结算后按文件顺序应用原有字节预算和输出顺序；typed 清理失败优先于取消，不启动下一批。
-- 初始长 Session CPU profile 显示逐记录 UTF-8 解码及重放占主要成本。整块解码候选使恢复退化到约 598 ms，已撤掉；最终只合并块内异步交接，每条仍独立解码，保留跨块 UTF-8、旧大记录、固定 EOF、尾部损坏和取消检查。
-- 诊断证据保留在 `.cache/performance-round3-v3/{before,candidate,replay-batched}.json` 与 `restore-before.cpuprofile`、`help-before.cpuprofile`。较大初始项目样本触发枚举期限，未纳入对照；初始 fixture 缺少 compaction automatic 字段被正确拒绝，修正后另建 fixture，未更改生产校验。
-- CLI profile 未显示需要扩大本轮范围的启动瓶颈；暖搜索已有缓存收益，不增加持久索引、schema、依赖或模型配置。生产文件改动仅 SessionStore 与 project insights；双语 README、专题、计划、项目地图与开发指南同步。
+最终已安装组合的官方审计为 info 0、low 1、moderate 0、high 0、critical 0，现有 `checkAudit` 策略通过；192 项组件许可证通过现有 `checkLicenses` 策略。残留为 `@inkjs/ui → deepmerge@4.3.1` 的 [GHSA-gcqx-w48m-w2h4](https://github.com/advisories/GHSA-gcqx-w48m-w2h4)，公告未提供修复版本；未忽略公告或变更安全门禁。证据 `.cache/pr-integration-2026-10-31/audit-final.json`、`licenses.json`；原始高危审计为 `audit-npmjs.json`，独立候选为 `audit-candidate.json`。默认本机镜像缺少 audit endpoint 的初次失败也保留为 `audit.json`，不能视作通过。
 
 ## 本轮验证
 
-新增多小记录的真实 JSONL 重放／搜索位置回归，以及受控四路读取、乱序字节预算、取消等待、并发 typed 清理故障和当前字节缓存复核。首批定向 streaming／insights 9 项通过，0 失败／跳过；日志 `.cache/performance-round3-targeted-initial.log`。交错性能对照另通过全部正确性、fixture 和构建身份断言。
+定向 UI/MCP/网络/expanded/workflow 回归 262 项全部通过，零跳过，日志 `.cache/pr-integration-2026-10-31/targeted.log`。安全传递依赖更新前的首轮完整门禁全部通过，1369 项中 1366 通过、3 跳过、零失败，日志 `initial-gates/`；其约 337 秒 test 包含 pretest，Node suite 本身约 324 秒。
 
-完整门禁按实际 package scripts 串行执行 typecheck → lint → test → build，一次全部通过；1367 项测试，1364 通过、3 跳过、0 失败，约 306 秒。日志 `.cache/performance-round3-gates/{typecheck,lint,test,build}.log`。跳过为本机文件 symlink、Windows 临时目录别名专门场景和 Unix 超时子进程实测，与前轮一致。
+应用最终安全依赖后重新发现实际 manifest，串行执行 typecheck → lint → test → build，四项全部通过；1369 项测试中 1366 通过、3 跳过、零失败，test 含 pretest 约 329 秒，Node suite 本身约 321 秒。跳过仍为本机文件 symlink、Windows 临时目录别名场景和 Unix 超时子进程实测。最终日志 `.cache/pr-integration-2026-10-31/{typecheck,lint,test,build}.log` 与 `gates.json`；不以首轮结果代替最终组合验证。
 
-补充静态检查通过：164 份公开文档路径和链接、953 组双语语言键与插值、workflow 固定身份及门禁、`git diff --check`。门禁后只补充本交接收据；提交前重查文档、暂存差异及最终源码／构建身份。
+补充通过：安全文件 read/create/update/delete/冲突 smoke、Windows 进程 owner 根与 detached 子进程清理、构建后 CLI/SDK 启动和原生 PTY 生命周期 7/7；安装补丁、workflow、953 组语言键与插值、165 份公开文档路径/链接、Dependabot 策略解析和 `git diff --check`。新增归档另查空白；未增加平台跳过或降低任何门禁。对应日志同目录 `{files-smoke,process-smoke,install-smoke,install-verify,workflows,ui,docs}.log`。
 
-最终源码及 JS 构建摘要与性能采样候选一致。门禁 pretest 会重编译原生 helper，采样时与门禁后的原生摘要分别保存在 `.cache/performance-round3-final/final-identity.json`；两臂采样期间的原生身份相同，原生源码和构建参数未修改。
+根锁与两份 evaluator lock 字节一致，最终锁 SHA-256 `f29df206ef83bf59d28dbdeefb3bd7fb7f21bd4e62ac1b070a22ea1feaa3f9c2`，固定 setup-python SHA 与上游 tag 核对一致；收据 `final-receipt.json`。门禁后仅补交接验证记录，源码、依赖和构建未再修改。
 
-## 交付边界
+## 未覆盖与远端交付
 
-本轮按授权以 `perf batch session replay and bound project reads [skip publish]` 提交并普通 fast-forward 推送当前分支，推送后核对远端 SHA，不使用 `[skip ci]`。Release workflow 仍仅 main 显式 dispatch；当前功能分支 push 不自动触发 PR/main Test，不声称远端 CI 已通过。真实终端、干净安装、取消收尾性能和跨平台仍未验收，不因此扩大当前授权任务。
+真实 Windows Terminal、Linux/macOS、干净消费者安装、包含 secret/SBOM 的完整安全扫描及真实模型评测未执行；本轮 audit/许可证检查和当前源码安装 smoke 不替代这些证据。real-fixtures 上游联网 proof 未重跑，旧 proof 不算新依赖验收。当前安全文件支持范围仍为 Windows 本地 NTFS。
+
+正在按用户授权提交并推送当前修复组合，使用 `[skip publish]` 且保留 CI。核对 Release workflow 仅接受 main 上的显式 workflow_dispatch，push/merge 不会创建 Release，本轮不 dispatch。待当前候选 Required checks 成功后才合并；不使用 admin 绕过检查。#13 保持 Node 22 策略，不合并其 Node 26 更新；其余依赖变更已包含在组合中，远端结算以实际状态为准。

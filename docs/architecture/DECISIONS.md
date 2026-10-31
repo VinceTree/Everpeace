@@ -1,5 +1,9 @@
 # Architecture Decisions
 
+## 运行时与界面依赖更新
+
+开发和 CI 继续以 Node 22 为基线，Node 类型定义与该主版本对齐，Dependabot 不自动升级到更高主版本。React 与测试渲染器使用相同精确版本并成组更新；Ink 大版本升级需复核普通 stream、输入解析和 inline resize 契约。App/Composer 使用公开尺寸 hook，Markdown 保留共享订阅及普通 Writable 的受检宽度回退。依赖变化同时重冻结 evaluator lock，旧候选证据不能迁移为新候选成功。执行规则见 [DEVELOPMENT](../DEVELOPMENT.md)。
+
 ## 有界失败、Job 所有权和持久恢复
 
 流和进程清理采用共享截止时间；期限到达返回资源故障并关闭后续准入，不能把超时当作资源已释放。Windows 在进程创建时加入 Job，根退出不能替代后代核验；保留沙箱，不授权裸 PID 终止。多文件提交采用原始字节/身份绑定的持久批次和追加恢复意图，不承诺原子事务或硬件断电持久性。allow 用户规则与项目限制分开求值，旧 allow 激活需确认；子包覆盖证据绑定当前 workspace revision，恢复不重放。详见 [可靠性加固](RELIABILITY_HARDENING.md)。

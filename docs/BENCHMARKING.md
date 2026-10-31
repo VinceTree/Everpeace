@@ -188,6 +188,8 @@ Checkout 的 buildDigest 覆盖入口所在的完整顶层 artifact 目录（构
 
 [EXPANDED_TASKS](benchmark/EXPANDED_TASKS.json) 增加八类合成用例及固定 node-pty #952 helper 异常路径，源码树摘要和外置评分器/依赖/seed/reference 冻结。合成百包不是大型真实仓库实测；helper 分数不代表全部进程清扫。准备失败、缺工具链和平台不适用单列，不缩小 planned 分母。
 
+根依赖升级须同步冻结 expanded 与 real-fixtures 的 evaluator lock，并核对 setup 中渲染器的精确版本。新的锁和 setup 会改变 evaluation 摘要，须重新证明当前 fixture；历史 proof、真实模型成绩和性能对照仍绑定原冻结身份，不能沿用为新候选通过证据。
+
 [PUBLIC_REPORT](benchmark/PUBLIC_REPORT.md) 与版本化 JSON 保留独立历史候选的逐次成绩，首页展示成功/计划，Unknown Usage 独立。不完整来源标证据不足；不同候选不合并，敏感日志不提交。新 campaign 自动生成公开汇总并绑定各 harness 代码/构建与 evaluation 摘要。
 
 [DEEPSEEK_CAMPAIGNS](benchmark/DEEPSEEK_CAMPAIGNS.json) 仅是官方与中转的独立准备记录，数值预算和模型身份待另行授权；不能直接作为 live 配置。新增任务离线证明不是 DeepSeek 实测，本轮模型运行次数为零。

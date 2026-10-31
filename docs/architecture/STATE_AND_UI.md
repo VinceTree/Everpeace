@@ -155,6 +155,8 @@ workflow 提供路径列表时同时返回 `changed_paths_total` 和 `changed_pa
 
 详细目录职责见 [TUI_STRUCTURE](TUI_STRUCTURE.md)。界面始终 inline，使用终端原生 scrollback，不切换 alternate screen。主状态机拥有视图切换；展示组件不得自己创建 Agent、写 Session 或启动新任务。
 
+Ink 的标准流按普通 Node stream 处理。App 和 Composer 用 `useWindowSize` 观察有效宽度，独立 Composer 挂载也能响应 resize；历史的去抖重放仍只在聊天窗口执行。Markdown 的嵌套块继续共用每个输出流的一份 resize 监听器，读取宽度前收窄属性类型，缺失、零或非有限值回退到 80 列，卸载后移除监听器。输入解析丢弃鼠标、焦点、光标位置等终端回报；正常按键、Kitty Enter 和 bracketed paste 保持原有提交语义。回归见 [rich text](../../tests/unit/tui/rich-text.test.tsx)、[Composer](../../tests/unit/tui/prompt-history.test.tsx) 和 [App](../../tests/unit/tui/app.test.tsx)。
+
 - 宿主文案集中管理并支持中英文切换；模型正文、源码和第三方输出保持原文。状态仅投影协调器、权限、计量及清理事实，清理失败保留准入阻塞。Markdown、代码、shell 和严格 unified diff 分层高亮，超大或未知内容安全退回纯文本。
 - 等待状态包含 provider、耗时与 Ctrl+C 提示；`/status` 显示模型、供应商、实际协议、压缩/推理设置、context 占用和累计 token/cache，缺失数据明确显示未知或不完整。
 - `/status`、`/outputs`、`/history`、`/terminal-setup`、信息窗口及 picker/wizard 使用独立命令窗口；`/new`、`/clear`、`/exit` 是立即动作。

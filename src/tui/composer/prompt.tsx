@@ -1,5 +1,5 @@
 import {uiText} from '../../localization/messages.js';
-import { Box, Text, useInput, usePaste, useStdout } from "ink";
+import { Box, Text, useInput, usePaste, useWindowSize } from "ink";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   filterSlashCommands,
@@ -175,7 +175,7 @@ export function Prompt({
 }: PromptProps) {
   const localNavigation = useRef<{ index: number | undefined; draft: string }>({ index: undefined, draft: "" });
   const navigation = historyNavigationRef ?? localNavigation;
-  const { stdout } = useStdout();
+  const { columns } = useWindowSize();
   const localStateRef = useRef<ComposerState>(createComposerState());
   const stateRef = editorRef ?? localStateRef;
   const [state, setState] = useState(stateRef.current);
@@ -483,7 +483,7 @@ export function Prompt({
   const firstVisibleLine = Math.max(0, cursorLine - MAX_VISIBLE_LINES + 1);
   const visibleLines = lines.slice(firstVisibleLine, firstVisibleLine + MAX_VISIBLE_LINES);
   // Root padding, prompt padding, the marker and its gap consume five cells.
-  const availableWidth = Math.max(1, (stdout.columns ?? 80) - 5);
+  const availableWidth = Math.max(1, columns - 5);
 
   return (
     <Box width="100%" flexDirection="column">
