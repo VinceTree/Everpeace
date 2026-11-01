@@ -70,7 +70,7 @@
     "ink": "8.0.0",
     "jsonc-parser": "3.3.1",
     "lowlight": "3.3.0",
-    "marked": "18.1.1",
+    "marked": "18.1.2",
     "node-pty": "1.1.0",
     "openai": "7.15.0",
     "proper-lockfile": "4.1.2",
