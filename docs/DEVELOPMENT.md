@@ -229,6 +229,8 @@ pnpm benchmark:campaign -- --config .\campaign.json --prove-fixtures
 
 Release 不再由分支或 tag push 自动触发，只能在 main 显式 dispatch 完整候选 SHA。Test 继续在 PR/main push 执行，不使用 `[skip ci]`。历史 `[skip publish]` 标记不再是发布安全机制；发布授权仍须明确，标签不能代替完整门禁。部署后先运行 failure_drill，Windows 故意失败时必须观察 gate 失败、publish skipped 且零远端发布写入。
 
+上述完整候选 workflow 用于原生安装包交付。根 AGENTS 明确允许的源码预发布沿用已有交付范围：用户明确授权后，绑定 main 的准确提交及当前成功的 Windows/Linux/security/Required checks，公开带标签源码和脱敏证据，并明确尚未覆盖的平台。源码预发布不能附带未经完整门禁的原生安装包，也不能作为专用 Windows Runner 或消费者安装通过的证明；安全扫描和锁文件 SBOM 必须属于该源码提交。
+
 展示版本调整若被授权，应同步 package.json 与中英文 README。正常发布另需确认 tag 和 GitHub Release 实际成功；只看到 Git push 成功不足以证明发布完成。以上操作规则不构成本次开发任务的提交或付费授权。
 
 ## 团队定向验收
