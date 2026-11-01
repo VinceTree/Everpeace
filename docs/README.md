@@ -6,7 +6,7 @@
 
 `docs/` 是唯一维护目录。[dosc/](../dosc/README.md) 保留为拼写导航入口。面向用户的安装及命令说明继续维护在 [English README](../README.md) 和 [中文 README](../README.zh-CN.md)。
 
-新人贡献从 [CONTRIBUTING](../CONTRIBUTING.md) / [中文贡献指南](../CONTRIBUTING.zh-CN.md) 开始，无需先读内部交接。公开接口见 [兼容契约](COMPATIBILITY.md)，本轮状态见 [核心体验实施](core-experience/STATUS.md)。
+新人贡献从 [CONTRIBUTING](../CONTRIBUTING.md) / [中文贡献指南](../CONTRIBUTING.zh-CN.md) 开始，无需先读内部交接。公开接口见 [兼容契约](COMPATIBILITY.md)，当前状态见 [HANDOFF](HANDOFF.md)，核心体验的历史验收见 [实施快照](core-experience/STATUS.md)。
 
 ## 文档地图
 

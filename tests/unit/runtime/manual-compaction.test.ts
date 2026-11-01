@@ -41,16 +41,18 @@ async function fixture(t: TestContext, options: { native?: boolean; ledger?: boo
   const goal = new GoalRuntime({ async getGoal() { return (await store.load(session.id)).goal; }, async setGoal(value) { await store.setGoal(session.id, value); } });
   await goal.create({ objective: "Fix the code", tokenBudget: options.tokenBudget ?? 100 });
   let coding = 0, summaries = 0, landed = 0;
+  const summaryRequests: Record<string, unknown>[] = [];
   const provider: ProviderRuntime = {
     sdk: {} as ProviderRuntime["sdk"], capabilities, settings: defaultModelRequestSettings(capabilities),
     responses: {
       async create(params) {
+        summaryRequests.push(structuredClone(params));
         assert.equal(params.tool_choice, "none");
         summaries++;
         return { id: "summary", status: "completed", output: [], output_text: checkpointText(), usage };
       },
       async stream() { coding++; return (async function* () { yield { type: "response.completed", response: { id: "coding", status: "completed", output: [], output_text: "done", usage } }; })(); },
-      ...(native ? { async compact() { summaries++; return { output: compacted, usage }; } } : {}),
+      ...(native ? { async compact(params: Record<string, unknown>) { summaryRequests.push(structuredClone(params)); summaries++; return { output: compacted, usage }; } } : {}),
     },
   };
   const handle = createProductionAgent({ model, workspacePath: root, providerRuntime: provider,
@@ -71,8 +73,26 @@ async function fixture(t: TestContext, options: { native?: boolean; ledger?: boo
       else await handle.dispose();
     } finally { await rm(root, { recursive: true, force: true }); }
   });
-  return { handle, provider, store, session, goal, counts: () => ({ coding, summaries, landed }), expectCleanupFailure(value: Error) { cleanupFailure = value; } };
+  return { handle, provider, store, session, goal, summaryRequests, counts: () => ({ coding, summaries, landed }), expectCleanupFailure(value: Error) { cleanupFailure = value; } };
 }
+
+test("native and summary compaction receive the current full objective without advancing blocker turns", async (t) => {
+  for (const native of [true, false]) for (const status of ["active", "paused"] as const) await t.test(`${native ? "native" : "DeepSeek"} ${status}`, async (t) => {
+    const f = await fixture(t, { native });
+    if (status === "paused") await f.goal.update("paused");
+    const turnId = (await f.goal.get())?.goal_turn_id;
+    await f.handle.agent.compact();
+    const request = f.summaryRequests[0]!;
+    const text = [request.instructions,
+      ...(Array.isArray(request.input) ? request.input.map((item: Record<string, unknown>) => item.content) : [])].filter(value => typeof value === "string").join("\n");
+    assert.ok(text.includes('"objective":"Fix the code"'));
+    assert.ok(text.includes(`"status":"${status}"`));
+    if (status === "active") assert.match(text, /full-objective audit/u);
+    else assert.doesNotMatch(text, /Call update_goal with complete only/u);
+    assert.equal((await f.goal.get())?.status, status);
+    assert.equal((await f.goal.get())?.goal_turn_id, turnId);
+  });
+});
 
 test("manual native and DeepSeek compaction charge the active Goal and persisted Session exactly once", async (t) => {
   for (const native of [true, false]) await t.test(native ? "native" : "DeepSeek", async (t) => {

@@ -1,6 +1,10 @@
-# Current implementation status / 本轮实施状态
+# Core-experience acceptance snapshot / 核心体验历史验收快照
 
-The baseline is published source commit `1e805410b713ab90ee09040fced7137416186d0c` (`v0.6.0-rc.1`). Candidate changes are maintained on `codex/public-contract-core-experience`. The package identifier and existing tags are unchanged. The user's real-model test deferral is effective: **no further paid probes or experiments** in this implementation stage.
+This page preserves the evidence and limits of the core-experience implementation candidate below. Its branch, draft-PR state and checks describe that historical snapshot. Use [HANDOFF](../HANDOFF.md) for the current branch, changes and validation; these receipts do not validate later changes.
+
+本页保留核心体验候选当时的验收证据与限制，正文的分支、草稿 PR 和检查状态均属于该历史快照。当前分支、改动与验证统一见 [HANDOFF](../HANDOFF.md)，不得把本页收据用于后续候选。
+
+The baseline was published source commit `1e805410b713ab90ee09040fced7137416186d0c` (`v0.6.0-rc.1`). Candidate changes were maintained on `codex/public-contract-core-experience`. The package identifier and existing tags were unchanged. The user's real-model test deferral applied: **no further paid probes or experiments** in that implementation stage.
 
 基线为上述已发布源码提交，候选在独立分支实施，不修改包标识或移动旧标签。用户已暂停真实模型测试，本阶段不再执行付费探测或实验。
 
@@ -32,6 +36,6 @@ Windows 开发打包在较早 `edfa463` 上生成了 tarball，但固定 SBOM �
 The real-model [150-slot plan and five deferred reports](DEFERRED_EVALUATION.md) explicitly distinguish frozen definitions from executable fixture/harness material that still needs preparation. No efficacy, complete-cost or competitive claim follows from them.
 
 
-[PR #11](https://github.com/VinceTree/Everpeace/pull/11) remains a draft. Hosted Windows/Linux, security and Required checks succeeded on `8385e37`; source runtime is frozen and later receipt edits are documentation only. The first failed run is retained in hosted-ci.json. The catalog false positive was reviewed by exact path/full-file digest; no broad secret-scan exclusions were added.
+[PR #11](https://github.com/VinceTree/Everpeace/pull/11) was a draft at this snapshot. Hosted Windows/Linux, security and Required checks succeeded on `8385e37`; source runtime was frozen and later receipt edits were documentation only. The first failed run is retained in hosted-ci.json. The catalog false positive was reviewed by exact path/full-file digest; no broad secret-scan exclusions were added.
 
-PR 保持草稿，两平台、安全与 Required checks 已在 `8385e37` 通过。第一轮失败原样保留；只为已审查的静态文案误报增加精确文件摘要，没有关闭完整历史或当前文件扫描。运行日志下载遇到 EOF，所以没有猜测平台测试数量。
+快照形成时 PR 保持草稿，两平台、安全与 Required checks 已在 `8385e37` 通过。第一轮失败原样保留；只为已审查的静态文案误报增加精确文件摘要，没有关闭完整历史或当时文件扫描。运行日志下载遇到 EOF，所以没有猜测平台测试数量。
