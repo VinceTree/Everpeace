@@ -1,3 +1,4 @@
+import { isolateOfflineModelProxy } from "./offline-model-proxy.js";
 import assert from "node:assert/strict";
 import { LearnedMemoryStore } from "../../src/memory/learned-memory.js";
 import { createDefaultTuiDependencies } from "../../src/tui/app/dependencies.js";
@@ -21,6 +22,7 @@ const startedWrite = new Promise<void>((resolve) => { writing = resolve; });
 const releasedWrite = new Promise<void>((resolve) => { release = resolve; });
 const originalAppend = LearnedMemoryStore.prototype.append;
 const originalFetch = globalThis.fetch;
+const restoreProxy = isolateOfflineModelProxy();
 let calls = 0;
 LearnedMemoryStore.prototype.append = async function(this: LearnedMemoryStore, ...args: Parameters<LearnedMemoryStore["append"]>) {
   writing();
@@ -74,5 +76,5 @@ try {
     assert.ok(failStorage && error instanceof AggregateError && error.errors.includes(storageFailure));
   });
   LearnedMemoryStore.prototype.append = originalAppend;
-  globalThis.fetch = originalFetch;
+  globalThis.fetch = originalFetch; restoreProxy();
 }

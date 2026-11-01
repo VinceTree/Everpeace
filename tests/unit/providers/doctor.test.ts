@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
+import { isolateOfflineModelProxy } from "../../fixtures/offline-model-proxy.js";
 import { diagnosticFreshness, diagnosticIdentity, runLiveDiagnostics } from "../../../src/providers/doctor.js";
 import type { ProviderRuntime } from "../../../src/providers/openai-compatible.js";
 import { defaultModelRequestSettings, resolveProviderCapabilities } from "../../../src/providers/capabilities.js";
 import { createProviderRuntime } from "../../../src/providers/openai-compatible.js";
 
 const model = { id: "fixture", base_url: "https://api.deepseek.com", model_name: "original-model-id", api_key: "unused-fixture", responses_profile: "deepseek" as const };
+const offlineProxyRestorations: Array<() => void> = [];
+beforeEach(() => { offlineProxyRestorations.push(isolateOfflineModelProxy()); });
+afterEach(() => { offlineProxyRestorations.pop()?.(); });
 function runtime(unknownAt?: number): { runtime: ProviderRuntime; requests: number[]; closed: number[] } {
   const capabilities = resolveProviderCapabilities(model.base_url, model.model_name, model.responses_profile);
   const requests: number[] = [], closed: number[] = [];

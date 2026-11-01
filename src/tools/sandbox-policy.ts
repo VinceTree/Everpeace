@@ -260,12 +260,20 @@ export function nativeLspPermissionProfileArgs(policy: LspSandboxPolicy, launche
 
 /** Filter inherited variables before the Node launcher itself starts. Values are never logged. */
 export function modelShellEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(source).filter(([name, value]) => {
+  const environment: NodeJS.ProcessEnv = Object.fromEntries(Object.entries(source).filter(([name, value]) => {
     if (value === undefined) return false;
     if (/(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)/iu.test(name)) return false;
     // These can execute code before the OS sandbox is established or load shell startup files.
     return !/^(?:NODE_OPTIONS|NODE_PATH|BASH_ENV|ENV|SHELLOPTS|BASHOPTS|BASH_FUNC_.*|LD_.*|DYLD_.*|PYTHONPATH|PYTHONSTARTUP)$/iu.test(name);
   }));
+  // MXC redirects LOCALAPPDATA inside the child. Freeze pnpm's host default
+  // before launch so an installed toolchain is reused instead of bootstrapped
+  // into the container. This adds no filesystem grant or host execution path.
+  if (process.platform === "win32" && !Object.keys(environment).some((name) => name.toUpperCase() === "PNPM_HOME")) {
+    const localAppData = Object.entries(environment).find(([name]) => name.toUpperCase() === "LOCALAPPDATA")?.[1];
+    if (localAppData) environment.PNPM_HOME = path.win32.join(localAppData, "pnpm");
+  }
+  return environment;
 }
 
 /** Protect control metadata through the in-process editor as well as the shell backend. */

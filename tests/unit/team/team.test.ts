@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import { windowsNativeSkip } from "../../fixtures/native-mode.js";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
@@ -23,10 +23,14 @@ import { SkillManager } from "../../../src/skills/manager.js";
 import { SkillCatalog } from "../../../src/skills/catalog.js";
 import { projectInsights } from "../../../src/tools/project-insights.js";
 import { runOfflineComparison } from "../../fixtures/team-comparison.js";
+import { isolateOfflineModelProxy } from "../../fixtures/offline-model-proxy.js";
 import type { TeamSnapshot } from "../../../src/team/types.js";
 import type { SessionGoal } from "../../../src/storage/session-store.js";
 
 const usage = { input_tokens: 4, output_tokens: 6, total_tokens: 10, output_tokens_details: { reasoning_tokens: 3 } };
+const offlineProxyRestorations: Array<() => void> = [];
+beforeEach(() => { offlineProxyRestorations.push(isolateOfflineModelProxy()); });
+afterEach(() => { offlineProxyRestorations.pop()?.(); });
 const model = { id: "registered", model_name: "raw-model", base_url: "https://api.example.test/v1", api_key: "fixture" };
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { promise, resolve }; }
 async function temporary(run: (directory: string) => Promise<void>) { const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "ep-team-test-"))); try { await run(directory); } finally { await fs.rm(directory, { recursive: true, force: true }); } }

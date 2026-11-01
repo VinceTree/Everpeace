@@ -1,3 +1,4 @@
+import { isolateOfflineModelProxy } from "./offline-model-proxy.js";
 // Explicit development fixture. prepare/offline never load credentials or call a provider.
 import assert from "node:assert/strict";
 import { randomUUID, createHash } from "node:crypto";
@@ -72,6 +73,7 @@ if (action === "prepare") {
     model = { ...matches[0]!, responses_profile: "deepseek", request_settings: model.request_settings! };
   }
   const originalFetch = globalThis.fetch;
+  const restoreProxy = action === "offline" ? isolateOfflineModelProxy() : () => {};
   const results: Array<{ id: string; passed: boolean; usage: ReturnType<RequestAttemptLedger["snapshot"]>; error: string | null }> = [];
   let stopped = false;
   try {
@@ -130,7 +132,7 @@ if (action === "prepare") {
       await save(`${action}-${item.id}.json`, { passed, usage, metrics: metrics.snapshot(), error });
       stopped = !passed || !usage.complete || results.reduce((sum, run) => sum + run.usage.inputTokens + run.usage.outputTokens, 0) >= 20_000;
     }
-  } finally { globalThis.fetch = originalFetch; }
+  } finally { globalThis.fetch = originalFetch; restoreProxy(); }
   await save(`${action}-result.json`, { planned: cases.map((item) => item.id), results, skipped: cases.filter((item) => !results.some((run) => run.id === item.id)).map((item) => item.id), paidRequests: action === "offline" ? 0 : results.reduce((sum, run) => sum + run.usage.attempts.filter((attempt) => attempt.status !== "rejected").length, 0) });
   console.log(JSON.stringify({ action, passed: results.length === 2 && results.every((run) => run.passed), root }));
   if (results.length !== 2 || results.some((run) => !run.passed)) process.exitCode = 1;

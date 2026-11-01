@@ -41,6 +41,10 @@ function usage(ledger: RequestAttemptLedger): NonNullable<BenchmarkHarnessResult
 }
 
 function installPreflightProviderBoundary(expectedModel: string, team?: TeamOptions): { evidence(): PreflightBoundaryEvidence } {
+  // This fresh worker owns a synthetic global-fetch boundary. Inherited model
+  // proxies must not select a real transport instead; run/live mode is untouched.
+  process.env.no_proxy = "*";
+  process.env.NO_PROXY = "*";
   let requests = 0;
   let rootRequests = 0; let memberRequests = 0;
   const members = team?.enabled !== false && team ? (team.maxAgents ?? 3) - 1 : 0;

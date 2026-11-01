@@ -4,12 +4,21 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { assertBenchmarkCheckoutIdentity, captureBenchmarkCheckoutIdentity, createCheckoutBenchmarkAdapter, preflightBenchmarkCheckout } from "../../../src/benchmark/checkout.js";
 import { RequestAttemptLedger } from "../../../src/agent/request-attempt-ledger.js";
 import { createBenchmarkMetricsCollector } from "../../../src/benchmark/metrics.js";
 
 const exec = promisify(execFile);
+
+function inheritRealProxyConfiguration(t: TestContext): void {
+  const names = ["http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "no_proxy", "NO_PROXY"] as const;
+  const before = names.map((name) => [name, process.env[name]] as const);
+  for (const name of names) delete process.env[name];
+  process.env.http_proxy = "http://127.0.0.1:1";
+  process.env.https_proxy = "http://127.0.0.1:1";
+  t.after(() => { for (const [name, value] of before) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } });
+}
 
 test("checkout identity binds revision, runtime source, and all built modules", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-checkout-identity-"));
@@ -138,7 +147,8 @@ test("dsh identity includes generated modules and excludes dependency installati
   }
 });
 
-test("checkout preflight invokes the repository production adapter at a synthetic provider boundary", { timeout: 45_000 }, async () => {
+test("checkout preflight invokes the repository production adapter at a synthetic provider boundary", { timeout: 45_000 }, async (t) => {
+  inheritRealProxyConfiguration(t);
   const root = process.cwd();
   const entryPath = path.resolve("src/benchmark/production.ts");
   const identity = await captureBenchmarkCheckoutIdentity(root, entryPath);
@@ -155,7 +165,8 @@ test("checkout preflight invokes the repository production adapter at a syntheti
   assert.equal(result.usage.complete, true);
 });
 
-test("checkout preflight forwards team configuration and accounts actual independent member requests", { timeout: 45_000 }, async () => {
+test("checkout preflight forwards team configuration and accounts actual independent member requests", { timeout: 45_000 }, async (t) => {
+  inheritRealProxyConfiguration(t);
   const root = process.cwd(); const entryPath = path.resolve("src/benchmark/production.ts");
   const identity = await captureBenchmarkCheckoutIdentity(root, entryPath);
   const result = await preflightBenchmarkCheckout({ sourceRoot: root, ...identity, team: { enabled: true, maxAgents: 3 }, modelName: "deepseek-flash" });

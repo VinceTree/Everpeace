@@ -1,3 +1,4 @@
+import { isolateOfflineModelProxy } from "./offline-model-proxy.js";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { AuxiliaryRequestExecutor } from "../../src/agent/auxiliary-request-executor.js";
@@ -10,6 +11,7 @@ if (!root || process.cwd() !== root) throw new Error("An isolated SDK accounting
 const usage = { input_tokens: 2, output_tokens: 1, total_tokens: 3 };
 const zero = { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
 const originalFetch = globalThis.fetch;
+const restoreProxy = isolateOfflineModelProxy();
 let requests = 0;
 globalThis.fetch = async () => {
   requests++;
@@ -54,4 +56,4 @@ try {
     assert.equal(requests - before, mode === "pre-cancel" ? 0 : 1);
   }
   process.stdout.write("Production SDK Memory accounting and cancellation passed\n");
-} finally { globalThis.fetch = originalFetch; }
+} finally { globalThis.fetch = originalFetch; restoreProxy(); }

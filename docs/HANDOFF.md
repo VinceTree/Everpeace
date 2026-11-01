@@ -1,32 +1,44 @@
 # 当前交接
 
-2026-11-01：用户要求继续优化 harness 并做好定位，明确选择优先加强「编码闭环的可靠性与完成质量」，随后授权自动提交和推送。工作从干净候选开始，复用当前 checkout；本地分支 `codex/harness-goal-reliability` 基于 main `7f6efcf8c41f5444829a913ba30ea2e8a83d2bbb`。展示版本仍为 `0.6.0-rc.4`，不调用付费模型、不创建 Release；门禁通过后提交使用 `[skip publish]`，保留 CI。
+2026-11-01：用户明确要求修改现有六个 PR 后开始合并，仍不创建 Release。开始时 `codex/harness-goal-reliability` 工作树干净。#26 的原候选经当前 Required checks 全绿核对后转 ready，并普通合并；此前 Goal 优化记录移入 [交接归档](archive/HANDOFF-2026-11-01-goal-reliability.md)。
 
-PR #20 已完成交付，详情移入 [归档](archive/HANDOFF-2026-10-31-pr20.md)。旧 CI 和门禁不作为本轮修改的证据。
+当前分支 `codex/pr-integration-2026-11-01` 基于 main `0b3b26fe55d49dc4181f7de62c4950a69a082642`，复用原 checkout。产品展示版本仍为 `0.6.0-rc.4`，不打 tag、不创建 Release、不调用模型或付费评测。证据目录 `.cache/pr-integration-2026-11-01/`。
 
-## 定位与本轮变化
+## 六 PR 范围与集成方式
 
-定位明确为 DeepSeek 优先、Windows 优先，面向个人 Node/TypeScript 单包开发的 coding harness。CLI、exec、SDK 共用生产运行层，把模型、项目上下文、工具、隔离执行、Session 与宿主验证接成闭环。双语 README、产品概览、使用指南、运行时和决策同步这项定位。
+| PR | 目标 |
+| --- | --- |
+| #21 | 原生 sandbox 依赖 @openai/codex 升至 0.165.0，复核 MXC/managed config 与真实原生边界 |
+| #22 | undici 升至 8.12.3，官方 engines 为 Node >=22.19.0，与本项目最低基线一致；验证公共传输、MCP 与模型代理／流清理 |
+| #23 | keyring 升至 2.1.2，保留 AuthStorage 和系统凭据库边界 |
+| #24 | marked 升至 18.1.2，复验既有 Markdown／TUI 回归 |
+| #25 | oxlint 升至 1.90.0，保持 correctness 策略 |
+| #26 | Goal 优化已合并，使用上轮同一源码及当前远端成功检查 |
 
-先通过真实 ReactAgent + GoalRuntime 的合成 provider 调度复现四个失败：迟到完成覆盖用户暂停、覆盖预算停止、完成替换后的新目标，以及同一回合三次 blocked 调用错误终止目标。修复前四项全失败，修复后通过；无真实模型请求。
+五项依赖 PR 原始只改 manifest 与根锁，均遗漏 expanded／real-fixtures 冻结锁，#21 还遗漏 Linux CI 的明确后端身份。先形成一个可验证组合，不接受各自不完整的旧锁。用 pnpm 精确更新上述五项，审阅解析差异仅涉及对应包、平台绑定及 OpenAI 的 undici peer 绑定；qs 6.17.1 等已有补丁保持。根锁同步至两份 evaluator lock，不迁移旧候选的评测结果。
 
-- 完成意图绑定 goal_id 和宿主 goal_turn_id，只有同一仍活动目标可结算；暂停／恢复、替换、运行中用户追加需求和下一编码回合使旧意图失效。停止状态不接受模型重新覆盖。追加需求后必须有新的完成请求，旧意图不能沿用。
-- GoalRuntime 按真实 coding turn 分配身份，每轮最多一份阻塞报告，稳定原因只以 SHA-256 摘要加入 Goal 元数据。不同原因或中间未报告阻塞会重置计数；第三个连续报告回合才 blocked。JSONL 重开保留回合依据；旧记录无身份则重新计数，blocked 恢复后重新审计。成功暂停／阻塞更新停止当前工具循环。
-- 每个 coding step 刷新当前完整目标与状态，工具重试使用同一 step 快照；原生与 summary 压缩也携带当前 Goal，Plan 不引入执行 Goal 指令。目标按 JSON 任务数据提供，宿主提示要求逐项对照原要求与当前证据，不把通过代码检查等同于完成整个目标。
-- Session 只增加可选 Goal 元数据字段，原始阻塞描述不复制到 Goal 记录；既有工具调用参数仍按原 Session 规则保存。未更改依赖、锁、产品版本、权限、验证 suite 或修复轮数。
+已核对 Codex 上游固定 tag 的 debug_sandbox 与 Windows sandbox 配置入口，保持显式 MXC、managed config 和原生启动失败关闭；同步 Linux CI 固定身份、native receipt 后端标识与当前专题／使用文档。workflow 校验新增 manifest 与已审阅 Linux 身份一致性检查，并补不一致时拒绝的回归，不移除人工明确固定身份。
 
-## 验证证据
+集成候选通过本机定向回归、完整四门禁及当前 GitHub Required checks 后，以普通 merge 合入 main。五个依赖原始 head 通过保留当前内容的 merge 记录进入候选，逐项证明目标更新和原始 ancestry；由 GitHub 结算间接合并，不使用 squash/rebase 丢弃提交，也不绕过保护或单独接受旧失败候选。
 
-证据目录 `.cache/harness-goal-reliability/`。Goal 生命周期与 JSONL 专项已通过，生产压缩／runner／资源清理定向回归通过。第一轮完整门禁在 test 停止，1387 项中有一项旧故障注入因新增的回合前持久化而提前失败：fixture 把所有 Goal 写入都设为失败，尚未触及它要覆盖的请求后用量持久化阶段。已将该注入明确放到首个请求之后，保留一次请求、一次失败写入和零工具执行的原断言；另增回合持久化故障在零请求／零工具前停止的覆盖。四文件定向回归 60/60 通过，首轮失败和收据保留为 `test-initial-failure.log`、`gates-initial-failure.json`。
+## 验证状态
 
-最终候选在 Node 22.19.0、pnpm 10.30.3 下重新发现脚本，串行 typecheck → lint → test → build 全部通过；1391 项测试中 1388 pass、3 个既有平台 skip、零 fail/cancelled。四项分别约 1.665、1.168、336.416、1.900 秒，test 含 pretest，Node suite 约 329 秒。对应 `{typecheck,lint,test,build}.log`、`gates.json`，903 份核心输入在验证前后摘要一致，绑定 SHA-256 `10bb07760eba2e8829ff1190932230bdb87d1148a5de84ef8669e9a1cb2714f8`，收据 `identity.json`。
+冻结安装与 strict peer 检查通过，五项实际依赖已更新，根锁和两份 evaluator lock 字节一致。官方审计 high/critical/moderate 为零，仅保留一项既有 low，192 个组件通过既有许可证策略。锁差异、安装、审计与许可证收据分别为 `lock-review.json`、`install.log`、`audit.json`、`licenses.json`。系统 AuthStorage 仅针对本任务新建的合成条目完成 set/get/delete/absent 实测并清理，不读取用户已有凭据，证据 `keyring-smoke.log`。
 
-另通过 167 份公开文档路径／链接、953 项双语文案及插值、workflow 固定身份、源码原生补丁核对与 CLI/SDK/PTY 安装烟测 7/7（零跳过）。对应 `{docs-verify,ui-verify,ci-verify,install-verify,install-smoke}.log`。完整门禁后只补文档验证收据，不再修改源码或测试；提交推送使用 `[skip publish]`，不触发只允许显式 workflow_dispatch 的 Release。
+初次定向回归发现 Undici 8 dispatcher 与 Node 内置 fetch 不兼容，三个代理测试失败。修复为同包 fetch/dispatcher，显式保留 HTTP CONNECT，并新增真实代理 Responses 流及物理 socket 关闭验证；初次日志保留 `targeted-initial-failure.log`。明确隔离全局 fake fetch fixture 的宿主代理设置，真实代理测试及 live 分支不隔离。
 
-## 后续与限制
+首次 required 原生清单中团队完整验证失败，保留 `native-initial-failure.log` 与失败 receipt。单独复现确认 MXC 重定向 LOCALAPPDATA，使 pnpm 找不到宿主已缓存的项目版本，转而尝试在容器内安装并以 EPERM 失败。模型启动前固定未设置的宿主 PNPM_HOME，保留用户显式配置、包管理器声明、原生隔离和所有验证断言。真实双 worker、子任务检查与根故意失败闭环已通过，日志 `team-toolchain-fixed.log`。
 
-中间候选完整测试运行期间，独立合成 provider 复现追加需求后旧完成意图仍会提交，证据 `steering-baseline.log`。已补 accepted steering 清除旧意图，回归同时验证未重新请求则保持 active、重新审计请求后才可 complete；定向 11/11 通过。中间运行另存 `*-intermediate.log`，不作为最终源码证据，最终候选已重新执行上述四项门禁。
+与 CI 同版 Node 22.23.4 的网络／provider／Markdown／expanded／workflow 定向回归 71/71 通过，零跳过，日志 `targeted.log`；真实代理专项 5/5，通过流关闭和取消路径。完整 required 原生复验 84 项全部通过、零失败／跳过，23 条必需原生用例全部满足；证据 `native-final.log` 与 `native-final/receipt.json`，标明本机脏候选，不冒充专用 Runner 或安装包验收。
 
-本轮先落实目标忠实性与 Goal 状态边界。下一步沿共享 runner 的最终异常收尾、模型终态及恢复验证债务检查，发现缺口先补可复现证据。宿主比较的是规范化阻塞描述的摘要，不能自动证明外部阻塞真实性或模型语义审计完整性。模型是否正确理解目标及真实编码成功率仍须独立真实评测，当前没有新付费授权或收益结论。
+首次完整四门禁在 test 停止，1394 项中两项 checkout preflight 未观察到合成请求边界。preflight 仍继承宿主代理，使同包 fetch 绕过它的全局 fake fetch。仅在 fresh worker 的 preflight 模式设置代理旁路，run/live 模式保留代理；原有 TCP／远端及无关 pipe 拒绝保持。两项回归明确传入代理配置并保留请求数、成员和用量断言；失败收据 `test-initial-failure.log`、`gates-initial-failure.json`，定向复验 5/5 通过，见 `preflight-fixed-cli.log`。原生执行路径不因该 benchmark-only 修复变化。
 
-门禁使用任务所属的临时保持运行 helper，避免已知现代待机中断；不改永久电源设置，收尾通过删除 `.cache/harness-goal-reliability/keep-awake.active` 使其退出，实际进程记录留在忽略的证据目录。
+最终重新发现 manifest，在 Node 22.19.0、pnpm 10.30.3 下串行执行 typecheck → lint → test → build，四项全通过。1394 项测试中 1391 pass、3 个既有平台 skip、零 fail/cancelled；四项分别约 1.879、1.281、352.194、2.020 秒，test 含 pretest，Node suite 约 344 秒。证据 `{typecheck,lint,test,build}.log`、`gates.json`。915 份核心输入验证前后摘要一致，SHA-256 `2bcd539e06a2934d0832b95ded2da7b6772fa1f6c9f084f073b343b4477e3023`，收据 `identity.json`；根锁与两份 evaluator lock 字节一致。
+
+补充通过安装补丁身份、CLI/SDK/PTY 烟测 7/7（零跳过）、安全文件 read/create/update/delete/冲突烟测、根与 detached 后代清理烟测、workflow 身份、953 项双语文案与插值、168 份公开文档路径／链接。对应 `{install-verify,install-smoke,files-smoke,process-smoke,ci-verify,ui-verify,docs-verify}.log`。门禁后仅补文档收据与保留提交来源的历史，不再修改已验证实现、依赖或测试。
+
+## 交付与边界
+
+main 的 Required checks、strict up-to-date 和管理员保护保持。提交包含 `[skip publish]`，保留 CI；Release workflow 只接受显式 workflow_dispatch，本任务不触发。认证通过既有 Git credential helper，仅向 gh 子进程提供，不落盘凭据。临时保持运行 helper 归本任务所有，收尾通过删除 `keep-awake.active` marker 退出，不改永久电源设置。
+
+真实 Windows Terminal、专用 Windows Runner、消费者安装包和付费模型质量不属于这些本机或 hosted 检查的证据。新增机器人 PR 不自动进入本次已明确的六项范围。

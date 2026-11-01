@@ -10,11 +10,13 @@ import { SessionStore } from "../../src/storage/session-store.js";
 import { TeamStore } from "../../src/team/store.js";
 import { git, loadTeamWorkspace, removeTeamWorkspace } from "../../src/team/workspace.js";
 import type { TeamMember } from "../../src/team/types.js";
+import { isolateOfflineModelProxy } from "./offline-model-proxy.js";
 
 export async function runOfflineComparison(team: boolean, failRoot = false, sameModel = false) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-team-comparison-"));
   const workspace = path.join(directory, "workspace"); await fs.mkdir(workspace);
   const originalFetch = globalThis.fetch;
+  const restoreProxy = isolateOfflineModelProxy();
   const root = { id: "fixture-root", model_name: "fixture-root-raw", base_url: "https://fixture.invalid/v1", api_key: "offline-placeholder", responses_profile: "generic" as const };
   const worker = sameModel ? root : { ...root, id: "fixture-worker", model_name: "fixture-worker-raw", responses_profile: "deepseek" as const };
   let rootCalls = 0; let calls = 0; let manualInterventions = 0;
@@ -76,6 +78,7 @@ export async function runOfflineComparison(team: boolean, failRoot = false, same
     return report;
   } finally {
     globalThis.fetch = originalFetch;
+    restoreProxy();
     for (const artifact of retained) await removeTeamWorkspace(await loadTeamWorkspace(artifact.workspace, artifact.source));
     await fs.rm(directory, { recursive: true, force: true });
   }

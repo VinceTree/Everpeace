@@ -35,6 +35,12 @@ pnpm dev
 
 审阅机器人生成的锁差异时也核对传递依赖的降级。新的直接依赖版本不保证所有既有补丁都被保留；无升级兼容性依据时，应保留已经验证的修复，并以实际安装和审计重新确认。
 
+Codex 原生后端更新还须核对固定 tag 的 sandbox 参数与真实隔离测试，同步 Linux CI 的明确已审阅身份和 native receipt。`ci:verify` 检查该身份与 manifest 的精确依赖一致；只改依赖与根锁的机器人 PR 不能替代后端复核。HTTP 客户端跨主版本更新也须核对官方 engines 与当前 Node 最低基线，实测代理、重定向和取消关闭。
+
+模型代理的 fetch 与 dispatcher 必须来自同一 Undici 包，并明确保留 HTTP CONNECT 契约；不能把 Undici 新主版本的 dispatcher 交给 Node 内置旧 fetch。使用全局 fake fetch 的离线 fixture 通过 `offline-model-proxy.ts` 在自身作用域隔离宿主代理并恢复；真实代理用例不使用此隔离，live fixture 分支保留用户代理。Windows 原生复验还要覆盖 MXC 应用数据重定向下既有 pnpm 版本的复用，不能通过删除 packageManager、跳过检查或放开宿主写权限解决。
+
+checkout preflight 的 fresh worker 也在安装合成 fetch 边界时显式旁路宿主代理，保持原有硬网络拒绝与请求／usage 观测；run/live 模式不应用该旁路。定向运行包含外置临时 checkout 的测试时，使用 tsx CLI 提供的绝对 loader，避免把裸 `--import tsx` 传到没有依赖的子目录。
+
 依赖 PR 的直接版本更新不能替代传递依赖审计。用 `pnpm audit --registry=https://registry.npmjs.org --audit-level high --json` 获取官方审计结果；镜像缺少 audit endpoint 时属于服务不可用，不能记为安全通过。优先在上游声明范围内定向更新受影响的传递依赖，检查锁差异后重新冻结和验证；无上游修复的残留公告在 HANDOFF 明示，不通过忽略公告或放宽安全门禁消除。
 
 ### Windows、WSL 与原生依赖

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { connect, type Socket } from "node:net";
 import { test, type TestContext } from "node:test";
-import { createProviderClient, disposeProviderClient, listOfficialModelIds } from "../../../src/providers/openai-compatible.js";
+import { createProviderClient, createProviderRuntime, disposeProviderClient, listOfficialModelIds } from "../../../src/providers/openai-compatible.js";
 
 function environment(t: TestContext, values: Record<string, string>) {
   const names = ["http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "no_proxy", "NO_PROXY"];
@@ -70,6 +70,44 @@ test("NO_PROXY bypasses a proxy for the configured host and port", async (t) => 
   try { assert.deepEqual(await listOfficialModelIds(client), ["bypassed"]); }
   finally { await disposeProviderClient(client); }
   assert.equal(requests, 1); assert.equal(tunnels, 0);
+});
+
+test("proxied Responses stream closes its real fetch body without changing global fetch", { timeout: 10_000 }, async (t) => {
+  let closed!: () => void;
+  const bodyClosed = new Promise<void>((resolve) => { closed = resolve; });
+  const target = createServer((req, res) => {
+    assert.equal(req.url, "/v1/responses");
+    req.socket.on("close", closed);
+    res.setHeader("Content-Type", "text/event-stream");
+    res.write(`data: ${JSON.stringify({ type: "response.completed", response: { id: "fixture", status: "completed", output: [], output_text: "done", usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } } })}\n\n`);
+  });
+  const targetPort = await listen(t, target);
+  const proxy = createServer();
+  let tunnels = 0;
+  proxy.on("connect", (req, socket, head) => {
+    assert.equal(req.url, "model-fixture.invalid:80"); tunnels++;
+    const upstream = connect(targetPort, "127.0.0.1", () => {
+      socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      if (head.length) upstream.write(head);
+      socket.pipe(upstream); upstream.pipe(socket);
+    });
+    socket.on("close", () => upstream.destroy());
+    upstream.on("error", () => socket.destroy());
+  });
+  const port = await listen(t, proxy);
+  environment(t, { HTTP_PROXY: `http://127.0.0.1:${port}` });
+  const originalFetch = globalThis.fetch;
+  const provider = createProviderRuntime("http://model-fixture.invalid/v1", "offline-key", undefined, "fixture");
+  try {
+    const stream = await provider.responses.stream({ model: "fixture", input: [] }, { maxRetries: 0 });
+    const iterator = stream[Symbol.asyncIterator]();
+    assert.equal((await iterator.next()).value?.type, "response.completed");
+    await iterator.return!();
+    await provider.dispose?.();
+    await bodyClosed;
+    assert.equal(tunnels, 1);
+    assert.equal(globalThis.fetch, originalFetch);
+  } finally { await provider.dispose?.(); }
 });
 
 test("HTTPS uses its proxy, lowercase takes precedence, and cancellation closes the pending tunnel", async (t) => {

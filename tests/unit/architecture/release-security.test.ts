@@ -76,6 +76,18 @@ test("required native mode overrides Actions presence and rejects hosted or unsu
   for (const property of ["skip", "todo"]) assert.throws(() => policy.requireNativeResults([{ ...events[0], data: { ...events[0].data, [property]: true } }, ...events.slice(1)]));
 });
 
+test("CI rejects a dependency update that leaves the reviewed sandbox identity behind", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-ci-backend-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.cp(path.join(process.cwd(), ".github/workflows"), path.join(root, ".github/workflows"), { recursive: true });
+  const manifest = JSON.parse(await fs.readFile(path.join(process.cwd(), "package.json"), "utf8"));
+  await fs.writeFile(path.join(root, "package.json"), JSON.stringify(manifest));
+  workflows.checkWorkflows(root);
+  manifest.dependencies["@openai/codex"] = "999.0.0";
+  await fs.writeFile(path.join(root, "package.json"), JSON.stringify(manifest));
+  assert.throws(() => workflows.checkWorkflows(root), /synchronize its CI identity/u);
+});
+
 test("publishing performs zero mutations for failed gates, mismatched packages or conflicting tags", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-release-policy-"));
   const sha = "a".repeat(40);

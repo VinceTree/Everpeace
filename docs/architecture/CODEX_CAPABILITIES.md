@@ -10,7 +10,7 @@
 - MCP：`codex-rs/core/src/mcp.rs`、`codex-rs/core/src/session/mcp_runtime.rs`、`codex-rs/core/src/tools/handlers/mcp.rs` 和 `codex-rs/core/src/mcp_tool_call.rs`。
 - Skills：`codex-rs/skills/src/parser.rs`、`codex-rs/ext/skills/src/host_roots.rs`、`catalog_prompt.rs` 和 `tools/read.rs`。
 
-Everpeace 没有复制整套 Rust runtime；它固定依赖 `@openai/codex@0.162.0` 作为 sandbox 执行后端，Windows 启动时显式选择 MXC，使用官方 MCP TypeScript SDK，并在现有 Responses/ReAct 循环内实现 Codex 对齐的主机 Skill 发现与渐进读取。
+Everpeace 没有复制整套 Rust runtime；它固定依赖 `@openai/codex@0.165.0` 作为 sandbox 执行后端，Windows 启动时显式选择 MXC，使用官方 MCP TypeScript SDK，并在现有 Responses/ReAct 循环内实现 Codex 对齐的主机 Skill 发现与渐进读取。
 
 ## Sandbox
 

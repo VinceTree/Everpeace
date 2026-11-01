@@ -1,3 +1,4 @@
+import { isolateOfflineModelProxy } from "./offline-model-proxy.js";
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -12,6 +13,7 @@ const store = new SessionStore({ directory: path.join(root, "sessions") });
 const model = { id: "offline", model_name: "offline", base_url: "https://compatible.invalid/v1", api_key: "fixture" };
 const registry = { async resolveAll() { return { available: [model], missing: [] }; } };
 const originalFetch = globalThis.fetch;
+const restoreProxy = isolateOfflineModelProxy();
 let calls = 0;
 globalThis.fetch = async () => {
   calls++;
@@ -39,4 +41,4 @@ try {
   assert.equal(loaded.workflow?.pending_verification, true);
   assert.equal(JSON.stringify(loaded.workflow).includes("SDK response body close refused"), false);
   process.stdout.write("SDK stream cleanup and reliable billing boundaries passed\n");
-} finally { globalThis.fetch = originalFetch; }
+} finally { globalThis.fetch = originalFetch; restoreProxy(); }

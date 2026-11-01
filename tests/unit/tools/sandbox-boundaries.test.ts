@@ -50,6 +50,15 @@ test("language-server policy is read-only, network denied, and rejects protected
   }), /protected application state/u);
 });
 
+test("model shell freezes the host pnpm home before Windows sandbox app-data redirection", () => {
+  const source = { LOCALAPPDATA: "C:\\workspace\\host-app-data" };
+  const environment = modelShellEnvironment(source);
+  assert.equal(environment.PNPM_HOME, process.platform === "win32" ? "C:\\workspace\\host-app-data\\pnpm" : undefined);
+  assert.deepEqual(source, { LOCALAPPDATA: "C:\\workspace\\host-app-data" });
+  const explicit = { ...source, pnpm_home: "C:\\workspace\\explicit-toolchain" };
+  assert.deepEqual(modelShellEnvironment(explicit), explicit);
+});
+
 test("sandbox payload output cannot trigger replay on success or failure", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-sandbox-replay-"));
   try {

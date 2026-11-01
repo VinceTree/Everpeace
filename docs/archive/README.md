@@ -1,5 +1,7 @@
 # 历史归档
 
+- [Goal 可靠性交接](HANDOFF-2026-11-01-goal-reliability.md)：目标／回合绑定、连续阻塞审计、运行中 guidance 和压缩上下文的验证及 PR #26 交付。
+
 - [PR #20 交接](HANDOFF-2026-10-31-pr20.md)：MCP SDK 补丁、冻结评分器锁和对应候选的本地／远端检查及普通合并证据。
 - [依赖 PR 整合交接](HANDOFF-2026-10-31-pr-integration.md)：Node 类型、React/Ink、MCP 与传递依赖整合的历史验证及交付。
 
