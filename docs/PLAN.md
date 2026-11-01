@@ -2,7 +2,13 @@
 
 按用户确认的优化计划分批执行；当前结果和验证证据只在 [HANDOFF](HANDOFF.md) 维护。
 
-## 当前：coding harness 的定位与编码完成质量
+## 当前：六项 PR 修复与合并
+
+用户明确要求处理 #21–#26 并合并。#26 先以当前全绿检查对应候选普通合并，再集成 Codex、undici、keyring、marked 和 oxlint 的五项依赖更新，补齐后端 CI 固定身份和 evaluator 锁快照。保留 Node 22、原生 sandbox、系统凭据库、公共传输／代理、验证及许可策略。
+
+先审阅精确解析差异，使用真实原生、网络／流、Markdown 和 evaluator proof 验证，再重新发现并串行执行 typecheck → lint → test → build，首败停止。保留原依赖 PR head ancestry，将最终候选推送到 #21 原分支；只有同一 head 的 Windows/Linux/security/Required checks 全部通过后才普通合并，核对六项的实际 merged 状态。不使用 squash、保护绕过或旧失败锁，不创建 Release、tag、产品展示版本或付费评测；不自动追逐随后机器人新增 PR。
+
+## 已完成：coding harness 的定位与编码完成质量
 
 用户要求持续优化 harness 并明确定位，随后选择优先加强「编码闭环的可靠性与完成质量」。定位保持 DeepSeek 优先、Windows 优先，面向个人 Node/TypeScript 单包开发；CLI、exec 和 SDK 共用生产 runner，以当前证据衡量需求理解、实施、验证与恢复。
 

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { test, type TestContext } from "node:test";
+import { afterEach, beforeEach, test, type TestContext } from "node:test";
+import { isolateOfflineModelProxy } from "../../fixtures/offline-model-proxy.js";
 import { RequestAttemptLedger } from "../../../src/agent/request-attempt-ledger.js";
 import { ModelResponseError } from "../../../src/agent/response-errors.js";
 import type { LoopEvent } from "../../../src/agent/agent-loop.js";
@@ -11,6 +12,9 @@ import { createProductionAgent } from "../../../src/runtime/production.js";
 import { SessionStore } from "../../../src/storage/session-store.js";
 
 const usage = { input_tokens: 10, output_tokens: 5, total_tokens: 15, input_tokens_details: { cached_tokens: 7 }, output_tokens_details: { reasoning_tokens: 3 } };
+const offlineProxyRestorations: Array<() => void> = [];
+beforeEach(() => { offlineProxyRestorations.push(isolateOfflineModelProxy()); });
+afterEach(() => { offlineProxyRestorations.pop()?.(); });
 const call = { type: "function_call", id: "item-1", call_id: "deepseek-call-1", name: "read_file", arguments: '{"path":"fixture.txt"}' };
 function response(id: string, output: unknown[], text = "", tokenUsage: unknown = usage) {
   return { id, status: "completed", output, output_text: text, ...(tokenUsage === undefined ? {} : { usage: tokenUsage }) };

@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { EnvHttpProxyAgent } from "undici";
+import { EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
 import type { AgentResponse, ResponseStreamLike } from "../agent/model-protocol.js";
 import { ownResponseStream } from "./response-stream.js";
 import { CleanupDeadline } from '../util/cleanup-deadline.js';
@@ -73,13 +73,16 @@ export function createProviderClient(
   }
   let dispatcher: EnvHttpProxyAgent;
   try {
-    dispatcher = new EnvHttpProxyAgent({ httpProxy: httpProxy ?? "", httpsProxy: httpsProxy ?? httpProxy ?? "", noProxy });
+    dispatcher = new EnvHttpProxyAgent({ httpProxy: httpProxy ?? "", httpsProxy: httpsProxy ?? httpProxy ?? "", noProxy, proxyTunnel: true });
   } catch {
     // Proxy URLs can contain credentials. Never echo the URL or parser error.
     throw new Error("Invalid model HTTP proxy configuration");
   }
   const client = new OpenAI({
     apiKey, baseURL,
+    // The SDK calls fetch with URL strings. Undici extends DOM Request/Response
+    // types, but its fetch must share the dispatcher's protocol implementation.
+    fetch: undiciFetch as unknown as typeof globalThis.fetch,
     fetchOptions: { dispatcher },
   });
   let disposal: Promise<void> | undefined;

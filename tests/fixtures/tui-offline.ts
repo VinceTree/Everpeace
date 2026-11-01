@@ -1,3 +1,4 @@
+import { isolateOfflineModelProxy } from "./offline-model-proxy.js";
 import { approvedMcpFixture } from "./mcp-trust.js";
 import { McpTrustStore } from "../../src/mcp/trust.js";
 import { promises as fs } from "node:fs";
@@ -162,6 +163,7 @@ async function main(): Promise<number> {
   let teamStep = 0;
   let longTeam = false;
   const previousFetch = globalThis.fetch;
+  const restoreProxy = isolateOfflineModelProxy();
   if (collaboration) globalThis.fetch = async (url, init) => {
     if (!String(url).startsWith(model.base_url)) throw new Error("Offline fixture refused a non-fixture request");
     if (longTeam) await waitForCancellation(init?.signal ?? undefined, 300_000);
@@ -312,7 +314,7 @@ async function main(): Promise<number> {
   const previousDirectory = process.cwd();
   process.chdir(workspacePath);
   try { return await runTui({ registry, dependencies }); }
-  finally { process.chdir(previousDirectory); globalThis.fetch = previousFetch; }
+  finally { process.chdir(previousDirectory); globalThis.fetch = previousFetch; restoreProxy(); }
 }
 
 void main().then((code) => { process.exitCode = code; }, (error: unknown) => {

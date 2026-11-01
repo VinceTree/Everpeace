@@ -1,5 +1,11 @@
 # Architecture Decisions
 
+## 依赖候选与原生后端身份一致性
+
+依赖 PR 以最终组合、冻结 evaluator lock 和当前四门禁／Required checks 结算。原生 sandbox 升级保留明确固定的已审阅平台身份；workflow 校验将它与 manifest 精确依赖比较，阻止只改 package 后沿用旧 Linux 例外。固定 tag 的参数核对和当前实际原生隔离验证仍是升级前提，不以自动同步字符串代替复核。HTTP 客户端的引擎要求按官方包元数据验证，不根据主版本推断 Node 兼容性。
+
+模型代理 fetch 与 dispatcher 使用同一包并显式保留 HTTP CONNECT；新主版本不能与 Node 内置旧协议混用。Windows 模型环境在 MXC 重定向应用数据前冻结 pnpm 的宿主默认 home，保留显式配置；仅复用已有工具链，不新增文件授权或宿主降级。真实代理和真实原生验证与隔离了代理的合成模型 fixture 分开取证。
+
 ## Coding harness 的目标忠实性与结算身份
 
 产品定位是 DeepSeek 优先、Windows 优先，服务个人 Node/TypeScript 开发的 coding harness；CLI、exec 与 SDK 共用生产运行层，优先提高编码闭环的可靠性与完成质量。Goal 每个 coding step 和压缩边界提供当前完整原目标，JSON 任务数据与宿主行为指令分离。模型须按原目标逐项检查当前证据，宿主验证只证明当前代码通过适用检查，不能替代目标语义审计。

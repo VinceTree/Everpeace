@@ -29,5 +29,5 @@ try {
   success = true;
 } finally {
   // Persist failed outcomes as well; a file's presence never means success.
-  writeFileSync(path.join(directory, "receipt.json"), JSON.stringify({ schema: 1, commit, ...identity, success, eventsSha256: digest(events), node: process.version, platform: process.platform, arch: process.arch, os: os.release(), backend: "@openai/codex@0.162.0; windows.sandbox=mxc", runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT }, null, 2) + "\n");
+  writeFileSync(path.join(directory, "receipt.json"), JSON.stringify({ schema: 1, commit, ...identity, success, eventsSha256: digest(events), node: process.version, platform: process.platform, arch: process.arch, os: os.release(), backend: "@openai/codex@0.165.0; windows.sandbox=mxc", runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT }, null, 2) + "\n");
 }

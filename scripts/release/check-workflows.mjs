@@ -40,6 +40,10 @@ export function checkWorkflows(root) {
   const native = parse(readFileSync(path.join(directory, "windows-native.yml"), "utf8"));
   assert.deepEqual(native.jobs.native.permissions, { contents: "read" }, "The dedicated runner must not inherit cancellation or publishing permission");
   const validation = parse(readFileSync(path.join(directory, "validate.yml"), "utf8"));
+  const backend = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).dependencies["@openai/codex"];
+  assert.match(backend, /^\d+\.\d+\.\d+$/u, "Native backend must use an exact reviewed package");
+  const sandbox = validation.jobs.test.steps.find((step) => step.name === "Permit pinned Linux sandbox namespaces");
+  assert.ok(sandbox?.run?.includes(`'${backend}-linux-x64'`), "Re-audit the native backend and synchronize its CI identity with package.json");
   assert.deepEqual(validation.jobs.test.strategy.matrix.os, ["ubuntu-24.04", "windows-2025"]);
   const checks = validation.jobs.test.steps.map((step) => step.run).filter(Boolean);
   for (const command of ["pnpm typecheck", "pnpm lint", "pnpm test", "pnpm build"]) assert.ok(checks.some((step) => step.includes(command)), `Missing CI check ${command}`);

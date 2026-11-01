@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
+import { isolateOfflineModelProxy } from "../../fixtures/offline-model-proxy.js";
 import { setImmediate } from "node:timers/promises";
 import { ReactAgent } from "../../../src/agent/react-agent.js";
 import { RequestAttemptLedger } from "../../../src/agent/request-attempt-ledger.js";
@@ -10,6 +11,10 @@ import { ModelStreamCleanupError } from "../../../src/agent/response-errors.js";
 import { createProviderRuntime } from "../../../src/providers/openai-compatible.js";
 
 const terminal = new TextEncoder().encode(`data: ${JSON.stringify({ type: "response.completed", response: { id: "fixture", status: "completed", output: [], output_text: "done", usage: { input_tokens: 2, output_tokens: 1, total_tokens: 3 } } })}\n\n`);
+
+const offlineProxyRestorations: Array<() => void> = [];
+beforeEach(() => { offlineProxyRestorations.push(isolateOfflineModelProxy()); });
+afterEach(() => { offlineProxyRestorations.pop()?.(); });
 
 test("production provider joins the response body cancellation after the SDK iterator returns", async (t) => {
   let closing!: () => void, release!: () => void;

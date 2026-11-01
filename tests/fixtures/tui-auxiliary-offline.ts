@@ -1,3 +1,4 @@
+import { isolateOfflineModelProxy } from "./offline-model-proxy.js";
 import assert from "node:assert/strict";
 import { createDefaultTuiDependencies } from "../../src/tui/app/dependencies.js";
 
@@ -13,6 +14,7 @@ const outputs = ["First title", "Second title", skill, skill,
   "Incomplete title", "After incomplete", "", "After failed request"];
 const limits = [64, 64, 4_096, 4_096, 800, 64, 64, 4_096, 64];
 const originalFetch = globalThis.fetch;
+const restoreProxy = isolateOfflineModelProxy();
 let calls = 0;
 globalThis.fetch = async (input, options) => {
   const request = input instanceof Request ? input.clone() : new Request(input, options);
@@ -48,4 +50,4 @@ try {
   assert.equal(usage.output_tokens, 7);
   assert.equal(usage.reasoning_tokens, 7);
   process.stdout.write("TUI auxiliary request scopes and sticky usage passed\n");
-} finally { globalThis.fetch = originalFetch; await dependencies.dispose?.(); }
+} finally { globalThis.fetch = originalFetch; restoreProxy(); await dependencies.dispose?.(); }

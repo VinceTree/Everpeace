@@ -56,7 +56,7 @@ jobs:
           const require = createRequire(import.meta.url);
           const launcher = createRequire(require.resolve('@openai/codex/bin/codex.js'));
           const manifest = launcher.resolve('@openai/codex-linux-x64/package.json');
-          if (JSON.parse(readFileSync(manifest, 'utf8')).version !== '0.162.0-linux-x64') throw new Error('Re-audit native backend');
+          if (JSON.parse(readFileSync(manifest, 'utf8')).version !== '0.165.0-linux-x64') throw new Error('Re-audit native backend');
           const binary = realpathSync(path.join(path.dirname(manifest), 'vendor/x86_64-unknown-linux-musl/bin/codex'));
           console.log(`abi <abi/4.0>,\ninclude <tunables/global>\nprofile everpeace-ci-codex ${JSON.stringify(binary)} flags=(unconfined) {\n  userns,\n}`);
           NODE
