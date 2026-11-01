@@ -1,33 +1,32 @@
 # 当前交接
 
-2026-10-31：用户明确要求处理 PR #20，检查有问题就修复，通过后直接合并，不创建 Release。本轮从 #20 原始 head `2b87c13e64d86472a20fdaa256d65894e893bda0` 开始，基于 main `69b2f5fcfec1b84a604ee2429242e1799aff8755`，工作树干净；当前分支 `codex/mcp-sdk-refresh` 跟踪 PR 原始分支。展示版本保留 `0.6.0-rc.4`，不打 tag、不调用模型或付费评测。
+2026-11-01：用户要求继续优化 harness 并做好定位，明确选择优先加强「编码闭环的可靠性与完成质量」，随后授权自动提交和推送。工作从干净候选开始，复用当前 checkout；本地分支 `codex/harness-goal-reliability` 基于 main `7f6efcf8c41f5444829a913ba30ea2e8a83d2bbb`。展示版本仍为 `0.6.0-rc.4`，不调用付费模型、不创建 Release；门禁通过后提交使用 `[skip publish]`，保留 CI。
 
-上轮 #11、#12、#14–#19 已合并，#13 由 Dependabot 按 Node 22 类型策略关闭；合并前 [Windows/Linux/security/Required checks](https://github.com/VinceTree/Everpeace/actions/runs/41213345732) 全部成功。上轮记录归档至 [PR 整合交接](archive/HANDOFF-2026-10-31-pr-integration.md)，旧门禁和性能数据不作为本轮结果。
+PR #20 已完成交付，详情移入 [归档](archive/HANDOFF-2026-10-31-pr20.md)。旧 CI 和门禁不作为本轮修改的证据。
 
-## 修改与已确认问题
+## 定位与本轮变化
 
-- PR #20 将 MCP SDK 从 1.32.0 更新至 1.32.2，同时更新其锁中的 HTTP/JWT 等传递依赖。原始 PR 仅修改 package.json 与根锁，遗漏 expanded/real-fixtures 的两个 evaluator 快照。
-- 已在未修复候选上直接运行 expanded setup，确认以 `Evaluator dependency lock changed` 拒绝；证据 `.cache/pr20-sdk-refresh/baseline-freeze-failure.log`。不是通过删除快照断言或跳过 fixture 解决。
-- 原始锁还将 qs 从已验收的 6.17.1 降到 6.17.0。本轮在现有范围内恢复 qs 6.17.1，审阅确认相对 PR 原锁只改变 qs 的解析，importer 和其他新解析保持不变，不添加 overrides 或直接依赖。
-- 将最终根锁同步冻结到 `tests/fixtures/expanded/pnpm-lock.yaml` 与 `docs/benchmark/real-fixtures/evaluator-lock.yaml`，保留既有 React/renderer 和 Node 22 基线。未改生产接口、MCP 信任/隔离、已有平台模式或检查时限。
-- 开发指南补充机器人锁差异的传递依赖降级核对，计划限定本轮只处理 #20。原有 ignored 用户目录、真实 Session 和 keyring 保持原样。
+定位明确为 DeepSeek 优先、Windows 优先，面向个人 Node/TypeScript 单包开发的 coding harness。CLI、exec、SDK 共用生产运行层，把模型、项目上下文、工具、隔离执行、Session 与宿主验证接成闭环。双语 README、产品概览、使用指南、运行时和决策同步这项定位。
 
-## 本轮验证
+先通过真实 ReactAgent + GoalRuntime 的合成 provider 调度复现四个失败：迟到完成覆盖用户暂停、覆盖预算停止、完成替换后的新目标，以及同一回合三次 blocked 调用错误终止目标。修复前四项全失败，修复后通过；无真实模型请求。
 
-冻结安装与 strict peer 检查通过，实际 SDK 为 1.32.2，根锁和两个 evaluator 快照字节一致。使用与 CI 相同的 Node 22.23.4、required 原生模式运行完整 MCP 与 expanded proof，60 项全部通过、零跳过，包含真实默认沙箱、host 后代清理及基线/缺陷/参考修复；日志 `targeted.log`。
+- 完成意图绑定 goal_id 和宿主 goal_turn_id，只有同一仍活动目标可结算；暂停／恢复、替换、运行中用户追加需求和下一编码回合使旧意图失效。停止状态不接受模型重新覆盖。追加需求后必须有新的完成请求，旧意图不能沿用。
+- GoalRuntime 按真实 coding turn 分配身份，每轮最多一份阻塞报告，稳定原因只以 SHA-256 摘要加入 Goal 元数据。不同原因或中间未报告阻塞会重置计数；第三个连续报告回合才 blocked。JSONL 重开保留回合依据；旧记录无身份则重新计数，blocked 恢复后重新审计。成功暂停／阻塞更新停止当前工具循环。
+- 每个 coding step 刷新当前完整目标与状态，工具重试使用同一 step 快照；原生与 summary 压缩也携带当前 Goal，Plan 不引入执行 Goal 指令。目标按 JSON 任务数据提供，宿主提示要求逐项对照原要求与当前证据，不把通过代码检查等同于完成整个目标。
+- Session 只增加可选 Goal 元数据字段，原始阻塞描述不复制到 Goal 记录；既有工具调用参数仍按原 Session 规则保存。未更改依赖、锁、产品版本、权限、验证 suite 或修复轮数。
 
-官方 npm 审计为 info 0、low 1、moderate 0、high 0、critical 0，192 项组件许可证通过既有策略。low 仍是上游未修复的 deepmerge 公告；未添加忽略或降低策略。证据 `audit.json`、`licenses.json`。
+## 验证证据
 
-最终重新发现 manifest，按 typecheck → lint → test → build 串行执行，四项全部通过；1369 项测试中 1366 pass、3 个既有本机平台 skip、零 fail/cancelled。test 含 pretest 约 354 秒，Node suite 本身约 346 秒，日志 `{typecheck,lint,test,build}.log` 与 `gates.json`。另通过安装补丁身份、CLI/SDK 启动及原生 PTY 生命周期 7/7、workflow 固定身份、166 份公开文档路径/链接、归档空白与 `git diff --check`；对应日志 `{install-verify,install-smoke,ci-verify,docs-verify}.log`。
+证据目录 `.cache/harness-goal-reliability/`。Goal 生命周期与 JSONL 专项已通过，生产压缩／runner／资源清理定向回归通过。第一轮完整门禁在 test 停止，1387 项中有一项旧故障注入因新增的回合前持久化而提前失败：fixture 把所有 Goal 写入都设为失败，尚未触及它要覆盖的请求后用量持久化阶段。已将该注入明确放到首个请求之后，保留一次请求、一次失败写入和零工具执行的原断言；另增回合持久化故障在零请求／零工具前停止的覆盖。四文件定向回归 60/60 通过，首轮失败和收据保留为 `test-initial-failure.log`、`gates-initial-failure.json`。
 
-根锁与两份 evaluator lock 字节一致，最终锁 SHA-256 `b30b671625f752e682e768c43304dbc9e767b3a944bc3fba5794da8d408ca8d9`；收据 `identity.json`。证据均位于 `.cache/pr20-sdk-refresh/`。门禁后只补本交接收据，不再修改生产代码、依赖或测试。
+最终候选在 Node 22.19.0、pnpm 10.30.3 下重新发现脚本，串行 typecheck → lint → test → build 全部通过；1391 项测试中 1388 pass、3 个既有平台 skip、零 fail/cancelled。四项分别约 1.665、1.168、336.416、1.900 秒，test 含 pretest，Node suite 约 329 秒。对应 `{typecheck,lint,test,build}.log`、`gates.json`，903 份核心输入在验证前后摘要一致，绑定 SHA-256 `10bb07760eba2e8829ff1190932230bdb87d1148a5de84ef8669e9a1cb2714f8`，收据 `identity.json`。
 
-为避免上轮已确认的现代待机中断，再次申请仅属于本任务的临时保持运行请求；不改永久电源设置，收尾时删除任务 marker 使 helper 自行退出。
+另通过 167 份公开文档路径／链接、953 项双语文案及插值、workflow 固定身份、源码原生补丁核对与 CLI/SDK/PTY 安装烟测 7/7（零跳过）。对应 `{docs-verify,ui-verify,ci-verify,install-verify,install-smoke}.log`。完整门禁后只补文档验证收据，不再修改源码或测试；提交推送使用 `[skip publish]`，不触发只允许显式 workflow_dispatch 的 Release。
 
-## 远端交付约束
+## 后续与限制
 
-认证继续通过 Git 已有 GitHub credential helper，仅在 gh 子进程环境中使用，不落盘凭据。main 要求当前 Required checks 成功、分支跟上 main，且保护适用于管理员；不更改保护或绕过检查。提交使用 `[skip publish]`，保留 CI。Release workflow 仍只接受显式 workflow_dispatch，本轮不触发；不创建 Release。
+中间候选完整测试运行期间，独立合成 provider 复现追加需求后旧完成意图仍会提交，证据 `steering-baseline.log`。已补 accepted steering 清除旧意图，回归同时验证未重新请求则保持 active、重新审计请求后才可 complete；定向 11/11 通过。中间运行另存 `*-intermediate.log`，不作为最终源码证据，最终候选已重新执行上述四项门禁。
 
-推送到 #20 原始分支后核对当前 SHA，等待实际 Windows/Linux/security/Required checks，通过后绑定同一 SHA 进行普通 merge 并核对 main 的 Git tree。真实 Windows Terminal、专用 Windows Runner、干净消费者安装和真实模型评测不属于本轮证据；上轮一项 deepmerge 低危残留以本轮新审计复核。
+本轮先落实目标忠实性与 Goal 状态边界。下一步沿共享 runner 的最终异常收尾、模型终态及恢复验证债务检查，发现缺口先补可复现证据。宿主比较的是规范化阻塞描述的摘要，不能自动证明外部阻塞真实性或模型语义审计完整性。模型是否正确理解目标及真实编码成功率仍须独立真实评测，当前没有新付费授权或收益结论。
 
-原始候选的 [GitHub Test](https://github.com/VinceTree/Everpeace/actions/runs/41214110760) 已结束：Linux/security 成功，Windows test 与 Required checks 失败。下载其详细日志遇到连接重置/临时链接错误，保留下载错误记录；本轮快照拒绝原因已由本地原始候选复现，最终远端结论以推送修复后的同一 head 为准。
+门禁使用任务所属的临时保持运行 helper，避免已知现代待机中断；不改永久电源设置，收尾通过删除 `.cache/harness-goal-reliability/keep-awake.active` 使其退出，实际进程记录留在忽略的证据目录。

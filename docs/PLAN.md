@@ -2,9 +2,19 @@
 
 按用户确认的优化计划分批执行；当前结果和验证证据只在 [HANDOFF](HANDOFF.md) 维护。
 
-## 当前：PR #20 的 MCP SDK 补丁升级
+## 当前：coding harness 的定位与编码完成质量
 
-在该 PR 的原始分支上补齐 evaluator lock 快照，保留既有传递依赖修复。运行真实 MCP/fixture 定向回归与完整 typecheck → lint → test → build，核对审计、文档和 workflow；推送后等待当前 head 的 Windows/Linux/security/Required checks 全部通过，再绑定该 SHA 合并。用户已明确授权处理并直接合并 #20，不创建 Release、tag 或调整产品展示版本；不自动扩大到随后新建的其他 PR。
+用户要求持续优化 harness 并明确定位，随后选择优先加强「编码闭环的可靠性与完成质量」。定位保持 DeepSeek 优先、Windows 优先，面向个人 Node/TypeScript 单包开发；CLI、exec 和 SDK 共用生产 runner，以当前证据衡量需求理解、实施、验证与恢复。
+
+本轮从 Goal 生命周期入手，修复已复现的旧完成意图覆盖暂停、预算停止或新目标，以及同一轮重复 blocked 调用冒充三轮的缺陷。完成意图绑定目标和真实宿主回合；阻塞原因以摘要持久化，连续回合证据跨 Session 重开保留，恢复后重新审计。每个 step 和压缩边界提供完整原目标与当前状态，要求逐项核对当前证据，禁止以较小结果替代原任务。
+
+验收包括真实 Agent 工具调度、Goal/JSONL 重开、不同阻塞与间断重置、旧记录兼容、暂停恢复和迟到完成、Plan 与原生／summary 压缩、既有取消／预算／清理结算，以及串行 typecheck → lint → test → build。状态机制与离线通过不代表真实模型语义审计可靠性或质量收益；不执行新的付费模型评测，不改展示版本或创建 Release。
+
+后续继续沿共享 runner 的异常收尾与完成结算、模型终态和恢复债务检查实际缺口，先复现再修改。不把本轮 Goal 修复视为整个 harness 已完成优化。用户已明确授权本轮自动提交和推送；门禁通过后使用 `[skip publish]`，保留 CI，不创建 Release。
+
+## 已完成：PR #20 的 MCP SDK 补丁升级
+
+已补齐 evaluator lock 快照、保留既有传递依赖修复，在当前 head 的 Windows/Linux/security/Required checks 全部通过后完成普通合并，未创建 Release、tag 或调整产品展示版本。证据归档至 [PR #20 交接](archive/HANDOFF-2026-10-31-pr20.md)，不自动扩大到随后新建的其他 PR。
 
 ## 上轮：已完成的依赖整合
 

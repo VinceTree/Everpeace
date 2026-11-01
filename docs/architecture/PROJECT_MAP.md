@@ -49,7 +49,7 @@ Composer 的挂载身份、提交占用和当前草稿归输入适配持有；�
 | `src/tools/`、`src/codex/` | 工具实现、输出/进程资源与原生 sandbox 启动；不负责 UI 生命周期 |
 | `src/storage/`、`src/status/` | 凭据引用、配置、Session/input history、lineage/分支事务、历史投影与持久输出附件、usage/status 数据模型 |
 | `src/permissions/` | 用户与项目策略组合、授权判断、权限 revision |
-| `src/goal/`、`src/plan/` | 明确 Goal 生命周期与严格 Plan 工具/交互契约 |
+| `src/goal/`、`src/plan/` | Goal 当前目标投影、回合绑定结算和持久阻塞审计；严格 Plan 工具/交互契约 |
 | `src/memory/` | 分层 learned memory、召回、脱敏、候选与后台队列 |
 | `src/util/` | 保留版式的凭据脱敏；Memory 与历史/附件复用同一匹配规则 |
 | `src/skills/`、`src/mcp/` | 外部能力发现、读取、安装或连接；工具内容不是上层授权 |

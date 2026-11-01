@@ -1,5 +1,11 @@
 # Architecture Decisions
 
+## Coding harness 的目标忠实性与结算身份
+
+产品定位是 DeepSeek 优先、Windows 优先，服务个人 Node/TypeScript 开发的 coding harness；CLI、exec 与 SDK 共用生产运行层，优先提高编码闭环的可靠性与完成质量。Goal 每个 coding step 和压缩边界提供当前完整原目标，JSON 任务数据与宿主行为指令分离。模型须按原目标逐项检查当前证据，宿主验证只证明当前代码通过适用检查，不能替代目标语义审计。
+
+完成请求绑定目标与宿主回合身份，只能结算仍活动的同一目标；暂停／恢复、新编码回合、运行中用户追加需求、目标替换与预算停止使旧意图失效。blocked 以真实回合而非模型调用次数计数，稳定原因仅以摘要进入 Goal 元数据，不新增原文副本；同一原因跨三个连续报告回合才允许终止，不同原因或中间未报告则重计。身份字段为可选增量字段，旧 Session 仍可读取，但缺依据不能继承阻塞成功。实现与回归见 [RUNTIME](RUNTIME.md)。这些机制提供状态边界证据，尚无新付费模型质量或 token 收益结论。
+
 ## 运行时与界面依赖更新
 
 开发和 CI 继续以 Node 22 为基线，Node 类型定义与该主版本对齐，Dependabot 不自动升级到更高主版本。React 与测试渲染器使用相同精确版本并成组更新；Ink 大版本升级需复核普通 stream、输入解析和 inline resize 契约。App/Composer 使用公开尺寸 hook，Markdown 保留共享订阅及普通 Writable 的受检宽度回退。依赖变化同时重冻结 evaluator lock，旧候选证据不能迁移为新候选成功。执行规则见 [DEVELOPMENT](../DEVELOPMENT.md)。

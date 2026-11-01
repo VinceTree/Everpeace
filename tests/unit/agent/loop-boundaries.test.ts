@@ -214,7 +214,10 @@ test("usage and Goal persistence failures cannot retry sampling or execute tools
   for (const failGoal of [false, true]) {
     let requests = 0, writes = 0, executions = 0;
     const fixture = await goalFixture();
-    const runtime = failGoal ? new GoalRuntime({ getGoal: async () => fixture.get(), setGoal: async () => { writes++; throw new Error("network storage timeout"); } }) : undefined;
+    const runtime = failGoal ? new GoalRuntime({ getGoal: async () => fixture.get(), setGoal: async (next) => {
+      if (requests === 0) { Object.assign(fixture.get(), next); return; }
+      writes++; throw new Error("network storage timeout");
+    } }) : undefined;
     const agent = new ReactAgent({ model: "test", ...(runtime ? { goalRuntime: runtime } : {}), client: { responses: { create: async () => { requests++; return { ...response([call("s", "bash", { command: "mock" })]), usage: { input_tokens: 1, output_tokens: 0, total_tokens: 1 } }; } } },
       io: { ...io, runBash: async () => { executions++; return io.runBash("mock"); } },
       ...(!failGoal ? { onUsage: async () => { writes++; throw new Error("network storage timeout"); } } : {}),
@@ -222,6 +225,21 @@ test("usage and Goal persistence failures cannot retry sampling or execute tools
     await assert.rejects(agent.runTurn("start"), PersistenceError);
     assert.equal(requests, 1); assert.equal(writes, 1); assert.equal(executions, 0);
   }
+});
+
+test("Goal turn persistence failure stops before the first request or tool", async (t) => {
+  const fixture = await goalFixture();
+  let requests = 0, writes = 0, executions = 0;
+  const runtime = new GoalRuntime({ getGoal: async () => fixture.get(), setGoal: async () => { writes++; throw new Error("network storage timeout"); } });
+  const agent = new ReactAgent({ model: "test", goalRuntime: runtime,
+    client: { responses: { async create() { requests++; return response([call("s", "bash", { command: "mock" })]); } } },
+    io: { ...io, async runBash() { executions++; return io.runBash("mock"); } },
+  });
+  t.after(() => agent.dispose());
+  await assert.rejects(agent.runTurn("start"), PersistenceError);
+  assert.equal(writes, 1);
+  assert.equal(requests, 0);
+  assert.equal(executions, 0);
 });
 
 test("budget and unknown usage stop before tools, retries, and false completion", async () => {

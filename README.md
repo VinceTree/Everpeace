@@ -2,7 +2,7 @@
 
 [Public interface contract](docs/COMPATIBILITY.md) · [Contributing](CONTRIBUTING.md) · [FAQ](docs/FAQ.md) · [Installation status](docs/INSTALLATION.md) · [Candidate notes](docs/RELEASE_NOTES.md)
 
-Host display: `--lang auto|en|zh-CN`, `EVERPEACE_LANG` and `/language`. `--accessible` provides append-only TTY interaction; redirected automation uses `exec --json`. [Task and acceptance status](docs/core-experience/STATUS.md).
+Host display: `--lang auto|en|zh-CN`, `EVERPEACE_LANG` and `/language`. `--accessible` provides append-only TTY interaction; redirected automation uses `exec --json`. [Core-experience acceptance snapshot](docs/core-experience/STATUS.md).
 
 
 **Candidate 0.6.0-rc.4.** The hardened workspace file backend requires Windows and local NTFS. Other platforms report unavailable file access. See [current validation and limitations](docs/HANDOFF.md); real-model security evaluation remains paused.
@@ -14,9 +14,11 @@ Host display: `--lang auto|en|zh-CN`, `EVERPEACE_LANG` and `/language`. `--acces
 [![Test](https://github.com/VinceTree/Everpeace/actions/workflows/test.yml/badge.svg)](https://github.com/VinceTree/Everpeace/actions/workflows/test.yml)
 [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-Everpeace is a DeepSeek-first, Windows-first CLI for personal Node.js and TypeScript projects. By default, one agent reads project rules, searches code, proposes a plan, edits files and runs the checks declared by your project. You can work in an inline terminal conversation, automate a task with `everpeace exec`, or call the same runner from TypeScript.
+Everpeace is a DeepSeek-first, Windows-first coding harness for personal Node.js and TypeScript projects, available as a terminal CLI, `everpeace exec`, and a TypeScript SDK. It connects the model to project rules, code tools, isolated commands, persistent Sessions and host verification. By default, one agent searches code, proposes a plan, edits files and runs the checks declared by your project.
 
 Work through a plan, review the edits and let the host check the result. It discovers `typecheck → lint → test → build`, runs available checks in order, stops at the first failure and allows at most three repair rounds. Missing checks, stale evidence, cancellation and incomplete usage remain visible.
+
+Persistent Goals retain the full objective in current model context, including after compaction. Completion requires an objective audit plus host acceptance for the same still-active goal and coding turn; new user guidance invalidates earlier completion intent. Blocked status requires the same reported condition across three consecutive host turns; repeated tool calls cannot count as extra turns.
 
 ## Start here
 

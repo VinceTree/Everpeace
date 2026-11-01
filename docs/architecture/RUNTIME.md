@@ -174,6 +174,10 @@ MCP 在沙箱准备阶段、进程尚未创建时的拒绝属于启动失败。�
 
 模型的编码 Goal 完成请求只暂存意图，由宿主在结算时决定；验证失败、中断或受限不会提交完成。真正无变更且无债务的任务可按 no_changes 结束。成功 learned-memory 仅接收 verified，详见 [MEMORY](MEMORY.md)。
 
+Goal 的完整原目标和当前状态由 [Goal context](../../src/goal/context.ts) 在每个 coding step 重新从宿主读取，并按同一 step 冻结给重试和自动压缩；手动压缩另取当前快照，Plan 不携带执行 Goal 的行动指令。目标序列化为任务数据，不成为高于当前用户的指令，不写入额外 context 事件。审计提示要求逐项绑定当前证据，明确区分代码检查通过与整个目标语义完成；宿主不能自动证明后者。
+
+待完成意图记录 goal_id 与宿主 goal_turn_id，只能结算同一活动目标。新的编码回合或接受运行中用户 guidance 清除旧意图，暂停／恢复改变回合身份，预算／用量停止和替换目标都不能被迟到验证覆盖。[Goal runtime](../../src/goal/runtime.ts) 为每个实际 coding turn 分配宿主身份，同一轮重复 blocked 调用不累加；稳定原因的摘要、最后报告回合和当前回合随 Goal 保存，原始阻塞描述不加入 Goal 元数据。不同原因或上轮未报告会重新计数；三轮实际重复才终止目标，恢复 blocked 后重新开始。旧记录缺少身份时不把旧 streak 当作充分依据。成功暂停或阻塞更新立即停止该模型工具循环。回归见 [Goal lifecycle](../../tests/unit/agent/goal-lifecycle.test.ts)、[持久 Goal](../../tests/unit/goal/runtime.test.ts) 和 [生产压缩](../../tests/unit/runtime/manual-compaction.test.ts)。
+
 ## 变更与检查
 
 - `WorkspaceChangeTracker` 在任务基线、shell 前后和最终检查边界观察内容指纹；Git 使用结构化 NUL 路径，将仓库根路径映射到工作区范围，不能混入兄弟目录。

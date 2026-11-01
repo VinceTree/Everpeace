@@ -91,6 +91,7 @@ import {
 } from "../tools/web.js";
 import type { LearnedMemoryPolicy, LearnedMemoryRuntimeLike, LearnedTurn, LearnedTurnOutcome, MemorySnapshot } from "../memory/learned-memory.js";
 import type { GoalRuntime } from "../goal/runtime.js";
+import { formatGoalContext } from "../goal/context.js";
 import { loadProjectRuleSnapshot, type ProjectRuleSnapshot } from "./project-context.js";
 import { PLAN_INSTRUCTIONS, normalizePlanReview, parsePlanRequest, parseSubmittedPlan, type AgentMode, type PlanInteraction, type PlanReviewDecision, type PlanReviewResult, type QuestionInteraction } from "../plan/runtime.js";
 import type { ContextPruneMetadata, SessionGoal } from "../storage/session-store.js";
@@ -555,7 +556,7 @@ export class ReactAgent {
   #goalPrompt = "";
   #projectRuleSnapshot: ProjectRuleSnapshot | undefined;
   #stepWorkflowContext: WorkflowContext | undefined;
-  #pendingGoalCompletion = false;
+  #pendingGoalCompletion: Pick<SessionGoal, "goal_id" | "goal_turn_id"> | undefined;
   #logicalStep = 0;
   #lastPruneAttemptStep = -1;
   readonly #providerCapabilities: ProviderCapabilities;
@@ -876,6 +877,7 @@ export class ReactAgent {
     const turnItems: Array<Record<string, unknown>> = [];
     this.#turnItems = turnItems;
     this.#turnMode = options.mode ?? "default";
+    this.#pendingGoalCompletion = undefined;
     this.#turnResult = {};
     this.#turnInput = [userInput];
     this.#preparedSkillInput = undefined;
@@ -901,9 +903,9 @@ export class ReactAgent {
         }
       }
       await this.#learnedMemory?.beginTurn?.();
-      const goal = await this.#goalRuntime?.get();
+      const goal = this.#turnMode === "default" ? await this.#goalRuntime?.beginTurn(signal) : await this.#goalRuntime?.get();
       this.#turnGoalId = goal?.status === "active" ? goal.goal_id : undefined;
-      this.#goalPrompt = this.#turnMode === "default" && goal?.status === "active" ? `Active session goal: ${goal.objective}\nContinue until verified complete. Before completion, audit the objective and call update_goal with complete. Mark blocked only after the same blocker recurs for three consecutive goal turns.` : "";
+      this.#goalPrompt = this.#turnMode === "default" ? formatGoalContext(goal) : "";
       this.#context.history = repairToolContext(this.#context.history);
       await this.#applyPendingSteering();
       await this.#record([userMessageWithAttachments(userInput, attachments)]);
@@ -971,6 +973,7 @@ export class ReactAgent {
           this.#projectRuleSnapshot = projectRules;
           const workflowContext = this.#io.getWorkflowContext?.();
           this.#stepWorkflowContext = workflowContext === undefined ? undefined : freezeSnapshot(projectWorkflowContext(workflowContext));
+          this.#goalPrompt = this.#turnMode === "default" ? formatGoalContext(await this.#goalRuntime?.get()) : "";
           /*
            * Tool and prompt snapshots are assembled only after every independent
            * source has settled, so a model request cannot observe a partial mix.
@@ -1102,18 +1105,15 @@ export class ReactAgent {
 
   async finalizePendingGoalCompletion(allow: boolean): Promise<void> {
     if (allow) this.#assertResourceCleanup();
-    if (!this.#pendingGoalCompletion) return;
-    if (!allow || !this.#goalRuntime) {
-      this.#pendingGoalCompletion = false;
-      return;
-    }
-    await this.#goalRuntime.update("complete");
-    this.#pendingGoalCompletion = false;
+    const intent = this.#pendingGoalCompletion;
+    this.#pendingGoalCompletion = undefined;
+    if (allow && intent && this.#goalRuntime) await this.#goalRuntime.finalizeCompletion(intent);
   }
 
   requestSteering(text: string, attachments: readonly FileAttachment[] = []): boolean {
     const value = text.trim();
     if (!value || !this.#lifecycle.running) return false;
+    this.#pendingGoalCompletion = undefined;
     this.#team?.invalidate(value);
     this.#pendingSteering.push({
       text: value,
@@ -1321,19 +1321,24 @@ export class ReactAgent {
       if (!(await this.#io.confirmGoal?.(`Create goal: ${args.objective}`))) return JSON.stringify({ status: "rejected" });
       signal?.throwIfAborted();
       const goal = await this.#goalRuntime.create({ objective: args.objective, ...(typeof args.token_budget === "number" ? { tokenBudget: args.token_budget } : {}) });
+      this.#pendingGoalCompletion = undefined;
       this.#turnGoalId = goal.goal_id;
       return JSON.stringify({ goal });
     } else if (call.name === "update_goal" && this.#goalRuntime) {
-      const args = JSON.parse(call.arguments) as { status?: unknown };
+      const args = JSON.parse(call.arguments) as { status?: unknown; blocker?: unknown };
       if (args.status !== "complete" && args.status !== "blocked" && args.status !== "paused") return JSON.stringify({ error: "Invalid goal status" });
       if (args.status === "paused" && !(await this.#io.confirmGoal?.("Pause the active goal"))) return JSON.stringify({ status: "rejected" });
       signal?.throwIfAborted();
       if (args.status === "complete") {
-        this.#pendingGoalCompletion = true;
+        const goal = await this.#goalRuntime.get();
+        if (!goal || goal.status !== "active") return JSON.stringify({ error: "Only the current active goal can request completion" });
+        this.#pendingGoalCompletion = { goal_id: goal.goal_id, ...(goal.goal_turn_id === undefined ? {} : { goal_turn_id: goal.goal_turn_id }) };
         this.#turnResult = { ...this.#turnResult, goalCompletionRequested: true };
         return JSON.stringify({ status: "pending_verification", message: "Goal completion will be persisted after the host workflow verifies this coding turn." });
       }
-      return JSON.stringify({ goal: await this.#goalRuntime.update(args.status) });
+      this.#pendingGoalCompletion = undefined;
+      const goal = await this.#goalRuntime.update(args.status, typeof args.blocker === "string" ? args.blocker : undefined);
+      return { output: JSON.stringify({ goal }), stop: true };
     } else if (call.name === READ_TOOL_OUTPUT_DEFINITION.name) {
       const args = parseReadToolOutputArguments(call.arguments);
       const currentSession = args.session_id === undefined || args.session_id === this.#io.getSessionId?.();
@@ -1932,9 +1937,11 @@ export class ReactAgent {
   async #compactContext(automatic: boolean, signal?: AbortSignal): Promise<ContextCompactionResult> {
     const priorGoalId = this.#turnGoalId;
     try {
-      if (!automatic) { const goal = await this.#goalRuntime?.get(); this.#turnGoalId = goal && ['active', 'budget_limited', 'usage_limited'].includes(goal.status) ? goal.goal_id : undefined; }
+      const goal = automatic ? undefined : await this.#goalRuntime?.get();
+      if (!automatic) this.#turnGoalId = goal && ['active', 'budget_limited', 'usage_limited'].includes(goal.status) ? goal.goal_id : undefined;
       const workflowContext = automatic ? this.#stepWorkflowContext : this.#io.getWorkflowContext?.();
-      const instructions = formatWorkflowContext(workflowContext === undefined ? undefined : projectWorkflowContext(workflowContext));
+      const goalContext = this.#turnMode === "default" ? (automatic ? this.#goalPrompt : formatGoalContext(goal)) : "";
+      const instructions = [formatWorkflowContext(workflowContext === undefined ? undefined : projectWorkflowContext(workflowContext)), goalContext].filter(Boolean).join("\n\n");
       return await this.#context.compact(automatic, {
         isStaleRule: isPersistedProjectRuleSnapshot,
         compact: async (input, observe) => {

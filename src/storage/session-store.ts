@@ -104,6 +104,11 @@ export interface SessionGoal {
   time_used_seconds: number;
   /** Consecutive goal turns that reported the same blocker. */
   blocked_streak?: number;
+  /** Host-owned turn identity; legacy goals have no trusted blocker history. */
+  goal_turn_id?: string;
+  blocked_turn_id?: string;
+  /** Digest of the stable blocker description, never its plaintext. */
+  blocked_reason_hash?: string;
   created_at: string;
   updated_at: string;
 }
@@ -663,6 +668,9 @@ function isGoal(value: unknown): value is SessionGoal {
     typeof value.tokens_used === "number" && Number.isSafeInteger(value.tokens_used) && value.tokens_used >= 0 &&
     typeof value.usage_complete === "boolean" && typeof value.time_used_seconds === "number" && value.time_used_seconds >= 0 &&
     (value.blocked_streak === undefined || (typeof value.blocked_streak === "number" && Number.isSafeInteger(value.blocked_streak) && value.blocked_streak >= 0)) &&
+    (value.goal_turn_id === undefined || isNonEmptyString(value.goal_turn_id)) &&
+    (value.blocked_turn_id === undefined || isNonEmptyString(value.blocked_turn_id)) &&
+    (value.blocked_reason_hash === undefined || (typeof value.blocked_reason_hash === "string" && /^[a-f0-9]{64}$/u.test(value.blocked_reason_hash))) &&
     isNonEmptyString(value.created_at) && isNonEmptyString(value.updated_at);
 }
 

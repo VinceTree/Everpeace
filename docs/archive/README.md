@@ -1,5 +1,8 @@
 # 历史归档
 
+- [PR #20 交接](HANDOFF-2026-10-31-pr20.md)：MCP SDK 补丁、冻结评分器锁和对应候选的本地／远端检查及普通合并证据。
+- [依赖 PR 整合交接](HANDOFF-2026-10-31-pr-integration.md)：Node 类型、React/Ink、MCP 与传递依赖整合的历史验证及交付。
+
 - [核心取消与恢复交接](HANDOFF-2026-10-24-core-recovery.md)：异步验证取消、独立资源收尾和持久验证债务的交付记录，不替代当前性能轮验证。
 
 - [构建与 MCP 收尾优化交接](HANDOFF-2026-10-23-build-mcp.md)：构建／检查脚本、隔离 fixture 和 MCP 未启动关闭修复的交付记录，不替代当前轮验证。

@@ -2,7 +2,7 @@
 
 [公开接口契约](docs/COMPATIBILITY.md) · [贡献指南](CONTRIBUTING.zh-CN.md) · [常见问题](docs/FAQ.md) · [安装状态](docs/INSTALLATION.md) · [候选变更](docs/RELEASE_NOTES.md)
 
-宿主显示使用 `--lang auto|en|zh-CN`、`EVERPEACE_LANG` 和 `/language`；`--accessible` 提供追加式 TTY 交互，重定向自动化使用 `exec --json`。[本轮任务与验收状态](docs/core-experience/STATUS.md)。
+宿主显示使用 `--lang auto|en|zh-CN`、`EVERPEACE_LANG` 和 `/language`；`--accessible` 提供追加式 TTY 交互，重定向自动化使用 `exec --json`。[核心体验历史验收快照](docs/core-experience/STATUS.md)。
 
 
 **候选版本 0.6.0-rc.4。** 加固后的工作区文件后端要求 Windows 与本地 NTFS，其他平台明确报告文件访问不可用。[本轮验收与限制](docs/HANDOFF.md)；真实模型安全评测继续暂停。
@@ -14,9 +14,11 @@
 [![Test](https://github.com/VinceTree/Everpeace/actions/workflows/test.yml/badge.svg)](https://github.com/VinceTree/Everpeace/actions/workflows/test.yml)
 [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-Everpeace 是 DeepSeek 优先、Windows 优先的个人 Node.js / TypeScript 开发 CLI。默认由单个 Agent 读取项目规则、搜索代码、提出计划、修改文件，再运行项目声明的检查。你可以在 inline 终端中交互，通过 `everpeace exec` 自动执行任务，或从 TypeScript 调用同一 runner。
+Everpeace 是 DeepSeek 优先、Windows 优先，面向个人 Node.js / TypeScript 开发的 coding harness，通过终端 CLI、`everpeace exec` 和 TypeScript SDK 使用。它把模型、项目规则、代码工具、隔离命令、持久 Session 和宿主验证接成编码闭环。默认由单个 Agent 搜索代码、提出计划、修改文件，再运行项目声明的检查。
 
 先审阅计划和改动，再由宿主检查结果：重新发现 `typecheck → lint → test → build`，按顺序执行存在的检查，首败停止，最多进行三轮修复。缺少检查、证据过期、取消和用量不完整都会明确保留。
+
+持久 Goal 的完整目标持续进入当前模型上下文，压缩后也会重新提供。完成须经过目标审计，并由宿主对同一个仍活动的目标与编码回合接受验证，运行中追加需求会使旧意图失效；阻塞须以同一原因跨三个连续宿主回合报告，重复工具调用不能充当额外回合。
 
 ## 开始使用
 
