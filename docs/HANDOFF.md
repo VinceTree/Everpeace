@@ -1,8 +1,14 @@
 # 当前交接
 
-2026-11-01：用户明确要求修改现有六个 PR 后开始合并，仍不创建 Release。开始时 `codex/harness-goal-reliability` 工作树干净。#26 的原候选经当前 Required checks 全绿核对后转 ready，并普通合并；此前 Goal 优化记录移入 [交接归档](archive/HANDOFF-2026-11-01-goal-reliability.md)。
+2026-11-01：用户在六 PR 合并完成后明确要求创建 Release，授权取代上一轮不创建 Release 的限制。沿用当前 `0.6.0-rc.4`，准备创建 `v0.6.0-rc.4` 源码预发布，不修改展示版本。交付范围为准确 main 提交的带标签源码与脱敏验证证据；不提供原生安装包，不发布 npm，不进行付费模型评测。
 
-当前分支 `codex/pr-integration-2026-11-01` 基于 main `0b3b26fe55d49dc4181f7de62c4950a69a082642`，复用原 checkout。产品展示版本仍为 `0.6.0-rc.4`，不打 tag、不创建 Release、不调用模型或付费评测。证据目录 `.cache/pr-integration-2026-11-01/`。
+六 PR 的合并交付已核实：#21–#26 全部为 MERGED，main 为 `d5230726ef58929071bf1bf49322078cfad0f289`，git tree 为 `4d4098d51b8a4f10173c01edf3a59fd27a53ec2e`，与最终本机验证候选完全一致。[main 检查](https://github.com/VinceTree/Everpeace/actions/runs/41276010711) 的 Windows、Linux、安全扫描和 Required checks 均成功。原始来源提交都已进入 main，工作树干净，临时保持运行进程已退出。收据 `.cache/pr-integration-2026-11-01/github-delivery.json`。
+
+本轮复用 checkout，新分支 `codex/source-candidate-evidence-2026-11-01` 仅补交接和源码交付范围说明。文档合并后重新绑定最终 main、当前成功检查和该提交的安全扫描 artifact，再创建 tag/Release 并核对实际远端结果；证据目录 `.cache/release-2026-11-01/`，公开说明与附件以 [源码候选入口](https://github.com/VinceTree/Everpeace/releases/tag/v0.6.0-rc.4) 为准。该链接在创建前不代表已发布成功。
+
+当前 API 实测专用 Runner 为零，仓库 Actions secrets 为空，`RUNNER_READ_TOKEN` 未配置。本机 required 原生回归只作开发证据，不能替代专用 Runner 与单一原生安装包的消费者验收；正式安装包 workflow、权限和完整门禁保持。源码预发布沿用根 AGENTS 的明确例外及此前 `v0.6.0-rc.1` 的交付范围。
+
+上一轮用户要求修改六 PR 时尚未授权 Release。开始时 `codex/harness-goal-reliability` 工作树干净，#26 经当前检查后转 ready 并普通合并；此前 Goal 优化记录移入 [交接归档](archive/HANDOFF-2026-11-01-goal-reliability.md)。集成分支 `codex/pr-integration-2026-11-01` 基于 main `0b3b26fe55d49dc4181f7de62c4950a69a082642`，验证证据目录 `.cache/pr-integration-2026-11-01/`。以下记录保留该次实现和验证事实。
 
 ## 六 PR 范围与集成方式
 
@@ -39,6 +45,6 @@
 
 ## 交付与边界
 
-main 的 Required checks、strict up-to-date 和管理员保护保持。提交包含 `[skip publish]`，保留 CI；Release workflow 只接受显式 workflow_dispatch，本任务不触发。认证通过既有 Git credential helper，仅向 gh 子进程提供，不落盘凭据。临时保持运行 helper 归本任务所有，收尾通过删除 `keep-awake.active` marker 退出，不改永久电源设置。
+main 的 Required checks、strict up-to-date 和管理员保护保持。提交包含 `[skip publish]`，保留 CI；正式原生安装包的 Release workflow 只接受显式 workflow_dispatch。认证通过既有 Git credential helper，仅向 gh 子进程提供，不落盘凭据。上一轮临时保持运行 helper 已通过删除 `keep-awake.active` marker 退出，未改永久电源设置。
 
 真实 Windows Terminal、专用 Windows Runner、消费者安装包和付费模型质量不属于这些本机或 hosted 检查的证据。新增机器人 PR 不自动进入本次已明确的六项范围。
