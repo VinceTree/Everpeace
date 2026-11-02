@@ -250,6 +250,13 @@ export function createDefaultTuiDependencies(
       return handle.agent;
     },
     privacy,
+    previewMemoryCandidate(workspacePath, id, correction) {
+      return learnedMemoryStore.previewCandidate(workspacePath, id, correction);
+    },
+    async reviewMemoryCandidate(workspacePath, id, revision, action, correction) {
+      cancelManualMemory(new Error("Memory candidate reviewed"));
+      await (activeLearnedMemory?.reviewCandidate(workspacePath, id, revision, action, correction) ?? learnedMemoryStore.reviewCandidate(workspacePath, id, revision, action, correction));
+    },
     async reviewMemory(scope, workspacePath, id, revision, action, correction) {
       cancelManualMemory(new Error("Memory entry reviewed"));
       await (activeLearnedMemory?.reviewEntry(scope, workspacePath, id, revision, action, correction) ?? learnedMemoryStore.reviewEntry(scope, workspacePath, id, revision, action, correction));

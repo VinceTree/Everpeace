@@ -20,6 +20,7 @@ export const SLASH_COMMANDS = [
   "/privacy",
   "/skills",
   "/memory",
+  "/remember",
   "/plan",
   "/goal",
   "/compact",
@@ -98,6 +99,7 @@ export const TUI_HELP = `Slash commands
   /privacy Inspect storage, configure retention, scan and safely export sessions
   /skills  Create, install, inspect, and use local skills
   /memory  View and manage learned experience
+  /remember Save a lasting user preference
   /plan    Plan a request; show, execute an approved plan, or exit
   /goal    Create, inspect, pause, or resume a session goal
   /compact Compact the model context

@@ -86,6 +86,8 @@ export interface TuiModelRegistry {
 }
 
 export interface TuiDependencies {
+  previewMemoryCandidate?(workspacePath: string, id: string, correction?: import("../../memory/learned-memory.js").MemoryCorrection): Promise<import("../../memory/learned-memory.js").MemoryCandidatePreview>;
+  reviewMemoryCandidate?(workspacePath: string, id: string, revision: string, action: import("../../memory/learned-memory.js").MemoryCandidateAction, correction?: import("../../memory/learned-memory.js").MemoryCorrection): Promise<void>;
   getInFlightRequests?(): number | undefined;
   acquireSessionActivity?(sessionId: string): Promise<import("../../storage/session-activity.js").ActivityLease>;
   privacy?: import("../../storage/session-privacy.js").SessionPrivacy;

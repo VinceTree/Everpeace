@@ -119,6 +119,59 @@ test("Memory review cancels safely and renews only the inspected revision", asyn
   } finally { view.unmount(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("candidate review defaults to cancel, rejects stale previews and accepts only confirmed replacements", async () => {
+  const { LearnedMemoryStore, memoryEntryRevision } = await import("../../../src/memory/learned-memory.js");
+  const root = await mkdtemp(join(tmpdir(), "ep-ui-candidate-review-"));
+  const store = new LearnedMemoryStore({ directory: join(root, "memory") });
+  const fixture = createFixture(); fixture.dependencies.workspacePath = root;
+  await store.append("project", root, [{ lesson: "Old fixture convention", applyWhen: "fixture" }]);
+  await store.saveCandidates([{ id: "ui-candidate", workspacePath: root, scope: "project", kind: "convention", confidence: "high", lesson: "New fixture convention", applyWhen: "fixture", evidence: [], redactionVersion: 2, createdAt: new Date().toISOString(), status: "review" }]);
+  let reviews = 0;
+  fixture.dependencies.getMemoryStatus = workspace => store.status(workspace);
+  fixture.dependencies.previewMemoryCandidate = (workspace, id, correction) => store.previewCandidate(workspace, id, correction);
+  fixture.dependencies.reviewMemoryCandidate = async (workspace, id, revision, action, correction) => { reviews++; await store.reviewCandidate(workspace, id, revision, action, correction); };
+  const view = render(<EverpeaceApp dependencies={fixture.dependencies} initialModels={{ available: [], missing: [] }} onReplayOutput={update => update()} />);
+  const submit = async (text: string) => { view.stdin.write(text); await tick(); view.stdin.write("\r"); };
+  const back = async () => { await new Promise<void>(done => setTimeout(done, 30)); view.stdin.write("\u001b"); await tick(); };
+  const approve = async () => { await new Promise<void>(done => setTimeout(done, 30)); view.stdin.write("\u001b[B"); await tick(); view.stdin.write("\r"); };
+  try {
+    await tick(); await submit("/memory candidates list");
+    await waitFor(() => (view.lastFrame() ?? "").includes("ui-candidate")); await back();
+    await waitFor(() => !(view.lastFrame() ?? "").includes("Memory candidates"));
+    await submit("/memory candidates accept ui-candidate");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Confirm candidate review"));
+    assert.match(view.lastFrame()!, /Old fixture convention/u);
+    await new Promise<void>(done => setTimeout(done, 30)); view.stdin.write("\r"); await tick(); assert.equal(reviews, 0);
+    await waitFor(() => !(view.lastFrame() ?? "").includes("Confirm candidate review"));
+    await submit("/memory candidates accept ui-candidate");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Confirm candidate review"));
+    const old = (await store.read("project", root))[0]!;
+    await store.reviewEntry("project", root, old.id, memoryEntryRevision(old), "renew");
+    await approve(); await waitFor(() => (view.lastFrame() ?? "").includes("Entry or storage changed")); await back();
+    await waitFor(() => !(view.lastFrame() ?? "").includes("/memory · Failed"));
+    assert.equal((await store.listReviewCandidates(root)).length, 1);
+    await submit("/memory candidates accept ui-candidate");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Confirm candidate review")); await approve();
+    await waitFor(() => (view.lastFrame() ?? "").includes("Entry updated"));
+    assert.equal((await store.read("project", root)).find(entry => entry.lesson === "Old fixture convention")?.status, "superseded");
+    assert.equal((await store.listReviewCandidates(root)).length, 0);
+    await back(); await waitFor(() => !(view.lastFrame() ?? "").includes("Entry updated"));
+    const make = (id: string) => ({ id, workspacePath: root, scope: "project" as const, kind: "convention" as const, confidence: "high" as const, lesson: "Suggested fixture convention", applyWhen: "fixture", evidence: [], redactionVersion: 2, createdAt: new Date().toISOString(), status: "review" as const });
+    await store.saveCandidates([make("ui-correct"), make("ui-reject")]);
+    await submit('/memory candidates correct ui-correct {"lesson":"Corrected fixture convention","applyWhen":"fixture"}');
+    await waitFor(() => (view.lastFrame() ?? "").includes("Confirm candidate review"));
+    assert.match(view.lastFrame()!, /Corrected fixture convention/u); await approve();
+    await waitFor(() => (view.lastFrame() ?? "").includes("Entry updated"));
+    assert.equal((await store.read("project", root)).find(entry => entry.status === "active")?.lesson, "Corrected fixture convention");
+    await back(); await waitFor(() => !(view.lastFrame() ?? "").includes("Entry updated"));
+    await submit("/memory candidates reject ui-reject");
+    await waitFor(() => (view.lastFrame() ?? "").includes("Confirm candidate review")); await approve();
+    await waitFor(() => (view.lastFrame() ?? "").includes("Entry updated"));
+    assert.equal((await store.loadCandidates()).find(candidate => candidate.id === "ui-reject")?.status, "rejected");
+    assert.equal((await store.listReviewCandidates(root)).length, 0);
+  } finally { view.unmount(); assert.ok(root.startsWith(tmpdir())); await rm(root, { recursive: true, force: true }); }
+});
+
 test("formats active turn elapsed time with useful units", () => {
   assert.equal(formatElapsed(0), "0s");
   assert.equal(formatElapsed(59), "59s");

@@ -61,7 +61,7 @@ test("redaction retains valid JSON and quoted secret delimiters", () => {
   assert.deepEqual(JSON.parse(redacted), { api_key: "[secret redacted]", token: "Bearer [secret redacted]", message: "中文 😀" });
   assert.equal(redacted.split("\r\n").length, input.split("\r\n").length);
   assert.match(redacted, /\r\n  "api_key": "\[secret redacted\]"/u);
-  assert.equal(redactSecrets('{"api_key":"fixture-sensitive-value"}'), '{"api_key":[secret redacted]}');
+  assert.equal(redactSecrets('{"api_key":"fixture-sensitive-value"}'), '{"api_key":"[secret redacted]"}');
   assert.deepEqual(JSON.parse(redactSecretsPreservingLayout(JSON.stringify({ password: 'sensitive"escaped fragment', private_key: "a\\b" }))), { password: "[secret redacted]", private_key: "[secret redacted]" });
   assert.equal(redactSecretsPreservingLayout('password="first\r\n  second"\r\nafter'), 'password="[secret redacted]\r\n  [secret redacted]"\r\nafter');
 });
@@ -91,4 +91,17 @@ test("learned memory retains its whitespace cleanup and bounded field behavior",
   assert.equal(redactSecrets("  before\n\t<user>secret</user>\n  api_key=value\n  after  "), "before [tag removed]secret[tag removed] api_key=[secret redacted] after");
   assert.equal(redactSecrets("\n  hello  world  \r\n", 8), "hello wo");
   assert.equal(redactSecrets("-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----"), "[private key redacted]");
+});
+
+test("Memory truncation remains idempotent at credential and public expression boundaries", () => {
+  for (const input of [
+    `${"x".repeat(1980)} password=process.env.API_KEY`,
+    `${"x".repeat(1980)} password="synthetic secret with spaces"`,
+    JSON.stringify({ password: 'synthetic secret with an escaped" quote' }),
+  ]) for (const limit of [0, 8, 20, 2000]) {
+    const redacted = redactSecrets(input, limit);
+    assert.ok(redacted.length <= limit);
+    assert.equal(redactSecrets(redacted, limit), redacted);
+    assert.equal(redactSecrets(redacted, limit), redactSecrets(redactSecrets(redacted, limit), limit));
+  }
 });

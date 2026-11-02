@@ -10,6 +10,19 @@ import { RequestAttemptLedger, RequestUsageIncompleteError } from "../agent/requ
 import { RequestExecutor, type RequestAccountingScope } from "../agent/request-executor.js";
 import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
 import { redactSecretsPreservingLayout } from "../util/redact-secrets.js";
+import { MemoryControl, type MemoryControlState, type MemoryEpochs, type MemoryWrite } from "./control.js";
+
+export class MemoryReviewError extends Error {}
+export class MemoryStaleError extends MemoryReviewError {}
+export type MemoryCorrection = { lesson: string; applyWhen: string };
+export type MemoryCandidateAction = "accept" | "correct" | "reject";
+export interface MemoryCandidatePreview { candidate: MemoryCandidate; conflicts: LearnedEntry[]; revision: string; correction?: MemoryCorrection }
+export function parseMemoryCorrection(value: string): MemoryCorrection {
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); } catch { throw new MemoryReviewError("Memory correction is invalid"); }
+  if (!parsed || typeof parsed !== "object" || !("lesson" in parsed) || !("applyWhen" in parsed) || typeof parsed.lesson !== "string" || typeof parsed.applyWhen !== "string") throw new MemoryReviewError("Memory correction is invalid");
+  return { lesson: parsed.lesson, applyWhen: parsed.applyWhen };
+}
 
 export type LearnedScope = "project" | "user";
 export type LearnedKind = "preference" | "convention" | "procedure" | "constraint" | "summary";
@@ -18,6 +31,7 @@ export type LearnedConfidence = "low" | "medium" | "high";
 
 /** Legacy entries remain inspectable but need review before request injection. */
 export function memoryEntryHasProvenance(entry: LearnedEntry): boolean {
+  if (entry.redactionReview) return false;
   return Boolean(entry.reviewedAt && Number.isFinite(Date.parse(entry.reviewedAt)))
     || Boolean(entry.sourceSessionId && /^[A-Za-z0-9_-]{1,100}$/u.test(entry.sourceSessionId))
     || Boolean(entry.sourceSessionIds?.some(id => /^[A-Za-z0-9_-]{1,100}$/u.test(id)))
@@ -36,6 +50,9 @@ export interface LearnedEvidence {
 }
 
 export interface LearnedEntry {
+  redactionVersion?: number;
+  redactionReview?: boolean;
+  supersedesIds?: string[];
   reviewHistory?: Array<{ action: "renew" | "correct" | "disable"; at: string; revision: string }>;
   expiresAt?: string;
   reviewedAt?: string;
@@ -74,6 +91,8 @@ export interface MemorySnapshot {
 }
 
 export interface LearnedMemoryStatus {
+  candidateNeedsReview?: number;
+  reviewCandidates?: MemoryCandidate[];
   entries?: LearnedEntry[];
   needsReview?: number;
   enabled: boolean;
@@ -92,6 +111,7 @@ export interface LearnedMemoryStatus {
 }
 
 export interface LearnedMemoryRuntimeLike {
+  reviewCandidate?(workspacePath: string, id: string, revision: string, action: MemoryCandidateAction, correction?: MemoryCorrection): Promise<void>;
   reviewEntry?(scope: LearnedScope, workspacePath: string, id: string, revision: string, action: "renew" | "correct" | "disable" | "delete", correction?: { lesson: string; applyWhen: string }): Promise<void>;
   loadPrompt(workspacePath: string, userInput?: string, activeFiles?: readonly string[]): Promise<string>;
   loadSnapshot?(workspacePath: string, userInput?: string, activeFiles?: readonly string[]): Promise<MemorySnapshot>;
@@ -176,9 +196,17 @@ function cleanText(value: string): string {
 }
 
 export function redactSecrets(value: string, maximum = MAX_FIELD_CHARS): string {
-  return redactSecretsPreservingLayout(cleanText(value), false)
-    .slice(0, maximum)
-    .trim();
+  const limit = Math.max(0, maximum);
+  let previous = value;
+  // Clipping a public credential expression can turn its suffix into a secret match.
+  // Return only a stable result; bound normalization and mask the field if it cannot settle.
+  for (let pass = 0; pass < 4; pass++) {
+    const redacted = cleanText(redactSecretsPreservingLayout(previous)).replace(/(?:\[private key redacted\]\s*)+/gu, "[private key redacted] ")
+      .slice(0, limit).trim();
+    if (redacted === previous) return redacted;
+    previous = redacted;
+  }
+  return "[secret redacted]".slice(0, limit).trim();
 }
 
 function normalizeEntry(entry: Partial<LearnedEntry> & Pick<LearnedEntry, "lesson" | "applyWhen">, now: Date): LearnedEntry | undefined {
@@ -186,6 +214,9 @@ function normalizeEntry(entry: Partial<LearnedEntry> & Pick<LearnedEntry, "lesso
   const applyWhen = redactSecrets(entry.applyWhen);
   if (!lesson || !applyWhen) return undefined;
   return {
+    redactionVersion: 2,
+    ...(entry.redactionReview ? { redactionReview: true } : {}),
+    ...(entry.supersedesIds ? { supersedesIds: [...new Set(entry.supersedesIds)].slice(0, MAX_ENTRIES) } : {}),
     ...(entry.reviewHistory ? { reviewHistory: entry.reviewHistory.filter(item => ["renew", "correct", "disable"].includes(item.action) && Number.isFinite(Date.parse(item.at)) && /^[a-f0-9]+$/u.test(item.revision)).slice(-20) } : {}),
     ...(entry.scope !== "user" ? { expiresAt: entry.expiresAt ?? new Date((Number.isNaN(Date.parse(entry.createdAt ?? "")) ? now.getTime() : Date.parse(entry.createdAt!)) + 90 * 86_400_000).toISOString() } : {}),
     ...(entry.reviewedAt ? { reviewedAt: entry.reviewedAt } : {}),
@@ -235,12 +266,15 @@ function serializeEntries(entries: readonly LearnedEntry[]): string {
     `- Kind: ${entry.kind}`,
     `- Confidence: ${entry.confidence}`,
     `- Status: ${entry.status}`,
+    `- Redaction version: ${entry.redactionVersion ?? 2}`,
+    ...(entry.redactionReview ? ["- Redaction review: true"] : []),
     `- Created at: ${entry.createdAt}`,
     `- Updated at: ${entry.updatedAt}`,
     ...(entry.expiresAt ? [`- Expires at: ${entry.expiresAt}`] : []),
     ...(entry.reviewedAt ? [`- Reviewed at: ${entry.reviewedAt}`] : []),
     ...(entry.reviewHistory?.length ? [`- Review history: ${JSON.stringify(entry.reviewHistory)}`] : []),
     ...(entry.supersedes ? [`- Supersedes: ${entry.supersedes}`] : []),
+    ...(entry.supersedesIds?.length ? [`- Supersedes ids: ${JSON.stringify(entry.supersedesIds)}`] : []),
     ...(entry.sourceSessionIds?.length ? [`- Source sessions: ${JSON.stringify(entry.sourceSessionIds)}`] : []),
     ...(entry.lastUsedAt ? [`- Last used at: ${entry.lastUsedAt}`] : []),
     `- Lesson: ${entry.lesson}`,
@@ -268,6 +302,10 @@ function parseEntries(markdown: string): LearnedEntry[] {
     const expiresAt = /^-\s+Expires at:\s*(.+)$/mu.exec(block)?.[1];
     const reviewedAt = /^-\s+Reviewed at:\s*(.+)$/mu.exec(block)?.[1];
     const supersedes = /^-\s+Supersedes:\s*(.+)$/mu.exec(block)?.[1];
+    const redactionVersion = Number(/^-\s+Redaction version:\s*(\d+)$/mu.exec(block)?.[1] ?? 0);
+    const unsafeLegacy = redactionVersion !== 2 && /\[(?:secret|private key) redacted\]/iu.test(`${lesson ?? ""} ${applyWhen ?? ""} ${/^-\s+Evidence:\s*(.+)$/mu.exec(block)?.[1] ?? ""}`);
+    let supersedesIds: string[] | undefined;
+    try { const ids: unknown = JSON.parse(/^-\s+Supersedes ids:\s*(.+)$/mu.exec(block)?.[1] ?? "null"); if (Array.isArray(ids) && ids.every(id => typeof id === "string" && /^[A-Za-z0-9_-]{8,80}$/u.test(id))) supersedesIds = ids; } catch { /* Optional legacy metadata. */ }
     let reviewHistory: LearnedEntry["reviewHistory"];
     try { const history: unknown = JSON.parse(/^-\s+Review history:\s*(.+)$/mu.exec(block)?.[1] ?? "null"); if (Array.isArray(history) && history.every(item => item && typeof item.action === "string" && typeof item.at === "string" && typeof item.revision === "string")) reviewHistory = history.slice(-20); } catch { /* Legacy records remain readable. */ }
     let sourceSessionIds: string[] | undefined;
@@ -294,6 +332,8 @@ function parseEntries(markdown: string): LearnedEntry[] {
     const parsedDate = new Date(`${header[1]}T00:00:00.000Z`);
     if (Number.isNaN(parsedDate.getTime())) continue;
     const normalized = normalizeEntry({
+      ...(supersedesIds ? { supersedesIds } : {}),
+      ...(unsafeLegacy || /^-\s+Redaction review:\s*true$/mu.test(block) ? { redactionReview: true } : {}),
       ...(expiresAt ? { expiresAt } : createdAt && Number.isNaN(Date.parse(createdAt)) ? { expiresAt: "unknown" } : {}),
       ...(reviewedAt ? { reviewedAt } : {}),
       ...(reviewHistory ? { reviewHistory } : {}),
@@ -304,10 +344,10 @@ function parseEntries(markdown: string): LearnedEntry[] {
       ...(kind ? { kind } : {}),
       ...(confidence ? { confidence } : {}),
       ...(status ? { status } : {}),
-      lesson,
-      applyWhen,
+      lesson: unsafeLegacy ? "[Memory field masked; redaction review required]" : lesson,
+      applyWhen: unsafeLegacy ? "[Memory field masked; redaction review required]" : applyWhen,
       ...(sourceSessionId ? { sourceSessionId } : {}),
-      ...(evidence ? { evidence } : {}),
+      ...(evidence ? { evidence: unsafeLegacy ? evidence.map(item => ({ ...item, excerpt: "[Memory field masked; redaction review required]" })) : evidence } : {}),
       createdAt: createdAt && !Number.isNaN(Date.parse(createdAt)) ? createdAt : `${header[1]}T00:00:00.000Z`,
       ...(updatedAt && !Number.isNaN(Date.parse(updatedAt)) ? { updatedAt } : {}),
       ...(lastUsedAt && !Number.isNaN(Date.parse(lastUsedAt)) ? { lastUsedAt } : {}),
@@ -327,6 +367,8 @@ async function readText(filePath: string): Promise<string> {
 }
 
 interface MemoryCaptureJob {
+  redactionVersion?: number;
+  epochs?: MemoryEpochs;
   id: string;
   turn: LearnedTurn;
   outcome: LearnedTurnOutcome;
@@ -346,16 +388,18 @@ class MemoryOperationStoppedError extends Error {
 
 function recoverCaptureJob(job: MemoryCaptureJob, now: number): MemoryCaptureJob {
   const expired = job.status === "running" && Date.parse(job.notBefore) <= now;
+  const unsettledRunning = job.status === "running" && !(job.requestPending === false && job.usageComplete === true);
   const unsafeQueued = job.status === "queued" && (
     job.requestPending !== undefined && job.requestPending !== false
     || job.usageComplete !== undefined && job.usageComplete !== true
     || !(job.requestPending === false && job.usageComplete === true)
       && (job.attempts > 0 || job.error !== undefined || job.extracted !== undefined)
   );
-  if (unsafeQueued || expired && !(job.requestPending === false && job.usageComplete === true)) {
+  if (unsafeQueued || unsettledRunning && (expired || job.outcome !== "verified")) {
     return { ...job, status: "failed", usageComplete: false,
       error: "Memory request usage is incomplete after interruption; automatic retry stopped" };
   }
+  if (job.outcome !== "verified" && job.status !== "failed") return { ...job, status: "failed", error: "Memory capture requires a verified outcome" };
   return expired ? { ...job, status: "queued" } : job;
 }
 
@@ -371,7 +415,11 @@ export type MemoryRequestRunner = <T extends { usage?: unknown; status?: unknown
 
 type MemoryRequestExecutor = <T extends { usage?: unknown; status?: unknown }>(run: (signal?: AbortSignal) => Promise<T>) => Promise<T>;
 
-interface MemoryCandidate {
+export interface MemoryCandidate {
+  epochs?: MemoryEpochs;
+  redactionVersion?: number;
+  redactionReview?: boolean;
+  resolvedEntryIds?: string[];
   sourceSessionIds?: string[];
   id: string;
   workspacePath: string;
@@ -383,7 +431,18 @@ interface MemoryCandidate {
   evidence: LearnedEvidence[];
   sourceSessionId?: string;
   createdAt: string;
-  status: "pending" | "consolidated" | "review";
+  status: "pending" | "consolidated" | "review" | "rejected";
+}
+
+function conflictsWith(left: Pick<LearnedEntry, "lesson" | "applyWhen">, right: Pick<LearnedEntry, "lesson" | "applyWhen">): boolean {
+  return left.applyWhen.toLowerCase() === right.applyWhen.toLowerCase() && left.lesson.toLowerCase() !== right.lesson.toLowerCase();
+}
+
+function capEntries(entries: LearnedEntry[], now: Date): LearnedEntry[] {
+  const active = entries.filter(entry => entry.status === "active");
+  const victims = [...active].sort((a, b) => Number(memoryEntryExpired(b, now)) - Number(memoryEntryExpired(a, now)) || a.updatedAt.localeCompare(b.updatedAt) || a.createdAt.localeCompare(b.createdAt) || entries.indexOf(a) - entries.indexOf(b));
+  for (const victim of victims.slice(0, Math.max(0, active.length - MAX_ENTRIES))) victim.status = "archived";
+  return [...entries.filter(entry => entry.status === "active"), ...entries.filter(entry => entry.status !== "active").slice(0, MAX_ENTRIES * 2)];
 }
 
 function parseArrayFile<T>(contents: string): T[] {
@@ -409,11 +468,13 @@ function retrievalTerms(value: string): string[] {
 export class LearnedMemoryStore {
   readonly #directory: string;
   readonly #now: () => Date;
+  readonly #control: MemoryControl;
   readonly #writeQueues = new Map<string, Promise<unknown>>();
 
   constructor(options: LearnedMemoryStoreOptions = {}) {
     this.#directory = options.directory ?? defaultMemoryDirectory();
     this.#now = options.now ?? (() => new Date());
+    this.#control = new MemoryControl(this.#directory);
   }
 
   get directory(): string {
@@ -441,27 +502,64 @@ export class LearnedMemoryStore {
 
   async setEnabled(enabled: boolean): Promise<void> {
     const filePath = path.join(this.#directory, SETTINGS_FILE);
-    await this.#enqueue(filePath, () => this.#locked(filePath, async () => {
-      await fs.mkdir(this.#directory, { recursive: true, mode: 0o700 });
-      await this.#atomicWrite(filePath, `${JSON.stringify({ enabled }, null, 2)}\n`);
-    }));
+    await this.#control.run(async state => {
+      if (!enabled) state.global += 1;
+      await this.#control.commit(state, [{ file: this.#control.relative(filePath), contents: `${JSON.stringify({ enabled }, null, 2)}\n` }]);
+    });
   }
 
   async read(scope: LearnedScope, workspacePath: string): Promise<LearnedEntry[]> {
+    return this.#control.run(() => this.#readEntries(scope, workspacePath));
+  }
+
+  async #readEntries(scope: LearnedScope, workspacePath: string): Promise<LearnedEntry[]> {
     const markdown = await readText(this.filePath(scope, workspacePath));
     return parseEntries(markdown).filter((entry) => entry.scope === scope);
   }
 
+  async captureEpochs(workspacePath: string): Promise<MemoryEpochs> {
+    return this.#control.run(async state => this.#control.epochs(state, projectMemoryKey(workspacePath)));
+  }
+
+  async captureAllowed(job: MemoryCaptureJob, scope?: LearnedScope): Promise<boolean> {
+    return this.#control.run(async state => job.outcome === "verified" && (scope ? this.#validScope(state, job, scope) : this.#validScope(state, job, "project") || explicitMemoryIntent(job.turn.userInput) && this.#validScope(state, job, "user")));
+  }
+
+  #validScope(state: MemoryControlState, job: MemoryCaptureJob, scope: LearnedScope): boolean {
+    return this.#control.matches(state, projectMemoryKey(job.turn.workspacePath), scope, job.epochs);
+  }
+
   async append(scope: LearnedScope, workspacePath: string, entries: readonly (Partial<LearnedEntry> & Pick<LearnedEntry, "lesson" | "applyWhen">)[],
-    options: { beforeCommit?: () => void | Promise<void> } = {}): Promise<void> {
+    options: { beforeCommit?: () => void | Promise<void>; epochs?: MemoryEpochs; candidates?: MemoryCandidate[]; resolvedCandidateIds?: string[]; job?: MemoryCaptureJob } = {}): Promise<void> {
     if (entries.length === 0) return;
     const filePath = this.filePath(scope, workspacePath);
-    await this.#enqueue(filePath, () => this.#locked(filePath, async () => {
+    await this.#control.run(state => this.#enqueue(filePath, () => this.#locked(filePath, async () => {
+      if (options.epochs && !this.#control.matches(state, projectMemoryKey(workspacePath), scope, options.epochs)) throw new MemoryStaleError("Memory scope changed");
+      if (options.job) {
+        if (!this.#validScope(state, options.job, scope)) throw new MemoryStaleError("Memory scope changed");
+        const jobs = this.#parseJobs(await readText(path.join(this.#directory, JOBS_FILE)));
+        if (!jobs.some(job => ownsCaptureJob(job, options.job!))) throw new MemoryStaleError("Memory capture ownership changed");
+      }
       const existing = parseEntries(await readText(filePath)).filter((entry) => entry.scope === scope);
-      const incoming = entries
+      let incoming = entries
         .map((entry) => normalizeEntry({ ...entry, scope }, this.#now()))
         .filter((entry): entry is LearnedEntry => entry !== undefined)
         .filter((entry) => !existing.some((candidate) => entryKey(candidate) === entryKey(entry) && candidate.status !== "active"));
+      let candidateWrites: MemoryWrite[] = [];
+      if (options.candidates) {
+        const candidatesFile = path.join(this.#directory, CANDIDATES_FILE);
+        const current = this.#parseCandidates(await readText(candidatesFile));
+        const final = this.#parseCandidates(JSON.stringify(options.candidates)).filter(candidate => candidate.lesson && candidate.applyWhen)
+          .filter(candidate => !current.some(item => item.id === candidate.id && (item.status === "rejected" || item.status === "consolidated")));
+        const accepted = final.filter(candidate => !candidate.redactionReview && !existing.some(entry => entry.status === "active" && conflictsWith(entry, candidate))
+          && !final.some(other => other.id !== candidate.id && conflictsWith(other, candidate)));
+        incoming = incoming.filter(entry => accepted.some(candidate => entryKey(candidate) === entryKey(entry)));
+        const finalIds = new Set(final.map(candidate => candidate.id));
+        const resolved = new Set(options.resolvedCandidateIds ?? []);
+        const next = current.map(candidate => resolved.has(candidate.id) && candidate.status === "pending" ? { ...candidate, status: "consolidated" as const } : candidate).filter(candidate => !finalIds.has(candidate.id));
+        next.push(...final.map(candidate => ({ ...candidate, status: accepted.includes(candidate) ? "consolidated" as const : "review" as const })));
+        candidateWrites = [{ file: CANDIDATES_FILE, contents: JSON.stringify(next, null, 2) + "\n" }];
+      }
       const combined: LearnedEntry[] = [];
       for (const entry of [...existing, ...incoming]) {
         const duplicate = combined.find((candidate) => entryKey(candidate) === entryKey(entry));
@@ -471,19 +569,31 @@ export class LearnedMemoryStore {
         }
         combined.push(entry);
       }
-      const active = combined.filter((entry) => entry.status === "active").slice(0, MAX_ENTRIES);
-      const inactive = combined.filter((entry) => entry.status !== "active").slice(0, MAX_ENTRIES * 2);
-      const limited = [...active, ...inactive];
+      const limited = capEntries(combined, this.#now());
       await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-      await this.#atomicWrite(filePath, serializeEntries(limited), options.beforeCommit);
-    }));
+      if (candidateWrites.length) await this.#control.commit(state, [{ file: this.#control.relative(filePath), contents: serializeEntries(limited) }, ...candidateWrites], options.beforeCommit);
+      else await this.#atomicWrite(filePath, serializeEntries(limited), options.beforeCommit);
+    })));
   }
 
   async clear(scope: LearnedScope, workspacePath: string): Promise<void> {
     const filePath = this.filePath(scope, workspacePath);
-    await this.#enqueue(filePath, () => this.#locked(filePath, async () => {
-      await fs.rm(filePath, { force: true });
-    }));
+    await this.#control.run(async state => {
+      this.#revoke(state, scope, workspacePath);
+      const candidates = this.#parseCandidates(await readText(path.join(this.#directory, CANDIDATES_FILE))).filter(candidate => candidate.scope !== scope || scope === "project" && normalizeWorkspacePath(candidate.workspacePath) !== normalizeWorkspacePath(workspacePath));
+      const jobs = this.#pruneJobs(this.#parseJobs(await readText(path.join(this.#directory, JOBS_FILE))), state);
+      await this.#control.commit(state, [{ file: this.#control.relative(filePath), contents: null }, { file: CANDIDATES_FILE, contents: JSON.stringify(candidates) + "\n" }, { file: JOBS_FILE, contents: JSON.stringify(jobs) + "\n" }]);
+    });
+  }
+
+  #revoke(state: MemoryControlState, scope: LearnedScope, workspacePath: string): void {
+    if (scope === "user") state.user += 1;
+    else { const key = projectMemoryKey(workspacePath); state.projects[key] = (state.projects[key] ?? 0) + 1; }
+  }
+
+  #pruneJobs(jobs: MemoryCaptureJob[], state: MemoryControlState): MemoryCaptureJob[] {
+    return jobs.filter(job => this.#validScope(state, job, "project") || explicitMemoryIntent(job.turn.userInput) && this.#validScope(state, job, "user")
+      || job.requestPending !== false || job.usageComplete !== true);
   }
 
   async updateEntry(
@@ -493,23 +603,25 @@ export class LearnedMemoryStore {
     patch: Partial<Pick<LearnedEntry, "status" | "lesson" | "applyWhen" | "confidence" | "kind">>,
   ): Promise<void> {
     const filePath = this.filePath(scope, workspacePath);
-    await this.#enqueue(filePath, () => this.#locked(filePath, async () => {
+    await this.#control.run(state => this.#enqueue(filePath, () => this.#locked(filePath, async () => {
       const entries = parseEntries(await readText(filePath)).filter((entry) => entry.scope === scope);
       const found = entries.find((entry) => entry.id === id);
-      if (!found) throw new Error("Memory entry not found");
+      if (!found) throw new MemoryReviewError("Memory entry not found");
       const updated = normalizeEntry({ ...found, ...patch, updatedAt: this.#now().toISOString() }, this.#now());
-      if (!updated) throw new Error("Memory entry is invalid");
-      await this.#atomicWrite(filePath, serializeEntries(entries.map((entry) => entry.id === id ? updated : entry)));
-    }));
+      if (!updated) throw new MemoryReviewError("Memory entry is invalid");
+      this.#revoke(state, scope, workspacePath);
+      await this.#control.commit(state, [{ file: this.#control.relative(filePath), contents: serializeEntries(capEntries(entries.map((entry) => entry.id === id ? updated : entry), this.#now())) }]);
+    })));
   }
 
   async reviewEntry(scope: LearnedScope, workspacePath: string, id: string, revision: string, action: "renew" | "correct" | "disable" | "delete", correction?: { lesson: string; applyWhen: string }): Promise<void> {
-    if (!["renew", "correct", "disable", "delete"].includes(action)) throw new Error("Invalid memory review action");
+    if (!["renew", "correct", "disable", "delete"].includes(action)) throw new MemoryReviewError("Invalid memory review action");
     const filePath = this.filePath(scope, workspacePath);
-    await this.#enqueue(filePath, () => this.#locked(filePath, async () => {
+    await this.#control.run(state => this.#enqueue(filePath, () => this.#locked(filePath, async () => {
       const entries = parseEntries(await readText(filePath)).filter((entry) => entry.scope === scope);
       const found = entries.find((entry) => entry.id === id);
-      if (!found || memoryEntryRevision(found) !== revision) throw new Error("Memory preview changed; inspect the entry again");
+      if (!found || memoryEntryRevision(found) !== revision) throw new MemoryReviewError("Memory preview changed; inspect the entry again");
+      if (action === "renew" && found.redactionReview) throw new MemoryReviewError("Memory requires a correction after redaction review");
       const now = this.#now();
       if (action !== "delete") { found.reviewHistory = [...(found.reviewHistory ?? []), { action, at: now.toISOString(), revision }].slice(-20); found.updatedAt = now.toISOString(); }
       let next = entries;
@@ -519,33 +631,38 @@ export class LearnedMemoryStore {
         found.status = "active"; found.reviewedAt = now.toISOString(); found.updatedAt = now.toISOString();
         if (scope === "project") found.expiresAt = new Date(now.getTime() + 90 * 86_400_000).toISOString();
       } else {
-        if (!correction) throw new Error("A correction requires lesson and applicability");
-        const corrected = normalizeEntry({ ...found, ...correction, id: createHash("sha256").update(`${revision}:${now.toISOString()}:correction`).digest("hex").slice(0, 20), status: "active", supersedes: found.id, createdAt: now.toISOString(), updatedAt: now.toISOString(), reviewedAt: now.toISOString(), ...(scope === "project" ? { expiresAt: new Date(now.getTime() + 90 * 86_400_000).toISOString() } : {}) }, now);
-        if (!corrected) throw new Error("Memory correction is invalid");
+        if (!correction) throw new MemoryReviewError("A correction requires lesson and applicability");
+        const corrected = normalizeEntry({ ...found, ...correction, redactionReview: false, id: createHash("sha256").update(`${revision}:${now.toISOString()}:correction`).digest("hex").slice(0, 20), status: "active", supersedes: found.id, createdAt: now.toISOString(), updatedAt: now.toISOString(), reviewedAt: now.toISOString(), ...(scope === "project" ? { expiresAt: new Date(now.getTime() + 90 * 86_400_000).toISOString() } : {}) }, now);
+        if (!corrected) throw new MemoryReviewError("Memory correction is invalid");
         found.status = "superseded"; next = [corrected, ...entries];
       }
-      await this.#atomicWrite(filePath, serializeEntries(next));
-    }));
+      this.#revoke(state, scope, workspacePath);
+      await this.#control.commit(state, [{ file: this.#control.relative(filePath), contents: serializeEntries(capEntries(next, now)) }]);
+    })));
   }
 
   async deleteEntry(scope: LearnedScope, workspacePath: string, id: string): Promise<void> {
     const filePath = this.filePath(scope, workspacePath);
-    await this.#enqueue(filePath, () => this.#locked(filePath, async () => {
+    await this.#control.run(state => this.#enqueue(filePath, () => this.#locked(filePath, async () => {
       const entries = parseEntries(await readText(filePath)).filter((entry) => entry.scope === scope && entry.id !== id);
-      await this.#atomicWrite(filePath, serializeEntries(entries));
-    }));
+      this.#revoke(state, scope, workspacePath);
+      await this.#control.commit(state, [{ file: this.#control.relative(filePath), contents: serializeEntries(entries) }]);
+    })));
   }
 
   async status(workspacePath: string): Promise<LearnedMemoryStatus> {
-    const [enabled, project, user] = await Promise.all([
+    const [enabled, project, user, reviewCandidates] = await Promise.all([
       this.isEnabled(),
       this.read("project", workspacePath),
       this.read("user", workspacePath),
+      this.listReviewCandidates(workspacePath),
     ]);
     return {
       enabled,
       entries: [...project, ...user],
-      needsReview: [...project, ...user].filter((entry) => entry.status === "active" && (memoryEntryExpired(entry, this.#now()) || !memoryEntryHasProvenance(entry))).length,
+      candidateNeedsReview: reviewCandidates.length,
+      reviewCandidates,
+      needsReview: reviewCandidates.length + [...project, ...user].filter((entry) => entry.status === "active" && (memoryEntryExpired(entry, this.#now()) || !memoryEntryHasProvenance(entry))).length,
       projectEntries: project.length,
       userEntries: user.length,
       recent: [...project, ...user]
@@ -612,51 +729,137 @@ export class LearnedMemoryStore {
 
   async loadJobs(): Promise<MemoryCaptureJob[]> {
     const filePath = path.join(this.#directory, JOBS_FILE);
-    return this.#enqueue(filePath, async () => parseArrayFile<MemoryCaptureJob>(await readText(filePath))
-      .filter((job) => job && typeof job.id === "string" && job.turn && (job.status === "queued" || job.status === "running" || job.status === "failed")));
+    return this.#control.run(() => this.#enqueue(filePath, async () => this.#parseJobs(await readText(filePath))
+      .filter((job) => job && typeof job.id === "string" && job.turn && (job.status === "queued" || job.status === "running" || job.status === "failed"))));
   }
 
   async saveJobs(jobs: readonly MemoryCaptureJob[]): Promise<void> {
     const filePath = path.join(this.#directory, JOBS_FILE);
-    await this.#enqueue(filePath, () => this.#locked(filePath, async () => {
-      await this.#atomicWrite(filePath, `${JSON.stringify(jobs, null, 2)}\n`);
-    }));
+    await this.#control.run(() => this.#enqueue(filePath, () => this.#locked(filePath, async () => {
+      await this.#atomicWrite(filePath, `${JSON.stringify(this.#parseJobs(JSON.stringify(jobs)), null, 2)}\n`);
+    })));
   }
 
   async updateJobs(update: (jobs: MemoryCaptureJob[]) => MemoryCaptureJob[]): Promise<MemoryCaptureJob[]> {
     const filePath = path.join(this.#directory, JOBS_FILE);
     let result: MemoryCaptureJob[] = [];
-    await this.#enqueue(filePath, () => this.#locked(filePath, async () => {
-      const current = parseArrayFile<MemoryCaptureJob>(await readText(filePath));
-      result = update(current);
+    await this.#control.run(state => this.#enqueue(filePath, () => this.#locked(filePath, async () => {
+      const current = this.#parseJobs(await readText(filePath));
+      result = this.#pruneJobs(this.#parseJobs(JSON.stringify(update(current))), state);
       await this.#atomicWrite(filePath, `${JSON.stringify(result, null, 2)}\n`);
-    }));
+    })));
     return result;
   }
 
   async loadCandidates(): Promise<MemoryCandidate[]> {
-    return parseArrayFile<MemoryCandidate>(await readText(path.join(this.#directory, CANDIDATES_FILE)));
+    return this.#control.run(async () => this.#parseCandidates(await readText(path.join(this.#directory, CANDIDATES_FILE))));
   }
 
   async saveCandidates(candidates: readonly MemoryCandidate[]): Promise<void> {
     const filePath = path.join(this.#directory, CANDIDATES_FILE);
-    await this.#enqueue(filePath, () => this.#locked(filePath, async () => {
+    await this.#control.run(() => this.#enqueue(filePath, () => this.#locked(filePath, async () => {
       const cutoff = this.#now().getTime() - CANDIDATE_RETENTION_MS;
-      const retained = candidates.filter((candidate) => candidate.status !== "pending" || Date.parse(candidate.createdAt) >= cutoff);
+      const retained = this.#parseCandidates(JSON.stringify(candidates)).filter((candidate) => candidate.status !== "pending" || Date.parse(candidate.createdAt) >= cutoff);
       await this.#atomicWrite(filePath, `${JSON.stringify(retained, null, 2)}\n`);
-    }));
+    })));
   }
 
   async updateCandidates(update: (candidates: MemoryCandidate[]) => MemoryCandidate[], options: { beforeCommit?: () => void | Promise<void> } = {}): Promise<MemoryCandidate[]> {
     const filePath = path.join(this.#directory, CANDIDATES_FILE);
     let result: MemoryCandidate[] = [];
-    await this.#enqueue(filePath, () => this.#locked(filePath, async () => {
-      const current = parseArrayFile<MemoryCandidate>(await readText(filePath));
+    await this.#control.run(state => this.#enqueue(filePath, () => this.#locked(filePath, async () => {
+      const current = this.#parseCandidates(await readText(filePath));
       const cutoff = this.#now().getTime() - CANDIDATE_RETENTION_MS;
-      result = update(current).filter((candidate) => candidate.status !== "pending" || Date.parse(candidate.createdAt) >= cutoff);
+      const terminal = current.filter(candidate => candidate.status === "rejected" || candidate.status === "consolidated");
+      result = update(current).filter(candidate => this.#control.matches(state, projectMemoryKey(candidate.workspacePath), candidate.scope, candidate.epochs))
+        .filter(candidate => !terminal.some(item => item.id === candidate.id))
+        .filter((candidate) => candidate.status !== "pending" || Date.parse(candidate.createdAt) >= cutoff);
+      result.push(...terminal);
       await this.#atomicWrite(filePath, `${JSON.stringify(result, null, 2)}\n`, options.beforeCommit);
-    }));
+    })));
     return result;
+  }
+
+  #parseCandidates(contents: string): MemoryCandidate[] {
+    return parseArrayFile<MemoryCandidate>(contents).filter(candidate => candidate && typeof candidate.id === "string" && typeof candidate.workspacePath === "string"
+      && (candidate.scope === "project" || candidate.scope === "user") && typeof candidate.lesson === "string" && typeof candidate.applyWhen === "string"
+      && ["pending", "review", "consolidated", "rejected"].includes(candidate.status)).map(candidate => {
+      const unsafe = candidate.redactionReview || candidate.redactionVersion !== 2 && /\[(?:secret|private key) redacted\]/iu.test(JSON.stringify(candidate));
+      return { ...candidate, redactionVersion: 2, ...(unsafe ? { redactionReview: true, ...(candidate.status === "pending" ? { status: "review" as const } : {}) } : {}),
+        lesson: unsafe ? "[Memory field masked; redaction review required]" : redactSecrets(candidate.lesson),
+        applyWhen: unsafe ? "[Memory field masked; redaction review required]" : redactSecrets(candidate.applyWhen),
+        evidence: (Array.isArray(candidate.evidence) ? candidate.evidence : []).filter(item => item && typeof item.excerpt === "string").slice(0, 3)
+          .map(item => ({ ...item, excerpt: unsafe ? "[Memory field masked; redaction review required]" : redactSecrets(item.excerpt, 800) })) };
+    });
+  }
+
+  #parseJobs(contents: string): MemoryCaptureJob[] {
+    return parseArrayFile<MemoryCaptureJob>(contents).filter(job => job && typeof job.id === "string" && job.turn && typeof job.turn.workspacePath === "string")
+      .map(job => {
+        const unsafe = job.redactionVersion !== 2 && /\[(?:secret|private key) redacted\]/iu.test(JSON.stringify(job));
+        const clean = (value: string, limit: number) => unsafe ? "[Memory field masked; redaction review required]" : redactSecrets(value, limit);
+        const result = { ...job, turn: { ...job.turn, userInput: clean(job.turn.userInput, 8_000), assistantText: clean(job.turn.assistantText, 12_000), transcript: clean(job.turn.transcript, 24_000) },
+          ...(job.error ? { error: redactSecrets(job.error) } : {}) };
+        if (unsafe || JSON.stringify(result.turn) !== JSON.stringify(job.turn)) result.redactionVersion = 2;
+        if (unsafe) { result.status = "failed"; result.error = "Memory capture requires redaction review"; delete result.extracted; }
+        else if (result.extracted) result.extracted = result.extracted.map(normalizeExtractedLesson);
+        return result;
+      });
+  }
+
+  async listReviewCandidates(workspacePath: string): Promise<MemoryCandidate[]> {
+    return this.#control.run(async () => this.#parseCandidates(await readText(path.join(this.#directory, CANDIDATES_FILE)))
+      .filter(candidate => candidate.status === "review" && (candidate.scope === "user" || normalizeWorkspacePath(candidate.workspacePath) === normalizeWorkspacePath(workspacePath))));
+  }
+
+  async #candidatePreview(state: MemoryControlState, workspacePath: string, id: string, correction?: MemoryCorrection): Promise<MemoryCandidatePreview> {
+    const candidate = this.#parseCandidates(await readText(path.join(this.#directory, CANDIDATES_FILE)))
+      .find(item => item.id === id && item.status === "review" && (item.scope === "user" || normalizeWorkspacePath(item.workspacePath) === normalizeWorkspacePath(workspacePath)));
+    if (!candidate) throw new MemoryReviewError("Memory candidate not found or already reviewed");
+    const corrected = correction ? { lesson: redactSecrets(correction.lesson), applyWhen: redactSecrets(correction.applyWhen) } : undefined;
+    if (corrected && (!corrected.lesson || !corrected.applyWhen)) throw new MemoryReviewError("Memory correction is invalid");
+    const entries = await this.#readEntries(candidate.scope, candidate.workspacePath);
+    const conflicts = entries.filter(entry => entry.status === "active" && conflictsWith(entry, corrected ?? candidate));
+    const revision = createHash("sha256").update(JSON.stringify({ candidate, correction: corrected, conflicts: conflicts.map(entry => [entry.id, memoryEntryRevision(entry)]),
+      epochs: this.#control.epochs(state, projectMemoryKey(candidate.workspacePath)) })).digest("hex");
+    return { candidate, conflicts, revision, ...(corrected ? { correction: corrected } : {}) };
+  }
+
+  async previewCandidate(workspacePath: string, id: string, correction?: MemoryCorrection): Promise<MemoryCandidatePreview> {
+    return this.#control.run(state => this.#candidatePreview(state, workspacePath, id, correction));
+  }
+
+  async reviewCandidate(workspacePath: string, id: string, revision: string, action: MemoryCandidateAction, correction?: MemoryCorrection): Promise<void> {
+    if (!["accept", "correct", "reject"].includes(action) || action === "correct" && !correction) throw new MemoryReviewError("Invalid Memory candidate action");
+    await this.#control.run(async state => {
+      const preview = await this.#candidatePreview(state, workspacePath, id, action === "correct" ? correction : undefined);
+      if (preview.revision !== revision) throw new MemoryReviewError("Memory preview changed; inspect the candidate again");
+      const candidate = preview.candidate;
+      if (action !== "reject" && candidate.redactionReview && action !== "correct") throw new MemoryReviewError("Memory candidate requires a correction after redaction review");
+      const candidates = this.#parseCandidates(await readText(path.join(this.#directory, CANDIDATES_FILE)));
+      const writes: MemoryWrite[] = [];
+      let resolvedEntryIds: string[] | undefined;
+      if (action !== "reject") {
+        const now = this.#now();
+        const entries = await this.#readEntries(candidate.scope, candidate.workspacePath);
+        const supersedesIds = preview.conflicts.map(entry => entry.id);
+        const values = preview.correction ?? candidate;
+        const duplicate = entries.find(entry => entry.status === "active" && entryKey(entry) === entryKey(values));
+        const accepted = normalizeEntry({ ...candidate, ...values, id: duplicate?.id ?? createHash("sha256").update(`accepted:${id}`).digest("hex").slice(0, 20),
+          redactionReview: false, status: "active", createdAt: duplicate?.createdAt ?? now.toISOString(), updatedAt: now.toISOString(), reviewedAt: now.toISOString(),
+          ...(candidate.scope === "project" ? { expiresAt: new Date(now.getTime() + 90 * 86_400_000).toISOString() } : {}),
+          ...(supersedesIds.length ? { supersedes: supersedesIds[0], supersedesIds } : {}) }, now);
+        if (!accepted) throw new MemoryReviewError("Memory correction is invalid");
+        for (const entry of entries) if (supersedesIds.includes(entry.id)) { entry.status = "superseded"; entry.updatedAt = now.toISOString(); }
+        const next = capEntries([accepted, ...entries.filter(entry => entry.id !== accepted.id)], now);
+        resolvedEntryIds = [accepted.id];
+        this.#revoke(state, candidate.scope, candidate.workspacePath);
+        writes.push({ file: this.#control.relative(this.filePath(candidate.scope, candidate.workspacePath)), contents: serializeEntries(next) });
+      }
+      const next = candidates.map(item => item.id === id ? { ...item, status: action === "reject" ? "rejected" as const : "consolidated" as const, ...(resolvedEntryIds ? { resolvedEntryIds } : {}) } : item);
+      writes.push({ file: CANDIDATES_FILE, contents: JSON.stringify(next, null, 2) + "\n" });
+      await this.#control.commit(state, writes);
+    });
   }
 
   async #enqueue<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
@@ -718,6 +921,16 @@ function explicitMemoryIntent(value: string): boolean {
   return /(?:remember|keep in mind|from now on|always|记住|请记住|以后都|长期偏好|我的偏好)/iu.test(value);
 }
 
+function normalizeExtractedLesson(entry: ExtractedLesson): ExtractedLesson {
+  return {
+    ...(entry.scope === "project" || entry.scope === "user" ? { scope: entry.scope } : {}),
+    ...(typeof entry.kind === "string" && ["preference", "convention", "procedure", "constraint", "summary"].includes(entry.kind) ? { kind: entry.kind } : {}),
+    ...(entry.confidence === "low" || entry.confidence === "medium" || entry.confidence === "high" ? { confidence: entry.confidence } : {}),
+    ...(typeof entry.lesson === "string" ? { lesson: redactSecrets(entry.lesson) } : {}),
+    ...(typeof entry.applyWhen === "string" ? { applyWhen: redactSecrets(entry.applyWhen) } : {}),
+  };
+}
+
 function parseExtractorOutput(value: string): ExtractedLesson[] {
   const trimmed = value.trim().replace(/^```(?:json)?\s*/iu, "").replace(/\s*```$/u, "");
   try {
@@ -725,7 +938,7 @@ function parseExtractorOutput(value: string): ExtractedLesson[] {
     if (typeof parsed !== "object" || parsed === null || !Array.isArray((parsed as { entries?: unknown }).entries)) return [];
     return (parsed as { entries: unknown[] }).entries
       .filter((entry): entry is ExtractedLesson => typeof entry === "object" && entry !== null)
-      .slice(0, 3);
+      .slice(0, 3).map(normalizeExtractedLesson);
   } catch {
     return [];
   }
@@ -883,7 +1096,7 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
       await this.#startup;
       this.#assertAvailable();
       const explicit = explicitMemoryIntent(turn.userInput);
-      if (!(await this.#store.isEnabled()) || !this.#policy.captureFuture || (outcome !== "verified" && !explicit) || (turn.toolCallCount === 0 && !explicit) || (this.#minTranscriptChars > 0 && turn.transcript.length < this.#minTranscriptChars && !explicit)) {
+      if (!(await this.#store.isEnabled()) || !this.#policy.captureFuture || outcome !== "verified" || (turn.toolCallCount === 0 && !explicit) || (this.#minTranscriptChars > 0 && turn.transcript.length < this.#minTranscriptChars && !explicit)) {
         this.#captureState = { state: "skipped", lastAt: new Date().toISOString(), usage: this.#usage };
         this.#turnActive = false;
         await this.#restartIdleCapture();
@@ -898,6 +1111,8 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
       const now = new Date();
       const id = createHash("sha256").update(`${turn.sessionId ?? ""}\n${turn.workspacePath}\n${sanitized.userInput}\n${sanitized.transcript}`).digest("hex").slice(0, 24);
       const job: MemoryCaptureJob = {
+        redactionVersion: 2,
+        epochs: await this.#store.captureEpochs(turn.workspacePath),
         id,
         turn: sanitized,
         outcome,
@@ -928,6 +1143,7 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
       await this.#runOwned(async () => {
         await this.#startup;
         await this.#checkWrite(generation, ownedSignal);
+        const epochs = await this.#store.captureEpochs(workspacePath);
         const ledger = new RequestAttemptLedger();
         const executor = new RequestExecutor(ledger);
         const execute: MemoryRequestExecutor = (run) => this.#executeRequest(ledger, executor, run, ownedSignal);
@@ -954,9 +1170,9 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
             applyWhen: "Apply this preference in future conversations across projects.",
             kind: "preference",
             reviewedAt: new Date().toISOString(),
-          }], { beforeCommit: () => this.#checkWrite(generation, ownedSignal) });
+          }], { epochs, beforeCommit: () => this.#checkWrite(generation, ownedSignal) });
         } catch (error) {
-          if (!(error instanceof MemoryOperationStoppedError)) this.#persistenceFailure ??= { error };
+          if (!(error instanceof MemoryOperationStoppedError) && !(error instanceof MemoryReviewError)) this.#persistenceFailure ??= { error };
           throw error;
         }
         await this.#checkWrite(generation, ownedSignal);
@@ -991,8 +1207,8 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
         this.#snapshot = undefined;
       }
       await this.#store.setEnabled(enabled);
-      if (!enabled) await this.#store.updateJobs((jobs) => jobs.filter((job) => job.status === "failed"));
-      else await this.#armCaptureTimer();
+      await this.#store.updateJobs(jobs => jobs);
+      if (enabled) await this.#armCaptureTimer();
     });
   }
 
@@ -1004,8 +1220,6 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
       this.#abortManual(new Error("Memory cleared"));
       this.#snapshot = undefined;
       await this.#store.clear(scope, workspacePath);
-      await this.#store.updateJobs((jobs) => jobs.filter((job) => normalizeWorkspacePath(job.turn.workspacePath) !== normalizeWorkspacePath(workspacePath)));
-      await this.#store.updateCandidates((candidates) => candidates.filter((candidate) => normalizeWorkspacePath(candidate.workspacePath) !== normalizeWorkspacePath(workspacePath) || candidate.scope !== scope));
     });
   }
 
@@ -1056,6 +1270,15 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
     }
   }
 
+  async reviewCandidate(workspacePath: string, id: string, revision: string, action: MemoryCandidateAction, correction?: MemoryCorrection): Promise<void> {
+    return this.#runOwned(async () => {
+      this.#generation++; this.#snapshot = undefined;
+      this.#captureController?.abort(new Error("Memory candidate reviewed"));
+      this.#abortManual(new Error("Memory candidate reviewed"));
+      await this.#store.reviewCandidate(workspacePath, id, revision, action, correction);
+    });
+  }
+
   getPolicy(): LearnedMemoryPolicy {
     return { ...this.#policy };
   }
@@ -1098,7 +1321,7 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
         this.#cleanupFailure ??= error;
         this.#captureController?.abort(error);
         this.#abortManual(error);
-      } else if (writes && !(error instanceof MemoryOperationStoppedError)) this.#persistenceFailure ??= { error };
+      } else if (writes && !(error instanceof MemoryOperationStoppedError) && !(error instanceof MemoryReviewError)) this.#persistenceFailure ??= { error };
       throw error;
     });
     this.#operations.add(operation);
@@ -1216,6 +1439,7 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
       const signal = AbortSignal.any([controller.signal, timeout]);
       const execute: MemoryRequestExecutor = (run) => this.#executeCaptureRequest(claimed!, ledger, executor, signal, generation, run);
       try {
+        if (!await this.#store.captureAllowed(claimed)) throw new MemoryStaleError("Memory scope changed");
         const entries = claimed.extracted ?? await this.#extract(claimed.turn, false, signal, execute);
         if (!claimed.extracted) {
           claimed.extracted = entries;
@@ -1225,6 +1449,7 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
         if (generation !== this.#generation || !this.#policy.captureFuture || !(await this.#store.isEnabled())) throw new Error("Memory capture became stale");
         await this.#stageCandidates(claimed, entries, signal, generation, execute);
         await this.#checkWrite(generation, signal, true);
+        if (!await this.#store.captureAllowed(claimed)) throw new MemoryStaleError("Memory scope changed");
         await this.#store.updateJobs((current) => current.filter((job) => !ownsCaptureJob(job, claimed!)));
         await this.#checkWrite(generation, signal, true);
         this.#ownedJobIds.delete(claimed.id);
@@ -1232,7 +1457,7 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
       } catch (error) {
         const usageIncomplete = claimed.usageComplete === false || !ledger.snapshot().complete;
         if (usageIncomplete) this.#usage = null;
-        const nonRetryable = claimed.requestPending === true || usageIncomplete || error instanceof RequestUsageIncompleteError || error instanceof ResourceCleanupError;
+        const nonRetryable = claimed.requestPending === true || usageIncomplete || error instanceof RequestUsageIncompleteError || error instanceof ResourceCleanupError || error instanceof MemoryStaleError;
         const cancelled = !nonRetryable && (controller.signal.aborted || generation !== this.#generation || !this.#policy.captureFuture);
         const message = error instanceof Error ? error.message : String(error);
         try {
@@ -1279,6 +1504,7 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
     let response: T;
     try {
       await this.#checkWrite(generation, signal, true);
+      if (!await this.#store.captureAllowed(job)) throw new MemoryStaleError("Memory scope changed");
       response = await this.#executeRequest(ledger, executor, run, signal);
     } catch (error) {
       failure = error;
@@ -1303,15 +1529,19 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
 
   async #stageCandidates(job: MemoryCaptureJob, entries: ExtractedLesson[], signal: AbortSignal, generation: number, execute: MemoryRequestExecutor): Promise<void> {
     const now = new Date().toISOString();
+    const scopeAllowed = { project: await this.#store.captureAllowed(job, "project"), user: await this.#store.captureAllowed(job, "user") };
     const candidates: MemoryCandidate[] = entries.flatMap((entry) => {
       if (typeof entry.lesson !== "string" || typeof entry.applyWhen !== "string") return [];
       const scope: LearnedScope = entry.scope === "user" && explicitMemoryIntent(job.turn.userInput) ? "user" : "project";
+      if (!scopeAllowed[scope]) return [];
       const lesson = redactSecrets(entry.lesson);
       const applyWhen = redactSecrets(entry.applyWhen);
       if (!lesson || !applyWhen) return [];
       const evidence: LearnedEvidence[] = [{ ...(job.turn.sessionId ? { sessionId: job.turn.sessionId } : {}), createdAt: now, excerpt: redactSecrets(job.turn.userInput, 800) }];
       return [{
         id: createHash("sha256").update(`${job.id}\n${lesson}\n${applyWhen}`).digest("hex").slice(0, 24),
+        redactionVersion: 2,
+        ...(job.epochs ? { epochs: job.epochs } : {}),
         workspacePath: job.turn.workspacePath,
         scope,
         kind: entry.kind === "preference" || entry.kind === "procedure" || entry.kind === "constraint" || entry.kind === "summary" ? entry.kind : "convention",
@@ -1338,11 +1568,11 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
       if (storedConflict || extractedConflict) candidate.status = "review";
     }
     const beforeCommit = () => this.#checkWrite(generation, signal, true);
-    await this.#store.updateCandidates((current) => [...current.filter((item) => !candidates.some((candidate) => candidate.id === item.id)), ...candidates], { beforeCommit });
-    const pending = candidates.filter((candidate) => candidate.status === "pending");
-    const resolvedCandidateIds = new Set(pending.map((candidate) => candidate.id));
+    const staged = await this.#store.updateCandidates((current) => [...current.filter((item) => !candidates.some((candidate) => candidate.id === item.id)), ...candidates], { beforeCommit });
+    const pending = candidates.filter(candidate => candidate.status === "pending" && staged.some(item => item.id === candidate.id && item.status === "pending"));
     const consolidated: MemoryCandidate[] = [];
     for (const scope of ["project", "user"] as const) {
+      if (!await this.#store.captureAllowed(job, scope)) continue;
       const scoped = pending.filter((candidate) => candidate.scope === scope).slice(0, 20);
       if (scoped.length <= 1) {
         consolidated.push(...scoped);
@@ -1373,6 +1603,7 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
         const merged: MemoryCandidate = {
           sourceSessionIds: [...sourceSessionIds].slice(0, 20),
           ...source,
+          id: createHash("sha256").update(`${job.id}\n${scope}\n${entry.lesson}\n${entry.applyWhen}`).digest("hex").slice(0, 24),
           lesson: redactSecrets(entry.lesson),
           applyWhen: redactSecrets(entry.applyWhen),
           evidence,
@@ -1383,14 +1614,20 @@ export class LearnedMemoryRuntime implements LearnedMemoryRuntimeLike {
       }));
     }
     if (generation !== this.#generation || !this.#policy.captureFuture) throw new Error("Memory capture became stale");
-    const grouped = new Map<LearnedScope, Array<Partial<LearnedEntry> & Pick<LearnedEntry, "lesson" | "applyWhen">>>();
-    for (const candidate of consolidated) {
-      const values = grouped.get(candidate.scope) ?? [];
-      values.push({ lesson: candidate.lesson, applyWhen: candidate.applyWhen, kind: candidate.kind, confidence: candidate.confidence, evidence: candidate.evidence, sourceSessionIds: [...new Set([...(candidate.sourceSessionIds ?? []), ...candidate.evidence.flatMap((item) => item.sessionId ? [item.sessionId] : [])])].slice(0, 20), ...(candidate.sourceSessionId ? { sourceSessionId: candidate.sourceSessionId } : {}) });
-      grouped.set(candidate.scope, values);
+    for (const scope of ["project", "user"] as const) {
+      const scoped = consolidated.filter(candidate => candidate.scope === scope);
+      if (!scoped.length) continue;
+      const values = scoped.map(candidate => ({ lesson: candidate.lesson, applyWhen: candidate.applyWhen, kind: candidate.kind, confidence: candidate.confidence,
+        evidence: candidate.evidence, sourceSessionIds: [...new Set([...(candidate.sourceSessionIds ?? []), ...candidate.evidence.flatMap(item => item.sessionId ? [item.sessionId] : [])])].slice(0, 20),
+        ...(candidate.sourceSessionId ? { sourceSessionId: candidate.sourceSessionId } : {}) }));
+      try {
+        await this.#store.append(scope, job.turn.workspacePath, values, { beforeCommit, job, candidates: scoped,
+          resolvedCandidateIds: pending.filter(candidate => candidate.scope === scope).map(candidate => candidate.id) });
+      } catch (error) {
+        // A mixed job keeps the other scope's authorization when only this scope was revoked.
+        if (!(error instanceof MemoryStaleError) || await this.#store.captureAllowed(job, scope) || !await this.#store.captureAllowed(job)) throw error;
+      }
     }
-    for (const [scope, values] of grouped) await this.#store.append(scope, job.turn.workspacePath, values, { beforeCommit });
-    await this.#store.updateCandidates((current) => current.map((candidate) => resolvedCandidateIds.has(candidate.id) ? { ...candidate, status: "consolidated" } : candidate), { beforeCommit });
   }
 
   async #extract(turn: LearnedTurn, forceUser: boolean, signal?: AbortSignal, execute?: MemoryRequestExecutor): Promise<ExtractedLesson[]> {

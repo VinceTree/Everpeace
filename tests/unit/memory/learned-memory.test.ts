@@ -144,7 +144,7 @@ test("learned entries are newest-first, deduplicated, capped, and redacted", asy
       lesson: `Lesson ${index}`,
       applyWhen: "When testing",
     })));
-    assert.equal((await store.read("project", "C:\\repo")).length, 100);
+    assert.equal((await store.read("project", "C:\\repo")).filter(entry => entry.status === "active").length, 100);
     const markdown = await readFile(store.filePath("project", "C:\\repo"), "utf8");
     assert.doesNotMatch(markdown, /secret-value/u);
   } finally {

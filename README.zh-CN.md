@@ -76,6 +76,8 @@ everpeace
 
 配置 MCP 的工具、资源和 prompts，以及本地 Skills，可以扩展 Agent。Learned Memory 保存偏好与经过验证的经验；公共网页访问检查重定向与网络边界。搜索的首选服务不可用时，会依次尝试中国区 Bing 和 DuckDuckGo。配置和完整限制见 [使用指南](docs/USAGE.zh-CN.md)。
 
+Memory 仅从已验证轮次自动学习。使用 `/remember <偏好>` 单独保存长期偏好；通过 `/memory candidates` 或 `everpeace memory candidates list` 本地查看、接纳、纠正或拒绝冲突候选，操作前预览受影响规则。清空用户 Memory 对所有工作区生效，清空项目 Memory 仅影响当前工作区。
+
 MCP stdio 程序需要独立启动信任，默认在原生工作区沙箱运行并禁止联网。`/mcp trust <server>` 审阅启动身份，`/mcp reconnect` 启动或重载，`/mcp revoke <server>` 撤销访问。`/mcp mode <server> host` 明确选择宿主用户权限并撤销旧信任，启动前必须重新审阅授权。程序或入口脚本字节变化需要重新授权，动态启动器每次启动均确认。Windows host stdio 需要已核验的可执行程序和 argv；`.cmd`/`.bat` 入口请显式配置解释器。远程 MCP 必须使用 HTTPS，本机回环 HTTP 需要独立例外，重定向均拒绝。缺少启动批准时，非交互 CLI/SDK 返回 `interaction_required`（退出码 5）。
 
 MCP 进程启动前的沙箱准备失败会保留启动原因，连接可以正常关闭；已启动进程仍须确认清理完成。
