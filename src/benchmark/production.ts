@@ -112,7 +112,7 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
           async confirm(_kind, tool) { return tool === "bash" || tool === "patch"; },
         },
       });
-      const memoryProvider = options.memoryPilot ? createProviderRuntime(options.model.base_url, options.model.api_key, comparisonSettings, options.model.model_name, options.model.responses_profile) : undefined;
+      const memoryProvider = options.memoryPilot ? createProviderRuntime(options.model.base_url, options.model.api_key, comparisonSettings, options.model.model_name, options.model.responses_profile, { sessionId: () => session.id }) : undefined;
       const memoryExecutor = new RequestExecutor(context.requestAttemptLedger);
       const memory = options.memoryPilot && memoryProvider ? new EvaluationMemoryRuntime({
         store: new LearnedMemoryStore({ directory: options.memoryPilot.directory }), client: memoryProvider, model: options.model.model_name,

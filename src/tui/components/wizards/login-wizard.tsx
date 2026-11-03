@@ -62,7 +62,7 @@ export function LoginWizard({
       return;
     }
 
-    if (provider === "deepseek" || provider === "openai") {
+    if (provider === "deepseek" || provider === "openai" || provider === "opencode-go") {
       setBaseUrl(getProviderDefinition(provider).baseURL);
       setStep("api-key");
     }
@@ -139,6 +139,7 @@ export function LoginWizard({
 
   const deepseek = getProviderDefinition("deepseek");
   const openai = getProviderDefinition("openai");
+  const openCodeGo = getProviderDefinition("opencode-go");
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="#D4AF37" paddingX={1}>
@@ -157,6 +158,10 @@ export function LoginWizard({
             {
               label: openai.displayName,
               value: "openai",
+            },
+            {
+              label: openCodeGo.displayName,
+              value: "opencode-go",
             },
             { label: uiText('m7eab6c328d7f'), value: "custom" },
           ]}

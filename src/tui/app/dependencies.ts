@@ -83,8 +83,9 @@ async function requestSkillDraft(
   instructions: string,
   input: string,
   execute: <T extends { usage?: unknown; status?: unknown }>(run: (signal: AbortSignal) => Promise<T>) => Promise<T>,
+  sessionId: string | undefined,
 ): Promise<string> {
-  const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name, model.responses_profile);
+  const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name, model.responses_profile, { sessionId: () => sessionId });
   try {
     const request = purposeRequest(model, "skill");
     const response = await execute((requestSignal) => runtime.responses.create(
@@ -292,7 +293,8 @@ export function createDefaultTuiDependencies(
       signal?.throwIfAborted();
       const controller = new AbortController();
       const ownedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
-      const providerRuntime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name, model.responses_profile);
+      const sessionId = costSessionId();
+      const providerRuntime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name, model.responses_profile, { sessionId: () => sessionId });
       const memoryRuntime = new LearnedMemoryRuntime({
         store: learnedMemoryStore,
         client: {
@@ -320,7 +322,8 @@ export function createDefaultTuiDependencies(
       finally { manualMemoryControllers.delete(controller); memoryOperations.delete(operation); }
     },
     async generateSessionTitle(model, firstQuestion, signal) {
-      const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name, model.responses_profile);
+      const sessionId = costSessionId();
+      const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name, model.responses_profile, { sessionId: () => sessionId });
       try {
         const request = purposeRequest(model, "title");
         const response = await runAuxiliary("title", (requestSignal) => runtime.responses.create(
@@ -428,7 +431,8 @@ export function createDefaultTuiDependencies(
         lines.push("Model request: unavailable (select a model first)");
         return lines.join("\n");
       }
-      const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name, model.responses_profile);
+      const sessionId = costSessionId();
+      const runtime = createProviderRuntime(model.base_url, model.api_key, model.request_settings, model.model_name, model.responses_profile, { sessionId: () => sessionId });
       try {
         const result = await runLiveDiagnostics(model, runtime, { ...(signal ? { signal } : {}), observe: (run, requestSignal) => runAuxiliary("doctor", run, undefined, requestSignal, model) });
         await new DiagnosticStore().save(result);
@@ -502,6 +506,7 @@ export function createDefaultTuiDependencies(
         "Create one concise Codex SKILL.md for the requested workflow. Return only the complete SKILL.md, without a Markdown code fence or commentary. It must begin with YAML frontmatter containing a lowercase hyphenated name (maximum 64 characters) and a discriminating description that states what the skill does and when it applies. The body should contain only task-specific workflow, non-obvious constraints, and useful decision criteria. Do not create or refer to extra files, scripts, assets, or placeholders.",
         description,
         (run) => runAuxiliary("skill", run, undefined, signal, model),
+        costSessionId(),
       );
     },
     reviseSkillDraft(model, skillMarkdown, signal) {
@@ -510,6 +515,7 @@ export function createDefaultTuiDependencies(
         "Validate and improve the supplied Codex SKILL.md. Correct invalid frontmatter, vague routing, generic advice, contradictions, and unnecessary verbosity while preserving the intended workflow. Return only the complete revised SKILL.md, without a Markdown code fence or commentary. Keep it self-contained and do not add references to files, scripts, or assets.",
         skillMarkdown,
         (run) => runAuxiliary("skill", run, undefined, signal, model),
+        costSessionId(),
       );
     },
     runTerminalCommand(command, onOutput, signal, onInputReady) {

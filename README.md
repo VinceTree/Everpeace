@@ -32,7 +32,9 @@ pnpm files:build
 pnpm dev
 ```
 
-In the terminal, run `/login`, choose DeepSeek, enter your masked API key and select the original model ID returned by the service. OpenAI and custom HTTPS Responses endpoints are also supported; capabilities depend on the endpoint. Keys stay in the system credential store, outside project files and Sessions.
+In the terminal, run `/login`, choose DeepSeek, enter your masked API key and select the original model ID returned by the service. OpenAI, OpenCode Go and custom HTTPS Responses endpoints are also supported; capabilities depend on the endpoint. Keys stay in the system credential store, outside project files and Sessions.
+
+For OpenCode Go, choose its login preset and the Flash ID returned by its catalog. The preset uses `https://opencode.ai/inference/go/openai/v1`; model discovery uses Go's separate catalog route. Requests identify Everpeace and send a stable `x-opencode-session` header. Go remains a compatible endpoint with conservative default capabilities; authenticated Responses, tools and usage still require live verification. See the [Go documentation](https://opencode.ai/v2/docs/console/go/) for model availability and workspace region settings.
 
 Model connections honor `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` (lowercase names take precedence). Set these before starting the CLI when your endpoint needs a proxy; `ALL_PROXY` alone is insufficient. Proxy settings apply to model traffic, while model shell commands retain their sandbox network policy.
 
@@ -40,7 +42,7 @@ Windows sandboxed commands reuse the host pnpm toolchain: an explicit `PNPM_HOME
 
 For a relay that explicitly supports the DeepSeek Responses contract, select `/model profile deepseek`, then `/reasoning high`. `/status` shows the profile, its capability source, and the reasoning value actually sent. This is user configuration, not proof of relay compatibility. Unknown endpoints default to conservative settings; `/model profile auto` restores endpoint detection. Full reasoning items are preserved between tool rounds. Experimental prompt and tool-feedback optimizations remain disabled by default until task quality and measured token use justify them.
 
-Web page reads retain a bounded list of source links, so the agent can follow an official site's navigation and verify citations when search results are broad.
+Web page reads retain a bounded list of source links, so the agent can follow an official site's navigation and verify citations when search results are broad. Bing search links expose their destination URLs for source discovery; page reads still validate public network boundaries.
 
 ```text
 /login

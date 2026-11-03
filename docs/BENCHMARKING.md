@@ -33,6 +33,23 @@ prepare 冻结兼容提示、harness 摘要、候选 revision/source/build diges
 
 campaign 在本地生成 `strategy-comparison.json`：总体及逐任务通过数不能低于基线，人工介入不能增加，成功必须同时通过宿主验证和独立验收，安全结算无回退。质量通过且完整计量后，比较成功任务总消耗、包括失败消耗的每成功任务成本、共同成功任务 token 中位数、请求次数、耗时、工具批次/等待/重复失败、reasoning/cache 及请求字节比例。reasoning 已包含在 output，不重复相加；缺失缓存为 null，JSON 字节比例不冒充 token。共同成功任务 token 中位数下降至少 10% 才报告该端点和样本中观察到节省；候选默认关闭，无有效 live 证据不改默认行为。
 
+## OpenCode Go compatibility preparation
+
+兼容准备器支持 `--base-url <HTTPS-base>` 和供应商原始 `--raw-model`，可为 Go 单独冻结隔离证据。未传 `--model-id` 时，custom base 的 live 阶段要求唯一匹配已登记的地址与原始模型 ID；campaign 仍须使用实际登记 ID。不要编辑已经开始的 plan 来切换供应商或复用旧中转结果。
+
+```powershell
+pnpm exec tsx tests/fixtures/deepseek-loop-acceptance.ts prepare $root --base-url https://opencode.ai/inference/go/openai/v1 --raw-model deepseek-v4.1-flash
+pnpm exec tsx tests/fixtures/deepseek-loop-acceptance.ts offline $root
+```
+
+以上操作不读取凭据或生成模型请求；Go 的公开模型列表只能证明广告信息。取得授权并通过本机 `/login` → OpenCode Go 将 Key 保存在系统凭据库后，才可运行同一冻结根的 `live $root --token-budget 20000`。先验证 Responses 终态／Usage，再验证生产 runner 的两轮只读工具闭环；本 fixture 显式使用 deepseek profile/high，这不改变日常 Go 注册的保守默认能力。unknown、清理失败和预算耗尽保留原停止证据；不得自动退回其他端点。上游契约见 [Go](https://opencode.ai/v2/docs/console/go/)。
+
+DeepSeek 需要 Go 工作区的 Settings → Privacy → Regions 允许 Global。区域／隐私拒绝与协议不兼容分开报告；错误缺 usage 时仍保留 unknown，不推断零费用。用户调整设置后的新阶段使用新隔离根，原失败和 skipped 不清除。
+
+上述原兼容 fixture 要求完整 `reasoning.content.reasoning_text`，属于与 DeepSeek full-content 契约对齐的验收。Go 可能只返回 `reasoning.summary`，且部分响应没有推理项；应另建明确标注标准的 Go 验收，逐次观察真实返回项，校验持久化及后续请求中的原样回传，不能要求每轮都有推理，也不能把摘要通过改记为原 full-content 标准通过。用户明确解除 token 阈值时，新阶段以 task／campaign budget null 冻结，保留用量、超时、取消与 unknown 停止；旧阶段的预算失败和用量继续保存。当前本机独立验收入口和结果仅在 HANDOFF 维护。
+
+扩展功能验收沿用隔离 fixture、真实 provider／工具／原生验证及独立账本；历史读取的原文授权、团队审批及 MCP 信任只能由声明的合成宿主策略提供，不算人工 TUI 验收。网页来源须由真实搜索结果或已读取页面链接发现，允许内容相同的官方规范页面路径，不能放宽发现链或事实断言。主动取消允许预先声明的单项 unknown，但必须关闭该账本准入并完成清理，后续独立项不能消除缺口。准备后的身份检查失败在请求前停止，保留未执行项；并行开发时使用明确列出 overlay 的固定副本，复测绑定新根和新身份，不把不同候选合并成同候选质量或成本成绩。
+
 ## Task and fixture contract
 
 每个任务包含唯一 `id`、自然语言 `prompt`、隔离工作区、固定源码和有界命令。`verification` 可向 harness 提供开发反馈，最终评分优先使用模型无法通过改写项目脚本替代的 `acceptance`。

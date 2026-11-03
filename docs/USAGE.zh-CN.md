@@ -43,6 +43,7 @@ pnpm dev
 
 - DeepSeek 官方 API：`https://api.deepseek.com`
 - OpenAI 官方 API：`https://api.openai.com/v1`
+- OpenCode Go：`https://opencode.ai/inference/go/openai/v1`（模型发现使用 `/inference/go/v1/models`）
 - 自定义 OpenAI-compatible base URL
 
 API Key 不会显示在终端。模型列表加载成功后选择一个服务端返回的原始模型 ID，该模型会被安全保存并立即用于当前会话；如需执行有界的模型生成检查，请使用 `/doctor --live`：

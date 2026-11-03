@@ -1,5 +1,11 @@
 # Architecture Decisions
 
+## OpenCode Go 的协议、路由与会话身份
+
+Go 作为具名登录预设接入现有 Responses runtime，不根据 DeepSeek 模型名自动启用官方能力。推理 base 与模型目录分别使用官方声明的 `/inference/go/openai/v1` 和 `/inference/go/v1/models`；端点协议转换仍需实际验收。
+
+仅精确的 Go HTTPS 路径获得 Everpeace User-Agent 和 `x-opencode-session`。主 Agent 在发送时解析当前持久 Session ID，辅助请求冻结所属 Session；独立 runtime 没有 Session 时生成该实例稳定的 UUID。会话头不改变本地 Session schema、模型 context 或服务端状态管理策略，其他供应商不接收该路由标识。API Key 继续仅由 AuthStorage／系统 keyring 管理。实现与验证入口见 [运行时](RUNTIME.md) 和 [评测](../BENCHMARKING.md)。
+
 ## Memory 撤销、审查与验证准入
 
 自动学习严格要求宿主 verified outcome，关键词不再豁免；手动 `/remember` 使用独立生命周期，保留全局开关、取消和可靠计量。所有持久材料使用共享完整脱敏后再裁剪；旧部分脱敏字段遮罩并暂停召回，人工纠正才能恢复。

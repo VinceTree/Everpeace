@@ -55,6 +55,7 @@ TUI / everpeace exec / everpeace/sdk / 内部 benchmark adapter
 注册可保存可选 `responses_profile: auto|generic|deepseek`；旧注册默认 auto，未知中转不根据模型名启用 reasoning。显式 deepseek 仍保留真实 provider 地址身份，能力来源显示 configured。该配置绑定注册 ID、地址与原始模型 ID；设置入口拒绝过期身份，不读取或写入凭据。修改会清除旧 request settings；TUI、exec、SDK 与辅助请求共用解析，旧 Session 缺字段兼容。配置证据不等于供应商实测证据。
 
 - `createProviderRuntime` 统一 client、能力与请求设置。只使用 Responses；模型 ID 保留服务端原值，不能通过名称推测中转端点支持官方能力。
+- OpenCode Go 登录预设使用 `https://opencode.ai/inference/go/openai/v1`，模型列表使用 `/inference/go/v1/models`。仅精确匹配的 Go HTTPS 路径附加 Everpeace User-Agent 和 `x-opencode-session`；主请求在发送前取当前持久 Session ID，TUI 辅助请求冻结所属 Session，没有 Session 的独立 runtime 使用自身 UUID。团队成员和 benchmark Memory 同样传递所属 Session。Go 保持 compatible/generic 默认能力，不按 Flash 名称推断 reasoning 或原生压缩；服务端 Responses 转换声明须另经 live 验证。回归见 [Go 契约](../../tests/unit/providers/opencode-go.test.ts)，上游见 [Go 官方文档](https://opencode.ai/v2/docs/console/go/)。
 - Node 模型连接读取 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`（同名小写优先），使用每个 client 独立的 Undici dispatcher，不修改全局网络设置。`ALL_PROXY` 不单独作为配置入口；配置无效报固定错误，不输出可能含凭据的代理 URL。主 Agent 先等待请求、Memory 与工具清理，再释放其拥有的连接；外部传入 provider 由调用者负责释放。登录、标题、Skill、手动 Memory 与 doctor 在各自请求结束后释放连接，取消后强制关闭残留 CONNECT。该代理不改变网页 SSRF 或模型 shell 原生隔离边界。回归见 [proxy transport](../../tests/unit/providers/proxy-transport.test.ts)。
 - 官方 DeepSeek 使用普通 reasoning/tool item、summary 压缩和供应商自动前缀缓存；不发送 OpenAI encrypted reasoning、prompt-cache 或 native compact 参数。`max` 原样映射到 DeepSeek `max`。
 - 官方 OpenAI 声明 native compact；未知兼容端点使用 summary 和保守能力。SDK 上存在方法不等于服务端支持该能力。

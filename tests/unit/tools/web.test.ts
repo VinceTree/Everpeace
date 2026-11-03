@@ -69,6 +69,35 @@ test("Bing HTML results are converted to source records", () => {
   ]);
 });
 
+test("Bing click links expose the source destination and deduplicate direct links", () => {
+  const target = "https://www.iana.org/domains/reserved";
+  const wrapped = new URL("https://www.bing.com/ck/a");
+  wrapped.searchParams.set("u", `a1${Buffer.from(target).toString("base64url")}`);
+  const html = `<li class="b_algo"><h2><a href="${wrapped.href}">IANA</a></h2></li><li class="b_algo"><h2><a href="${target}">Duplicate</a></h2></li>`;
+  assert.deepEqual(parseBingResults(html), [{ title: "IANA", url: target, snippet: "" }]);
+});
+
+test("Bing decoding is confined to known routes and rejects unsafe or malformed targets", () => {
+  const parse = (url: string) => parseBingResults(`<li class="b_algo"><h2><a href="${url}">Result</a></h2></li>`);
+  const wrap = (target: string) => `https://cn.bing.com/ck/a?u=a1${Buffer.from(target).toString("base64url")}`;
+  for (const target of ["javascript:alert(1)", "https://user:password@example.com/", "not a URL"]) assert.deepEqual(parse(wrap(target)), []);
+  for (const value of ["invalid!", "YQ===", Buffer.from([0xff, 0xfe]).toString("base64url")]) assert.deepEqual(parse(`https://www.bing.com/ck/a?u=a1${value}`), []);
+  const foreign = `https://bing.com.evil.invalid/ck/a?u=a1${Buffer.from("https://www.iana.org/").toString("base64url")}`;
+  assert.equal(parse(foreign)[0]?.url, foreign);
+  const otherRoute = wrap("https://www.iana.org/").replace("/ck/a?", "/other?");
+  assert.equal(parse(otherRoute)[0]?.url, otherRoute);
+});
+
+test("decoded Bing destinations still pass through the public fetch address guard", async () => {
+  const target = "http://127.0.0.1/private";
+  const wrapped = `https://www.bing.com/ck/a?u=a1${Buffer.from(target).toString("base64url")}`;
+  const result = parseBingResults(`<li class="b_algo"><h2><a href="${wrapped}">Private target</a></h2></li>`)[0]!;
+  assert.equal(result.url, target);
+  let fetched = false;
+  await assert.rejects(fetchWebPage(result.url, { fetch: (async () => { fetched = true; return new Response("unexpected"); }) as typeof fetch }));
+  assert.equal(fetched, false);
+});
+
 test("searchWeb sends the query and returns parsed results", async () => {
   let requestedUrl = "";
   const fetchMock = (async (input: URL | RequestInfo) => {

@@ -18,6 +18,7 @@ import { createBenchmarkMetricsCollector } from "../../src/benchmark/metrics.js"
 import { projectBenchmarkEvent } from "../../src/benchmark/event-projection.js";
 import { captureBenchmarkEvaluationDigest } from "../../src/benchmark/evaluation-identity.js";
 import type { RegisteredModel } from "../../src/storage/model-registry.js";
+import { normalizeBaseUrl } from "../../src/providers/openai-compatible.js";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const [action, rootArg, ...args] = process.argv.slice(2);
@@ -26,9 +27,10 @@ const root = path.resolve(rootArg);
 const relative = path.relative(repo, root);
 assert.ok(relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative), "Use an external isolated root");
 const argument = (flag: string) => args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined;
-let baseUrl = args.includes("--official") ? "https://api.deepseek.com" : "https://cc2.caaa.tech/v1";
-let modelName = argument("--raw-model") ?? (args.includes("--official") ? "REQUIRES_RAW_MODEL_ID" : "deepseek-flash");
-const registrationId = argument("--model-id") ?? modelName;
+const customBaseUrl = argument("--base-url");
+let baseUrl = customBaseUrl ? normalizeBaseUrl(customBaseUrl) : args.includes("--official") ? "https://api.deepseek.com" : "https://cc2.caaa.tech/v1";
+let modelName = argument("--raw-model") ?? (customBaseUrl || args.includes("--official") ? "REQUIRES_RAW_MODEL_ID" : "deepseek-flash");
+const registrationId = argument("--model-id") ?? (customBaseUrl ? undefined : modelName);
 const cases = [
   { id: "text", prompt: "Reply OK only." },
   { id: "reasoning-tools", prompt: "Read first.txt, follow its instruction to read the next workspace file, and report that file's hidden marker. Do not edit files or run commands." },
@@ -46,7 +48,7 @@ if (action === "prepare") {
   }
   const expected = { model: modelName, reasoning: "high", maxOutputTokens: 32_768 };
   const harnesses = ["baseline", "candidate"].map((strategy) => ({ kind: "everpeace-checkout", name: strategy, loopStrategy: strategy, sourceRoot: repo, entryPath: identity.entryPath, revision: identity.revision, sourceDigest: identity.sourceDigest, buildDigest: identity.buildDigest, expected }));
-  const common = { catalogPath: path.join(repo, "docs/benchmark/DEEPSEEK_NODE_TASKS.json"), fixtureRoot: path.join(repo, "docs/benchmark/fixtures"), modelId: registrationId, modelBaseUrl: baseUrl, responsesProfile: "deepseek", seed: 20261009, taskTokenBudget: 100_000, harnesses };
+  const common = { catalogPath: path.join(repo, "docs/benchmark/DEEPSEEK_NODE_TASKS.json"), fixtureRoot: path.join(repo, "docs/benchmark/fixtures"), modelId: registrationId ?? modelName, modelBaseUrl: baseUrl, responsesProfile: "deepseek", seed: 20261009, taskTokenBudget: 100_000, harnesses };
   const evaluationDigest = await captureBenchmarkEvaluationDigest(common.catalogPath, common.fixtureRoot);
   const catalog = JSON.parse(await readFile(common.catalogPath, "utf8")) as { tasks: Array<{ id: string }> };
   // Keep Git's workspace metadata below Windows path limits; reports stay external.

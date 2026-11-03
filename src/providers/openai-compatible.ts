@@ -1,4 +1,6 @@
 import OpenAI from "openai";
+import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
 import type { AgentResponse, ResponseStreamLike } from "../agent/model-protocol.js";
 import { ownResponseStream } from "./response-stream.js";
@@ -12,7 +14,7 @@ import {
   type ResponsesProfile,
 } from "./capabilities.js";
 
-export type ProviderName = "deepseek" | "openai";
+export type ProviderName = "deepseek" | "openai" | "opencode-go";
 
 export interface ProviderDefinition {
   name: ProviderName;
@@ -31,9 +33,30 @@ const PROVIDERS: Record<ProviderName, ProviderDefinition> = {
     displayName: "OpenAI",
     baseURL: "https://api.openai.com/v1",
   },
+  "opencode-go": {
+    name: "opencode-go",
+    displayName: "OpenCode Go",
+    baseURL: "https://opencode.ai/inference/go/openai/v1",
+  },
 };
 
+const packageJson = createRequire(import.meta.url)("../../package.json") as { version: string };
+
+/** Exact service routes only: unrelated compatible endpoints keep their own identity. */
+function openCodeGoModelsUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.host !== "opencode.ai" || url.username || url.password || url.search || url.hash) return undefined;
+    const route = url.pathname.replace(/\/+$/u, "");
+    if (route === "/inference/go/openai/v1" || route === "/inference/go/v1") return "https://opencode.ai/inference/go/v1/models";
+    if (route === "/zen/go/v1") return "https://opencode.ai/zen/go/v1/models";
+  } catch { /* Unrecognized URLs do not receive service-specific metadata. */ }
+  return undefined;
+}
+
 export interface ModelListClient {
+  baseURL?: string;
+  get?<T>(url: string, options?: { signal?: AbortSignal }): Promise<T>;
   models: {
     list(options?: { signal?: AbortSignal }): Promise<{ data: Array<{ id: string }> }>;
   };
@@ -41,10 +64,10 @@ export interface ModelListClient {
 
 export function parseProvider(value: string): ProviderName {
   const normalized = value.trim().toLowerCase();
-  if (normalized === "deepseek" || normalized === "openai") {
+  if (normalized === "deepseek" || normalized === "openai" || normalized === "opencode-go") {
     return normalized;
   }
-  throw new Error(`Unsupported provider: ${value}. Use deepseek or openai.`);
+  throw new Error(`Unsupported provider: ${value}. Use deepseek, openai, or opencode-go.`);
 }
 
 export function getProviderDefinition(
@@ -65,11 +88,12 @@ export function createProviderClient(
   baseURL: string,
   apiKey: string,
 ): OpenAI {
+  const defaultHeaders = openCodeGoModelsUrl(baseURL) ? { "User-Agent": `Everpeace/${packageJson.version}` } : undefined;
   const httpProxy = process.env.http_proxy ?? process.env.HTTP_PROXY;
   const httpsProxy = process.env.https_proxy ?? process.env.HTTPS_PROXY;
   const noProxy = process.env.no_proxy ?? process.env.NO_PROXY ?? "";
   if ((!httpProxy && !httpsProxy) || noProxy.trim() === "*") {
-    return new OpenAI({ apiKey, baseURL });
+    return new OpenAI({ apiKey, baseURL, defaultHeaders });
   }
   let dispatcher: EnvHttpProxyAgent;
   try {
@@ -79,7 +103,7 @@ export function createProviderClient(
     throw new Error("Invalid model HTTP proxy configuration");
   }
   const client = new OpenAI({
-    apiKey, baseURL,
+    apiKey, baseURL, defaultHeaders,
     // The SDK calls fetch with URL strings. Undici extends DOM Request/Response
     // types, but its fetch must share the dispatcher's protocol implementation.
     fetch: undiciFetch as unknown as typeof globalThis.fetch,
@@ -132,14 +156,22 @@ export function createProviderRuntime(
   settings?: Partial<ModelRequestSettings>,
   modelName?: string,
   profile: ResponsesProfile = "auto",
+  context: { sessionId?: () => string | undefined } = {},
 ): ProviderRuntime {
   const capabilities = resolveProviderCapabilities(baseURL, modelName, profile);
   const sdk = createProviderClient(baseURL, apiKey);
+  const goSessionFallback = openCodeGoModelsUrl(baseURL) ? randomUUID() : undefined;
+  const requestOptions = (options?: Record<string, unknown>): Record<string, unknown> | undefined => {
+    if (!goSessionFallback) return options;
+    const headers = new Headers(options?.headers as HeadersInit | undefined);
+    headers.set("x-opencode-session", context.sessionId?.()?.trim() || goSessionFallback);
+    return { ...options, headers };
+  };
   const assertAvailable = () => { if (failedCleanupDeadlines.has(sdk)) throw new ModelStreamCleanupError('Provider resource ownership is unresolved'); };
   const responses: ProviderRuntime["responses"] = {
     create(params, options) {
       assertAvailable();
-      return sdk.responses.create(sanitizeProviderRequest(capabilities, params) as never, options as never) as unknown as Promise<AgentResponse>;
+      return sdk.responses.create(sanitizeProviderRequest(capabilities, params) as never, requestOptions(options) as never) as unknown as Promise<AgentResponse>;
     },
     async stream(params, options) {
       assertAvailable();
@@ -149,7 +181,7 @@ export function createProviderRuntime(
         : controller.signal;
       const response = await sdk.responses.create(
         { ...sanitizeProviderRequest(capabilities, params), stream: true } as never,
-        { ...options, signal } as never,
+        { ...requestOptions(options), signal } as never,
       ).asResponse();
       return ownResponseStream(response, controller, signal, sdk, deadline => { failedCleanupDeadlines.set(sdk, deadline); });
     },
@@ -195,7 +227,11 @@ export async function listOfficialModelIds(
   client: ModelListClient,
   signal?: AbortSignal,
 ): Promise<string[]> {
-  const page = await client.models.list(signal === undefined ? undefined : { signal });
+  const modelsUrl = client.baseURL ? openCodeGoModelsUrl(client.baseURL) : undefined;
+  const options = signal === undefined ? undefined : { signal };
+  const page = modelsUrl && client.get
+    ? await client.get<{ data: Array<{ id: string }> }>(modelsUrl, options)
+    : await client.models.list(options);
   return page.data
     .map((model) => model.id)
     .filter((id) => typeof id === "string" && id.length > 0);

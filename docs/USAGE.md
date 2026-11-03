@@ -46,6 +46,7 @@ After startup, enter `/login`. The TUI login wizard lets you choose a provider, 
 
 - DeepSeek official API: `https://api.deepseek.com`
 - OpenAI official API: `https://api.openai.com/v1`
+- OpenCode Go: `https://opencode.ai/inference/go/openai/v1` (model discovery uses `/inference/go/v1/models`)
 - A custom OpenAI-compatible base URL
 
 The API key is never displayed in the terminal. After the model list loads, select one of the original model IDs returned by the server. Everpeace securely saves it and activates it for the current session; use `/doctor --live` when you want a bounded model-generation check:
