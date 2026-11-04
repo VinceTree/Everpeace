@@ -1,5 +1,5 @@
 import { spawn as spawnPty } from "node-pty";
-import { ownedLaunch, type OwnedProcess } from './owned-process.js';
+import { ownedLaunch, type OwnedProcess, type ProcessState } from './owned-process.js';
 import { CleanupDeadline } from '../util/cleanup-deadline.js';
 import xtermHeadless from "@xterm/headless";
 import type { BashResult } from "./bash.js";
@@ -9,6 +9,9 @@ import { retainOutput } from "./command-record.js";
 const MAX_CAPTURED_OUTPUT = 2 * 1024 * 1024;
 const MAX_SCROLLBACK_LINES = 10_000;
 const { Terminal } = xtermHeadless;
+
+/** Internal seam for process-ordering tests; production retains native ownership. */
+export const terminalProcessBackend = { launch: ownedLaunch, spawn: spawnPty };
 
 export const DISABLE_FOCUS_REPORTING = "\u001B[?1004l";
 export const DISABLE_WIN32_INPUT_MODE = "\u001B[?9001l";
@@ -95,6 +98,7 @@ export function runTerminalCommand(
     let truncated = false;
     let cleanup: Promise<void> | undefined;
     let cleanupError: unknown;
+    let cleanupStatus: ProcessState | undefined;
     let exited = false, finished = false;
     let notifyExit!: () => void;
     const didExit = new Promise<void>(resolve => { notifyExit = resolve; });
@@ -141,6 +145,7 @@ export function runTerminalCommand(
           signal: null,
           cancelled: options.signal?.aborted ?? false,
           truncated,
+          ...(cleanupStatus ? { cleanupStatus } : {}),
           ...(cleanupError ? { cleanupFailed: true, error: `PTY process-tree cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}` } : {}),
         });
       };
@@ -157,8 +162,8 @@ export function runTerminalCommand(
     let child: ReturnType<typeof spawnPty>;
     let owner: OwnedProcess | undefined;
     try {
-      const launch = platform === 'win32' ? ownedLaunch(invocation.executable, invocation.args, { cwd: options.cwd ?? process.cwd(), env }) : undefined;
-      child = spawnPty(launch?.command ?? invocation.executable, launch?.args ?? invocation.args, {
+      const launch = platform === 'win32' ? terminalProcessBackend.launch(invocation.executable, invocation.args, { cwd: options.cwd ?? process.cwd(), env }) : undefined;
+      child = terminalProcessBackend.spawn(launch?.command ?? invocation.executable, launch?.args ?? invocation.args, {
         name: env.TERM ?? "xterm-256color",
         cols: columns,
         rows,
@@ -167,7 +172,8 @@ export function runTerminalCommand(
         ...(platform === "win32" ? { useConpty: true } : {}),
       });
       owner = launch?.attach(child.pid);
-      void owner?.receipt.then(receipt => { if (receipt.status !== 'confirmed_exited' && !exited) child.kill(); });
+      // Receipt failure and user cancellation share one bounded cleanup owner.
+      void owner?.receipt.then(receipt => { if (receipt.status !== 'confirmed_exited' && !exited) terminate(); });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (streamOutput) {
@@ -193,13 +199,15 @@ export function runTerminalCommand(
         if (owner) {
           owner.stop();
           const receipt = await deadline.wait(owner.receipt, 'pty_job_exit');
+          cleanupStatus = receipt.status;
           if (receipt.status !== 'confirmed_exited') throw new Error('PTY process ownership is unresolved');
-        } else await terminateProcessTree(child.pid, platform);
+        } else { await terminateProcessTree(child.pid, platform); cleanupStatus = 'confirmed_exited'; }
       }).catch((error: unknown) => {
+        cleanupStatus ??= 'unknown';
         cleanupError = error;
       }).then(async () => {
         // Close the pseudoconsole after tree termination; native helpers may otherwise race the console teardown.
-        try { child.kill(); } catch (error) { cleanupError ??= error; }
+        try { if (!exited) child.kill(); } catch (error) { cleanupError ??= error; }
         try { await deadline.wait(didExit, 'pseudoconsole_exit'); } catch (error) { cleanupError ??= error; }
         if (!exited) { releaseInput(); finish(null); }
       });
@@ -261,9 +269,10 @@ export function runTerminalCommand(
       if (owner && !cleanupError) {
         try {
           const receipt = await new CleanupDeadline().wait(owner.receipt, 'pty_exit_receipt');
+          cleanupStatus = receipt.status;
           if (receipt.status !== 'confirmed_exited') throw new Error('PTY process ownership is unresolved');
           exitCode = receipt.exitCode ?? exitCode;
-        } catch (error) { cleanupError = error; }
+        } catch (error) { cleanupStatus ??= 'unknown'; cleanupError = error; }
       }
       finish(exitCode);
     });

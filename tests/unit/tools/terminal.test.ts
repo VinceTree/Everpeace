@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
+import type { OwnedProcess, ProcessReceipt } from "../../../src/tools/owned-process.js";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -10,19 +11,46 @@ import {
   resetTerminalModes,
   resolveTerminalInvocation,
   runTerminalCommand,
+  terminalProcessBackend,
 } from "../../../src/tools/terminal.js";
 
-test("PTY cancellation terminates a long command without closing the parent", { timeout: 15000 }, async () => {
+function traceOwner(t: TestContext) {
+  const receipts: ProcessReceipt[] = []; let owner: OwnedProcess | undefined;
+  const launch = terminalProcessBackend.launch;
+  t.mock.method(terminalProcessBackend, "launch", (...args: Parameters<typeof launch>) => {
+    const prepared = launch(...args);
+    return { ...prepared, attach(pid: number) {
+      owner = prepared.attach(pid);
+      return { ...owner, receipt: owner.receipt.then(receipt => { receipts.push(receipt); return receipt; }) };
+    } };
+  });
+  return { receipts, async stop() { owner?.stop(); return owner?.receipt; } };
+}
+
+test("PTY cancellation terminates a long command without closing the parent", { timeout: 15000 }, async t => {
+  const owner = traceOwner(t);
+  t.after(() => owner.stop());
   const controller = new AbortController();
   const command = process.platform === "win32" ? 'Write-Output "pid:$PID ready"; Start-Sleep -Seconds 60' : 'echo "pid:$$ ready"; sleep 60';
   const result = await runTerminalCommand(command, { streamOutput: false, signal: controller.signal, onInputReady() {}, onOutput: (text) => { if (text.includes("ready")) controller.abort(); } });
   assert.equal(result.cancelled, true);
   const pid = Number(/pid:(\d+)/.exec(result.stdout)?.[1]);
   assert.ok(pid > 0);
-  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  assert.equal(result.cleanupFailed, undefined, result.error);
+  if (process.platform === "win32") {
+    // A PID is valid only for its original lifetime. Bind the native Job's
+    // empty-tree receipt to that process and its creation identity instead.
+    assert.equal(result.cleanupStatus, "confirmed_exited");
+    assert.equal(owner.receipts.length, 1);
+    assert.equal(owner.receipts[0]?.status, "confirmed_exited");
+    assert.equal(owner.receipts[0]?.pid, pid);
+    assert.match(owner.receipts[0]?.identity ?? "", /^\d+:\d+$/u);
+    assert.equal(owner.receipts[0]?.exitCode, result.exitCode);
+  } else assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
 });
 
-test("Windows PTY cancellation waits for a detached uncooperative descendant", { skip: process.platform !== "win32", timeout: 20_000 }, async () => {
+test("Windows PTY cancellation waits for a detached uncooperative descendant", { skip: process.platform !== "win32", timeout: 20_000 }, async t => {
+  const owner = traceOwner(t);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-pty-tree-"));
   const script = path.join(root, "child.cjs");
   const source = "const {spawn}=require('node:child_process');process.on('SIGINT',()=>{});const child=spawn(process.execPath,['-e',\"process.on('SIGINT',()=>{});console.log('ready');setInterval(()=>{},1000)\"],{detached:true,windowsHide:true,stdio:['ignore','pipe','inherit']});child.stdout.once('data',()=>console.log('fixture-pids:'+process.pid+':'+child.pid));setInterval(()=>{},1000);";
@@ -32,17 +60,22 @@ test("Windows PTY cancellation waits for a detached uncooperative descendant", {
   try {
     await fs.writeFile(script, source);
     const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
-    const result = await runTerminalCommand(`& ${quote(process.execPath)} ${quote(script)}`, { cwd: root, streamOutput: false, signal: controller.signal, onInputReady() {}, onOutput(text) {
+    const result = await runTerminalCommand(`Write-Output "root-pid:$PID"; & ${quote(process.execPath)} ${quote(script)}`, { cwd: root, streamOutput: false, signal: controller.signal, onInputReady() {}, onOutput(text) {
       const match = /fixture-pids:(\d+):(\d+)/u.exec(text);
       if (match && !pids.length) { pids.push(Number(match[1]), Number(match[2])); controller.abort(); }
     } });
     assert.equal(pids.length, 2);
     assert.equal(result.cancelled, true);
     assert.equal(result.cleanupFailed, undefined);
-    for (const pid of pids) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+    assert.equal(result.cleanupStatus, "confirmed_exited");
+    assert.equal(owner.receipts.length, 1);
+    assert.equal(owner.receipts[0]?.status, "confirmed_exited");
+    assert.equal(owner.receipts[0]?.pid, Number(/root-pid:(\d+)/u.exec(result.stdout)?.[1]));
+    assert.match(owner.receipts[0]?.identity ?? "", /^\d+:\d+$/u);
   } finally {
     clearTimeout(timer);
-    for (const pid of pids) { try { process.kill(pid, "SIGKILL"); } catch { /* Owned fixture already gone. */ } }
+    // Cleanup stays bound to the original private Job, even if PIDs are reused.
+    await owner.stop();
     await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

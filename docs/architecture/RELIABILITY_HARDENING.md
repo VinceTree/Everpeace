@@ -12,6 +12,8 @@ Windows 固定辅助程序在 CreateProcess 时通过 PROC_THREAD_ATTRIBUTE_JOB_
 
 模型 shell、后台任务、验证、benchmark、Git、MCP/LSP、搜索及文件 worker 共用 owner；Windows 用户 PTY 通过固定 helper 启动实际 shell，保留输入/resize/呈现。宿主可读取进程内至多 128 条诊断元数据，包含阶段、时长、状态、Win32 错误和身份摘要，不含命令、cwd、环境或输出；不写入 Session。裸 Windows PID 不再授权 taskkill。旧评测 taskkill 128 没有后代身份或终态记录，不能补造历史成功/失败原因。本轮证明提前退出、detached 后代和 owner 崩溃的状态，历史精确根因保持未定位。
 
+直接 PTY 将原生凭据状态透传为既有 BashResult.cleanupStatus；用户取消和未知凭据回调共用同一个有界清理 Promise，控制台只关闭一次。PTY 的 onExit 仍先恢复输入并等待进程树确认，unknown 继续携带 cleanupFailed。Windows 集成回归把根 PID、创建身份和私有 Job 的 confirmed_exited 凭据相互绑定；进程结束后的裸 PID 查询不代表同一代身份，也不作为清理入口。依据为 Microsoft 的 [进程句柄与标识](https://learn.microsoft.com/en-us/windows/win32/procthread/process-handles-and-identifiers)及 [Job 活动进程计数](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_basic_accounting_information)。受控先退出／迟到确认／unknown 回归见 [terminal cleanup](../../tests/unit/tools/terminal-cleanup.test.ts)。
+
 显式宿主 MCP 仍需独立授权，也通过同一 owned duplex launcher 管理后代；这不提供沙箱文件或网络限制。Windows launcher 只接受明确的 PE 可执行程序和 argv，裸程序名仅在显式 PATH 中查找，环境名称按 Windows 大小写规则合并，不隐式搜索 cwd。`.cmd`/`.bat` 入口不能直接运行，请配置可核验的解释器及入口脚本；不回退 SDK 宿主 shell。任务取消传入 Git 跟踪、验证依据读取与子包扫描，取消后不启动新的观察进程。
 
 Unix 保留独立进程组；发送 SIGKILL 后有界查询组是否消失，查询失败或期限耗尽保留未知状态与清理故障。关闭等待同样有界，不能据此声称 Windows Job 等价保证。Win32_Process.Create、服务或其他外部执行代理不是普通 CreateProcess Job 后代；full-access/host 例外仍不能被解释成无限隔离保证。
