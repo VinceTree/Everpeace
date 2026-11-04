@@ -1,5 +1,24 @@
 # 当前交接
 
+## MCP 清理与主分支 CI 修复（2026-11-04）
+
+用户授权检查 main CI、修复两项本地 MCP 清理失败，测试通过后提交、推送并合并。基于 main d3246c4 建立独立 codex/fix-mcp-cleanup-20261104 检出；原六个 Bing／MCP 未提交文件保存字节摘要并保留，不进入本次变更。PR #29 已实际合并，不能再将当时的本地 gates-003 失败称作通过。
+
+主分支 Test 41839888873 实际为 Windows PTY cancellation 的裸 PID 退出断言失败（1482 tests、1470 pass、1 fail、11 skip）；Linux portable 和 security 成功。此前本地两项默认沙箱 MCP discovery/filter 的 hook 清理失败仍保留。无负载串行 32 项及四并发 132 项固定 MCP／PTY 复现未报错，不能据此清除旧失败。原生管道 EPIPE 注入在已确认进程退出时重现相同上层 MCP unresolved 错误，退出凭据为 confirmed_exited；旧日志没有底层错误，不能断言原两次均由 EPIPE 触发。
+
+stdio close 现在依据 owned terminate 凭据处理通信／启动错误；真正 unknown 和清理故障仍失败。runtime 将 transport 的资源关闭 Promise 独立于 SDK 引用保存，SDK onclose 清除 transport 后也必须等待并传播失败。新增五项受控 MCP 回归，修复前四项失败、修复后五项全通过；同一真实 EPIPE 注入修复后关闭成功，未追加模型请求。
+
+PTY 透传既有 cleanupStatus 字段；未知凭据回调与用户取消共用一次有界清理，避免重复关闭控制台。新增三项受控回归验证提前控制台退出不能提前结算、未知状态继续失败及正常退出等待。Windows 真集成将原始 PID／创建身份与 Job 退出凭据绑定，保留不配合的 detached 后代覆盖；不以可能失效的裸 PID 操作清理，也不把旧 CI 断言失败确认为 PID 复用。首轮定向 17/18 通过，unknown 触发重复 kill 的用例失败；修正共享清理后 18/18 通过。
+
+关联 MCP／PTY／进程完成回归 focused-001 全部通过：80 tests、80 pass、零 fail／skip，约 19.6 秒；typecheck、lint、178 个文档路径和 959 项双语检查通过。最终串行四门禁另存 gates-001，以实际收尾结果记录，不沿用旧主分支或定向测试代替。
+
+首轮 gates-001 四门禁全通过：1490 tests、1487 pass、3 个既有 skip，约 1.936／1.346／392.786／2.015 秒。收尾审阅新增已关闭控制台拒绝再次 kill 的受控场景，原收尾路径误报 cleanupFailed（定向 2 pass／1 fail）；现仅在控制台尚未退出时执行关闭，仍等待同一 Job 凭据。该两行修正后的最终四门禁另存 gates-002，不将首轮结果套用于更新后的代码。
+
+最终 gates-002 串行 typecheck → lint → test → build 全通过：1490 tests、1487 pass、3 个既有 skip、零 fail／cancelled，约 1.980／1.453／410.121／1.921 秒。两项原生 MCP 用例及 PTY 退出、后代与受控回归均通过，门禁前后全部受控文件字节一致。收尾仅补本条交接和检查文档，不改变已验证的源码、测试或依赖；提交及合并后的远端 CI 仍按实际 GitHub 结果另行核对。
+
+本轮证据位于 `.cache/mcp-cleanup-fix-20261104/attempt-001/`，包含原 main CI 日志、复现、修复前回归及后续门禁。当前未改展示值、依赖或实验结果；不创建 tag 或 Release。提交使用 [skip publish]，保留全部 CI；只有最终检查通过才合并。
+
+
 ## 主分支合并交付（2026-11-04）
 
 用户明确授权合并此前已推送的 Memory 优化与 README 实验结果。本批通过 [PR #29](https://github.com/VinceTree/Everpeace/pull/29) 进入主分支，包含 b30f993、45b1bf7、7ff8c35；旧 PR #27 仅覆盖更早交付。先在独立检出同步 main。首轮 CI 的 Linux portable 因 Go Session 测试错误地要求 Windows 文件读取成功而失败；保留真实工具往返、Session 恢复、三次请求及 45 tokens 断言，在非 Windows 明确检查 FILE_ACCESS_UNAVAILABLE。安全扫描因静态英文文案与合成脱敏 fixture 的完整文件摘要变化而拒绝；核对内容后只追加两份精确摘要，不扩大路径或规则例外。生产代码、默认策略和依赖不变；须在修正后的 Windows 全量、Linux portable、安全扫描及 Required checks 成功后合并，不绕过保护。

@@ -57,6 +57,8 @@ stdio 的宿主进程启动与 MCP tool-call 审批是独立权限边界。默�
 
 stdio transport 尚未创建进程时，close 同样发出恰好一次终态通知，使 SDK 和 supervisor 完成关闭；沙箱准备失败保留启动原因，不因缺失事件误报进程清理不明。close 先登记共享 Promise 再通知观察者，重复或重入关闭复用同一结果，并立即禁止新 start/send。已创建进程仍等待真实退出与必要的进程树终止；真实清理失败继续阻止替代连接和成功结算。回归见 [transport lifecycle](../../tests/unit/mcp/transport-lifecycle.test.ts)、[原生 sandbox](../../tests/unit/mcp/sandbox.test.ts) 和 [恢复](../../tests/unit/mcp/stdio-recovery.test.ts)。
 
+关闭 stdio 时，stdin 的 EPIPE 等通信错误不会替代进程树退出判定；宿主继续等待 owned terminate 的确认凭据，真正的 unknown／超时仍拒绝清理成功。SDK 收到 onclose 后会清除 transport 引用，runtime 因此独立保留 transport 事件及资源关闭 Promise，断连后也不能丢失待确认或已拒绝的清理。内部进程工厂仅供固定生命周期回归注入，不增加模型配置或宿主回退入口。确定性回归见 [cleanup tests](../../tests/unit/mcp/cleanup.test.ts)。
+
 默认沙箱的真实 discovery/filtering 与启动隔离回归遵循显式 hosted/required 原生模式：hosted Windows 不具有嵌套后端，专用 required 清单强制这些用例执行并拒绝 skip；生产不因此回退 host。显式 host 的真实协议、信任、恢复及后代清理仍在 hosted 运行；测试同样使用生产配置准备来冻结安全环境，避免空环境导致 Windows Node/OpenSSL 无法初始化。
 
 恢复只影响后续调用。断连时正在进行的 tool call 不自动重放；普通业务错误、单次 tool timeout 和用户取消不会单独触发 reconnect。Streamable HTTP 已有 session ID 收到 404 时，宿主将该会话视为失效，通过同一关闭/重连流程建立后续连接；SDK 自身的 SSE 流恢复仍由 SDK 管理。`tools/list_changed` 通知以 50 ms 合并；每次先完整读取分页结果，再原子替换该 server 的工具定义和执行校验器。失败时保持上一份完整目录并在 status 中记录错误，真正断连则立即移除。发现最多 100 页、1,000 个工具和 2 MiB 定义，连接、发现及校验器编译共享配置的启动期限；重复 cursor、重复原始工具名及超限都明确失败。

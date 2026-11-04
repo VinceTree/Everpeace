@@ -4,6 +4,9 @@ import { startCodexDuplexProcess, startOwnedDuplexProcess, type CodexDuplexProce
 import { createEffectiveSandboxPolicy, materializeSandboxControlPaths, modelShellEnvironment, nativePermissionProfileArgs } from '../tools/sandbox-policy.js';
 import type { McpServerConfig } from './runtime.js';
 
+/** Internal process seam; production always uses the owned launchers. */
+export const mcpProcessBackend = { host: startOwnedDuplexProcess, sandbox: startCodexDuplexProcess };
+
 /** MCP framing over the owned duplex launcher, with isolation chosen by approved config. */
 export class SandboxedMcpTransport {
   onclose?: () => void;
@@ -19,11 +22,11 @@ export class SandboxedMcpTransport {
     if (this.#process) throw new Error('MCP transport already started');
     if (this.config.transport.type !== 'stdio') throw new Error('Expected stdio MCP');
     const transport = this.config.transport;
-    if (transport.isolation === 'host') this.#process = startOwnedDuplexProcess(transport.command, transport.args ?? [], { cwd: transport.cwd ?? this.workspace, env: transport.env ?? {} });
+    if (transport.isolation === 'host') this.#process = mcpProcessBackend.host(transport.command, transport.args ?? [], { cwd: transport.cwd ?? this.workspace, env: transport.env ?? {} });
     else {
       const policy = createEffectiveSandboxPolicy({ mode: transport.sandboxMode ?? 'workspace-write', web: false, shellNetwork: 'deny' }, this.workspace);
       materializeSandboxControlPaths(policy);
-      this.#process = startCodexDuplexProcess(['sandbox', ...nativePermissionProfileArgs(policy), '-C', transport.cwd ?? this.workspace, '--sandbox-state-disable-network', '--include-managed-config', '--', transport.command, ...(transport.args ?? [])], { cwd: this.workspace, env: modelShellEnvironment(transport.env ?? {}) });
+      this.#process = mcpProcessBackend.sandbox(['sandbox', ...nativePermissionProfileArgs(policy), '-C', transport.cwd ?? this.workspace, '--sandbox-state-disable-network', '--include-managed-config', '--', transport.command, ...(transport.args ?? [])], { cwd: this.workspace, env: modelShellEnvironment(transport.env ?? {}) });
     }
     this.#process.stdout.setEncoding('utf8');
     this.#process.stdout.on('data', (chunk: string) => {
@@ -53,10 +56,19 @@ export class SandboxedMcpTransport {
     // Publish the shared close promise before notifying the SDK: its close
     // callback may reenter close(). No process also has a confirmed terminal state.
     return this.#close ??= Promise.resolve().then(async () => { if (this.#process) {
-      const process = this.#process; process.closeInput();
+      const process = this.#process;
       let stopping: Promise<unknown> | undefined;
-      const timer = setTimeout(() => { stopping = process.terminate(); void stopping.catch(() => undefined); }, 100);
-      try { await process.exit; if (stopping) await stopping; } finally { clearTimeout(timer); }
+      const stop = () => stopping ??= process.terminate();
+      const timer = setTimeout(() => { void stop().catch(() => undefined); }, 100);
+      try {
+        try { process.closeInput(); await process.exit; }
+        catch {
+          // Pipe/launch errors are not proof of a live process. The owned
+          // termination path still rejects every unresolved cleanup result.
+          await stop();
+        }
+        if (stopping) await stopping;
+      } finally { clearTimeout(timer); }
     } else this.#notifyClosed(); });
   }
 }

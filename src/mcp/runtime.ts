@@ -795,11 +795,15 @@ export class McpRuntime {
           new URL(config.transport.url),
           { requestInit: { headers: this.#httpHeaders(config.transport) }, fetch: http!.fetch },
         );
-    // SDK stdio close() may resolve immediately after SIGKILL, before the child
-    // has emitted close. Observe the public transport event as the exit gate.
-    this.#transportClosed.set(client, new Promise<void>((resolveClosed) => {
+    // The SDK detaches a transport when onclose fires. Retain the stdio
+    // cleanup promise independently, including after an unexpected disconnect.
+    const closed = new Promise<void>((resolveClosed) => {
       transport.onclose = resolveClosed;
-    }));
+    }).then(async () => {
+      if (transport instanceof SandboxedMcpTransport) await transport.close();
+    });
+    void closed.catch(() => {}); // Remain observed until the supervisor awaits it.
+    this.#transportClosed.set(client, closed);
     const observeTransportError = (error: Error) => {
       transportError = error;
       // The HTTP SDK reports an expired session as an error without closing the
