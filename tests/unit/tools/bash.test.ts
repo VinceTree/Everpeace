@@ -6,15 +6,23 @@ import { test } from "node:test";
 import { resolveBashLaunch, runBash, serializeBashResult } from "../../../src/tools/bash.js";
 import { COMMAND_TIMEOUT_REMEDY } from "../../../src/tools/tool-feedback.js";
 
-test("Bash abort stops a running child and leaves the next command usable", { timeout: 15000 }, async () => {
+test("Bash abort stops a running child and leaves the next command usable", { timeout: 30_000 }, async () => {
   const controller = new AbortController();
-  const started = Date.now();
+  let cancelledAt: number | undefined;
   const command = process.platform === "win32"
     ? "Write-Output ready; Start-Sleep -Seconds 60"
     : "echo ready; sleep 60";
-  const result = await runBash(command, { streamOutput: false, signal: controller.signal, onOutput: () => controller.abort() });
+  const result = await runBash(command, { streamOutput: false, signal: controller.signal, onOutput: output => {
+    if (cancelledAt === undefined && output.headLines.some(line => line.trim() === "ready")) {
+      cancelledAt = performance.now(); controller.abort();
+    }
+  } });
   assert.equal(result.cancelled, true);
-  assert.ok(Date.now() - started < 12000);
+  assert.ok(typeof cancelledAt === "number", "cancel only after the child reports readiness");
+  // Keep the cancellation bound separate from cold PowerShell startup.
+  assert.ok(performance.now() - cancelledAt < 12_000);
+  assert.equal(result.cleanupFailed, undefined);
+  assert.equal(result.cleanupStatus, "confirmed_exited");
   assert.match(result.stdout, /ready/);
   const followUp = process.platform === "win32" ? "[Console]::Write('alive')" : "printf alive";
   assert.equal((await runBash(followUp, { streamOutput: false })).stdout, "alive");

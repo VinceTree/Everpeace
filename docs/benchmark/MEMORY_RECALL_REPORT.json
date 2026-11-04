@@ -1,0 +1,354 @@
+{
+  "schema": 1,
+  "verifiedAt": "2026-11-04",
+  "experiment": "protected-pilot-001",
+  "scope": "Fixed pre-audited LongMemEval-S development subset, one repetition, no-tool fact-memory reader. Not a coding-harness benchmark or held-out evaluation. Results stay bound to the original frozen experiment, not the later delivery commit.",
+  "candidate": {
+    "sourceDigest": "7bb6d184a8d0f3d20bc60874f841d418a3b873c87354c1ed7a241928c54cd657",
+    "buildDigest": "bd73fc02cff0ae511c890528f9e386d5dc62c388248e94bc26aac1566b90354d",
+    "selectionPolicy": "preservation-repair",
+    "defaultPromoted": false
+  },
+  "local": {
+    "model": "deepseek-v4.1-flash",
+    "provider": "OpenCode Go model service; not OpenCode harness",
+    "judgeModel": "deepseek-v4.1-flash",
+    "retrievedBodyLimitChars": 8000,
+    "questionCount": 11,
+    "excludedPartialStore": "a3045048",
+    "repetitions": 1,
+    "groups": [
+      {
+        "arm": "current",
+        "planned": 11,
+        "completed": 11,
+        "correct": 10,
+        "failed": 0,
+        "skipped": 0
+      },
+      {
+        "arm": "protected",
+        "planned": 11,
+        "completed": 11,
+        "correct": 9,
+        "failed": 0,
+        "skipped": 0
+      }
+    ],
+    "smoke": {
+      "planned": 12,
+      "completed": 12,
+      "correct": 12
+    },
+    "usage": {
+      "requests": 68,
+      "input": 62315,
+      "output": 6667,
+      "unknown": 0,
+      "pending": 0
+    },
+    "totalInputOutputTokens": 68982,
+    "budgetInputOutputTokens": 500000,
+    "phases": {
+      "answer": {
+        "requests": 34,
+        "input": 56369,
+        "output": 6633,
+        "unknown": 0,
+        "pending": 0
+      },
+      "judge": {
+        "requests": 34,
+        "input": 5946,
+        "output": 34,
+        "unknown": 0,
+        "pending": 0
+      }
+    },
+    "extractionRequests": 0,
+    "pairedPublicAnswerTokens": {
+      "current": 28784,
+      "protected": 29507
+    },
+    "pairedPublicAnswerTokenRatio": 1.0251181211784324,
+    "newUnknown": 0,
+    "newPending": 0,
+    "historicalUnknownNotCleared": 1,
+    "formalIntervals": null,
+    "humanReviewed": false,
+    "readerRequestedReasoning": "high",
+    "judgeRequestedReasoning": "none",
+    "readerOutputLimitTokens": 32768,
+    "judgeOutputLimitTokens": 16,
+    "historicalConstructionTokensIncluded": false
+  },
+  "offline": {
+    "auditedNecessaryFacts": 18,
+    "currentVisible": 16,
+    "oldAggregateVisible": 14,
+    "protectedVisible": 16,
+    "oldLossesRecovered": 2,
+    "anchorsPreserved": 4,
+    "allCurrentRowsPreserved": true,
+    "retrievedBodyLimitChars": 8000,
+    "necessaryGainVersusCurrent": 0
+  },
+  "criticalCases": {
+    "mummiesCount": 4,
+    "minimumCombinedSale": 5150,
+    "necklaceValue": 5000,
+    "vanityMinimum": 150,
+    "bothArmsCorrect": true
+  },
+  "regression": {
+    "questionId": "57f827a0",
+    "contextsIdentical": true,
+    "requestHashesIdentical": true,
+    "requestHash": "5e930a8c35057250c36c9a489358f1af64f7c796e6da1ff868f0270e1b85e4f1",
+    "interpretation": "Different generations from identical requests; causal retrieval degradation is not established. Preserve both scores and do not promote."
+  },
+  "externalReferences": {
+    "hindsight": {
+      "url": "https://benchmarks.hindsight.vectorize.io/",
+      "manifestUrl": "https://raw.githubusercontent.com/vectorize-io/agent-memory-benchmark/main/blob-manifest.json",
+      "publishedOutputUrl": "https://l4cy6iaq2c4g2ldt.public.blob.vercel-storage.com/outputs/longmemeval/hindsight/rag/s.json-cdNhcgkKvKuhtZAh4abx03GbOk90T7.gz",
+      "decompressedSha256": "186cf0b05a5cbdd8223cea4336d5585a11677f774ddb7c743637c1e9c19a5222",
+      "compressedSha256": "d0bcc75fb4060f0a395239a353d2066d3f7d252bbe16d674c951d9855deaf9cf",
+      "evidenceOwner": "System developer; benchmark maintained by the same organization",
+      "matchedQuestionIds": 11,
+      "identicalQuestionTexts": 11,
+      "matchedCorrect": 11,
+      "fullRunCorrect": 473,
+      "fullRunQuestions": 500,
+      "reader": "gemini:gemini-3.1-pro-preview",
+      "judge": "gemini:gemini-2.5-flash-lite",
+      "meanContextTokensFullRun": 43624.5,
+      "historyIdentityVerified": false,
+      "independentReproduction": false
+    },
+    "mastra": {
+      "url": "https://mastra.ai/research/observational-memory",
+      "evidenceOwner": "System developer",
+      "reader": "gpt-5-mini",
+      "observerReflector": "gemini-2.5-flash",
+      "judge": "gpt-4o",
+      "questions": 500,
+      "categoryCorrect": [
+        75,
+        116,
+        53,
+        30,
+        67,
+        127
+      ],
+      "categoryTotal": [
+        78,
+        133,
+        56,
+        30,
+        70,
+        133
+      ],
+      "microCorrect": 468,
+      "microAccuracy": 0.936,
+      "reportedMacroPercent": 94.87,
+      "meanContextTokensApprox": 30000,
+      "historyIdentityVerified": false,
+      "matchedQuestionIdResultAvailable": false,
+      "independentReproduction": false,
+      "categories": [
+        "knowledge-update",
+        "multi-session",
+        "single-session-assistant",
+        "single-session-preference",
+        "single-session-user",
+        "temporal-reasoning"
+      ]
+    },
+    "zep": {
+      "url": "https://www.getzep.com/research/",
+      "evidenceOwner": "System developer",
+      "reader": "gpt-5.4",
+      "judge": "gpt-5.4",
+      "questions": 500,
+      "correct": 451,
+      "accuracy": 0.902,
+      "medianContextTokens": 4408,
+      "historyIdentityVerified": false,
+      "matchedQuestionIdResultAvailable": false,
+      "independentReproduction": false
+    }
+  },
+  "harnessReferences": [
+    {
+      "name": "DS Harness",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/session-query/session-query/README.md",
+      "mechanism": "Exact event reads, bounded source context and relationship traces",
+      "sameConditionResult": null
+    },
+    {
+      "name": "OpenCode",
+      "url": "https://opencode.ai/docs/config/#compaction",
+      "mechanism": "Configurable automatic compaction, tool-output pruning and reserved token buffer",
+      "sameConditionResult": null
+    },
+    {
+      "name": "Claude Code",
+      "url": "https://code.claude.com/docs/en/memory",
+      "mechanism": "Persistent instruction files and an auto-memory index with on-demand topic files",
+      "sameConditionResult": null
+    }
+  ],
+  "limitations": [
+    "Question ID and text equality do not establish identical histories.",
+    "Local and external readers, judges, context budgets and extraction conditions differ.",
+    "Published external results were inspected, not independently rerun.",
+    "The same-ID Hindsight subset is developer-published and is not a controlled harness comparison.",
+    "No superiority, cost or latency ranking follows from these figures."
+  ],
+  "perQuestion": [
+    {
+      "questionId": "0862e8bf",
+      "type": "single-session-user",
+      "current": {
+        "status": "completed",
+        "correct": true
+      },
+      "protected": {
+        "status": "completed",
+        "correct": true
+      },
+      "hindsightPublishedCorrect": true
+    },
+    {
+      "questionId": "bc8a6e93_abs",
+      "type": "single-session-user",
+      "current": {
+        "status": "completed",
+        "correct": true
+      },
+      "protected": {
+        "status": "completed",
+        "correct": true
+      },
+      "hindsightPublishedCorrect": true
+    },
+    {
+      "questionId": "16c90bf4",
+      "type": "single-session-assistant",
+      "current": {
+        "status": "completed",
+        "correct": true
+      },
+      "protected": {
+        "status": "completed",
+        "correct": true
+      },
+      "hindsightPublishedCorrect": true
+    },
+    {
+      "questionId": "18dcd5a5",
+      "type": "single-session-assistant",
+      "current": {
+        "status": "completed",
+        "correct": true
+      },
+      "protected": {
+        "status": "completed",
+        "correct": true
+      },
+      "hindsightPublishedCorrect": true
+    },
+    {
+      "questionId": "57f827a0",
+      "type": "single-session-preference",
+      "current": {
+        "status": "completed",
+        "correct": true
+      },
+      "protected": {
+        "status": "completed",
+        "correct": false
+      },
+      "hindsightPublishedCorrect": true
+    },
+    {
+      "questionId": "505af2f5",
+      "type": "single-session-preference",
+      "current": {
+        "status": "completed",
+        "correct": true
+      },
+      "protected": {
+        "status": "completed",
+        "correct": true
+      },
+      "hindsightPublishedCorrect": true
+    },
+    {
+      "questionId": "4dfccbf7",
+      "type": "temporal-reasoning",
+      "current": {
+        "status": "completed",
+        "correct": true
+      },
+      "protected": {
+        "status": "completed",
+        "correct": true
+      },
+      "hindsightPublishedCorrect": true
+    },
+    {
+      "questionId": "07741c44",
+      "type": "knowledge-update",
+      "current": {
+        "status": "completed",
+        "correct": true
+      },
+      "protected": {
+        "status": "completed",
+        "correct": true
+      },
+      "hindsightPublishedCorrect": true
+    },
+    {
+      "questionId": "71315a70",
+      "type": "knowledge-update",
+      "current": {
+        "status": "completed",
+        "correct": true
+      },
+      "protected": {
+        "status": "completed",
+        "correct": true
+      },
+      "hindsightPublishedCorrect": true
+    },
+    {
+      "questionId": "1a8a66a6",
+      "type": "multi-session",
+      "current": {
+        "status": "completed",
+        "correct": false
+      },
+      "protected": {
+        "status": "completed",
+        "correct": false
+      },
+      "hindsightPublishedCorrect": true
+    },
+    {
+      "questionId": "91b15a6e",
+      "type": "multi-session",
+      "current": {
+        "status": "completed",
+        "correct": true
+      },
+      "protected": {
+        "status": "completed",
+        "correct": true
+      },
+      "hindsightPublishedCorrect": true
+    }
+  ]
+}

@@ -162,7 +162,7 @@ test("production verification, Goal settlement, and continuation all hold the sa
 });
 
 for (const outcome of ["no_changes", "failed", "cancelled", "stopped"] as const) {
-  test(`production ${outcome} exits restore the prior queue without learning the new task`, async (t) => {
+  test(`production ${outcome} exits restore prior jobs with host-classified fact admission`, async (t) => {
     const time = clock(t);
     const foregroundGate = gate();
     const controller = new AbortController();
@@ -195,14 +195,15 @@ for (const outcome of ["no_changes", "failed", "cancelled", "stopped"] as const)
         else assert.equal(result.workflowResult?.state.result, "no_changes");
       }
       const jobs = await owner.store.loadJobs();
-      assert.equal(jobs.length, 1);
+      assert.equal(jobs.length, outcome === "no_changes" ? 2 : 1);
       assert.equal(jobs[0]?.turn.sessionId, "old-session");
+      if (outcome === "no_changes") assert.equal(jobs[1]?.outcome, "conversation_completed");
       assert.equal(Date.parse(jobs[0]!.notBefore), Date.now() + idleDelayMs);
       await time.advance(idleDelayMs - 1);
       assert.equal(owner.requests(), 0);
       await time.advance(1);
       await time.until(async () => (await owner.store.loadJobs()).length === 0);
-      assert.equal(owner.requests(), 1);
+      assert.equal(owner.requests(), outcome === "no_changes" ? 2 : 1);
       assert.equal((await owner.store.read("project", owner.workspace)).length, 1);
     } finally {
       foregroundGate.release();

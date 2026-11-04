@@ -43,6 +43,7 @@ pnpm dev
 
 - DeepSeek 官方 API：`https://api.deepseek.com`
 - OpenAI 官方 API：`https://api.openai.com/v1`
+- OpenCode Go：`https://opencode.ai/inference/go/openai/v1`（模型发现使用 `/inference/go/v1/models`）
 - 自定义 OpenAI-compatible base URL
 
 API Key 不会显示在终端。模型列表加载成功后选择一个服务端返回的原始模型 ID，该模型会被安全保存并立即用于当前会话；如需执行有界的模型生成检查，请使用 `/doctor --live`：
@@ -174,7 +175,11 @@ TUI 使用原生 inline 模式，普通滚轮可以浏览已完成的 Everpeace 
 
 Everpeace 还会维护独立的 learned 经验记忆。workflow 验证完成并真实空闲五分钟后，当前模型可在后台提取最多三条带证据候选并整理无冲突经验；持久队列可跨 Agent 重建和进程重启恢复。前台任务在 Plan 审批、宿主验证、修复和 Goal 续跑期间持续暂停后台请求；整项任务结束或 runtime 重建后重新计满五分钟，没有新增学习材料的任务也会恢复先前可靠队列。未开始或请求已可靠结算的任务仍可自动继续；中断后用量未知的请求会保留为失败，不自动重发。只有用户明确表达长期偏好时才写入用户级记忆。记忆位于平台应用状态目录（Windows 为 `%APPDATA%\Everpeace\memory`），不会写入仓库。每个逻辑 Agent step 都会根据当前问题和实际读取文件刷新带 revision 的快照，网络重试复用该快照；主 prompt 只注入不可信短索引，只读 `memory_lookup` 可按 ID 查看脱敏证据。输入在裁剪前脱敏，输出在保存前再次脱敏，无法可靠判断的冲突保留待审；当前用户指令和实际仓库证据始终优先。
 
-手动偏好要求全局 Memory 已启用；暂停当前聊天的自动学习仍允许明确保存偏好。在 `/memory remember` 提取期间按 `Esc` 可取消并返回同一 Session。清空、关闭或退出会使待处理结果失效，退出会等待请求和存储完成；取消前已提交的条目仍保留。Memory 存储或资源清理故障会保留原错误，重启 Agent 后才能开始新的 Memory 请求。
+新事实可保存宿主绑定的精确消息引用。调用 `memory_lookup({id})` 后，存在 `entry.fact.lookup.read` 时按其 tool 和 arguments 回读原文，更多内容使用 `next_offset_bytes` 分页；起始位置对应证据引文。旧事实和明确未绑定的来源保留 `lookup.query`。直接来源不可用或冲突时先披露，再考虑搜索回退。助手历史回答仍是带归属的陈述，不是经过验证的结论。
+
+编码经验的自动学习必须经过 verified 结算，即使提示词包含 always、remember 或“记住”也不例外。正常完成的普通对话仅可捕获带归属的事实；failed、unverified、cancelled、stopped 轮次不能入队，恢复的旧任务执行相同规则。使用 `/remember <偏好>`（兼容 `/memory remember <偏好>`）独立保存长期偏好。手动偏好要求全局 Memory 已启用；暂停当前聊天的自动学习仍允许明确保存偏好。提取期间按 `Esc` 可取消并返回同一 Session。清空、关闭或退出会使待处理结果失效，退出会等待请求和存储完成；取消前已提交的条目仍保留。Memory 存储或资源清理故障会保留原错误，重启 Agent 后才能开始新的 Memory 请求。预览失效、条目不存在或纠正输入无效可直接重试，无需重启。
+
+清空用户 Memory 对所有工作区生效，清空项目 Memory 仅影响当前项目；保留其他 scope 及 pending/unknown 用量记录。撤销和中断清理跨进程重启恢复。旧格式中无法确认完整脱敏的内容暂停召回，人工纠正后才能使用；仅续期不能解除这类待审状态。
 
 `/status` 会打开居中的独立命令窗口，显示当前模型、实际 Responses 协议、压缩策略、推理档位、接口地址、工作目录、Session ID、context 占用，以及累计输入、输出、推理、缓存命中和缓存写入 token。主 coding 与辅助模型用量分开显示；辅助请求包括标题、Skill、Memory 与 live doctor。缺失 usage 后累计总量持续标记不完整，独立的后续操作仍可使用；同一 Memory 任务在用量不完整后不能继续请求合并。缓存读取与写入独立统计；命中率只使用供应商确实返回缓存数据的样本，数据不完整时标为 partial。DeepSeek 使用自动前缀缓存，不发送 OpenAI 缓存字段；官方 OpenAI 型号可使用 Session 级缓存 key 和原生压缩。主 coding 的 Usage 与请求设置随 Session 持久化。 Memory 操作取消后仍保留供应商已返回的可靠用量；provider 请求开始前的拒绝不增加 token 用量。
 
@@ -205,6 +210,7 @@ TUI 命令：
 - `/mcp`：查看状态；`/mcp trust <server>` 审阅启动信任，`/mcp revoke <server>` 撤销，`/mcp reconnect` 重载配置并连接获准服务器。
 - `/skills`：创建、安装、查看并显式调用本地 Skills。
 - `/memory`：查看 learned 经验和独立的 Memory 模型用量、全局启用或关闭读取与自动学习、切换当前聊天是否读取或记录 memory、归档或清理条目、使用 `/memory view` 查看最近一次实际注入快照，或在全局启用时使用 `/memory remember <偏好>` 保存长期用户偏好。`Esc` 取消提取并返回同一 Session。聊天策略会随 Session 恢复；开关只控制 learned Memory，与按需 Session 历史检索独立。
+- `/remember <偏好>`：使用与 `/memory remember` 相同的生命周期单独保存长期偏好。
 - `/plan` 或 `/plan <需求>`：进入严格只读规划。审阅菜单提供 **Approve plan**（批准）、**Revise plan**（输入修订意见）、**Cancel plan**（取消）。批准后保持 Plan 模式并空闲等待；`/plan show` 查看已批准计划，`/plan execute` 才把完整正文交给正常编码与验证闭环。批准仅保留在当前进程、Session 和 Agent 中；继续讨论、`/plan exit`、成功切换会话或替换 Agent 会清除，重启或恢复不会重建。修订输入中 Esc 返回审阅菜单，菜单中 Esc 取消规划；两处 Ctrl+C 都取消活动任务。未处理的 Plan guidance 返回草稿，等待再次提交。普通 coding 中模型需要澄清时也会使用同一阻塞式问题窗口；在 coding 问题中取消会停止整个活动任务。执行器会拒绝 Plan step 未提供的工具，包括编辑和 Goal 写操作。
 - `/goal <目标> [--tokens N]`：创建、查看、暂停、恢复并自动持续执行当前 Session 目标。收到 usage 后达到预算或无法可靠计量时，会停止后续工具、模型请求和自动验证修复，并显示原因；正在进行的单次请求可能超过剩余额度。
 
@@ -344,5 +350,20 @@ pnpm build
 `/privacy` 提供保留策略、清理预览、凭据扫描及安全导出，均不请求模型；默认永久保留。`everpeace privacy preview 90` 返回单次 token，供 `configure` 或 `cleanup` 使用；预览到期或会话变化均拒绝。`everpeace privacy export <session-id> <new-file>` 仅导出白名单诊断，对话另需 TUI 预览确认。删除是逻辑删除，Memory、凭据、输入历史、保留团队与导出为独立存储。
 
 `/perf` 包含失败/取消任务、已知用量及可能重叠的累计阶段。`Request token budget` 控制请求准入，不是账单上限。`/memory list` 查看条目 ID；`inspect`、`renew`、`disable`、`delete`、`correct` 使用 `<scope> <id>` 并绑定 revision 确认。项目经验 90 天后暂停召回，长期用户偏好不自动到期。
+
+Memory 菜单和 `/memory candidates list` 显示待审候选：项目候选仅属于当前工作区，用户候选全局可见。使用 `/memory candidates inspect <id>`、`accept <id>`、`reject <id>` 或 `correct <id> {"lesson":"...","applyWhen":"..."}`。修改会打开默认选择 Cancel 的确认窗口，并预览受影响规则；这些审查操作不请求模型。接纳后旧冲突规则成为 superseded，保留来源及替代关系；拒绝结果在重试和重启后保留。待审数量同时包含条目和候选。
+
+本地 CLI 提供相同闭环。`inspect` 返回绑定候选及受影响规则的 revision；纠正时先用相同 JSON 预览，再使用返回的 revision：
+
+```text
+everpeace memory candidates list
+everpeace memory candidates inspect <id>
+everpeace memory candidates accept <id> <revision>
+everpeace memory candidates reject <id> <revision>
+everpeace memory candidates inspect <id> '{"lesson":"Use pnpm","applyWhen":"Node projects"}'
+everpeace memory candidates correct <id> <revision> '{"lesson":"Use pnpm","applyWhen":"Node projects"}'
+```
+
+JSON 必须作为一个 shell 参数传入。候选或受影响规则发生变化后需重新 inspect。每个 scope 最多保留 100 条 active；新增、续期和纠正先归档过期项，再归档最旧 active。自动去重保留已有 ID 和到期时间。
 
 [详细契约与证据限制](architecture/VALIDATION_PRIVACY_PERFORMANCE.md)。

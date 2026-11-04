@@ -1,3 +1,5 @@
+import { factSources } from "../memory/facts.js";
+import type { MessageCaptureBoundary } from "../storage/session-history.js";
 import { safeReadFile } from "../tools/safe-files.js";
 import { sha256Bytes } from "../tools/file-version.js";
 import { SensitiveAccessGuard, SENSITIVE_CONTEXT_MARKER, sensitivePath, safeApprovalText, sensitiveDigest, sensitiveText } from "../permissions/sensitive-access.js";
@@ -889,6 +891,8 @@ export class ReactAgent {
     let contextRecoveryRemaining = this.#contextRecoveryBudget;
     let persistenceFailed = false;
     let initialMcpSnapshot: McpSnapshot | undefined;
+    let messageCapture: MessageCaptureBoundary | undefined;
+    let messageCaptureFailure = "source_unavailable";
     try {
       await this.#reviewRestoredContext(signal);
       if (this.#mcp && this.#turnMode === "default") {
@@ -907,6 +911,10 @@ export class ReactAgent {
       this.#turnGoalId = goal?.status === "active" ? goal.goal_id : undefined;
       this.#goalPrompt = this.#turnMode === "default" ? formatGoalContext(goal) : "";
       this.#context.history = repairToolContext(this.#context.history);
+      if (this.#learnedMemory && this.#turnMode === "default" && this.#sessionHistory?.beginMessageCapture) {
+        try { messageCapture = await this.#sessionHistory.beginMessageCapture(signal); }
+        catch { signal.throwIfAborted(); messageCaptureFailure = "source_unavailable"; }
+      }
       await this.#applyPendingSteering();
       await this.#record([userMessageWithAttachments(userInput, attachments)]);
       if (this.#taskStepsRemaining === 0) {
@@ -1068,10 +1076,22 @@ export class ReactAgent {
           workspacePath: this.#workspacePath,
           userInput,
           transcript: JSON.stringify(turnItems),
+          capturedAt: new Date().toISOString(),
           assistantText: assistantTexts.join("\n\n"),
           toolCallCount: turnItems.filter((item) => item.type === "function_call").length,
           ...(sessionId ? { sessionId } : {}),
         };
+        if (this.#sessionHistory?.beginMessageCapture) {
+          let bound = false;
+          if (messageCapture && this.#sessionHistory.resolveMessages) {
+            try {
+              const result = await this.#sessionHistory.resolveMessages(messageCapture, turnItems, signal);
+              if (result.status === "bound") { learnedTurn.messages = result.messages; bound = true; }
+              else messageCaptureFailure = result.reason ?? "source_unavailable";
+            } catch { signal.throwIfAborted(); messageCaptureFailure = "source_unavailable"; }
+          }
+          if (!bound) learnedTurn.messages = factSources(learnedTurn).map(source => ({ ...source, sourceUnboundReason: messageCaptureFailure }));
+        }
         this.#pendingLearnedTurn = learnedTurn;
       }
       return { ...this.#turnResult };

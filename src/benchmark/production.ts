@@ -62,7 +62,7 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
       if (!context.requestAttemptLedger) throw new Error("Production benchmark requests require a request-attempt ledger");
       const workspacePath = task.workspacePath;
       const policy = options.permissionPolicy ?? { mode: "workspace-write", web: false, shellNetwork: "deny" };
-      const skills = new SkillCatalog(workspacePath);
+      const skills = new SkillCatalog(workspacePath, options.memoryPilot ? { roots: [] } : {});
       const sessionStore = new SessionStore({
         directory: join(options.sessionsRoot, safeName(task.id), String(context.attempt)),
       });
@@ -112,7 +112,7 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
           async confirm(_kind, tool) { return tool === "bash" || tool === "patch"; },
         },
       });
-      const memoryProvider = options.memoryPilot ? createProviderRuntime(options.model.base_url, options.model.api_key, comparisonSettings, options.model.model_name, options.model.responses_profile) : undefined;
+      const memoryProvider = options.memoryPilot ? createProviderRuntime(options.model.base_url, options.model.api_key, comparisonSettings, options.model.model_name, options.model.responses_profile, { sessionId: () => session.id }) : undefined;
       const memoryExecutor = new RequestExecutor(context.requestAttemptLedger);
       const memory = options.memoryPilot && memoryProvider ? new EvaluationMemoryRuntime({
         store: new LearnedMemoryStore({ directory: options.memoryPilot.directory }), client: memoryProvider, model: options.model.model_name,
@@ -131,6 +131,7 @@ export function createProductionBenchmarkAdapter(options: ProductionBenchmarkAda
         requestAttemptLedger: context.requestAttemptLedger,
         skills,
         mcp: null,
+        ...(options.memoryPilot ? { codeNavigation: null, sessionHistory: null } : {}),
         learnedMemoryStore: new LearnedMemoryStore({ directory: join(options.sessionsRoot, safeName(task.id), String(context.attempt), "memory") }),
         ...(memory ? { learnedMemory: memory } : {}),
         learnedMemoryPolicy: { readExisting: options.memoryPilot?.enabled ?? false, captureFuture: options.memoryPilot?.enabled ?? false },

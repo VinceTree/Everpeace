@@ -34,6 +34,8 @@ Session 模型协议及执行参数不盲目改写；持久上下文可能包含
 
 回归：[expiry](../../tests/unit/memory/expiry.test.ts)、[request validity](../../tests/unit/agent/memory-request-validity.test.ts)。这些测试证明生命周期，不能证明真实模型提取的经验普遍正确。
 
+候选使用 `/memory candidates list|inspect|accept|correct|reject` 或 `everpeace memory candidates` 审查；CLI 先 inspect 获取 revision，纠正须带相同 JSON 预览。revision 同时绑定候选与受影响旧条目，确认后原子接纳并 supersede 冲突规则；拒绝持久保存。默认 Cancel，审查不调用模型。候选计入 needsReview；用户候选全局可见，项目候选限定当前工作区。撤销 epoch、跨进程锁和可恢复事务覆盖清空、关闭及人工变更；可恢复业务错误不关闭 runtime。完整边界与回归见 [Memory](MEMORY.md)。
+
 ## 子目录、Worktree 与状态所有权
 
 团队记录区分 gitRoot、授权 source/workspaceRoot、workspacePrefix 和成员 workspace；快照只枚举、读取、复制授权子树。已有 linked worktree 可用，共享 Git 元数据及其他 worktree 保持保护。子模块、链接逃逸、不完整快照、二进制整合及超限仍拒绝。原始字节、并发版本、取消 ownership、冲突和原工作区最终验证继续保留。成员原生隔离依旧必须实机证明，hosted skip 或路径 fixture 不代替。

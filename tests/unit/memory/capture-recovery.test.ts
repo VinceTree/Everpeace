@@ -405,7 +405,7 @@ test("a failed unknown job retains the accounting gap across another reconstruct
 });
 
 test("an actual process interruption leaves a durable request marker and prevents automatic replay", { timeout: 30_000 }, async (t) => {
-  for (const phase of ["extraction", "consolidation"] as const) await t.test(phase, async (t) => {
+  for (const phase of ["extraction", "second-window"] as const) await t.test(phase, async (t) => {
     const directory = await mkdtemp(join(tmpdir(), "everpeace-memory-crash-"));
     const child = fork(resolve("tests/fixtures/memory-capture-crash.ts"), [directory, phase], {
       cwd: directory, execArgv: ["--import", import.meta.resolve("tsx")], stdio: ["ignore", "ignore", "pipe", "ipc"],
@@ -424,7 +424,7 @@ test("an actual process interruption leaves a durable request marker and prevent
       const jobs = JSON.parse(await readFile(join(directory, "capture-jobs.json"), "utf8")) as CaptureJobs;
       assert.equal(jobs[0]?.requestPending, true, "The request checkpoint must be durable before provider admission");
       assert.equal(jobs[0]?.usageComplete, true);
-      assert.equal(jobs[0]?.extracted?.length, phase === "consolidation" ? 2 : undefined);
+      assert.equal(jobs[0]?.extracted?.length, undefined);
       child.kill("SIGKILL");
       await closed;
       const store = new LearnedMemoryStore({ directory });

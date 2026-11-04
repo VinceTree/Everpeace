@@ -16,3 +16,26 @@ test('CLI inspects, corrects and disables memory without a provider or keyring r
   await cli(['correct','project',original.id,inspected.revision,JSON.stringify({lesson:'fixture corrected convention',applyWhen:'fixture'})]);const corrected=(await store.read('project',workspace)).find(e=>e.supersedes===original.id)!;assert.match((await store.snapshot(workspace,'fixture')).text,/corrected/u);
   await cli(['disable','project',corrected.id,memoryEntryRevision(corrected)]);assert.equal((await store.snapshot(workspace,'fixture')).text,'');await assert.rejects(cli(['renew','project',corrected.id,'stale']));
 });
+
+test('CLI candidates can be previewed, corrected and rejected without model access', async t => {
+  const {runMemoryCommand} = await import('../../../src/cli/commands/memory.js');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ep-memory-cli-candidates-'));
+  t.after(async () => { assert.ok(path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)); await fs.rm(root, {recursive:true,force:true}); });
+  const store = new LearnedMemoryStore({directory:root});
+  const make = (id:string) => ({id,workspacePath:root,scope:'project' as const,kind:'convention' as const,confidence:'high' as const,lesson:'Use pnpm',applyWhen:'fixture',createdAt:new Date().toISOString(),evidence:[],redactionVersion:2,status:'review' as const});
+  await store.saveCandidates([make('cli-candidate-a'),make('cli-candidate-b')]);
+  let output = '';
+  const cli = (args:string[]) => runMemoryCommand(args,store,root,text=>{output=text;});
+  assert.equal(await cli(['candidates','list']),0); assert.equal(JSON.parse(output).length,2);
+  const correction = JSON.stringify({lesson:'Use the corrected fixture runner',applyWhen:'fixture'});
+  assert.equal(await cli(['candidates','inspect','cli-candidate-a',correction]),0);
+  const preview = JSON.parse(output);
+  assert.equal(await cli(['candidates','correct','cli-candidate-a',preview.revision,correction]),0);
+  assert.equal((await store.read('project',root))[0]?.lesson,'Use the corrected fixture runner');
+  assert.equal(await cli(['candidates','inspect','cli-candidate-b']),0);
+  const rejected = JSON.parse(output);
+  assert.equal(await cli(['candidates','reject','cli-candidate-b',rejected.revision]),0);
+  assert.equal(await cli(['candidates','accept','cli-candidate-b',rejected.revision]),1);
+  assert.equal((await store.listReviewCandidates(root)).length,0);
+  assert.equal(await cli(['candidates','correct','missing','stale','{}']),1);
+});

@@ -45,7 +45,7 @@ test("coding task runner shares the production turn, verification, and settlemen
   assert.equal(result.workflowResult?.state.result, "no_changes");
   assert.equal(turns, 1);
   assert.deepEqual(finalized, [true]);
-  assert.deepEqual(memory, ["unverified"]);
+  assert.deepEqual(memory, ["conversation_completed"]);
   assert.deepEqual(lifecycle, ["begin:default:user", "end"]);
 });
 

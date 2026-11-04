@@ -2507,8 +2507,29 @@ directController.current = new AbortController();setLastTaskStartedAt(Date.now()
     try {
       const [action, scope, id, ...rest] = args.split(/\s+/u);
       const status = await dependencies.getMemoryStatus?.(workspacePath); const entries = status?.entries ?? status?.recent ?? [];
-      const { memoryEntryRevision, memoryEntryExpired } = await import("../../memory/learned-memory.js");
+      const { memoryEntryRevision, memoryEntryExpired, parseMemoryCorrection } = await import("../../memory/learned-memory.js");
       if (!isCurrentCommandOperation(operation)) return;
+      if (action === "candidates") {
+        if (!scope || scope === "list") {
+          const candidates = status?.reviewCandidates ?? [];
+          replaceCommandView(infoView(uiText('memory.candidates.title'), (candidates.map(candidate => `${candidate.scope}#${candidate.id}\n${candidate.lesson}\n${candidate.applyWhen}`).join("\n\n") || uiText('mfeed98ce586a')) + "\n\n" + uiText('memory.candidates.help'))); return;
+        }
+        if (!id || !dependencies.previewMemoryCandidate || !["inspect", "accept", "correct", "reject"].includes(scope)) throw new Error(uiText('mbeeb7fd0a49e'));
+        const correction = scope === "correct" || scope === "inspect" && rest.length ? parseMemoryCorrection(rest.join(" ")) : undefined;
+        const preview = await dependencies.previewMemoryCandidate(workspacePath, id, correction);
+        if (!isCurrentCommandOperation(operation)) return;
+        const summary = uiText('memory.candidates.summary', {p0: preview.candidate.scope, p1: preview.candidate.id, p2: preview.candidate.lesson, p3: preview.candidate.applyWhen, p4: preview.candidate.confidence, p5: preview.candidate.evidence.map(item => item.excerpt).join("; ") || uiText('mfeed98ce586a')});
+        const detail = uiText('memory.candidates.detail', {p0: summary, p1: preview.conflicts.map(entry => `${entry.scope}#${entry.id}: ${entry.lesson}`).join("\n") || uiText('mfeed98ce586a'), p2: preview.revision, p3: preview.correction ? JSON.stringify(preview.correction) : ""});
+        if (scope === "inspect") { replaceCommandView(infoView(uiText('memory.candidates.title'), detail)); return; }
+        if (!dependencies.reviewMemoryCandidate) throw new Error(uiText('mbeeb7fd0a49e'));
+        const reviewAction = scope as "accept" | "correct" | "reject";
+        enterCommandView({ kind: "action-confirm", text: uiText('memory.candidates.confirm', {p0: detail, p1: scope}), startLabel: uiText('mb804c4e8f298'), cancel: returnToChat, start: () => {
+          const pending = startCommandLoad(uiText('m695198e89c8a'), uiText('mf9f89c8e9e48'), true, false);
+          void dependencies.reviewMemoryCandidate!(workspacePath, id, preview.revision, reviewAction, correction)
+            .then(() => { if (isCurrentCommandOperation(pending)) replaceCommandView(infoView(uiText('mf5b5cf06a801'), uiText('m8bac2573dd14'))); })
+            .catch(() => { if (isCurrentCommandOperation(pending)) replaceCommandView(infoView(uiText('me67da28946d9'), uiText('mb453ac09a92c'), "error")); });
+        } }); return;
+      }
       if (action === "list") { replaceCommandView(infoView(uiText('m97d5b7cda343'), entries.map((e) => `${e.scope}#${e.id} · ${e.status}${memoryEntryExpired(e) ? uiText('me2c18e1ca315') : ""}\n${e.lesson}`).join("\n\n") || uiText('mfeed98ce586a'))); return; }
       const entry = entries.find((e) => e.scope === scope && e.id === id); if (!entry) throw new Error(uiText('mf36668ddf224'));
       const revision = memoryEntryRevision(entry);
@@ -2639,13 +2660,14 @@ directController.current = new AbortController();setLastTaskStartedAt(Date.now()
           } else void showMcp();
         }
         if (parsed.command === "/skills") enterCommandView({ kind: "skills" });
+        if (parsed.command === "/remember") rememberMemory(parsed.args?.trim() ?? "");
         if (parsed.command === "/memory") {
           const args = parsed.args?.trim() ?? "";
           if (args.toLowerCase().startsWith("remember ")) rememberMemory(args.slice("remember ".length).trim());
           else if (args.toLowerCase() === "pause") toggleMemory(false);
           else if (args.toLowerCase() === "resume") toggleMemory(true);
           else if (args.toLowerCase() === "view") void showMemoryPrompt();
-          else if (/^(?:list|inspect|renew|disable|delete|correct)(?:\s|$)/u.test(args)) void runMemoryReview(args);
+          else if (/^(?:list|inspect|renew|disable|delete|correct|candidates)(?:\s|$)/u.test(args)) void runMemoryReview(args);
           else void showMemory();
         }
         if (parsed.command === "/plan") {
@@ -2969,6 +2991,7 @@ directController.current = new AbortController();setLastTaskStartedAt(Date.now()
             onPolicyChange={updateMemoryPolicy}
             onArchive={archiveMemory}
             onClear={clearMemory}
+            onCandidates={() => { void runMemoryReview("candidates"); }}
           />
         ) : view.kind === "plan-questions" ? (
           <PlanQuestionsSurface request={view.request} mode={view.mode} onComplete={view.complete} onCancel={view.cancel} />

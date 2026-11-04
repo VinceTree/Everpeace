@@ -169,6 +169,7 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     options.model.request_settings,
     options.model.model_name,
     options.model.responses_profile,
+    { sessionId: options.sessionId },
   );
   const client = providerClient(provider);
   const skills = options.skills === undefined ? new SkillCatalog(options.workspacePath) : options.skills ?? undefined;

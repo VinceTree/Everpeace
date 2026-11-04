@@ -1017,3 +1017,31 @@ test("partial and schema-invalid legacy tails are ignored and do not invalidate 
     }
   } finally { await f.cleanup(); }
 });
+
+
+test("host message capture rejects mismatches, reused tokens and incomplete scans without widening tool EOF", async () => {
+  const f = await fixture();
+  try {
+    const id = await f.create(); f.select(id); const runtime = f.runtime();
+    await runtime.prepareStep();
+    const first = await runtime.beginMessageCapture(); assert.ok(first);
+    await f.store.appendContext(id, [{ role: "user", content: "same" }, { role: "assistant", content: "same" }]);
+    const resolved = await runtime.resolveMessages(first, [{ role: "user", content: "same" }, { role: "assistant", content: "same" }]);
+    assert.equal(resolved.status, "bound"); assert.notEqual(resolved.messages[0]!.source.eventId, resolved.messages[1]!.source.eventId);
+    assert.equal((await runtime.resolveMessages(first, [])).status, "unbound");
+    assert.deepEqual(matches(await runtime.call("session_event_search", '{"query":"same"}')), []);
+    const mismatch = await runtime.beginMessageCapture(); assert.ok(mismatch);
+    await f.store.appendContext(id, [{ role: "user", content: "unexpected" }]);
+    assert.equal((await runtime.resolveMessages(mismatch, [{ role: "user", content: "same" }])).reason, "message_mismatch");
+    const corrupt = await runtime.beginMessageCapture(); assert.ok(corrupt);
+    await fs.appendFile(path.join(f.directory, `${id}.jsonl`), "not json\n");
+    await f.store.appendContext(id, [{ role: "user", content: "tail" }]);
+    assert.equal((await runtime.resolveMessages(corrupt, [{ role: "user", content: "tail" }])).status, "unbound");
+    const oversized = await runtime.beginMessageCapture(); assert.ok(oversized);
+    const content = "x".repeat(9 * 1024 * 1024);
+    await f.store.appendContext(id, [{ role: "user", content }]);
+    assert.equal((await runtime.resolveMessages(oversized, [{ role: "user", content }])).reason, "incomplete_scan");
+    const aborted = new AbortController(); aborted.abort();
+    await assert.rejects(runtime.beginMessageCapture(aborted.signal), { name: "AbortError" });
+  } finally { await f.cleanup(); }
+});

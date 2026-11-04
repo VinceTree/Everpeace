@@ -3,6 +3,26 @@ import { Stream } from "openai/core/streaming";
 import type { ResponseStreamLike } from "../agent/model-protocol.js";
 import { ModelStreamCleanupError } from "../agent/response-errors.js";
 import { CleanupDeadline } from '../util/cleanup-deadline.js';
+import { normalizeTokenUsageSample } from '../status/model-status.js';
+
+/** Drain an unmetered Go terminal to EOF so later billing is not discarded. Never reissue inference. */
+export async function* settleGoTerminalUsage(events: AsyncIterable<Record<string, unknown>>): AsyncGenerator<Record<string, unknown>> {
+  let pending: Record<string, unknown> | undefined;
+  for await (const event of events) {
+    const terminal = ["response.completed", "response.failed", "response.incomplete"].includes(String(event.type));
+    if (pending) {
+      const previous = pending.response as Record<string, unknown>;
+      const next = event.response as Record<string, unknown> | undefined;
+      if (!terminal || !next || next.id !== previous.id || next.status !== previous.status) throw new Error("Conflicting events after an unmetered Go terminal response");
+      // A subsequent envelope may contain only billing; keep the original output.
+      pending = { ...pending, response: { ...previous, usage: next.usage } };
+      if (normalizeTokenUsageSample(next.usage)) { yield pending; pending = undefined; }
+    } else if (terminal && event.response && !normalizeTokenUsageSample((event.response as Record<string, unknown>).usage)) pending = event;
+    else yield event;
+  }
+  // An actual omission remains unknown, with the original response identity/status.
+  if (pending) yield pending;
+}
 
 /** Retain body ownership independently of the SDK's abort-aware SSE iterator. */
 export function ownResponseStream(response: Response, controller: AbortController, signal: AbortSignal, sdk: OpenAI, onCleanupFailure?: (deadline: CleanupDeadline) => void): ResponseStreamLike {

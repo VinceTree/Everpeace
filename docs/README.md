@@ -35,6 +35,9 @@
 | [MEMORY](architecture/MEMORY.md) | 召回、聊天策略、后台学习与存储 | 修改 Memory |
 | [TUI_STRUCTURE](architecture/TUI_STRUCTURE.md) | 终端目录职责与依赖方向 | 增加/移动 UI 模块 |
 | [BENCHMARKING](BENCHMARKING.md) | fixtures、执行器、独立评分和预算 | 跑离线证明或筹备 live 比较 |
+| [Memory 差距分析](benchmark/MEMORY_GAP_ANALYSIS.md) | 独立快照、案例审计、外部记忆系统和完整 harness 对标 | 复算阶段／全量 Memory 结果及定位信息丢失 |
+| [Memory 事实保留优化](benchmark/MEMORY_FACT_PRESERVATION.md) | 离线候选重放、开发／保留划分、合成任务及生产接入顺序 | 准备与验收事实记忆优化 |
+| [Memory reader 公开结果](benchmark/MEMORY_RECALL_REPORT.json) | 冻结小样本、逐题标签与外部对照条件 | 核对中英文 README 的实测和比较数字 |
 | [本地性能对照](benchmark/LOCAL_PERFORMANCE.md) | CLI、Session、历史搜索与项目扫描 | 复测离线延迟与资源成本 |
 | [编码竞争力评测](benchmark/CODING_COMPETITIVENESS.md) | 官方 DeepSeek、真实任务、计量和 pilots | 修改或验收问题 24–41 |
 | [实测准备](benchmark/READINESS.md) | 个人四任务、十项固定 proof、候选身份与三阶段预算 | 准备 DeepSeek 实测 |

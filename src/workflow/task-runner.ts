@@ -197,7 +197,10 @@ export class CodingTaskRunner {
       await this.#agent.finalizePendingGoalCompletion?.(outcome === "verified" || outcome === "no_changes");
       input.signal?.throwIfAborted();
       await this.#agent.finishMemoryTurn?.(
-        outcome === "verified" ? "verified" : outcome === "failed" ? "failed" : "unverified",
+        outcome === "verified" ? "verified" : outcome === "no_changes" && !lastWorkflowResult.changed
+          && !lastWorkflowResult.state.tracking_limited && !lastWorkflowResult.state.pending_verification
+          && !lastWorkflowResult.state.prior_unverified && nextMode === "default" ? "conversation_completed"
+          : outcome === "failed" ? "failed" : "unverified",
       );
       const summary = formatWorkflowSummary(lastWorkflowResult);
       if (summary) this.#host.onSystemMessage?.(summary);

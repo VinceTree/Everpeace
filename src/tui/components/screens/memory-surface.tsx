@@ -13,6 +13,7 @@ export function MemorySurface({
   onPolicyChange,
   onArchive,
   onClear,
+  onCandidates,
 }: {
   status: LearnedMemoryStatus;
   policy: LearnedMemoryPolicy;
@@ -21,6 +22,7 @@ export function MemorySurface({
   onPolicyChange(patch: Partial<LearnedMemoryPolicy>): void;
   onArchive(entry: LearnedMemoryStatus["recent"][number]): void;
   onClear(scope: LearnedScope): void;
+  onCandidates?(): void;
 }) {
   const [confirmScope, setConfirmScope] = useState<LearnedScope>();
   const toggleLabel = status.enabled ? uiText('m8d72cbf86551') : uiText('m70e34e008988');
@@ -49,6 +51,7 @@ export function MemorySurface({
         <Text>{uiText('me9ddf5699691')}{status.projectEntries}</Text>
         <Text>{uiText('m783bcdc85170')}{status.userEntries}</Text>
         <Text>{uiText('m6b8436b69db8')}{status.needsReview ?? "unknown"}</Text>
+        <Text>{uiText('memory.candidates.count', {p0: status.candidateNeedsReview ?? 0})}</Text>
         <Text dimColor>{uiText('m7e649f6717fb')}</Text>
         {status.capture ? <Text>{uiText('m6d7ac707bce6')}<Text color={status.capture.state === "failed" ? "red" : status.capture.state === "succeeded" ? "green" : "yellow"}>{status.capture.state}</Text></Text> : null}
         {status.capture?.queued !== undefined ? <Text>{uiText('m4976bf0963de')}{status.capture.queued}</Text> : null}
@@ -65,6 +68,7 @@ export function MemorySurface({
         </Box>
       ) : <Box marginTop={1}><Text dimColor>{uiText('me9c8b88a177d')}</Text></Box>}
       <Select options={[
+        ...(onCandidates ? [{ label: uiText('memory.candidates.title'), value: "candidates" }] : []),
         { label: toggleLabel, value: "toggle" },
         { label: uiText('m435aae06ca1f', {p0: policy.readExisting ? uiText('mb7e3e4aa4257') : uiText('m5342e09f2729')}), value: "read" },
         { label: uiText('m0234ba8aa0e6', {p0: policy.captureFuture ? uiText('mb7e3e4aa4257') : uiText('m5342e09f2729')}), value: "capture" },
@@ -73,6 +77,7 @@ export function MemorySurface({
         { label: uiText('m84e723ca797f'), value: "clear-user" },
         { label: uiText('mdea785dbd445'), value: "back" },
       ]} onChange={(value) => {
+        if (value === "candidates") onCandidates?.();
         if (value === "toggle") onToggle(!status.enabled);
         if (value === "read") onPolicyChange({ readExisting: !policy.readExisting });
         if (value === "capture") onPolicyChange({ captureFuture: !policy.captureFuture });

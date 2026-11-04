@@ -32,7 +32,9 @@ pnpm files:build
 pnpm dev
 ```
 
-In the terminal, run `/login`, choose DeepSeek, enter your masked API key and select the original model ID returned by the service. OpenAI and custom HTTPS Responses endpoints are also supported; capabilities depend on the endpoint. Keys stay in the system credential store, outside project files and Sessions.
+In the terminal, run `/login`, choose DeepSeek, enter your masked API key and select the original model ID returned by the service. OpenAI, OpenCode Go and custom HTTPS Responses endpoints are also supported; capabilities depend on the endpoint. Keys stay in the system credential store, outside project files and Sessions.
+
+For OpenCode Go, choose its login preset and the Flash ID returned by its catalog. The preset uses `https://opencode.ai/inference/go/openai/v1`; model discovery uses Go's separate catalog route. Requests identify Everpeace and send a stable `x-opencode-session` header. Go remains a compatible endpoint with conservative default capabilities; authenticated Responses, tools and usage still require live verification. See the [Go documentation](https://opencode.ai/v2/docs/console/go/) for model availability and workspace region settings.
 
 Model connections honor `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` (lowercase names take precedence). Set these before starting the CLI when your endpoint needs a proxy; `ALL_PROXY` alone is insufficient. Proxy settings apply to model traffic, while model shell commands retain their sandbox network policy.
 
@@ -76,6 +78,10 @@ Root-to-directory rules, `@` attachments and an on-demand project map help the a
 
 Configured MCP tools, resources and prompts and local Skills extend the agent. Learned Memory can retain preferences and verified lessons. Public web tools check redirects and network boundaries. Search falls back to Bing China and DuckDuckGo when the first provider is unavailable. See the [usage guide](docs/USAGE.md) for setup and limits.
 
+Facts from newly completed conversations include host-bound source references when available. `memory_lookup` returns direct `session_event_read` arguments; older entries retain a search query. Exact counts, historical recommendations and date updates should be checked against the original message. Source-chain checks run offline with `node --import tsx scripts/benchmark/prove-memory-sources.mjs <new-evidence-directory>`; see the [Memory protocol](docs/benchmark/MEMORY_FACT_PRESERVATION.md).
+
+Memory captures attributed facts from normally completed conversations; reusable coding lessons still require verified turns. Save a lasting preference with `/remember <preference>`; review conflicts through `/memory candidates` or `everpeace memory candidates list`. Inspect, accept, correct and reject candidates locally with a preview of affected rules. Clearing user Memory applies across workspaces; project clearing affects the current workspace.
+
 MCP stdio programs require separate startup trust and default to a native workspace sandbox with networking denied. `/mcp trust <server>` reviews launch identity, `/mcp reconnect` starts or reloads, and `/mcp revoke <server>` cancels access. `/mcp mode <server> host` explicitly selects host user authority and revokes old trust; review and trust again before starting. Changed executable or entry-script bytes require new trust; dynamic launchers require approval at every startup. Windows host stdio requires a verified executable and argv; configure an interpreter explicitly for `.cmd`/`.bat` entry points. Remote MCP requires HTTPS. Loopback HTTP requires its own exception; redirects are blocked. Missing startup approval returns `interaction_required` (exit 5) in headless CLI/SDK runs.
 
 If sandbox preparation fails before an MCP process starts, status retains the startup cause and the connection can close normally. Started processes still require confirmed cleanup.
@@ -85,6 +91,39 @@ Search uses DOM selectors by default. `/web` can explicitly select Brave LLM Con
 `/privacy` shows persistence and retention, previews cleanup and exports diagnostics. First setup recommends 30 days and requires a preview review; existing settings stay unchanged. `/history no-save` excludes the next input from input history; the Session still saves it. Suspected secret inputs offer masking, original-text authorization or cancellation; original secrets stay out of input history. Session deletion also removes linked history; older unlinked entries need `/history clear`. `everpeace privacy --help` provides local CLI controls. `/perf` reports measured time and tokens; Project Memory expires after 90 days until reviewed with `/memory`. [Privacy contracts](docs/architecture/SECURITY_HARDENING.md).
 
 Report vulnerabilities privately through [GitHub Security](https://github.com/VinceTree/Everpeace/security/advisories/new). See [SECURITY.md](SECURITY.md) for supported releases and coordinated disclosure. Dependency audit, redacted secret scans, license policy and candidate-bound SBOM evidence are required before merging and publishing.
+
+## Memory reader results and comparisons
+
+This fixed, pre-audited **11-question LongMemEval-S development pilot** used `deepseek-v4.1-flash` through OpenCode Go for both answering and grading, one run per arm, and an **8,000-character retrieved-body limit**. It tested a no-tool fact-memory reader, not a complete coding harness. One incomplete fact store was excluded before the run; existing complete stores were reused without extraction.
+
+| Local strategy | Correct / planned | Accuracy | Public-answer tokens |
+| --- | ---: | ---: | ---: |
+| Current BM25 fact retrieval — default | 10 / 11 | 90.91% | 28,784 |
+| Protected evidence aggregation — experimental | 9 / 11 | 81.82% | 29,507 |
+
+Both arms correctly answered **4 mummies** and **$5,150 minimum combined sale** ($5,000 necklace + at least $150 vanity). Protected aggregation recovered the old aggregator's two lost facts and preserved every current-strategy entry; audited necessary-evidence coverage remained **16/18**, with no gain over current BM25. QA adoption criteria were not met, so it was **not promoted to the default**. The sole score regression came from two different generations with **identical context and request hashes**; this single run does not establish a retrieval-caused regression.
+
+All **22 public answers** completed; the six smoke cases passed in both arms (**12/12**). The entire new run used **68 requests / 68,982 input+output tokens** (62,315 input + 6,667 output), including smoke and grading, with **zero new unknown usage or pending requests**. This is reader-and-grader usage; earlier fact-store construction is excluded. Historical unknown usage remains separate. These are automatic grades on development cases, without human scoring review or formal confidence intervals. [Per-question results and frozen conditions](docs/benchmark/MEMORY_RECALL_REPORT.json).
+
+**External memory references — different experimental conditions, not a leaderboard:**
+
+| System / primary source | Published evidence | Reader / judge | Context reported by that run |
+| --- | --- | --- | --- |
+| [Hindsight](https://benchmarks.hindsight.vectorize.io/) · [published output manifest](https://github.com/vectorize-io/agent-memory-benchmark/blob/main/blob-manifest.json) | Recounted **11/11 matching question IDs**; full run **473/500 (94.6%)** | Gemini 3.1 Pro Preview / Gemini 2.5 Flash-Lite | Full-run mean **43,624.5 tokens** |
+| [Mastra Observational Memory](https://mastra.ai/research/observational-memory) | **468/500 (93.60%)** from category counts; author's **94.87%** is a six-category macro average | gpt-5-mini / GPT-4o; observations use Gemini 2.5 Flash | Mean approximately **30k tokens** |
+| [Zep](https://www.getzep.com/research/) | **451/500 (90.2%)** | GPT-5.4 / GPT-5.4 | Median **4,408 tokens** |
+
+Hindsight's 11 IDs and question texts match this pilot, but identical histories have **not** been established. The external runs use different models, graders and context budgets; their published scores were inspected, not independently reproduced. Hindsight and its benchmark publisher share an organization. The 500-question results are not scores on our 11-question subset, and tokens are not interchangeable with our character budget. No cross-system quality, cost or latency advantage is established.
+
+For complete coding harnesses, the comparison currently covers documented mechanisms:
+
+| Harness / primary source | Relevant mechanism | Same-condition result in this pilot |
+| --- | --- | --- |
+| [DS Harness session query](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/session-query/session-query/README.md) | Exact event reads, bounded source context and relationship traces | Not run |
+| [OpenCode](https://opencode.ai/docs/config/#compaction) | Configurable compaction, pruning and reserved context | Not run; Go was only the model service |
+| [Claude Code](https://code.claude.com/docs/en/memory) | Persistent rules and an auto-memory index with on-demand topic files | Not run |
+
+Everpeace has production `memory_lookup` and Session source-reading tools, but this reader pilot did not enable them. [Comparison methodology and evidence limits](docs/benchmark/MEMORY_GAP_ANALYSIS.md) · [Current handoff](docs/HANDOFF.md).
 
 ## Automate the same workflow
 
@@ -149,6 +188,28 @@ pnpm build
 Run these gates in order and stop on failure, then run `git diff --check`. Start with [AGENTS.md](AGENTS.md) and the [documentation map](docs/README.md). Report reproducible issues through [GitHub Issues](https://github.com/VinceTree/Everpeace/issues).
 
 The [offline performance protocol](docs/benchmark/LOCAL_PERFORMANCE.md) compares CLI process startup, Session recovery, history search and project scanning with fixed fixtures and saved samples. CLI help timing excludes terminal prompt readiness; local results do not imply model or cross-platform gains.
+
+`pnpm benchmark:memory-batch <prepare|preflight|run|resume|report> <absolute evidence root>` provides the [Go/DeepSeek Memory campaign](docs/benchmark/MEMORY_BATCH.md). Live execution requires `--live` and user authorization; unknown usage blocks resume. Reports use an adapted DeepSeek judge and do not represent official GPT-4o benchmark scores.
+
+For offline gap analysis, use `python scripts/benchmark/analyze-memory.py --campaign <campaign-root> --output <new-analysis-root>` (Python 3.10+, existing Node/tsx). It snapshots evidence outside the campaign and makes no model requests. Add `--replay <snapshot-root>` to recompute captured bytes or `--wait-for-stop` to analyze once the running campaign settles. [Findings, comparison conditions and limits](docs/benchmark/MEMORY_GAP_ANALYSIS.md).
+
+Prepare the fact-preservation experiment offline with `python scripts/benchmark/prepare-memory-facts.py prepare --campaign <campaign-root> --snapshot <analysis-snapshot> --output <new-preparation-root>`, then check it with `python scripts/benchmark/prepare-memory-facts.py verify --root <preparation-root>`. This creates split manifests, candidate replay evidence and synthetic tasks; the preparation itself does not run production capture or models. The bounded pilot entry below validates the implemented candidate. [Protocol and limits](docs/benchmark/MEMORY_FACT_PRESERVATION.md).
+
+The small fact-memory pilot uses `pnpm benchmark:memory-pilot prepare <new-absolute-root> <preparation-root> <baseline-root>` after the four validation gates, then `pnpm benchmark:memory-pilot run <absolute-root> --live`. It is limited to 12 development questions, two arms and six smoke cases under a shared 2,000,000-token budget; it never starts the holdout or full batch.
+
+To continue only skipped pilot items after explicit authorization, use `pnpm benchmark:memory-pilot prepare-skipped <new-absolute-root> <sealed-parent-root>`, then run the new root with `--live`. Completed items, failed items and passed smoke cases are retained; parent unknown usage remains disclosed.
+
+For aggregation-loss repair, use `pnpm benchmark:memory-recall prepare-protected <new-absolute-root> <sealed-parent> <sealed-child> <evidence-audit-json>`. This explicitly freezes the preservation-repair gate: preserve every baseline row and recover audited losses before the authorized reader pilot. It reports evidence gain separately; the default quality-and-cost adoption criteria still apply.
+
+The sealed-store recall pilot uses `pnpm benchmark:memory-recall prepare <new-absolute-root> <sealed-parent> <sealed-child> <evidence-audit-json>`, followed by `preflight <root>`, `run <root> --live`, and `report <root>`. It compares frozen local retrieval candidates without extraction. The default prepare mode requires improved audited evidence without losses, explicit authorization and a new 500,000-token budget; otherwise it stops offline. See [the protocol](docs/benchmark/MEMORY_FACT_PRESERVATION.md).
+
+Learned Memory now ranks eligible facts and evidence with local BM25 within the existing context budget. Retrieval-only replay is available with `node --import tsx scripts/benchmark/replay-memory-recall.mjs <parent-root> <child-root> <anchor-audit-json> <new-output>`; it reuses stored facts without model requests or extraction.
+
+Finished pilots can be compared offline with `python scripts/benchmark/compare-memory-fact-pilots.py --before <old-root> --after <new-root> --output <new-analysis-root>`. This reads existing ledgers, keeps failed and skipped items, and makes no model requests.
+
+After an authorized repair, `prepare <new-root> --continue-from <stopped-root>` freezes the parent evidence and retains complete verified coding chains. Failed attempts and unknown usage stay visible; the new candidate requires preflight and smoke again. Public QA runs entirely on the new candidate by default.
+
+Add `--continue-unrun` only after approval of the documented protocol change to preserve all terminal public results and run only unstarted items. Closed service failures are retained without retry; pending requests still block recovery, historical usage stays incomplete, and formal confidence intervals are disabled.
 
 Licensed under [Apache 2.0](LICENSE). Maintained by [VinceTree](https://github.com/VinceTree).
 

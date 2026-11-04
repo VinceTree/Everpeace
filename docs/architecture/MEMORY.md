@@ -1,5 +1,33 @@
 # Learned Memory
 
+共享召回新增内部 `current / terms / aggregate / protected` 策略和统一整条选择／渲染函数，生产默认仍为 `current`。`terms` 使用保守英文复数归一化并过滤检索功能词 many/much，路径、标识符、数值和中文保持原规则；原词与归一化词只计一次。`aggregate` 在其上按 `BM25 / (1 + 0.5 × 已选同 Session 事实数)` 贪心选择，装不下的事实不占来源配额。只折叠同实际来源、说话者、时间、陈述与引文的完全重复项，不合并更新、否定或不明来源。候选只对资格过滤后的集合运行，生产存储与公共接口保持兼容。
+
+`protected` 先按 current 在相同预算中选择完整条目，原样保留全部 ID、顺序、正文和引文，再用空余字符补充关联事实；不会以来源多样性替换原条目。关联来自当前可读事实的规范化稀有词重合：两条相对得分不低于最高分一半的 seed、语料频率不超过 10% 的内容词、最多两跳且每跳最多四条，权重每跳乘 0.5。无标签、无主题词典、无模型调用，不推断来源关系。它可增加上下文，也可能带入无助于回答的内容，须由 QA 对照检验。
+
+用户后续明确要求先修复聚合丢失再实测，因此新增显式 preservation-repair 验收：完整保留所有基线条目、四锚点和原必要证据，修复旧 aggregate 的全部审计丢失且正文不超预算。该路径只选 protected，清单记录政策与相对 current 的真实增益；不称为通过原 evidence-gain 门槛。默认采用仍要求完整 QA／计量、正确数严格增加、无原正确题回退及配对回答成本通过。
+
+默认 evidence-gain 验收要求候选增加必要证据、逐条无损失并保留既有锚点；仅增加来源多样性不够。采用还须满足完整计量、配对正确数增加、无原正确题回退及回答成本比例要求。未通过时默认不变；本轮实际离线结果和证据入口见 HANDOFF。
+
+事实修复后的诊断发现，旧等权子串排序会漏掉已存的数量和偏好。用户随后授权先接续 skipped，再离线优化排序；当前候选已改用本地词项 BM25，并复用冻结事实回放，不重新提取或付费重答。旧实验成绩和新召回结果分别保留，离线召回成功不能代替回答质量验证。具体证据和范围见 [事实优化协议](../benchmark/MEMORY_FACT_PRESERVATION.md) 与 HANDOFF。
+
+## 事实到原文的来源链
+
+新对话在首条消息落盘前记录宿主边界，最终回答落盘后按本轮 user／assistant 消息的顺序、角色和脱敏正文绑定真实历史引用。宿主捕获使用独立 EOF，不推进模型工具的 prepared-step 边界；遗漏、歧义、日志变化和扫描上限返回未绑定。消息时间来自原始 context_append 事件，不使用提取或导入时间冒充。
+
+FactSource 的可选 source 由宿主生成，不发送给提取模型。事实保留 source.sessionId、eventId、完整消息 messageSha256 和 quoteStartBytes／quoteEndBytes。分窗保留窗口起点；完整消息摘要与窗口位置分开，UTF-8 偏移对应 session_event_read 的脱敏正文。队列与恢复采用保留布局的脱敏，内容变化或裁剪使绑定失效；旧事实保留原 ID 和搜索回退，不自动回填。新绑定捕获任务和事实的身份包含真实事件引用，同正文的新轮次分别保留；同一来源版本仍幂等去重。
+
+memory_lookup 的 entry.fact.lookup 保持 query／session_id，增加 sourceStatus 与可选 read：`{tool:"session_event_read",arguments:{session_id,event_id,offset_bytes}}`。精确数量、助手历史推荐及时间更新优先按该定位回读，使用 next_offset_bytes 分页。直接来源失效或冲突时须披露，搜索结果不能自动替代它。来源引用不授予跨项目或敏感数据权限，现有历史工具仍独立授权；Memory 关闭与清空阻断事实读取。
+
+实现入口：[宿主历史服务](../../src/storage/session-history.ts)、[共同消息投影](../../src/storage/session-message.ts)、[事实提取与来源](../../src/memory/facts.ts)。参考固定 [DS Harness session-query](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/session-query/session-query/README.md) 的精确读取与来源关系；没有引入其 SQLite 后端，也没有据此产生外部对照成绩。
+
+[事实保留优化](../benchmark/MEMORY_FACT_PRESERVATION.md) 已接入生产：事实与经验分开存储，宿主分类的正常无修改对话可捕获事实，verified 任务可在同次提取中产生事实和经验。unverified／failed／cancelled／stopped 不捕获。项目 `facts.json` 复用控制锁、事务、epoch、租约和提交复核，不占 100 条经验配额；事实不按消息或事件日期自动过期。每条事实保留说话者、消息时间、可确定事件时间、原文摘录及 Session 搜索定位，snapshot 统一使用原有 8000 字符正文预算。memory_lookup 兼容旧条目并可读取事实。
+
+公开记忆组件评测使用内部共享的 `extractMemoryLessons`／`stageMemoryLessons` 与隔离 benchmark store；生产 runtime 继续控制 verified 准入、epoch、租约与提交检查。公开导入不生成 verified job。见 [Memory 批量评测](../benchmark/MEMORY_BATCH.md)。
+
+[离线差距分析](../benchmark/MEMORY_GAP_ANALYSIS.md) 分别检查真实投影、提取、候选日志、整理、active 条目、snapshot、回答和评分。候选日志保存了事实不等于 active 已保留；来源 ID 命中也不等于答案细节在 reader 上下文中。当前无工具 reader 没有调用已有 memory_lookup 或 Session 历史工具，不能据此判定完整 harness 缺少原文恢复能力。该分析不修改生产策略。
+
+修复后的批次可通过显式 `--continue-from` 保留父批次完整 verified 编码链，未完成链使用空 Memory 重建；不复制失败链的学习状态。父批次 unknown 与失败消耗独立保留，新候选的公开记忆构建仍逐题／组／重复隔离。
+
 项目条目在创建/人工复核后 90 天到期并暂停召回，自动合并和使用不续期；长期用户偏好不自动到期。`/memory list/inspect/renew/correct/disable/delete` 使用 revision-bound 人工操作；实际请求前重新检查有效性。来源集合、superseded 关系和回归见 [Memory 生命周期](VALIDATION_PRIVACY_PERFORMANCE.md)。
 
 Everpeace 的 learned memory 是本地、分层、可审计的经验存储。它不替代当前 Session context、`AGENTS.md`、仓库证据或用户当前指令，也不使用向量数据库。设计参考 Codex 的“提取与整理分离”原则，但使用 Markdown、JSON 任务文件和普通 Responses 请求适配当前单 Agent 与兼容端点。
@@ -7,11 +35,13 @@ Everpeace 的 learned memory 是本地、分层、可审计的经验存储。它
 ## 数据与作用域
 
 - `learned.md` 保存用户级长期偏好；`projects/<workspace-hash>/learned.md` 保存项目经验。
-- `capture-jobs.json` 保存待处理、运行中和失败任务；`memory-candidates.json` 保存候选、待审和已合并状态。
-- 项目路径规范化后做 SHA-256 哈希，不把原始路径写入文件名。读改写使用 `proper-lockfile` 跨进程锁并通过临时文件原子替换。
+- `capture-jobs.json` 保存待处理、运行中和失败任务；`memory-candidates.json` 保存 pending、review、consolidated 和 rejected 状态。
+- `memory-control.json` 保存全局开关撤销 epoch、全局用户 scope epoch 和各项目 scope epoch；job、候选和手动请求绑定开始时的 epoch。缺少 epoch 的旧任务仅在对应 scope 从未撤销时兼容，不能重新授予旧任务权限。控制文件损坏直接报错。
+- 项目路径规范化后做 SHA-256 哈希，不把原始路径写入文件名。所有内容读写先取 store 级 `proper-lockfile` 控制锁，再取需要的文件锁，固定为“控制锁 → 文件锁”；provider 请求不持锁。提交时重查 epoch、策略和 job 租约所有权，阻止其他实例或进程的旧结果回填。
+- 清空、关闭和人工变更通过控制层撤销旧写入资格。`memory-transaction.json` 的原子替换是清理或多文件审查提交点，先持久化新 epoch 和写入意图，再完成内容操作；中断后所有读取和新写入先恢复该事务。事务文件含脱敏内容，使用与 Memory 相同的本地文件权限。
 - 同一 store 的 capture job 读取与写入共用每路径队列；读取等待已开始的原子替换和锁释放，避免 Windows 上高频状态读取与替换竞争。外部进程仍由原子替换、跨进程锁和有界重试保护，持续存储失败保持可见。边界回归见 [capture recovery](../../tests/unit/memory/capture-recovery.test.ts)。
 - 成功重启回归使用明确完成状态和可靠 Usage，等待串行 job 队列结算后再读取长期条目，避免测试高频读取写入目标；失败保留合成 fixture 的 job/capture 状态。未知 Usage 的恢复和禁止重试仍由独立用例验收，不以成功 fixture 代替。
-- 每个 scope 最多保留 100 条 active 条目。superseded、archived、候选与 review 状态不挤占 active 配额；未合并临时候选保留 30 天。
+- 新增、续期和纠正统一限制每 scope 最多 100 条 active，超限先归档过期条目，再归档最旧 active，让新条目保留。superseded、archived、候选与 review 状态不挤占 active 配额；未合并临时候选保留 30 天。自动去重保留稳定 ID 和原到期时间。
 - 旧 Markdown 条目继续读取为 legacy 来源，不补造验证证据，也不默认回扫旧 Session。
 
 长期条目包含稳定 ID、scope、kind、confidence、status、完整创建/更新时间、适用条件、来源 Session 和最多三个脱敏证据片段。归档条目不会被相同自动提取重新激活。
@@ -26,6 +56,10 @@ revision + loadedAt + entryIds + injected text
 
 检索词来自当前用户问题和本轮已实际访问的文件，支持中文双字片段、英文词、路径和标识符。只选择 active 条目，并以完整条目为单位装入字符预算；装不下的条目整体跳过，不截断半条规则。普通网络重试复用当前快照，工具 follow-up 或 guidance 进入下一 step 时重新检索。
 
+当前排序在范围、active、到期、脱敏及来源检查之后才构建词频统计。NFKC／小写规范化后做完整词项匹配，过滤常见英文功能词，保留数值、标识符、完整路径和中文 Unicode 字符边界上的双字片段。BM25 使用 k1=1.2、b=0.75，按语料中的词项稀有度、词频和条目长度评分；不再让 our 命中 four、cat 命中 catch。词频只由当前可读候选生成，不包含其他项目或不可召回条目。
+
+事实以陈述与引文、经验以 lesson 与 applyWhen 评分；作用域、置信度和近 30 天新旧程度仅用于同分排序，最后按更新时间与原顺序稳定决胜。无文本命中的项目条目不会因元数据权重超过真正相关事实；用户级显式偏好保留原有回退语义。正文继续整条装入默认 8000 字符预算，包装提示另计，不引入模型重排、向量库或持久索引。共享实现为 [retrieval.ts](../../src/memory/retrieval.ts)，事实、来源、提取提示和公开 SDK 不变。
+
 主 prompt 注入的是带 ID 的短索引，并明确标记为不可信背景。`memory_lookup` 是受 scope 和读取策略限制的只读工具，可按 ID 返回脱敏详情及证据；Plan 模式允许读取。当前聊天关闭 `readExisting` 后，下一 step 不再广告该工具，dispatch 也会拒绝读取。`/memory view` 展示最近一次实际发送的 snapshot，而不是重新读取磁盘形成一个不同视图。
 
 全局开关同时控制 learned Memory 的读取和自动学习；聊天级策略也仅影响 learned Memory。`session_search`、`session_event_search`、`session_event_read`、`session_relations` 和同工作区 `read_tool_output` 属于独立的只读历史能力，关闭 Memory 不会关闭它们；历史记录也不会因此自动成为长期经验。聊天级 `readExisting` / `captureFuture` 通过 `memory_policy_updated` Session 事件保存；`/new` 使用默认策略，`/resume` 恢复原 Session 策略，旧 Session 使用默认值。Session 分支继承该策略；公开 exec 固定读取已有 Memory、关闭本次 capture，不在任务清理后产生提取请求。
@@ -36,13 +70,15 @@ revision + loadedAt + entryIds + injected text
 
 - `beginTask` / `endTask`：由生产 Agent 接到现有 coding runner 的完整任务范围；同步关闭后台准入并取消请求，覆盖 Plan 审批、宿主验证、修复和 Goal 续跑，最终退出时才恢复五分钟空闲期。
 - `beginTurn` / `endTurn`：单轮持有前台状态；没有待学习材料时也能结束该轮，整项任务仍活动时不能解除任务的暂停。
-- `finishTurn`：在 workflow 验证完成后提交结构化 outcome。verified 任务及明确的长期记忆请求可以排队；failed、unverified、cancelled 和受限停止不会把助手自称成功晋升为长期事实。
+- `finishTurn`：在 workflow 验证完成后提交结构化 outcome，verified 任务可以排队提取事实与经验；宿主确认 no_changes、无验证债务且跟踪完整的普通完成对话仅提取事实。failed、unverified、cancelled、stopped 即使含 always、remember 或“记住”也不得准入；恢复旧队列应用相同规则。长期偏好通过独立 `/remember`（兼容 `/memory remember`）保存。
 - `setPolicy`、`clear`、`archive`、`deleteEntry`：提升 runtime generation，取消或隔离旧工作；迟到结果在写入前必须再次通过 generation 与策略检查。
 - `dispose`：停止当前 runtime，但保留持久队列供下一实例或进程恢复。
 
 显式 `remember` 等待启动完成，并在 provider 准入、响应后、持锁写入提交前及返回成功前复核全局开关、取消信号与 generation。全局关闭时必须先启用；聊天级 `captureFuture: false` 只暂停自动学习，仍允许新的显式偏好请求。清空、关闭、归档、删除、恢复前台或关闭聊天 capture 会取消已在运行的手动请求，迟到响应保留可靠 usage，但不能写回或报告成功。取消发生在原子提交之后时保留已提交条目，不尝试回滚并发修改。
 
 runtime 登记手动请求和异步变更的所有权后才执行 callback；重复及取消 callback 重入的 `dispose` 共用同一完成 Promise，等待请求、计量和存储结束。启动、手动操作设置读取、手动写入或异步变更的存储失败关闭该所有者的后续准入；资源清理失败也关闭所有者，关闭仍返回原故障，资源清理错误优先于存储错误与普通取消。生产 TUI 为手动偏好创建关闭自动 capture 的临时 runtime，避免它消费共享后台队列；TUI 服务关闭也等待 provider 返回后的 Memory 持久化。回归见 [手动生命周期](../../tests/unit/memory/manual-lifecycle.test.ts)、[生产 TUI 服务](../../tests/unit/tui/dependencies.test.ts) 和 [实际 SDK 离线 fixture](../../tests/fixtures/tui-memory-lifecycle.ts)。
+
+预览过期、条目不存在、无效纠正和撤销后的旧提交属于可恢复业务错误，不设置永久 persistence failure；重新预览或开始下一任务仍可用。真实存储与资源清理故障继续关闭该所有者的后续准入。
 
 生产默认等待五分钟真实空闲。任务最终结束后，所有可靠 queued job 重新计时；失败、取消、受限停止、no_changes 和 Plan 退出不增加未验证学习，但仍恢复旧队列。runtime 重建时也重新计时，进程关闭期间不算当前实例的空闲；unknown/pending job 仍按持久恢复规则失败，前台暂停不能隐藏该用量缺口。timer、处理循环、异步认领和请求提交复核前台状态，旧请求结算后的重排不能在前台任务中重新启动。回归见 [生产空闲生命周期](../../tests/unit/runtime/memory-idle-lifecycle.test.ts)，使用实际 factory、runner、隔离 Git 项目和受控时钟，不替代付费效果或真实终端验收。后台并发为 1，一次空闲最多处理 5 个任务。每个请求 60 秒超时，失败最多重试 2 次；running 任务持有一小时租约，只有已可靠结算的任务在租约过期后可重新排队。任务 ID 根据 Session、工作区和脱敏后的轮次材料计算，重复提交保持幂等。连续轮次分别进入队列，不再由单个 timer 覆盖。
 
@@ -58,14 +94,28 @@ runtime 登记手动请求和异步变更的所有权后才执行 callback；重
 
 第一阶段从一个已验证轮次提取最多三条候选，记录 scope、lesson、适用条件、置信度、来源和证据。输入只包含明确用户信息、助手结果摘要与本地可追溯 transcript；网页、MCP 文本和助手自称成功不能单独作为验证依据。
 
-第二阶段先做确定性去重和冲突检查。与 active 条目或同批候选在相同适用条件下冲突的内容进入 review，不注入 prompt。只有同批存在多条非冲突候选时才额外调用普通模型提出合并结果；模型没有工具或文件写权限，程序重新解析、脱敏、限制数量并提交。候选及条目写入在锁内原子提交前再次复核 generation、信号和策略，等待期间清空不会由旧结果重新填入。模型失败时保留原有长期记忆和持久任务状态。
+第二阶段先做确定性去重和冲突检查。与 active 条目或同批候选在相同适用条件下冲突的内容进入 review，不注入 prompt。同批独立候选直接保留，不再调用模型概括；确定性去重合并来源，冲突继续进入 review。非法 JSON、结构错误和截断不会被解释为空提取。最终在控制锁内对规范化后的合并结果、当前长期条目和同批内容再次使用相同确定性判据检查；合并引入或并发新增的冲突也进入 review，不增加付费语义判断。候选结算与长期条目一起提交，提交前复核 generation、信号、策略、epoch 与租约。模型失败时保留原有长期记忆和持久任务状态。
 
 所有输入先脱敏再裁剪，模型输出在保存前再次脱敏。凭据匹配规则通过 [redact-secrets](../../src/util/redact-secrets.ts) 与历史/附件共享，覆盖 JSON/配置形式的 key、token、password、Bearer、常见 token 前缀，以及完整或被截断的 PEM。Memory 保留原有空白清理、标签清理和字段裁剪；历史/附件使用保留换行、缩进与 CRLF 的脱敏函数，再按 UTF-8 字节分页。Memory 请求 usage 单独累计；provider 未返回 usage 时显示 unknown，不计入前台 context 占用、Session 主 usage 或 Goal 预算。
+
+Memory 使用共享脱敏器完整的引号、转义和 JSON 处理后再清理空白、标签并裁剪，验证裁剪后的结果稳定后才返回；有界规范化无法稳定时整字段遮罩。入队、提取/合并结果、保存和读取均经过该边界；提取输出仅保留声明字段与合法类型，不保存模型额外属性。旧格式字段含脱敏占位符时不能证明秘密已完整清除，lesson、applyWhen、evidence 整字段遮罩，并暂停召回、标记 redactionReview；人工纠正后才可恢复，续期不足以解除。旧受污染 job 不继续提取；旧受污染候选只能纠正后接纳或拒绝。实施和回归只使用隔离合成目录，不读取或批量重写真实用户存储。
+
+## 候选审查
+
+共享 store 提供列表、详情、预览与提交。`LearnedMemoryStatus.candidateNeedsReview` 单独计数，`needsReview` 同时包含条目和候选；项目候选限定当前工作区，用户候选全局可见。
+
+CLI 使用 `everpeace memory candidates list`、`inspect <id> [JSON correction]`、`accept|reject <id> <revision>` 和 `correct <id> <revision> <JSON correction>`。纠正先用相同 JSON 预览，revision 绑定候选、纠正内容、epoch 和全部受影响条目的 revision；任一变化均要求重新预览。
+
+TUI 菜单和 `/memory candidates list|inspect|accept|correct|reject` 提供对应操作，修改沿用默认 Cancel 的确认窗口，不请求模型。人工接纳冲突候选时展示受影响规则；确认后原子保存新条目、旧规则的 superseded 状态和候选结算，保留来源、`supersedes` 及可选 `supersedesIds`。拒绝持久保存，job 重试和重启不能重新激活同一候选。回归见 [八项缺陷与跨进程恢复](../../tests/unit/memory/hardening.test.ts)、[CLI](../../tests/unit/cli/memory-review.test.ts) 和 [TUI](../../tests/unit/tui/app.test.tsx)。
 
 ## 安全与兼容边界
 
 - 自动学习不读取历史 Session，不跨项目提升项目事实，也不允许模型直接写 Memory 文件。
 - 用户 scope 只接受明确要求长期记住的偏好；其他候选降为 project scope。
-- 删除或清空会取消当前后台请求、移除对应任务/候选并提升 generation，避免旧响应回写。
+- 清空 user 影响所有工作区，清空 project 仅影响当前项目。混合 job 仅撤销对应 scope，其他有效材料继续；pending/unknown 用量证据保留。删除、禁用、纠正和 CLI 直接操作也经过同一控制层，撤销旧写入资格。
 - 文件格式继续兼容旧条目；新增 Session 事件为可选事件，旧 JSONL 不迁移。
 - 当前实现不包含向量检索、多 Agent、远程 Memory 服务、通用 hooks 或历史回填。
+
+获批的 benchmark `--continue-unrun` 仅改变独立公开样本调度：保留终态失败、不重试未知请求、全局结算冷却后继续未运行项。生产 Memory 的验证准入、重试、容量、提示和 unknown 操作边界保持原契约；此模式不生成正式置信区间。
+
+普通事实提取按消息边界构造 24000 字符窗口，超长单消息分页，模型输出最多 4096 tokens；记录窗口数与输入裁剪。仅接受引用实际输入片段的事实，助手陈述保留其归属，不提升为宿主验证。原始 Session 仍是原文来源，事实中仅复制必要摘录；sourceId/message hash 与 session_event_search 查询不是伪造的 Session event ID。新队列使用可选 bundle 检查点，可靠旧 extracted 继续兼容，pending/unknown 不因重启恢复准入。

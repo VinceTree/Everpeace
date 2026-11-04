@@ -55,6 +55,7 @@ TUI / everpeace exec / everpeace/sdk / 内部 benchmark adapter
 注册可保存可选 `responses_profile: auto|generic|deepseek`；旧注册默认 auto，未知中转不根据模型名启用 reasoning。显式 deepseek 仍保留真实 provider 地址身份，能力来源显示 configured。该配置绑定注册 ID、地址与原始模型 ID；设置入口拒绝过期身份，不读取或写入凭据。修改会清除旧 request settings；TUI、exec、SDK 与辅助请求共用解析，旧 Session 缺字段兼容。配置证据不等于供应商实测证据。
 
 - `createProviderRuntime` 统一 client、能力与请求设置。只使用 Responses；模型 ID 保留服务端原值，不能通过名称推测中转端点支持官方能力。
+- OpenCode Go 登录预设使用 `https://opencode.ai/inference/go/openai/v1`，模型列表使用 `/inference/go/v1/models`。仅精确匹配的 Go HTTPS 路径附加 Everpeace User-Agent 和 `x-opencode-session`；主请求在发送前取当前持久 Session ID，TUI 辅助请求冻结所属 Session，没有 Session 的独立 runtime 使用自身 UUID。团队成员和 benchmark Memory 同样传递所属 Session。Go 保持 compatible/generic 默认能力，不按 Flash 名称推断 reasoning 或原生压缩；服务端 Responses 转换声明须另经 live 验证。回归见 [Go 契约](../../tests/unit/providers/opencode-go.test.ts)，上游见 [Go 官方文档](https://opencode.ai/v2/docs/console/go/)。
 - Node 模型连接读取 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`（同名小写优先），使用每个 client 独立的 Undici dispatcher，不修改全局网络设置。`ALL_PROXY` 不单独作为配置入口；配置无效报固定错误，不输出可能含凭据的代理 URL。主 Agent 先等待请求、Memory 与工具清理，再释放其拥有的连接；外部传入 provider 由调用者负责释放。登录、标题、Skill、手动 Memory 与 doctor 在各自请求结束后释放连接，取消后强制关闭残留 CONNECT。该代理不改变网页 SSRF 或模型 shell 原生隔离边界。回归见 [proxy transport](../../tests/unit/providers/proxy-transport.test.ts)。
 - 官方 DeepSeek 使用普通 reasoning/tool item、summary 压缩和供应商自动前缀缓存；不发送 OpenAI encrypted reasoning、prompt-cache 或 native compact 参数。`max` 原样映射到 DeepSeek `max`。
 - 官方 OpenAI 声明 native compact；未知兼容端点使用 summary 和保守能力。SDK 上存在方法不等于服务端支持该能力。
@@ -65,6 +66,10 @@ TUI / everpeace exec / everpeace/sdk / 内部 benchmark adapter
 [RequestExecutor](../../src/agent/request-executor.ts) 在请求前准入，完成、失败、取消均结算 attempt；被准入拒绝的调用记为 rejected，不假装已消费模型 tokens。编码、摘要、重试、传输 fallback 与生产辅助调用均经过此边界。
 
 ReactAgent 在每个实际 provider attempt 结束后立即结算 coding 的 Session/Goal 用量；流恢复、采样重试和能力降级各有独立样本，不能只记录逻辑请求的最终成功。账本触发停止仍须保存已发出请求的 unknown 样本。未准入的请求不产生 usage 样本；用量持久化失败不能被 steering、网络重试或 fallback 吞掉。
+
+请求账本可保存受限协议 response ID、终态和 error code，在 usage 停止早于正常响应持久化时保留诊断；不保存供应商消息、正文或 headers。Go 专用流边界对未计量终态继续读取到 EOF 或同 ID／状态的完整计量终态，只合入实际 usage，不重复 inference；真正漏报仍为 unknown。对应回归见 [Go 终态计量](../../tests/unit/providers/go-terminal-usage.test.ts)。
+
+RequestExecutor 将账本写入故障包装为 PersistenceError 并锁定该 executor 的后续准入，避免持久化错误触发模型重试；可靠返回的 usage 保留，provider 启动前失败为 rejected／零消耗。checkout worker 独立保留 storageFailed 标记，跨源码／构建模块边界也不丢失故障。回归见 [存储与取消](../../tests/unit/benchmark/memory-storage.test.ts)。
 
 已准入的 provider attempt 失败且触发 unknown 停止时，Agent 的当前 turn 保留宿主生成的 HTTP 错误状态（仅 400–599 整数）和固定 sampling category。共享 runner 把它加入停止提示，exec/SDK 使用已有 `error` 字段返回；仍保持 `usage_limited`、退出码 4、不重试和不执行后续工具。供应商 message、body、headers、凭据及任意 error 字段不进入该诊断；没有实际请求失败的缺失 usage 不伪造 HTTP 错误。回归见 [exec runtime](../../tests/unit/exec/runtime.test.ts)。
 

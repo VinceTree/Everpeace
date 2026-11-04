@@ -13,10 +13,11 @@
     "rule": "private-key",
     "file": "tests/unit/util/redact-secrets.test.ts",
     "sha256": [
-      "450bf3bef4a12b2909198949c2ed07734813e61b953e29397c0e3d957769d378"
+      "450bf3bef4a12b2909198949c2ed07734813e61b953e29397c0e3d957769d378",
+      "fdf6c0d30224f6091b16eaa11875aefce119ce62f0ee25d80811c4a351aa24be"
     ],
     "reason": "Literal fake private-key markers used to test redaction; no usable credential.",
-    "review": "Reviewed exact file bytes during security boundary implementation; any changed content requires review."
+    "review": "Reviewed full test source after JSON-preserving redaction and truncation-idempotence assertions; PEM bodies and token strings remain literal synthetic fixtures, not usable credentials. Any content change requires a fresh exact-hash review."
   },
   {
     "rule": "private-key",
@@ -35,9 +36,10 @@
       "4afbfaa87a2b041c62b56ef5cfd980ac054a5147e5da025c189cc98cb4780ce8",
       "d6d379fe18a46b0b7a9e39355c50c38007e27a8a41b76088f019e6cbc45b75c5",
       "7c2c3e7f0f2cbbc006620e7883505e3ccb7fe2c09a58aa5b595bb67aafea01d6",
-      "7ca62d76a0bdd9cef673fda90a960f73cd0f6dc4993ed85040648ef6c1b0af65"
+      "7ca62d76a0bdd9cef673fda90a960f73cd0f6dc4993ed85040648ef6c1b0af65",
+      "bbb16c7d6a3a358a03edee77e974f18133bce6dbb5f7c6c87ed7a3906bb3d40e"
     ],
     "reason": "False positive on static host-copy JSON next to the Brave API-key label and a generated message identifier; catalog contains UI literals/interpolation placeholders, not a credential.",
-    "review": "Reviewed exact LF catalog and reliability additions: static UI labels, recovery/package commands and generated identifiers; the existing Brave label finding contains no credential. Any content change requires fresh exact-hash review."
+    "review": "Reviewed the previously approved LF catalog plus Memory review/help and candidate labels; the existing Brave-label finding remains static host copy with generated identifiers and no credential. Any content change requires a fresh exact-hash review."
   }
 ]
