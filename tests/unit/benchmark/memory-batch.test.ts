@@ -3,7 +3,6 @@ import { test } from "node:test";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { parseMemoryDataset, memoryPlan, historyTurn, bm25History, parseJudgeLabel, judgePrompt, parseJudgeTemplates } from "../../../src/benchmark/memory-data.js";
 import { MemoryRequestGate, jsonFiles, readJson, writeJson, type MemoryRequestRecord } from "../../../src/benchmark/memory-evidence.js";
 import { createMemoryAdapter } from "../../../src/benchmark/memory-adapters.js";
@@ -44,9 +43,16 @@ test("BM25 retrieves relevant complete bounded chunks and strict judge handles c
   assert.throws(() => parseJudgeTemplates("changed upstream"));
 });
 
-test("durable gate bounds parallel requests, caches settled responses and preserves unknown across recovery", async () => temporary(async dir => {
-  const gate = new MemoryRequestGate(dir); let active = 0, peak = 0, calls = 0;
-  const client: ResponsesClientLike = { responses: { async create() { calls++; active++; peak = Math.max(peak, active); await delay(10); active--; return response(); } } };
+test("durable gate bounds parallel requests, caches settled responses and preserves unknown across recovery", { timeout: 10_000 }, async t => temporary(async dir => {
+  const gate = new MemoryRequestGate(dir); let active = 0, peak = 0, calls = 0, release!: () => void;
+  const bothEntered = new Promise<void>(resolve => { release = resolve; });
+  t.signal.addEventListener("abort", release, { once: true });
+  const client: ResponsesClientLike = { responses: { async create() {
+    calls++; peak = Math.max(peak, ++active);
+    if (active === 2) release();
+    try { await bothEntered; return response(); }
+    finally { active--; }
+  } } };
   await Promise.all([0, 1, 2, 3].map(i => gate.request(client, String(i), "answer", {})));
   assert.equal(peak, 2); assert.equal(gate.peak, 2); await gate.validateRecovery();
   await gate.request(client, "0", "answer", {}); assert.equal(calls, 4);
