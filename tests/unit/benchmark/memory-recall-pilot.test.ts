@@ -75,10 +75,18 @@ test("UTF-8 and output reservations include concurrent requests and release afte
   assert.throws(() => budget.reserve({}), /budget_exhausted/u);
 });
 
-test("fixed provider requests persist once, settle usage and never call extraction", async t => {
+test("fixed provider requests persist once, settle usage and never call extraction", { timeout: 10_000 }, async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), "recall-requests-")); t.after(() => rm(root, { recursive: true, force: true }));
-  let active = 0, peak = 0, calls = 0;
-  const provider: ResponsesClientLike = { responses: { async create() { calls++; peak = Math.max(peak, ++active); await new Promise(resolve => setTimeout(resolve, 5)); active--; return response(); } } };
+  let active = 0, peak = 0, calls = 0, release!: () => void;
+  const bothEntered = new Promise<void>(resolve => { release = resolve; });
+  t.signal.addEventListener("abort", release, { once: true });
+  const provider: ResponsesClientLike = { responses: { async create() {
+    calls++; peak = Math.max(peak, ++active);
+    // Filesystem admission may take longer than a timer on a busy runner.
+    if (active === 2) release();
+    try { await bothEntered; return response(); }
+    finally { active--; }
+  } } };
   const gate = new MemoryRequestGate(root, 2), budget = new RecallBudget();
   await Promise.all([1, 2].map(i => recallRequest(gate, provider, budget, `item${i}`, "answer", { max_output_tokens: 20 })));
   assert.equal(calls, 2); assert.equal(peak, 2); assert.equal(budget.spent, 20); assert.equal(budget.reserved, 0);
