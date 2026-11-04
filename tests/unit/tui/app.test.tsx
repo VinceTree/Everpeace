@@ -1056,7 +1056,7 @@ test("host workflow settles no-change goals without marking learned memory verif
     view.stdin.write("\r");
     await waitFor(() => completions.length > 0);
     assert.deepEqual(completions, [true]);
-    assert.deepEqual(memoryOutcomes, ["unverified"]);
+    assert.deepEqual(memoryOutcomes, ["conversation_completed"]);
   } finally { view.unmount(); }
 });
 
@@ -2250,13 +2250,14 @@ test("Escape dismisses slash suggestions until editing resumes and Enter execute
   view.unmount();
 });
 
-test("/login masks the API Key, registers one model, and activates it", async () => {
+for (const provider of ["deepseek", "opencode-go"] as const) test(`/login masks the API Key, registers one ${provider} model, and activates it`, async () => {
   const fixture = createFixture();
+  const modelName = provider === "deepseek" ? "deepseek-flash" : "deepseek-v4.1-flash";
   const seenKeys: string[] = [];
   fixture.dependencies.listModels = async (baseUrl, apiKey) => {
-    assert.equal(baseUrl, "https://api.deepseek.com");
+    assert.equal(baseUrl, provider === "deepseek" ? "https://api.deepseek.com" : "https://opencode.ai/inference/go/openai/v1");
     seenKeys.push(apiKey);
-    return ["deepseek-flash"];
+    return [modelName];
   };
   const view = render(
     <EverpeaceApp
@@ -2273,13 +2274,19 @@ test("/login masks the API Key, registers one model, and activates it", async ()
   await waitFor(() => (view.lastFrame() ?? "").includes("Model sign-in"));
   assert.match(view.lastFrame() ?? "", /Esc to return to session/);
   assert.doesNotMatch(lastBorderedSurface(view.lastFrame() ?? ""), /Everpeace Agent/);
+  if (provider === "opencode-go") {
+    view.stdin.write("\u001B[B");
+    await tick();
+    view.stdin.write("\u001B[B");
+    await tick();
+  }
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("API Key"));
   await tick();
   view.stdin.write("sk-tui-secret");
   await tick();
   view.stdin.write("\r");
-  await waitFor(() => (view.lastFrame() ?? "").includes("deepseek-flash"));
+  await waitFor(() => (view.lastFrame() ?? "").includes(modelName));
   await tick();
   view.stdin.write("\r");
   await waitFor(() => (view.lastFrame() ?? "").includes("Signed in and enabled"));
@@ -2287,7 +2294,7 @@ test("/login masks the API Key, registers one model, and activates it", async ()
   assert.deepEqual(seenKeys, ["sk-tui-secret"]);
   assert.doesNotMatch(view.frames.join("\n"), /sk-tui-secret/);
   assert.doesNotMatch(view.frames.join("\n"), /https:\/\/api\.deepseek\.com/);
-  assert.match(view.lastFrame() ?? "", /deepseek-flash/);
+  assert.ok((view.lastFrame() ?? "").includes(modelName));
   view.unmount();
 });
 

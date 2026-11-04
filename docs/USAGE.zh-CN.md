@@ -43,6 +43,7 @@ pnpm dev
 
 - DeepSeek 官方 API：`https://api.deepseek.com`
 - OpenAI 官方 API：`https://api.openai.com/v1`
+- OpenCode Go：`https://opencode.ai/inference/go/openai/v1`（模型发现使用 `/inference/go/v1/models`）
 - 自定义 OpenAI-compatible base URL
 
 API Key 不会显示在终端。模型列表加载成功后选择一个服务端返回的原始模型 ID，该模型会被安全保存并立即用于当前会话；如需执行有界的模型生成检查，请使用 `/doctor --live`：
@@ -174,7 +175,9 @@ TUI 使用原生 inline 模式，普通滚轮可以浏览已完成的 Everpeace 
 
 Everpeace 还会维护独立的 learned 经验记忆。workflow 验证完成并真实空闲五分钟后，当前模型可在后台提取最多三条带证据候选并整理无冲突经验；持久队列可跨 Agent 重建和进程重启恢复。前台任务在 Plan 审批、宿主验证、修复和 Goal 续跑期间持续暂停后台请求；整项任务结束或 runtime 重建后重新计满五分钟，没有新增学习材料的任务也会恢复先前可靠队列。未开始或请求已可靠结算的任务仍可自动继续；中断后用量未知的请求会保留为失败，不自动重发。只有用户明确表达长期偏好时才写入用户级记忆。记忆位于平台应用状态目录（Windows 为 `%APPDATA%\Everpeace\memory`），不会写入仓库。每个逻辑 Agent step 都会根据当前问题和实际读取文件刷新带 revision 的快照，网络重试复用该快照；主 prompt 只注入不可信短索引，只读 `memory_lookup` 可按 ID 查看脱敏证据。输入在裁剪前脱敏，输出在保存前再次脱敏，无法可靠判断的冲突保留待审；当前用户指令和实际仓库证据始终优先。
 
-自动学习必须经过 verified 结算，即使提示词包含 always、remember 或“记住”，failed、unverified、cancelled、stopped 轮次也不能入队，恢复的旧任务执行相同规则。使用 `/remember <偏好>`（兼容 `/memory remember <偏好>`）独立保存长期偏好。手动偏好要求全局 Memory 已启用；暂停当前聊天的自动学习仍允许明确保存偏好。提取期间按 `Esc` 可取消并返回同一 Session。清空、关闭或退出会使待处理结果失效，退出会等待请求和存储完成；取消前已提交的条目仍保留。Memory 存储或资源清理故障会保留原错误，重启 Agent 后才能开始新的 Memory 请求。预览失效、条目不存在或纠正输入无效可直接重试，无需重启。
+新事实可保存宿主绑定的精确消息引用。调用 `memory_lookup({id})` 后，存在 `entry.fact.lookup.read` 时按其 tool 和 arguments 回读原文，更多内容使用 `next_offset_bytes` 分页；起始位置对应证据引文。旧事实和明确未绑定的来源保留 `lookup.query`。直接来源不可用或冲突时先披露，再考虑搜索回退。助手历史回答仍是带归属的陈述，不是经过验证的结论。
+
+编码经验的自动学习必须经过 verified 结算，即使提示词包含 always、remember 或“记住”也不例外。正常完成的普通对话仅可捕获带归属的事实；failed、unverified、cancelled、stopped 轮次不能入队，恢复的旧任务执行相同规则。使用 `/remember <偏好>`（兼容 `/memory remember <偏好>`）独立保存长期偏好。手动偏好要求全局 Memory 已启用；暂停当前聊天的自动学习仍允许明确保存偏好。提取期间按 `Esc` 可取消并返回同一 Session。清空、关闭或退出会使待处理结果失效，退出会等待请求和存储完成；取消前已提交的条目仍保留。Memory 存储或资源清理故障会保留原错误，重启 Agent 后才能开始新的 Memory 请求。预览失效、条目不存在或纠正输入无效可直接重试，无需重启。
 
 清空用户 Memory 对所有工作区生效，清空项目 Memory 仅影响当前项目；保留其他 scope 及 pending/unknown 用量记录。撤销和中断清理跨进程重启恢复。旧格式中无法确认完整脱敏的内容暂停召回，人工纠正后才能使用；仅续期不能解除这类待审状态。
 

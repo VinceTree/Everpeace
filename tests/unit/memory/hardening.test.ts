@@ -47,7 +47,7 @@ test("old partially redacted Memory is masked and withheld until corrected", asy
   assert.match((await store.snapshot(root)).text, /Safe preference/u);
 });
 
-test("capture and consolidation redact requests and outputs before persistence", async t => {
+test("capture preserves independent candidates and redacts requests and outputs before persistence", async t => {
   const { root, store, own } = await fixture(t); const requests: unknown[] = [];
   const source = ['password="synthetic-quoted tail with space"', JSON.stringify({ access_token: 'synthetic-escaped" tail' }), `-----BEGIN PRIVATE KEY-----\n${"SYNTHETICKEY".repeat(400)}`].join("\n");
   const runtime = new LearnedMemoryRuntime({ store, model: "offline", unrefTimers: false, client: { responses: { async create(request) {
@@ -60,13 +60,13 @@ test("capture and consolidation redact requests and outputs before persistence",
   own(runtime);
   await runtime.finishTurn({ ...turn(root), userInput: `Fix fixture ${source}`, assistantText: source, transcript: source }, "verified");
   await waitFor(async () => (await runtime.status(root)).capture?.state === "succeeded");
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 1);
   assert.doesNotMatch(JSON.stringify(requests), /synthetic-|SYNTHETICKEY/u);
   for (const file of [store.filePath("project", root), path.join(store.directory, "capture-jobs.json"), path.join(store.directory, "memory-candidates.json")]) {
     assert.doesNotMatch(await fs.readFile(file, "utf8"), /synthetic-|SYNTHETICKEY/u);
   }
   const entries = await store.read("project", root);
-  assert.equal(entries.length, 1);
+  assert.equal(entries.length, 2);
   assert.equal(redactSecrets(entries[0]!.lesson), entries[0]!.lesson);
 });
 
@@ -168,10 +168,10 @@ test("a project clear during mixed submission preserves the still-authorized use
   assert.equal((await store.read("user", root))[0]?.lesson, "Valid user preference");
 });
 
-test("consolidated conflicts are visible and have a revision-bound review lifecycle", async t => {
+test("extracted conflicts are visible and have a revision-bound review lifecycle", async t => {
   const { root, store, own } = await fixture(t); let requests = 0;
   await store.append("project", root, [{ lesson: "Use npm", applyWhen: "Node projects", reviewedAt: new Date().toISOString() }]);
-  const runtime = new LearnedMemoryRuntime({ store, model: "offline", unrefTimers: false, client: { responses: { async create() { return response(++requests === 1 ? [{ lesson: "Use pnpm install", applyWhen: "installing" }, { lesson: "Use pnpm test", applyWhen: "testing" }] : [{ lesson: "Use pnpm", applyWhen: "Node projects" }]); } } } });
+  const runtime = new LearnedMemoryRuntime({ store, model: "offline", unrefTimers: false, client: { responses: { async create() { return response(++requests === 1 ? [{ lesson: "Use pnpm", applyWhen: "Node projects" }] : []); } } } });
   own(runtime);
   await runtime.finishTurn(turn(root), "verified"); await waitFor(async () => (await runtime.status(root)).capture?.state === "succeeded");
   const status = await store.status(root);

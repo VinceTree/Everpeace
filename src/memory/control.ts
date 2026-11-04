@@ -71,7 +71,7 @@ export class MemoryControl {
   relative(file: string): string { return path.relative(this.#directory, file).replaceAll("\\", "/"); }
   #validateWrites(writes: MemoryWrite[]): void {
     if (!Array.isArray(writes) || !writes.every(write => write && typeof write.file === "string" && (write.contents === null || typeof write.contents === "string")
-      && /^(?:learned\.md|memory-settings\.json|capture-jobs\.json|memory-candidates\.json|projects\/[a-f0-9]{32}\/learned\.md)$/u.test(write.file))) throw new Error("Invalid Memory transaction");
+      && /^(?:learned\.md|memory-settings\.json|capture-jobs\.json|memory-candidates\.json|projects\/[a-f0-9]{32}\/(?:learned\.md|facts\.json))$/u.test(write.file))) throw new Error("Invalid Memory transaction");
   }
   async #apply(transaction: Transaction): Promise<void> {
     await this.#atomic(this.#file, JSON.stringify(transaction.state) + "\n");

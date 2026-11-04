@@ -7,6 +7,7 @@ import type { PerformanceTrace } from "../performance/trace.js";
 import { redactSecretsPreservingLayout } from "../util/redact-secrets.js";
 import { isValidSessionEvent, normalizeSessionWorkspacePath, type SessionStore, type StoredToolOutput } from "./session-store.js";
 import { isToolOutputAttachmentReference, type ToolOutputAttachmentReference } from "./session-outputs.js";
+import { sessionMessageText, sessionMessageBody } from "./session-message.js";
 
 const MAX_RECORD_BYTES = 8 * 1024 * 1024;
 const MAX_SCAN_BYTES = 64 * 1024 * 1024;
@@ -47,6 +48,8 @@ export const SESSION_HISTORY_TOOL_DEFINITIONS = [
 ] as const;
 
 export interface SessionHistoryRuntimeLike {
+  beginMessageCapture?(signal?: AbortSignal): Promise<MessageCaptureBoundary | undefined>;
+  resolveMessages?(boundary: MessageCaptureBoundary, items: readonly Record<string, unknown>[], signal?: AbortSignal): Promise<MessageCaptureResult>;
   prepareStep(signal?: AbortSignal): Promise<void>;
   call(name: string, argumentsJson: string, signal?: AbortSignal): Promise<Record<string, unknown>>;
   readToolOutput(argumentsJson: string, signal?: AbortSignal): Promise<Record<string, unknown>>;
@@ -56,6 +59,11 @@ export interface SessionHistoryRuntimeLike {
     signal?: AbortSignal,
   ): Promise<ToolResultHistoryResolution[]>;
 }
+
+export interface MessageCaptureBoundary { sessionId: string; boundary: number; header: string; identity: string }
+export interface MessageHistorySource { sessionId: string; eventId: string; messageSha256: string }
+export interface CapturedMessage { role: "user" | "assistant"; text: string; messageTime: string; sourceId: string; source: MessageHistorySource }
+export interface MessageCaptureResult { messages: CapturedMessage[]; status: "bound" | "unbound"; reason?: string }
 
 export interface ToolResultHistoryCandidate {
   candidate_id: string;
@@ -235,16 +243,6 @@ function decodeReference(value: unknown): Reference | undefined {
   } catch { return undefined; }
 }
 
-function messageText(item: Record<string, unknown>): string | undefined {
-  if (item.role !== "user" && item.role !== "assistant") return undefined;
-  if (item.type !== undefined && item.type !== "message") return undefined;
-  if (typeof item.content === "string") return item.content;
-  if (!Array.isArray(item.content)) return undefined;
-  return item.content.flatMap((raw) => {
-    const part = object(raw);
-    return part && (part.type === "input_text" || part.type === "output_text" || part.type === "text") && typeof part.text === "string" ? [part.text] : [];
-  }).join("\n");
-}
 
 function toolCall(item: Record<string, unknown>, location: Locator): CallLocation | undefined {
   return item.type === "function_call" && typeof item.name === "string" && typeof item.call_id === "string"
@@ -299,12 +297,78 @@ export class SessionHistoryRuntime implements SessionHistoryRuntimeLike {
   readonly #workspace: string;
   readonly #sessionId: () => string | undefined;
   #step: { id: string; boundary: number } | undefined;
+  readonly #captureBoundaries = new WeakSet<MessageCaptureBoundary>();
   readonly #outputLocators = new Map<string, OutputLocator>();
 
   constructor(options: SessionHistoryRuntimeOptions) {
     this.#store = options.store;
     this.#workspace = normalizeSessionWorkspacePath(options.workspacePath);
     this.#sessionId = options.sessionId;
+  }
+
+  /** Host-only capture never advances the model tools' prepared step boundary. */
+  async beginMessageCapture(signal?: AbortSignal): Promise<MessageCaptureBoundary | undefined> {
+    signal?.throwIfAborted();
+    const id = this.#sessionId();
+    if (!id) return undefined;
+    const boundary = await this.#store.captureSessionBoundary(id);
+    const session = await this.#open(id, newBudget(), signal, boundary);
+    if (!session) return undefined;
+    try {
+      const token = Object.freeze({ sessionId: id, boundary, header: session.header.digest, identity: session.identity });
+      this.#captureBoundaries.add(token);
+      return token;
+    } finally { await session.handle.close(); }
+  }
+
+  async resolveMessages(token: MessageCaptureBoundary, items: readonly Record<string, unknown>[], signal?: AbortSignal): Promise<MessageCaptureResult> {
+    signal?.throwIfAborted();
+    const unbound = (reason: string): MessageCaptureResult => ({ messages: [], status: "unbound", reason });
+    if (!this.#captureBoundaries.delete(token) || token.sessionId !== this.#sessionId()) return unbound("capture_changed");
+    const expected = items.flatMap(item => {
+      const text = sessionMessageBody(item);
+      return text ? [{ role: item.role, text }] : [];
+    });
+    if (!expected.length || expected.length > 512) return unbound("capture_limit");
+    const budget = newBudget(this.#store.performanceTrace);
+    const end = await this.#store.captureSessionBoundary(token.sessionId);
+    const session = await this.#open(token.sessionId, budget, signal, end);
+    if (!session) return unbound("source_unavailable");
+    try {
+      if (session.identity !== token.identity || session.header.digest !== token.header || end < token.boundary) return unbound("capture_changed");
+      const before = await session.handle.stat();
+      const messages: CapturedMessage[] = [];
+      const locations: Locator[] = [];
+      let nextOffset = token.boundary;
+      for await (const line of lines(session.handle, end, budget, signal, token.boundary)) {
+        if (line.offset !== nextOffset) return unbound("incomplete_scan");
+        nextOffset = line.end;
+        const event = decode(line, budget);
+        if (!event) return unbound("incomplete_scan");
+        if (event.type !== "context_append") continue;
+        for (const [index, raw] of (event.items as unknown[]).entries()) {
+          const item = object(raw);
+          if (!item) return unbound("incomplete_scan");
+          const text = sessionMessageBody(item);
+          if (!text) continue;
+          const wanted = expected[messages.length];
+          if (!wanted || wanted.role !== item.role || wanted.text !== text) return unbound("message_mismatch");
+          const locator = { offset: line.offset, item: index, digest: line.digest };
+          const projection: Projection = { content: text, kind: String(item.role), at: String(event.at), locator };
+          const eventId = encodeReference(session, projection);
+          locations.push(locator);
+          messages.push({ role: item.role as "user" | "assistant", text, messageTime: projection.at,
+            sourceId: `message-${messages.length}`, source: { sessionId: session.id, eventId, messageSha256: sessionHistoryBodyDigest(text) } });
+        }
+      }
+      if (nextOffset !== end || messages.length !== expected.length || budget.reasons.size) return unbound("incomplete_scan");
+      // Revalidate the observed records, including in-place edits, before publishing locators.
+      for (const location of locations) if (!await this.#lineAt(session, location, budget, signal)) return unbound("capture_changed");
+      const after = await session.handle.stat();
+      if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs
+        || !await this.#stillExists(session, signal, budget) || budget.reasons.size) return unbound("capture_changed");
+      return { messages, status: "bound" };
+    } finally { await session.handle.close(); }
   }
 
   async prepareStep(signal?: AbortSignal): Promise<void> {
@@ -494,7 +558,7 @@ export class SessionHistoryRuntime implements SessionHistoryRuntimeLike {
     return sessionId(id);
   }
 
-  async #open(id: string, budget: Budget, signal?: AbortSignal): Promise<OpenSession | undefined> {
+  async #open(id: string, budget: Budget, signal?: AbortSignal, hostBoundary?: number): Promise<OpenSession | undefined> {
     signal?.throwIfAborted();
     let handle: FileHandle;
     const filename = path.join(this.#store.directory, `${sessionId(id)}.jsonl`);
@@ -512,8 +576,9 @@ export class SessionHistoryRuntime implements SessionHistoryRuntimeLike {
       const size = opened.size;
       const current = this.#sessionId();
       // Without a prepared step, current-session history is deliberately unavailable.
-      if (id === current && this.#step?.id !== id) { await handle.close(); return undefined; }
-      const boundary = id === current ? Math.min(size, this.#step!.boundary) : size;
+      if (hostBoundary === undefined && id === current && this.#step?.id !== id) { await handle.close(); return undefined; }
+      if (hostBoundary !== undefined && hostBoundary > size) { await handle.close(); return undefined; }
+      const boundary = hostBoundary ?? (id === current ? Math.min(size, this.#step!.boundary) : size);
       for await (const line of lines(handle, boundary, budget, signal)) {
         if (line.offset !== 0) break;
         const header = decode(line, budget);
@@ -650,7 +715,7 @@ export class SessionHistoryRuntime implements SessionHistoryRuntimeLike {
   }
 
   async #project(id: string, event: Record<string, unknown>, item: Record<string, unknown>, location: Locator, origin: CallLocation | undefined, budget: Budget, signal?: AbortSignal, readAttachments = true): Promise<Projection | undefined> {
-    let text = messageText(item);
+    let text = sessionMessageText(item);
     let kind = String(item.role);
     let call: CallLocation | undefined;
     let outputId: string | undefined;

@@ -18,6 +18,7 @@ export interface RequestAttemptRecord {
   agentId?: string;
   modelId?: string;
   unknownReason?: "missing_usage" | "invalid_usage" | "transport_failure" | "stream_ended_without_usage";
+  response?: { id?: string; status?: string; errorCode?: string };
 }
 
 export interface RequestAttemptLedgerSnapshot {
@@ -104,7 +105,7 @@ export class RequestAttemptLedger {
     });
   }
 
-  settle(id: number, status: RequestAttemptStatus, usage: TokenUsageSample | null, unknownReason?: RequestAttemptRecord["unknownReason"]): void {
+  settle(id: number, status: RequestAttemptStatus, usage: TokenUsageSample | null, unknownReason?: RequestAttemptRecord["unknownReason"], response?: RequestAttemptRecord["response"]): void {
     const purpose = this.#open.get(id);
     if (!purpose) throw new Error(`Unknown or already settled request attempt: ${id}`);
     this.#open.delete(id);
@@ -115,7 +116,7 @@ export class RequestAttemptLedger {
       this.#outputTokens += usage.output_tokens;
       this.#reasoningTokens += usage.reasoning_tokens ?? 0;
     }
-    this.#attempts.push({ id, purpose, status, usage, ...(usage === null && unknownReason ? { unknownReason } : {}) });
+    this.#attempts.push({ id, purpose, status, usage, ...(usage === null && unknownReason ? { unknownReason } : {}), ...(response ? { response } : {}) });
   }
 
   get remainingTokens(): number | undefined {

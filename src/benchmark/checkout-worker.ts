@@ -7,6 +7,9 @@ import type { LoopStrategy } from "../agent/tool-feedback-policy.js";
 import type { TeamOptions } from "../team/types.js";
 import { benchmarkLedgerUsage, benchmarkRequestAccounting } from "./request-accounting.js";
 import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+import { writeJson } from "./memory-evidence.js";
 
 interface CheckoutWorkerInput {
   mode?: "run" | "preflight";
@@ -122,7 +125,11 @@ export async function main(): Promise<void> {
     throw new Error("Checkout benchmark requires high reasoning and 32768 output tokens");
   }
   const ledger = new RequestAttemptLedger((request.tokenBudget === undefined ? {} : { tokenBudget: request.tokenBudget }));
+  const ledgerFile = path.join(request.sessionsRoot, "request-ledgers", `${randomUUID()}.json`);
+  let storageFailed = false;
   if (request.mode !== "preflight") ledger.flush = async () => {
+    try { await writeJson(ledgerFile, { taskId: request.task!.id, openRequests: ledger.openRequests, ...ledger.snapshot() }); }
+    catch (error) { storageFailed = true; throw error; }
     process.stdout.write(`EVERPEACE_CHECKOUT_USAGE ${JSON.stringify({ usage: usage(ledger), requestAccounting: benchmarkRequestAccounting(ledger.snapshot()) })}\n`);
   };
   const adapter = module.createProductionBenchmarkAdapter({ model: request.model, sessionsRoot: request.sessionsRoot, ...(request.memoryPilot ? { memoryPilot: request.memoryPilot } : {}), ...(request.loopStrategy === undefined ? {} : { loopStrategy: request.loopStrategy }), ...(request.team ? { team: request.team } : {}), ...(request.repairStrategy === undefined ? {} : { repairStrategy: request.repairStrategy }) });
@@ -156,7 +163,7 @@ export async function main(): Promise<void> {
     })}\n`);
     return;
   }
-  process.stdout.write(`EVERPEACE_CHECKOUT_RESULT ${JSON.stringify({ ...result, usage: usage(ledger), requestAttempts: benchmarkRequestAccounting(ledger.snapshot()).requests, requestAccounting: benchmarkRequestAccounting(ledger.snapshot()) })}\n`);
+  process.stdout.write(`EVERPEACE_CHECKOUT_RESULT ${JSON.stringify({ ...result, ...(storageFailed ? { storageFailed: true } : {}), usage: usage(ledger), requestAttempts: benchmarkRequestAccounting(ledger.snapshot()).requests, requestAccounting: benchmarkRequestAccounting(ledger.snapshot()) })}\n`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

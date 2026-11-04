@@ -166,7 +166,7 @@ test("runtime extracts substantive turns in the background and injects a safe pr
         return {
           id: "learned",
           output_text: JSON.stringify({ entries: [{ scope: "project", lesson: "Validate inputs first", applyWhen: "When adding a new command" }] }),
-          output: [],
+          usage: { input_tokens: 2, output_tokens: 1, total_tokens: 3 }, output: [],
         };
       } } },
     });
@@ -346,7 +346,7 @@ test("memory capture can wait for idle time before extracting", async () => {
       unrefTimers: false,
       client: { responses: { async create() {
         requests += 1;
-        return { id: "capture", output_text: JSON.stringify({ entries: [{ lesson: "Use bounded output", applyWhen: "When rendering command output" }] }), output: [] };
+        return { id: "capture", output_text: JSON.stringify({ entries: [{ lesson: "Use bounded output", applyWhen: "When rendering command output" }] }), usage: { input_tokens: 2, output_tokens: 1, total_tokens: 3 }, output: [] };
       } } },
     });
     await runtime.finishTurn({ workspacePath: "C:\\repo", userInput: "fix command output", transcript: "tool", assistantText: "done", toolCallCount: 1 }, "verified");
@@ -470,7 +470,7 @@ test("conflicting extracted candidates remain pending review instead of becoming
         return { id: "capture", output_text: JSON.stringify({ entries: [
           { lesson: "Always run command A", applyWhen: "When validating changes" },
           { lesson: "Always run command B", applyWhen: "When validating changes" },
-        ] }), output: [] };
+        ] }), usage: { input_tokens: 2, output_tokens: 1, total_tokens: 3 }, output: [] };
       } } },
     });
     await runtime.finishTurn({ workspacePath: "C:\\repo", userInput: "Validate the change", transcript: "verified local results", assistantText: "done", toolCallCount: 1 }, "verified");
@@ -504,7 +504,7 @@ test("candidate consolidation keeps project and user scopes separate", async () 
         return { id: "capture", output_text: JSON.stringify({ entries: [
           { scope: "project", lesson: "Keep repository checks focused", applyWhen: "When validating this project" },
           { scope: "user", kind: "preference", lesson: "Prefer concise answers", applyWhen: "For future responses" },
-        ] }), output: [] };
+        ] }), usage: { input_tokens: 2, output_tokens: 1, total_tokens: 3 }, output: [] };
       } } },
     });
     await runtime.finishTurn({ workspacePath: "C:\\repo", sessionId: "session-1", userInput: "Remember that I prefer concise answers while fixing this project", transcript: "verified local results", assistantText: "done", toolCallCount: 1 }, "verified");

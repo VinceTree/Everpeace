@@ -32,7 +32,9 @@ pnpm files:build
 pnpm dev
 ```
 
-启动后输入 `/login`，选择 DeepSeek，输入遮罩显示的 API Key，再选择服务返回的原始模型 ID。也支持 OpenAI 和自定义 HTTPS Responses 端点，能力按实际端点识别。密钥保存在系统凭据库，不写入项目或 Session。
+启动后输入 `/login`，选择 DeepSeek，输入遮罩显示的 API Key，再选择服务返回的原始模型 ID。也支持 OpenAI、OpenCode Go 和自定义 HTTPS Responses 端点，能力按实际端点识别。密钥保存在系统凭据库，不写入项目或 Session。
+
+使用 OpenCode Go 时，在登录向导选择对应预设及模型列表返回的 Flash 原始 ID。预设地址为 `https://opencode.ai/inference/go/openai/v1`，模型发现使用 Go 独立的列表路径；请求携带 Everpeace 客户端身份及稳定的 `x-opencode-session`。Go 仍按兼容端点采用保守默认能力，认证后的 Responses、工具和计量须经真实调用验收。模型供应和工作区区域设置见 [Go 官方文档](https://opencode.ai/v2/docs/console/go/)。
 
 模型连接支持 `HTTP_PROXY`、`HTTPS_PROXY` 与 `NO_PROXY`，同名小写变量优先。端点需要代理时，在启动 CLI 前设置；仅设置 `ALL_PROXY` 不生效。这些设置作用于模型请求，模型 shell 仍遵守 sandbox 网络策略。
 
@@ -76,7 +78,9 @@ everpeace
 
 配置 MCP 的工具、资源和 prompts，以及本地 Skills，可以扩展 Agent。Learned Memory 保存偏好与经过验证的经验；公共网页访问检查重定向与网络边界。搜索的首选服务不可用时，会依次尝试中国区 Bing 和 DuckDuckGo。配置和完整限制见 [使用指南](docs/USAGE.zh-CN.md)。
 
-Memory 仅从已验证轮次自动学习。使用 `/remember <偏好>` 单独保存长期偏好；通过 `/memory candidates` 或 `everpeace memory candidates list` 本地查看、接纳、纠正或拒绝冲突候选，操作前预览受影响规则。清空用户 Memory 对所有工作区生效，清空项目 Memory 仅影响当前工作区。
+新完成对话中的事实可绑定宿主来源引用。`memory_lookup` 返回可直接调用 `session_event_read` 的参数；旧条目保留搜索查询。精确数量、历史推荐和时间更新应回读原消息。来源链离线核验命令为 `node --import tsx scripts/benchmark/prove-memory-sources.mjs <新证据目录>`，详见 [Memory 协议](docs/benchmark/MEMORY_FACT_PRESERVATION.md)。
+
+Memory 可以从正常完成的对话捕获带归属的事实；可复用编码经验仍须来自已验证轮次。使用 `/remember <偏好>` 单独保存长期偏好；通过 `/memory candidates` 或 `everpeace memory candidates list` 本地查看、接纳、纠正或拒绝冲突候选，操作前预览受影响规则。清空用户 Memory 对所有工作区生效，清空项目 Memory 仅影响当前工作区。
 
 MCP stdio 程序需要独立启动信任，默认在原生工作区沙箱运行并禁止联网。`/mcp trust <server>` 审阅启动身份，`/mcp reconnect` 启动或重载，`/mcp revoke <server>` 撤销访问。`/mcp mode <server> host` 明确选择宿主用户权限并撤销旧信任，启动前必须重新审阅授权。程序或入口脚本字节变化需要重新授权，动态启动器每次启动均确认。Windows host stdio 需要已核验的可执行程序和 argv；`.cmd`/`.bat` 入口请显式配置解释器。远程 MCP 必须使用 HTTPS，本机回环 HTTP 需要独立例外，重定向均拒绝。缺少启动批准时，非交互 CLI/SDK 返回 `interaction_required`（退出码 5）。
 
@@ -151,6 +155,28 @@ pnpm build
 按上述顺序执行门禁，首败停止，另跑 `git diff --check`。开发从 [AGENTS.md](AGENTS.md) 和 [文档地图](docs/README.md) 开始。可复现问题请提交到 [GitHub Issues](https://github.com/VinceTree/Everpeace/issues)。
 
 [离线性能对照](docs/benchmark/LOCAL_PERFORMANCE.md) 使用固定 fixture 和保留样本，比较 CLI 新进程启动、Session 恢复、历史搜索与项目扫描。CLI 帮助耗时不代表终端首 prompt，本机结果不外推模型或跨平台收益。
+
+`pnpm benchmark:memory-batch <prepare|preflight|run|resume|report> <绝对证据目录>` 提供 [Go／DeepSeek Memory 批量评测](docs/benchmark/MEMORY_BATCH.md)。真实执行需要 `--live` 和用户授权，未知用量禁止续跑；报告使用适配的 DeepSeek 评分，不代表官方 GPT-4o 基准成绩。
+
+离线差距分析使用 `python scripts/benchmark/analyze-memory.py --campaign <批次目录> --output <新分析目录>`（Python 3.10+、现有 Node/tsx）。快照保存在 campaign 外，不调用模型。追加 `--replay <快照目录>` 只从冻结字节复算；`--wait-for-stop` 等待当前批次结算后分析一次。[结果、对比条件与限制](docs/benchmark/MEMORY_GAP_ANALYSIS.md)。
+
+事实保留实验的离线准备使用 `python scripts/benchmark/prepare-memory-facts.py prepare --campaign <批次目录> --snapshot <分析快照> --output <新准备目录>`，之后用 `python scripts/benchmark/prepare-memory-facts.py verify --root <准备目录>` 校验。输出数据划分、候选重放证据和合成任务；准备本身不运行生产捕获或模型；下方受限 pilot 入口用于验证已实现候选。[协议与限制](docs/benchmark/MEMORY_FACT_PRESERVATION.md)。
+
+事实记忆小样本在四门禁后使用 `pnpm benchmark:memory-pilot prepare <新绝对目录> <准备目录> <基线目录>`，随后 `pnpm benchmark:memory-pilot run <绝对目录> --live`。固定 12 道开发题、两组和六项 smoke，共享 200 万 token 上限，不启动保留集或全量。
+
+明确授权后，可用 `pnpm benchmark:memory-pilot prepare-skipped <新绝对目录> <已结束父批次目录>` 仅接续 skipped，再对新目录运行 `--live`。已完成项、失败项和通过的 smoke 保留；父批次未知用量继续披露。
+
+聚合丢失修复使用 `pnpm benchmark:memory-recall prepare-protected <新绝对目录> <已结束父批次> <已结束子批次> <必要证据审计JSON>`。该入口显式冻结修复验收：保留全部基线条目并找回审计丢失后进入已授权实测，另报实际证据增益；默认采用仍须满足问答质量和成本条件。
+
+冻结事实库召回实验使用 `pnpm benchmark:memory-recall prepare <新绝对目录> <已结束父批次> <已结束子批次> <必要证据审计JSON>`，然后执行 `preflight <目录>`、`run <目录> --live` 和 `report <目录>`。它比较本地召回候选且不重新提取；默认 prepare 模式要求必要证据增加且无损失，并在明确授权及新设 50 万 token 预算下实测，否则止于离线。见[实验协议](docs/benchmark/MEMORY_FACT_PRESERVATION.md)。
+
+Learned Memory 现在在既有上下文预算内以本地 BM25 排序可读事实与证据。可用 `node --import tsx scripts/benchmark/replay-memory-recall.mjs <父批次> <子批次> <锚点审计JSON> <新输出目录>` 复用已存事实做召回回放，不调用模型或重新提取。
+
+已结束的小样本可用 `python scripts/benchmark/compare-memory-fact-pilots.py --before <旧批次目录> --after <新批次目录> --output <新分析目录>` 离线比较。命令只读已有账本，保留失败和跳过项，不调用模型。
+
+获得修复后继续的授权后，`prepare <新目录> --continue-from <已停止目录>` 冻结父批次证据并保留完整通过验证的编码链。失败尝试和未知用量继续可见，新候选重新通过 preflight 与 smoke；默认公开问答全部使用新候选。
+
+用户批准协议变更后可追加 `--continue-unrun`，保留全部已结算公开结果，只执行未开始项。服务故障保留失败且不重试；未决请求仍禁止恢复，历史计量持续不完整，正式置信区间禁用。
 
 采用 [Apache 2.0](LICENSE) 许可证，由 [VinceTree](https://github.com/VinceTree) 维护。
 

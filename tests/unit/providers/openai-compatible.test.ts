@@ -34,11 +34,13 @@ test("official providers use their documented API base URLs", () => {
     getProviderDefinition("openai").baseURL,
     "https://api.openai.com/v1",
   );
+  assert.equal(getProviderDefinition("opencode-go").baseURL, "https://opencode.ai/inference/go/openai/v1");
 });
 
 test("parseProvider accepts only supported official presets", () => {
   assert.equal(parseProvider("DeepSeek"), "deepseek");
   assert.equal(parseProvider("openai"), "openai");
+  assert.equal(parseProvider("OpenCode-Go"), "opencode-go");
   assert.throws(() => parseProvider("proxy"), /Unsupported provider/);
 });
 

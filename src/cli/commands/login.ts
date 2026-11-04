@@ -20,11 +20,13 @@ export async function runLoginCommand({
 }: CommandContext): Promise<number> {
   const deepseek = getProviderDefinition("deepseek");
   const openai = getProviderDefinition("openai");
+  const openCodeGo = getProviderDefinition("opencode-go");
   const providerChoice = await selectOne<ProviderChoice>(
     "Provider",
     [
       { label: deepseek.displayName, baseURL: deepseek.baseURL },
       { label: openai.displayName, baseURL: openai.baseURL },
+      { label: openCodeGo.displayName, baseURL: openCodeGo.baseURL },
       { label: uiText('m7eab6c328d7f') },
     ],
     (item) => item.label,

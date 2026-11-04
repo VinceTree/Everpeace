@@ -32,7 +32,9 @@ pnpm files:build
 pnpm dev
 ```
 
-In the terminal, run `/login`, choose DeepSeek, enter your masked API key and select the original model ID returned by the service. OpenAI and custom HTTPS Responses endpoints are also supported; capabilities depend on the endpoint. Keys stay in the system credential store, outside project files and Sessions.
+In the terminal, run `/login`, choose DeepSeek, enter your masked API key and select the original model ID returned by the service. OpenAI, OpenCode Go and custom HTTPS Responses endpoints are also supported; capabilities depend on the endpoint. Keys stay in the system credential store, outside project files and Sessions.
+
+For OpenCode Go, choose its login preset and the Flash ID returned by its catalog. The preset uses `https://opencode.ai/inference/go/openai/v1`; model discovery uses Go's separate catalog route. Requests identify Everpeace and send a stable `x-opencode-session` header. Go remains a compatible endpoint with conservative default capabilities; authenticated Responses, tools and usage still require live verification. See the [Go documentation](https://opencode.ai/v2/docs/console/go/) for model availability and workspace region settings.
 
 Model connections honor `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` (lowercase names take precedence). Set these before starting the CLI when your endpoint needs a proxy; `ALL_PROXY` alone is insufficient. Proxy settings apply to model traffic, while model shell commands retain their sandbox network policy.
 
@@ -76,7 +78,9 @@ Root-to-directory rules, `@` attachments and an on-demand project map help the a
 
 Configured MCP tools, resources and prompts and local Skills extend the agent. Learned Memory can retain preferences and verified lessons. Public web tools check redirects and network boundaries. Search falls back to Bing China and DuckDuckGo when the first provider is unavailable. See the [usage guide](docs/USAGE.md) for setup and limits.
 
-Memory learns automatically only from verified turns. Save a lasting preference with `/remember <preference>`; review conflicts through `/memory candidates` or `everpeace memory candidates list`. Inspect, accept, correct and reject candidates locally with a preview of affected rules. Clearing user Memory applies across workspaces; project clearing affects the current workspace.
+Facts from newly completed conversations include host-bound source references when available. `memory_lookup` returns direct `session_event_read` arguments; older entries retain a search query. Exact counts, historical recommendations and date updates should be checked against the original message. Source-chain checks run offline with `node --import tsx scripts/benchmark/prove-memory-sources.mjs <new-evidence-directory>`; see the [Memory protocol](docs/benchmark/MEMORY_FACT_PRESERVATION.md).
+
+Memory captures attributed facts from normally completed conversations; reusable coding lessons still require verified turns. Save a lasting preference with `/remember <preference>`; review conflicts through `/memory candidates` or `everpeace memory candidates list`. Inspect, accept, correct and reject candidates locally with a preview of affected rules. Clearing user Memory applies across workspaces; project clearing affects the current workspace.
 
 MCP stdio programs require separate startup trust and default to a native workspace sandbox with networking denied. `/mcp trust <server>` reviews launch identity, `/mcp reconnect` starts or reloads, and `/mcp revoke <server>` cancels access. `/mcp mode <server> host` explicitly selects host user authority and revokes old trust; review and trust again before starting. Changed executable or entry-script bytes require new trust; dynamic launchers require approval at every startup. Windows host stdio requires a verified executable and argv; configure an interpreter explicitly for `.cmd`/`.bat` entry points. Remote MCP requires HTTPS. Loopback HTTP requires its own exception; redirects are blocked. Missing startup approval returns `interaction_required` (exit 5) in headless CLI/SDK runs.
 
@@ -151,6 +155,28 @@ pnpm build
 Run these gates in order and stop on failure, then run `git diff --check`. Start with [AGENTS.md](AGENTS.md) and the [documentation map](docs/README.md). Report reproducible issues through [GitHub Issues](https://github.com/VinceTree/Everpeace/issues).
 
 The [offline performance protocol](docs/benchmark/LOCAL_PERFORMANCE.md) compares CLI process startup, Session recovery, history search and project scanning with fixed fixtures and saved samples. CLI help timing excludes terminal prompt readiness; local results do not imply model or cross-platform gains.
+
+`pnpm benchmark:memory-batch <prepare|preflight|run|resume|report> <absolute evidence root>` provides the [Go/DeepSeek Memory campaign](docs/benchmark/MEMORY_BATCH.md). Live execution requires `--live` and user authorization; unknown usage blocks resume. Reports use an adapted DeepSeek judge and do not represent official GPT-4o benchmark scores.
+
+For offline gap analysis, use `python scripts/benchmark/analyze-memory.py --campaign <campaign-root> --output <new-analysis-root>` (Python 3.10+, existing Node/tsx). It snapshots evidence outside the campaign and makes no model requests. Add `--replay <snapshot-root>` to recompute captured bytes or `--wait-for-stop` to analyze once the running campaign settles. [Findings, comparison conditions and limits](docs/benchmark/MEMORY_GAP_ANALYSIS.md).
+
+Prepare the fact-preservation experiment offline with `python scripts/benchmark/prepare-memory-facts.py prepare --campaign <campaign-root> --snapshot <analysis-snapshot> --output <new-preparation-root>`, then check it with `python scripts/benchmark/prepare-memory-facts.py verify --root <preparation-root>`. This creates split manifests, candidate replay evidence and synthetic tasks; the preparation itself does not run production capture or models. The bounded pilot entry below validates the implemented candidate. [Protocol and limits](docs/benchmark/MEMORY_FACT_PRESERVATION.md).
+
+The small fact-memory pilot uses `pnpm benchmark:memory-pilot prepare <new-absolute-root> <preparation-root> <baseline-root>` after the four validation gates, then `pnpm benchmark:memory-pilot run <absolute-root> --live`. It is limited to 12 development questions, two arms and six smoke cases under a shared 2,000,000-token budget; it never starts the holdout or full batch.
+
+To continue only skipped pilot items after explicit authorization, use `pnpm benchmark:memory-pilot prepare-skipped <new-absolute-root> <sealed-parent-root>`, then run the new root with `--live`. Completed items, failed items and passed smoke cases are retained; parent unknown usage remains disclosed.
+
+For aggregation-loss repair, use `pnpm benchmark:memory-recall prepare-protected <new-absolute-root> <sealed-parent> <sealed-child> <evidence-audit-json>`. This explicitly freezes the preservation-repair gate: preserve every baseline row and recover audited losses before the authorized reader pilot. It reports evidence gain separately; the default quality-and-cost adoption criteria still apply.
+
+The sealed-store recall pilot uses `pnpm benchmark:memory-recall prepare <new-absolute-root> <sealed-parent> <sealed-child> <evidence-audit-json>`, followed by `preflight <root>`, `run <root> --live`, and `report <root>`. It compares frozen local retrieval candidates without extraction. The default prepare mode requires improved audited evidence without losses, explicit authorization and a new 500,000-token budget; otherwise it stops offline. See [the protocol](docs/benchmark/MEMORY_FACT_PRESERVATION.md).
+
+Learned Memory now ranks eligible facts and evidence with local BM25 within the existing context budget. Retrieval-only replay is available with `node --import tsx scripts/benchmark/replay-memory-recall.mjs <parent-root> <child-root> <anchor-audit-json> <new-output>`; it reuses stored facts without model requests or extraction.
+
+Finished pilots can be compared offline with `python scripts/benchmark/compare-memory-fact-pilots.py --before <old-root> --after <new-root> --output <new-analysis-root>`. This reads existing ledgers, keeps failed and skipped items, and makes no model requests.
+
+After an authorized repair, `prepare <new-root> --continue-from <stopped-root>` freezes the parent evidence and retains complete verified coding chains. Failed attempts and unknown usage stay visible; the new candidate requires preflight and smoke again. Public QA runs entirely on the new candidate by default.
+
+Add `--continue-unrun` only after approval of the documented protocol change to preserve all terminal public results and run only unstarted items. Closed service failures are retained without retry; pending requests still block recovery, historical usage stays incomplete, and formal confidence intervals are disabled.
 
 Licensed under [Apache 2.0](LICENSE). Maintained by [VinceTree](https://github.com/VinceTree).
 
