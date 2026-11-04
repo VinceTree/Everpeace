@@ -189,6 +189,22 @@ function normalizeSearchUrl(value: string): string | undefined {
     }
   }
 
+  // Bing's public result links can wrap the destination in an a1-prefixed
+  // base64 payload. Decode only the known service route, without fetching it.
+  const bingTarget = url.protocol === "https:" && !url.username && !url.password && ["www.bing.com", "cn.bing.com", "bing.com"].includes(url.host)
+    && url.pathname.replace(/\/$/u, "") === "/ck/a" ? url.searchParams.get("u") : null;
+  if (bingTarget?.startsWith("a1")) {
+    const encoded = bingTarget.slice(2);
+    if (encoded.length > 4096 || !/^[A-Za-z0-9+/_-]+={0,2}$/u.test(encoded)) return undefined;
+    const bytes = Buffer.from(encoded, "base64url");
+    const canonical = bytes.toString("base64url");
+    const normalized = encoded.replace(/\+/gu, "-").replace(/\//gu, "_");
+    const padded = canonical.padEnd(Math.ceil(canonical.length / 4) * 4, "=");
+    if (normalized !== canonical && normalized !== padded) return undefined;
+    try { url = new URL(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
+    catch { return undefined; }
+  }
+
   return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password && url.href.length <= 2048
     ? url.toString()
     : undefined;

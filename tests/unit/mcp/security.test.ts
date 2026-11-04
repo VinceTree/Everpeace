@@ -223,10 +223,14 @@ test("all redirect responses and HTTP methods close the response without reachin
   let targetRequests = 0; const target = await localServer(t, (_request, response) => { targetRequests++; response.end(); });
   let destination = target; let status = 302; const methods: string[] = [];
   const origin = await localServer(t, (request, response) => { methods.push(request.method!); assert.equal(request.headers["x-secret"], "fixture-secret"); response.writeHead(status, { location: destination }); response.end("redirect"); });
-  let policyFailures = 0; const client = createMcpHttp(origin, () => { policyFailures++; }); t.after(() => client.close());
+  let policyFailures = 0;
   for (const next of [target, origin + "/same-origin", "https://example.invalid/mcp"]) for (const code of [301, 302, 303, 307, 308]) for (const method of ["POST", "GET", "DELETE"]) {
     destination = next; status = code;
-    await assert.rejects(client.fetch(origin, { method, headers: { "X-Secret": "fixture-secret" } }), /redirects are blocked/u);
+    // Production retires the MCP connection after a policy violation.
+    // Give each redirect variant its own dispatcher and await its cleanup.
+    const client = createMcpHttp(origin, () => { policyFailures++; });
+    try { await assert.rejects(client.fetch(origin, { method, headers: { "X-Secret": "fixture-secret" } }), /redirects are blocked/u); }
+    finally { await client.close(); }
   }
   assert.equal(targetRequests, 0); assert.equal(policyFailures, 45); assert.equal(methods.length, 45);
 });
