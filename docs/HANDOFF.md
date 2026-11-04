@@ -1,5 +1,12 @@
 # 当前交接
 
+## 主分支合并交付（2026-11-04）
+
+用户明确授权合并此前已推送的 Memory 优化与 README 实验结果。本批通过 [PR #29](https://github.com/VinceTree/Everpeace/pull/29) 进入主分支，包含 b30f993、45b1bf7、7ff8c35；旧 PR #27 仅覆盖更早交付。先在独立检出同步 main，源码、测试、依赖与已通过提交保持一致，仅补本条交接；须在本 PR 的 Windows 全量、Linux portable、安全扫描及 Required checks 成功后合并，不绕过保护。
+
+既有 Bing／MCP 六个未提交文件保持原字节并留在本地，不进入 PR。本轮不启动模型请求或新实验，不修改默认检索、展示值、tag 或 Release；使用 [skip publish]，保留 CI。原实验冻结摘要与结果仍绑定原身份，合并不构成重新实测。实际合并状态与 SHA 以 PR 和远端 main 为准，检查及工作区保留收据在 `.cache/memory-fact-preservation/merge-main-001/`。
+
+
 ## README 实测与外部对照公开摘要（2026-11-04）
 
 用户在代码推送后要求同步 README 的本轮结果并与其他 harness 对比。代码已通过前述独立提交门禁并推送，代码提交为 45b1bf724a1283d6fc911eebae8254991154b0b2。新增中英文 Memory 实测段与 docs/benchmark/MEMORY_RECALL_REPORT.json，公开逐题标签、完整分母、冻结源码／构建摘要、用量、唯一同输入评分差异及未默认采用结论；不公开历史正文、凭据或本机路径。
