@@ -42,7 +42,7 @@ Windows sandboxed commands reuse the host pnpm toolchain: an explicit `PNPM_HOME
 
 For a relay that explicitly supports the DeepSeek Responses contract, select `/model profile deepseek`, then `/reasoning high`. `/status` shows the profile, its capability source, and the reasoning value actually sent. This is user configuration, not proof of relay compatibility. Unknown endpoints default to conservative settings; `/model profile auto` restores endpoint detection. Full reasoning items are preserved between tool rounds. Experimental prompt and tool-feedback optimizations remain disabled by default until task quality and measured token use justify them.
 
-Web page reads retain a bounded list of source links, so the agent can follow an official site's navigation and verify citations when search results are broad.
+Web page reads retain a bounded list of source links, so the agent can follow an official site's navigation and verify citations when search results are broad. Supported Bing click links expose their destination URLs for source discovery; page reads still validate public network boundaries.
 
 ```text
 /login

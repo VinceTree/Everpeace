@@ -45,4 +45,6 @@ Git 子进程移除继承 GIT_*、代理及 askpass 注入，禁用 system/globa
 
 ## 搜索与生命周期验收
 
+Bing 的精确 HTTPS `/ck/a` 点击路由可将实际结果 URL 编码在 `u=a1...` 中；搜索解析先校验并解码该载荷，再按实际来源去重。仅已知 Bing 主机和路由适用，拒绝包装链接或目标中的 URL 凭据、非法 UTF-8、目标协议及非规范 Base64 填充；兼容无填充与正确填充的标准／URL-safe 编码。该操作不发网络请求；读取解码后的目标仍经过完整公网地址、DNS、代理及逐跳检查。回归见 [web tests](../../tests/unit/tools/web.test.ts)。
+
 搜索 DOM 选择器、Brave 固定 HTTPS LLM Context 端点与统一响应租约见 [安全与诊断契约](SECURITY_AND_DIAGNOSTICS.md#搜索与响应生命周期)。HTML 默认保留提供方回退；明确选择 Brave 后不付费重试、不静默回退，Key 仅 AuthStorage。真实脱敏结构快照在 tests/fixtures/search-html；压力进程记录连接、租约、heap/external 和 RSS，清理失败不算成功。
