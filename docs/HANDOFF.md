@@ -2,7 +2,7 @@
 
 ## 主分支合并交付（2026-11-04）
 
-用户明确授权合并此前已推送的 Memory 优化与 README 实验结果。本批通过 [PR #29](https://github.com/VinceTree/Everpeace/pull/29) 进入主分支，包含 b30f993、45b1bf7、7ff8c35；旧 PR #27 仅覆盖更早交付。先在独立检出同步 main，源码、测试、依赖与已通过提交保持一致，仅补本条交接；须在本 PR 的 Windows 全量、Linux portable、安全扫描及 Required checks 成功后合并，不绕过保护。
+用户明确授权合并此前已推送的 Memory 优化与 README 实验结果。本批通过 [PR #29](https://github.com/VinceTree/Everpeace/pull/29) 进入主分支，包含 b30f993、45b1bf7、7ff8c35；旧 PR #27 仅覆盖更早交付。先在独立检出同步 main。首轮 CI 的 Linux portable 因 Go Session 测试错误地要求 Windows 文件读取成功而失败；保留真实工具往返、Session 恢复、三次请求及 45 tokens 断言，在非 Windows 明确检查 FILE_ACCESS_UNAVAILABLE。安全扫描因静态英文文案与合成脱敏 fixture 的完整文件摘要变化而拒绝；核对内容后只追加两份精确摘要，不扩大路径或规则例外。生产代码、默认策略和依赖不变；须在修正后的 Windows 全量、Linux portable、安全扫描及 Required checks 成功后合并，不绕过保护。
 
 既有 Bing／MCP 六个未提交文件保持原字节并留在本地，不进入 PR。本轮不启动模型请求或新实验，不修改默认检索、展示值、tag 或 Release；使用 [skip publish]，保留 CI。原实验冻结摘要与结果仍绑定原身份，合并不构成重新实测。实际合并状态与 SHA 以 PR 和远端 main 为准，检查及工作区保留收据在 `.cache/memory-fact-preservation/merge-main-001/`。
 

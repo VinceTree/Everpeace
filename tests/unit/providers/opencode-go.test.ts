@@ -106,7 +106,10 @@ test("production Go tool rounds and restored Sessions use the persisted Session 
     if (requests === 1) return sse(completed([{ type: "function_call", call_id: "read-fixture", name: "read_file", arguments: '{"path":"fixture.txt"}' }], ""));
     const output = request.input.find((item: { type: string }) => item.type === "function_call_output");
     assert.equal(output.call_id, "read-fixture");
-    assert.match(output.output, /isolated fixture bytes/u);
+    // File access is intentionally unavailable outside Windows. The routing
+    // contract still exercises a real tool round and persisted output there.
+    if (process.platform === "win32") assert.match(output.output, /isolated fixture bytes/u);
+    else assert.match(output.output, /FILE_ACCESS_UNAVAILABLE/u);
     return sse(completed([], "Read."));
   });
   const ledger = new RequestAttemptLedger({ tokenBudget: 100 });
