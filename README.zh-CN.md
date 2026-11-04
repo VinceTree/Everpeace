@@ -92,6 +92,39 @@ MCP 进程启动前的沙箱准备失败会保留启动原因，连接可以正�
 
 漏洞请通过 [GitHub 私密报告](https://github.com/VinceTree/Everpeace/security/advisories/new) 提交，支持范围与协调披露见 [SECURITY.md](SECURITY.md)。依赖审计、脱敏秘密扫描、许可证策略及绑定候选的 SBOM 证据是合并和发布必需检查。
 
+## Memory 实测与外部对照
+
+本轮使用固定且已审阅的 **11 道 LongMemEval-S 开发题**，通过 OpenCode Go 调用 `deepseek-v4.1-flash` 回答与评分，每组一次，**召回正文上限 8000 字符**。测量对象是不开工具的事实记忆 reader，不是完整编码 harness。运行前单列一个不完整事实库，复用其余完整库，没有重新提取。
+
+| 本地策略 | 正确／计划 | 正确率 | 公开题回答 tokens |
+| --- | ---: | ---: | ---: |
+| 当前 BM25 事实检索——默认 | 10 / 11 | 90.91% | 28,784 |
+| 保护式证据聚合——实验候选 | 9 / 11 | 81.82% | 29,507 |
+
+两组都答对了 **4 具木乃伊**及 **最低总售价 $5,150**（项链 $5,000＋梳妆台至少 $150）。保护式聚合找回旧聚合丢失的两条事实，保留全部当前策略条目；必要证据覆盖仍为 **16/18**，相对当前 BM25 没有新增命中。本轮 QA 未满足默认采用条件，候选**未设为默认**。唯一评分回退发生于**上下文及实际请求摘要完全相同**的两次不同生成，不能据这一次结果建立检索导致退化的因果结论。
+
+**22 个公开回答项全部完成**；六项 smoke 双臂 **12/12** 正确。新增总计 **68 次请求、68,982 input+output tokens**（输入 62,315＋输出 6,667），包含 smoke 和评分，**新增 unknown／pending 均为零**。这是回答／评分阶段的新用量，不含历史建库成本。历史未知用量独立保留。成绩来自开发题的自动评分，未经人工评分复核，不报告正式置信区间。[逐题结果与冻结条件](docs/benchmark/MEMORY_RECALL_REPORT.json)。
+
+**外部记忆系统参考——实验条件不同，不作为统一排行榜：**
+
+| 系统／一手来源 | 公开证据 | 回答模型／评分模型 | 该运行报告的上下文 |
+| --- | --- | --- | --- |
+| [Hindsight](https://benchmarks.hindsight.vectorize.io/) · [公开输出清单](https://github.com/vectorize-io/agent-memory-benchmark/blob/main/blob-manifest.json) | 已复算**相同问题 ID 的 11/11**；全量 **473/500（94.6%）** | Gemini 3.1 Pro Preview／Gemini 2.5 Flash-Lite | 全量均值 **43,624.5 tokens** |
+| [Mastra Observational Memory](https://mastra.ai/research/observational-memory) | 分类计数合计 **468/500（93.60%）**；作者 **94.87%** 为六类宏平均 | gpt-5-mini／GPT-4o；观察记录使用 Gemini 2.5 Flash | 均值约 **30k tokens** |
+| [Zep](https://www.getzep.com/research/) | **451/500（90.2%）** | GPT-5.4／GPT-5.4 | 中位数 **4,408 tokens** |
+
+Hindsight 的 11 个 ID 及题面与本轮一致，但**尚未证明历史语料相同**。外部运行的模型、评分器和上下文预算均不同；这里只核查公开成绩，没有独立复现。Hindsight 与其榜单发布方同属一个组织。500 题成绩不是本轮 11 题子集成绩，tokens 也不能与字符预算直接换算；这些数据不能证明跨系统质量、费用或延迟优势。
+
+完整编码 harness 目前只进行已公开机制的对照：
+
+| Harness／一手来源 | 相关机制 | 本轮同条件实测 |
+| --- | --- | --- |
+| [DS Harness session query](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/session-query/session-query/README.md) | 精确事件读取、有界来源上下文及关系追踪 | 未运行 |
+| [OpenCode](https://opencode.ai/docs/config/#compaction) | 可配置压缩、裁剪及保留上下文预算 | 未运行；Go 仅用作模型服务 |
+| [Claude Code](https://code.claude.com/docs/en/memory) | 持久规则、auto memory 短索引与按需主题文件 | 未运行 |
+
+Everpeace 生产环境已有 `memory_lookup` 和 Session 原文读取工具，但本轮 reader 没有启用它们。[对照方法与证据限制](docs/benchmark/MEMORY_GAP_ANALYSIS.md) · [当前交接](docs/HANDOFF.md)。
+
 ## 自动执行同一工作流
 
 ```powershell

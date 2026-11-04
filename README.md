@@ -92,6 +92,39 @@ Search uses DOM selectors by default. `/web` can explicitly select Brave LLM Con
 
 Report vulnerabilities privately through [GitHub Security](https://github.com/VinceTree/Everpeace/security/advisories/new). See [SECURITY.md](SECURITY.md) for supported releases and coordinated disclosure. Dependency audit, redacted secret scans, license policy and candidate-bound SBOM evidence are required before merging and publishing.
 
+## Memory reader results and comparisons
+
+This fixed, pre-audited **11-question LongMemEval-S development pilot** used `deepseek-v4.1-flash` through OpenCode Go for both answering and grading, one run per arm, and an **8,000-character retrieved-body limit**. It tested a no-tool fact-memory reader, not a complete coding harness. One incomplete fact store was excluded before the run; existing complete stores were reused without extraction.
+
+| Local strategy | Correct / planned | Accuracy | Public-answer tokens |
+| --- | ---: | ---: | ---: |
+| Current BM25 fact retrieval — default | 10 / 11 | 90.91% | 28,784 |
+| Protected evidence aggregation — experimental | 9 / 11 | 81.82% | 29,507 |
+
+Both arms correctly answered **4 mummies** and **$5,150 minimum combined sale** ($5,000 necklace + at least $150 vanity). Protected aggregation recovered the old aggregator's two lost facts and preserved every current-strategy entry; audited necessary-evidence coverage remained **16/18**, with no gain over current BM25. QA adoption criteria were not met, so it was **not promoted to the default**. The sole score regression came from two different generations with **identical context and request hashes**; this single run does not establish a retrieval-caused regression.
+
+All **22 public answers** completed; the six smoke cases passed in both arms (**12/12**). The entire new run used **68 requests / 68,982 input+output tokens** (62,315 input + 6,667 output), including smoke and grading, with **zero new unknown usage or pending requests**. This is reader-and-grader usage; earlier fact-store construction is excluded. Historical unknown usage remains separate. These are automatic grades on development cases, without human scoring review or formal confidence intervals. [Per-question results and frozen conditions](docs/benchmark/MEMORY_RECALL_REPORT.json).
+
+**External memory references — different experimental conditions, not a leaderboard:**
+
+| System / primary source | Published evidence | Reader / judge | Context reported by that run |
+| --- | --- | --- | --- |
+| [Hindsight](https://benchmarks.hindsight.vectorize.io/) · [published output manifest](https://github.com/vectorize-io/agent-memory-benchmark/blob/main/blob-manifest.json) | Recounted **11/11 matching question IDs**; full run **473/500 (94.6%)** | Gemini 3.1 Pro Preview / Gemini 2.5 Flash-Lite | Full-run mean **43,624.5 tokens** |
+| [Mastra Observational Memory](https://mastra.ai/research/observational-memory) | **468/500 (93.60%)** from category counts; author's **94.87%** is a six-category macro average | gpt-5-mini / GPT-4o; observations use Gemini 2.5 Flash | Mean approximately **30k tokens** |
+| [Zep](https://www.getzep.com/research/) | **451/500 (90.2%)** | GPT-5.4 / GPT-5.4 | Median **4,408 tokens** |
+
+Hindsight's 11 IDs and question texts match this pilot, but identical histories have **not** been established. The external runs use different models, graders and context budgets; their published scores were inspected, not independently reproduced. Hindsight and its benchmark publisher share an organization. The 500-question results are not scores on our 11-question subset, and tokens are not interchangeable with our character budget. No cross-system quality, cost or latency advantage is established.
+
+For complete coding harnesses, the comparison currently covers documented mechanisms:
+
+| Harness / primary source | Relevant mechanism | Same-condition result in this pilot |
+| --- | --- | --- |
+| [DS Harness session query](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/session-query/session-query/README.md) | Exact event reads, bounded source context and relationship traces | Not run |
+| [OpenCode](https://opencode.ai/docs/config/#compaction) | Configurable compaction, pruning and reserved context | Not run; Go was only the model service |
+| [Claude Code](https://code.claude.com/docs/en/memory) | Persistent rules and an auto-memory index with on-demand topic files | Not run |
+
+Everpeace has production `memory_lookup` and Session source-reading tools, but this reader pilot did not enable them. [Comparison methodology and evidence limits](docs/benchmark/MEMORY_GAP_ANALYSIS.md) · [Current handoff](docs/HANDOFF.md).
+
 ## Automate the same workflow
 
 ```powershell
