@@ -8,7 +8,11 @@
 
 本轮完整安全扫描 security-001 已通过，包含完整历史／当前凭据、官方依赖审计、许可证及锁 SBOM；scan.success=true、unreviewedSecrets=0。旧扫描失败继续保留，不改写为通过。179 个文档路径、959 项双语及暂存 diff 检查通过。
 
-最终 gates-001 串行 typecheck → lint → test → build 全通过：1506 tests、1503 pass、3 个既有 skip、零 fail／cancelled；约 5.210／2.371／353.815／2.129 秒。所有受控文件在门禁期间字节一致。实际暂存范围为原二十项及两份安全审阅 JSON，共二十二个文件。门禁后只补本交接并重查文档与 diff，源码、测试、依赖、公开实验 JSON 均未变化。远端 PR 和合并后主分支 CI 按实际 GitHub 状态另行核对，不用本地通过代替。实验的历史源码／构建身份、68982 与 68027 两轮消费和旧失败均保留，不把本次提交验证称为重新实测。提交使用 [skip publish]，Test 保持 PR／main 触发，Release 仍只手动触发，不改展示值、tag 或 Release。
+最终 gates-001 串行 typecheck → lint → test → build 全通过：1506 tests、1503 pass、3 个既有 skip、零 fail／cancelled；约 5.210／2.371／353.815／2.129 秒。所有受控文件在门禁期间字节一致。实际暂存范围为原二十项及两份安全审阅 JSON，共二十二个文件。门禁后只补本交接并重查文档与 diff，源码、测试、依赖、公开实验 JSON 均未变化。远端 PR 和合并后主分支 CI 按实际 GitHub 状态另行核对，不用本地通过代替。
+
+首个提交 f9a16be 已推送并创建 PR #32。PR 首轮安全扫描拒绝新公开报告三项 tokenizer SHA-256；本地提交前扫描不包含尚未进入 Git 历史的 docs，故先前通过不能覆盖该新历史命中。security-002 在新提交历史上重现，核对三项均等于冻结公开模型资产，不是凭据；仅追加该报告 LF／CRLF 两份精确文件摘要，未更改报告、全局扫描规则或模型代码。首轮失败日志保留，修正后安全检查及最终四门禁另存新轮次。 修正后 security-003 全部通过。最终 gates-002 串行四门禁全部通过：1506 tests、1503 pass、3 个既有 skip、零 fail／cancelled，约 1.719／1.206／336.346／1.980 秒；受控文件在门禁期间未变。收尾仅补本交接、文档／双语及 diff 检查，不改变公开报告、模型实现、测试或依赖。
+
+GitHub 推送提示的默认分支一百零二条 high／critical 告警全部来自五份固定 Chalk 历史评测 package-lock，根应用清单零条；只读明细在 dependabot-manifests-002.json。未改写历史夹具或把此类告警宣称已清除。实验的历史源码／构建身份、68982 与 68027 两轮消费和旧失败均保留，不把本次提交验证称为重新实测。提交使用 [skip publish]，Test 保持 PR／main 触发，Release 仍只手动触发，不改展示值、tag 或 Release。
 
 
 ## BGE／MMR 原因排查与新实测（2026-11-05）
