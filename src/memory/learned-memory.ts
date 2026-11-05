@@ -1,4 +1,5 @@
-import { selectMemoryEntries, memorySelectionText, rankMemoryEntries } from "./retrieval.js";
+import { memorySelectionText, rankMemoryEntries } from "./retrieval.js";
+import { selectMemoryEntriesAsync } from "./semantic-retrieval.js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -717,7 +718,7 @@ export class LearnedMemoryStore {
     const now = this.#now();
     const eligible = [...project, ...user, ...await this.readFacts(workspacePath)]
       .filter(entry => entry.status === "active" && !memoryEntryExpired(entry, now) && memoryEntryHasProvenance(entry));
-    const selected = selectMemoryEntries(eligible, `${userInput} ${activeFiles.join(" ")}`, now, Math.min(MAX_PROMPT_CHARS, budgetChars));
+    const selected = await selectMemoryEntriesAsync(eligible, `${userInput} ${activeFiles.join(" ")}`, now, Math.min(MAX_PROMPT_CHARS, budgetChars));
     const text = memorySelectionText(selected);
     if (!selected.length && !rankMemoryEntries(eligible, `${userInput} ${activeFiles.join(" ")}`, now).length) return { revision: createHash("sha256").update("empty").digest("hex").slice(0, 16), text: "", entryIds: [], loadedAt };
     return {

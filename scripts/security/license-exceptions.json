@@ -5,5 +5,131 @@
     "license": "CC-BY-3.0",
     "reason": "SPDX license exception identifier data used by the expression parser. Upstream attribution and license travel with the dependency; no application source is relicensed.",
     "review": "Reviewed published 2.5.0 package.json and README attribution to the Linux Foundation/SPDX. Registry evidence: https://registry.npmjs.org/spdx-exceptions/2.5.0 . Re-review upgrades and retain the published README attribution."
+  },
+  {
+    "name": "@img/sharp-libvips-darwin-arm64",
+    "version": "1.3.4",
+    "license": "LGPL-3.0-or-later",
+    "reason": "Unmodified optional Sharp/libvips prebuilt dependency of the explicit local encoder. Preserve upstream LICENSE/README notices, source links and library replaceability; this does not approve modified or statically relinked native distributions.",
+    "review": "Reviewed exact published package license metadata and upstream prebuilt-package licensing notes. The application does not copy or modify these binaries; npm dependencies retain their upstream package contents. Exact package/version/expression only; native release packaging must retain the corresponding notices and source information. https://registry.npmjs.org/%40img%2Fsharp-libvips-darwin-arm64/1.3.4 ; https://github.com/lovell/sharp-libvips ; https://sharp.pixelplumbing.com/install/"
+  },
+  {
+    "name": "@img/sharp-libvips-darwin-x64",
+    "version": "1.3.4",
+    "license": "LGPL-3.0-or-later",
+    "reason": "Unmodified optional Sharp/libvips prebuilt dependency of the explicit local encoder. Preserve upstream LICENSE/README notices, source links and library replaceability; this does not approve modified or statically relinked native distributions.",
+    "review": "Reviewed exact published package license metadata and upstream prebuilt-package licensing notes. The application does not copy or modify these binaries; npm dependencies retain their upstream package contents. Exact package/version/expression only; native release packaging must retain the corresponding notices and source information. https://registry.npmjs.org/%40img%2Fsharp-libvips-darwin-x64/1.3.4 ; https://github.com/lovell/sharp-libvips ; https://sharp.pixelplumbing.com/install/"
+  },
+  {
+    "name": "@img/sharp-libvips-linux-arm64",
+    "version": "1.3.4",
+    "license": "LGPL-3.0-or-later",
+    "reason": "Unmodified optional Sharp/libvips prebuilt dependency of the explicit local encoder. Preserve upstream LICENSE/README notices, source links and library replaceability; this does not approve modified or statically relinked native distributions.",
+    "review": "Reviewed exact published package license metadata and upstream prebuilt-package licensing notes. The application does not copy or modify these binaries; npm dependencies retain their upstream package contents. Exact package/version/expression only; native release packaging must retain the corresponding notices and source information. https://registry.npmjs.org/%40img%2Fsharp-libvips-linux-arm64/1.3.4 ; https://github.com/lovell/sharp-libvips ; https://sharp.pixelplumbing.com/install/"
+  },
+  {
+    "name": "@img/sharp-libvips-linux-arm",
+    "version": "1.3.4",
+    "license": "LGPL-3.0-or-later",
+    "reason": "Unmodified optional Sharp/libvips prebuilt dependency of the explicit local encoder. Preserve upstream LICENSE/README notices, source links and library replaceability; this does not approve modified or statically relinked native distributions.",
+    "review": "Reviewed exact published package license metadata and upstream prebuilt-package licensing notes. The application does not copy or modify these binaries; npm dependencies retain their upstream package contents. Exact package/version/expression only; native release packaging must retain the corresponding notices and source information. https://registry.npmjs.org/%40img%2Fsharp-libvips-linux-arm/1.3.4 ; https://github.com/lovell/sharp-libvips ; https://sharp.pixelplumbing.com/install/"
+  },
+  {
+    "name": "@img/sharp-libvips-linux-ppc64",
+    "version": "1.3.4",
+    "license": "LGPL-3.0-or-later",
+    "reason": "Unmodified optional Sharp/libvips prebuilt dependency of the explicit local encoder. Preserve upstream LICENSE/README notices, source links and library replaceability; this does not approve modified or statically relinked native distributions.",
+    "review": "Reviewed exact published package license metadata and upstream prebuilt-package licensing notes. The application does not copy or modify these binaries; npm dependencies retain their upstream package contents. Exact package/version/expression only; native release packaging must retain the corresponding notices and source information. https://registry.npmjs.org/%40img%2Fsharp-libvips-linux-ppc64/1.3.4 ; https://github.com/lovell/sharp-libvips ; https://sharp.pixelplumbing.com/install/"
+  },
+  {
+    "name": "@img/sharp-libvips-linux-riscv64",
+    "version": "1.3.4",
+    "license": "LGPL-3.0-or-later",
+    "reason": "Unmodified optional Sharp/libvips prebuilt dependency of the explicit local encoder. Preserve upstream LICENSE/README notices, source links and library replaceability; this does not approve modified or statically relinked native distributions.",
+    "review": "Reviewed exact published package license metadata and upstream prebuilt-package licensing notes. The application does not copy or modify these binaries; npm dependencies retain their upstream package contents. Exact package/version/expression only; native release packaging must retain the corresponding notices and source information. https://registry.npmjs.org/%40img%2Fsharp-libvips-linux-riscv64/1.3.4 ; https://github.com/lovell/sharp-libvips ; https://sharp.pixelplumbing.com/install/"
+  },
+  {
+    "name": "@img/sharp-libvips-linux-s390x",
+    "version": "1.3.4",
+    "license": "LGPL-3.0-or-later",
+    "reason": "Unmodified optional Sharp/libvips prebuilt dependency of the explicit local encoder. Preserve upstream LICENSE/README notices, source links and library replaceability; this does not approve modified or statically relinked native distributions.",
+    "review": "Reviewed exact published package license metadata and upstream prebuilt-package licensing notes. The application does not copy or modify these binaries; npm dependencies retain their upstream package contents. Exact package/version/expression only; native release packaging must retain the corresponding notices and source information. https://registry.npmjs.org/%40img%2Fsharp-libvips-linux-s390x/1.3.4 ; https://github.com/lovell/sharp-libvips ; https://sharp.pixelplumbing.com/install/"
+  },
+  {
+    "name": "@img/sharp-libvips-linux-x64",
+    "version": "1.3.4",
+    "license": "LGPL-3.0-or-later",
+    "reason": "Unmodified optional Sharp/libvips prebuilt dependency of the explicit local encoder. Preserve upstream LICENSE/README notices, source links and library replaceability; this does not approve modified or statically relinked native distributions.",
+    "review": "Reviewed exact published package license metadata and upstream prebuilt-package licensing notes. The application does not copy or modify these binaries; npm dependencies retain their upstream package contents. Exact package/version/expression only; native release packaging must retain the corresponding notices and source information. https://registry.npmjs.org/%40img%2Fsharp-libvips-linux-x64/1.3.4 ; https://github.com/lovell/sharp-libvips ; https://sharp.pixelplumbing.com/install/"
+  },
+  {
+    "name": "@img/sharp-libvips-linuxmusl-arm64",
+    "version": "1.3.4",
+    "license": "LGPL-3.0-or-later",
+    "reason": "Unmodified optional Sharp/libvips prebuilt dependency of the explicit local encoder. Preserve upstream LICENSE/README notices, source links and library replaceability; this does not approve modified or statically relinked native distributions.",
+    "review": "Reviewed exact published package license metadata and upstream prebuilt-package licensing notes. The application does not copy or modify these binaries; npm dependencies retain their upstream package contents. Exact package/version/expression only; native release packaging must retain the corresponding notices and source information. https://registry.npmjs.org/%40img%2Fsharp-libvips-linuxmusl-arm64/1.3.4 ; https://github.com/lovell/sharp-libvips ; https://sharp.pixelplumbing.com/install/"
+  },
+  {
+    "name": "@img/sharp-libvips-linuxmusl-x64",
+    "version": "1.3.4",
+    "license": "LGPL-3.0-or-later",
+    "reason": "Unmodified optional Sharp/libvips prebuilt dependency of the explicit local encoder. Preserve upstream LICENSE/README notices, source links and library replaceability; this does not approve modified or statically relinked native distributions.",
+    "review": "Reviewed exact published package license metadata and upstream prebuilt-package licensing notes. The application does not copy or modify these binaries; npm dependencies retain their upstream package contents. Exact package/version/expression only; native release packaging must retain the corresponding notices and source information. https://registry.npmjs.org/%40img%2Fsharp-libvips-linuxmusl-x64/1.3.4 ; https://github.com/lovell/sharp-libvips ; https://sharp.pixelplumbing.com/install/"
+  },
+  {
+    "name": "@img/sharp-wasm32",
+    "version": "0.35.5",
+    "license": "Apache-2.0 AND LGPL-3.0-or-later AND MIT",
+    "reason": "Unmodified optional Sharp/libvips prebuilt dependency of the explicit local encoder. Preserve upstream LICENSE/README notices, source links and library replaceability; this does not approve modified or statically relinked native distributions.",
+    "review": "Reviewed exact published package license metadata and upstream prebuilt-package licensing notes. The application does not copy or modify these binaries; npm dependencies retain their upstream package contents. Exact package/version/expression only; native release packaging must retain the corresponding notices and source information. https://registry.npmjs.org/%40img%2Fsharp-wasm32/0.35.5 ; https://github.com/lovell/sharp-libvips ; https://sharp.pixelplumbing.com/install/"
+  },
+  {
+    "name": "@img/sharp-win32-arm64",
+    "version": "0.35.5",
+    "license": "Apache-2.0 AND LGPL-3.0-or-later",
+    "reason": "Unmodified optional Sharp/libvips prebuilt dependency of the explicit local encoder. Preserve upstream LICENSE/README notices, source links and library replaceability; this does not approve modified or statically relinked native distributions.",
+    "review": "Reviewed exact published package license metadata and upstream prebuilt-package licensing notes. The application does not copy or modify these binaries; npm dependencies retain their upstream package contents. Exact package/version/expression only; native release packaging must retain the corresponding notices and source information. https://registry.npmjs.org/%40img%2Fsharp-win32-arm64/0.35.5 ; https://github.com/lovell/sharp-libvips ; https://sharp.pixelplumbing.com/install/"
+  },
+  {
+    "name": "@img/sharp-win32-ia32",
+    "version": "0.35.5",
+    "license": "Apache-2.0 AND LGPL-3.0-or-later",
+    "reason": "Unmodified optional Sharp/libvips prebuilt dependency of the explicit local encoder. Preserve upstream LICENSE/README notices, source links and library replaceability; this does not approve modified or statically relinked native distributions.",
+    "review": "Reviewed exact published package license metadata and upstream prebuilt-package licensing notes. The application does not copy or modify these binaries; npm dependencies retain their upstream package contents. Exact package/version/expression only; native release packaging must retain the corresponding notices and source information. https://registry.npmjs.org/%40img%2Fsharp-win32-ia32/0.35.5 ; https://github.com/lovell/sharp-libvips ; https://sharp.pixelplumbing.com/install/"
+  },
+  {
+    "name": "@img/sharp-win32-x64",
+    "version": "0.35.5",
+    "license": "Apache-2.0 AND LGPL-3.0-or-later",
+    "reason": "Unmodified optional Sharp/libvips prebuilt dependency of the explicit local encoder. Preserve upstream LICENSE/README notices, source links and library replaceability; this does not approve modified or statically relinked native distributions.",
+    "review": "Reviewed exact published package license metadata and upstream prebuilt-package licensing notes. The application does not copy or modify these binaries; npm dependencies retain their upstream package contents. Exact package/version/expression only; native release packaging must retain the corresponding notices and source information. https://registry.npmjs.org/%40img%2Fsharp-win32-x64/0.35.5 ; https://github.com/lovell/sharp-libvips ; https://sharp.pixelplumbing.com/install/"
+  },
+  {
+    "name": "chownr",
+    "version": "3.0.0",
+    "license": "BlueOak-1.0.0",
+    "reason": "Permissive Blue Oak notice-bearing dependency of the pinned ONNX runtime. Preserve the upstream LICENSE.md text or its license link in downstream package distributions.",
+    "review": "Reviewed exact published package metadata and installed LICENSE.md. The license grants copyright and patent permissions and requires the license text/link to accompany copies. Exact package/version only; upgrades require re-review. https://registry.npmjs.org/chownr/3.0.0 ; https://blueoakcouncil.org/license/1.0.0"
+  },
+  {
+    "name": "minipass",
+    "version": "7.1.3",
+    "license": "BlueOak-1.0.0",
+    "reason": "Permissive Blue Oak notice-bearing dependency of the pinned ONNX runtime. Preserve the upstream LICENSE.md text or its license link in downstream package distributions.",
+    "review": "Reviewed exact published package metadata and installed LICENSE.md. The license grants copyright and patent permissions and requires the license text/link to accompany copies. Exact package/version only; upgrades require re-review. https://registry.npmjs.org/minipass/7.1.3 ; https://blueoakcouncil.org/license/1.0.0"
+  },
+  {
+    "name": "tar",
+    "version": "7.5.22",
+    "license": "BlueOak-1.0.0",
+    "reason": "Permissive Blue Oak notice-bearing dependency of the pinned ONNX runtime. Preserve the upstream LICENSE.md text or its license link in downstream package distributions.",
+    "review": "Reviewed exact published package metadata and installed LICENSE.md. The license grants copyright and patent permissions and requires the license text/link to accompany copies. Exact package/version only; upgrades require re-review. https://registry.npmjs.org/tar/7.5.22 ; https://blueoakcouncil.org/license/1.0.0"
+  },
+  {
+    "name": "yallist",
+    "version": "5.0.0",
+    "license": "BlueOak-1.0.0",
+    "reason": "Permissive Blue Oak notice-bearing dependency of the pinned ONNX runtime. Preserve the upstream LICENSE.md text or its license link in downstream package distributions.",
+    "review": "Reviewed exact published package metadata and installed LICENSE.md. The license grants copyright and patent permissions and requires the license text/link to accompany copies. Exact package/version only; upgrades require re-review. https://registry.npmjs.org/yallist/5.0.0 ; https://blueoakcouncil.org/license/1.0.0"
   }
 ]

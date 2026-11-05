@@ -1,5 +1,62 @@
 # 当前交接
 
+## Memory 未提交改动审阅与主分支交付（2026-11-05）
+
+用户授权审阅全部 Memory 未提交改动，测试通过后提交、推送并合并 main。开始时二十个相关文件均保存原字节、摘要与完整 diff 至 .cache/memory-submit-review/attempt-001；复用当前检出创建 codex/review-memory-semantic-20261105，未丢弃任何旧修改。核对共享召回、模型资产、标签隔离、权限与取消、预算准入、冻结输入、公开结果与双语文档。默认 current、8000 字符整条正文及原 SDK 语义不变，不重新运行付费实验。
+
+依赖审阅发现 Sharp/libvips 的精确平台包和 ONNX 引入的四个 Blue Oak 包尚未有许可证审阅。读取实际包声明／许可证及官方注册元数据，核对所有锁定平台包的发布 integrity 与 lock 一致，仅在现有许可审阅清单追加十八条精确包／版本／表达式，保留上游 notices、source links 和动态库可替换性要求，不放宽全局 SPDX 规则或授权任意重建二进制。已安装及全部锁定平台元数据检查通过。此前英文文案 CRLF 拦截也核对为与 HEAD／已批准 LF 文本完全相同，仅补其精确 CRLF 摘要，不修改原文或泛化例外。
+
+本轮完整安全扫描 security-001 已通过，包含完整历史／当前凭据、官方依赖审计、许可证及锁 SBOM；scan.success=true、unreviewedSecrets=0。旧扫描失败继续保留，不改写为通过。179 个文档路径、959 项双语及暂存 diff 检查通过。
+
+最终 gates-001 串行 typecheck → lint → test → build 全通过：1506 tests、1503 pass、3 个既有 skip、零 fail／cancelled；约 5.210／2.371／353.815／2.129 秒。所有受控文件在门禁期间字节一致。实际暂存范围为原二十项及两份安全审阅 JSON，共二十二个文件。门禁后只补本交接并重查文档与 diff，源码、测试、依赖、公开实验 JSON 均未变化。远端 PR 和合并后主分支 CI 按实际 GitHub 状态另行核对，不用本地通过代替。实验的历史源码／构建身份、68982 与 68027 两轮消费和旧失败均保留，不把本次提交验证称为重新实测。提交使用 [skip publish]，Test 保持 PR／main 触发，Release 仍只手动触发，不改展示值、tag 或 Release。
+
+
+## BGE／MMR 原因排查与新实测（2026-11-05）
+
+用户要求继续查清两条杂志证据低排名原因并换方案；通过后直接用 50 万 input+output 实测。用户同时持续授权后续同范围 Memory 小样本按已有预算直接使用 tokens，不重复询问，默认每独立批次仍为 50 万，不扩成全量或无限额。起点仍为 main，已有十九个未提交文件全部保存原字节和 diff 至 .cache/memory-semantic-diagnosis/before，不提交、推送或合并。
+
+诊断与全部失败保存在 .cache/memory-semantic-diagnosis。E5 问句／词项查询加陈述与引文时，Architectural Digest 名次 99→39、National Geographic 22→12；仅引文反而更差。全精度 E5 仍为 63／21，量化为 99／22；最长 239 tokens，无分窗截断；617/619 条分词往返一致。小型成对重排能逐值复现官方 Berlin 示例，但杂志题不改善，保留该失败。BGE small 仍漏掉目标；BGE base 加词项查询使两个目标进入前八，但直接装入有重复占用。词项 TF-IDF 新颖性原型也未补齐，记录为失败。
+
+选择 BGE base q8／CLS／768 维与固定 lambda=0.7 的 MMR：current 全部原文保持前缀，只对前八候选追加；新政策 semantic-model-gain 与旧 E5 政策分开，模型资产不能混用。共享路径原型正文 7939 字符、两条目标都进入，仍不等于十一题门禁或 QA 成绩。方法选择受已知开发题影响，不是盲测。新增矩阵、内容变更／取消及新政策回归；定向三十项通过。后续已按以下记录完成最终门禁、冻结与实测。
+
+
+最终 gates-001 串行 typecheck → lint → test → build 全通过：1506 tests、1503 pass、3 个既有 skip、零 fail／cancelled；约 1.738／1.237／361.873／1.987 秒，门禁期间受控文件摘要一致。prepare-bge／preflight 均退出 0，约 131.288／1.631 秒。身份冻结后实验期间没有修改候选。
+
+正式 bge-pilot-001：current／protected 为必要证据 16/18，BGE 直接相关性为 17/18，BGE/MMR 为 18/18；全部四锚点保留、必要证据零损失。新候选逐题 current ID、顺序与全文原样保留，十一题 current 上下文与上一轮逐字一致。MMR 杂志正文 7939 字符，两个目标都进入，selected=semantic-protected-bge-mmr，已通过 semantic-model-gain 后自动 live，无再次询问。
+
+新实测已完整结算，统一 exec 97744 退出 0，run 墙钟约 129.954 秒。六项双臂 smoke 12/12 正确；公开 22 项全部 completed，current 9/11、MMR 10/11，唯一配对增益为杂志题，无原正确题回退。候选答 2（The New Yorker、Architectural Digest），说明 Forbes 已取消、National Geographic 是单期购买；基线答 1。木乃伊两组均 4，最低总售价两组均 $5,150。新 68 次请求均一次 attempt、可靠结算；input 62473／output 5554，合计 68027 tokens，unknown／pending／重试／提取全零，峰值并发二。answer 34 请求／61951 tokens，judge 34／6076；推理不额外重复相加。新 50 万上限剩余 431973，不为花完预算追加重复。
+
+配对公开回答 tokens current／MMR 为 28104／29295，比约 1.042378；本轮完整性、计量、正确数严格增加、原正确题无回退和成本条件均满足，report.adoptionEligible=true。普通默认继续 current，新本地模型仍是显式候选；不据此自动下载资产或宣称保留集升级。两组唯一共同错题 57f827a0 的上下文和实际请求 SHA 均相同（`5e930a8c35057250c36c9a489358f1af64f7c796e6da1ff868f0270e1b85e4f1`），均未提及已可见的 mid-century modern dresser 偏好；不重跑、改分或用之前 10/11 冒充本轮基线。固定开发题、一次重复、自动评分未人工复核，不报告正式区间。
+
+新本地选择编码合计 121.004 秒、user/system CPU 1441.514／3.750 秒，最大采样 RSS 582.9 MiB；RSS 不是峰值，缓存复用、加载与固定 smoke 编码范围见 summary。公开每行回答＋评分平均时延 current 7.117／MMR 6.302 秒，不能由单次样本断言性能优势。完整报告为 bge-pilot-001/report-c8b3cead-04f6-4cd7-bb03-276799db941a/report.json 与 offline.json；主入口 .cache/memory-semantic-diagnosis/summary.md、summary.json、critical-answers.json、paired-audit.json、residual-failure.json。公开无历史正文摘要见 docs/benchmark/MEMORY_BGE_MMR_REPORT.json，保留旧公开报告。
+
+冻结 sourceDigest `f244cc2d01019025b405a82490b2eafcfe6473214361dab5ef70031660ac257e`、buildDigest `c8c25607dccfd5ecf9cb547b0218f886ef37e46881c9450a710c96f64fbf91fb`，模型 revision `4d6cd88e18e51a5e020c2c305726d76ada9c03cf`。上一轮 676 个冻结输入与原 663 个父子输入均未变；历史建库已知 2205808、旧 unknown 1 单列，不迁为本批新消耗。此前完整安全扫描的 CRLF 摘要失败仍保留，本轮未改例外或把它记为通过。
+
+已补双语新入口、Memory／评测协议、PLAN、DECISIONS 和本交接；收尾只补文档与结果，功能、测试、依赖及构建保持冻结身份。未提交、推送、合并、改展示值或创建 tag／Release；未启动保留集或全量，无运行中实验请求。
+
+
+## 本地语义补充候选与杂志题筛选（2026-11-05）
+
+用户批准固定 E5 ONNX 本机语义补充方案，离线补齐两条杂志证据且保护全部基线后才使用新 50 万 input+output 预算。实现 semantic-protected-075／080、显式模型准备与 prepare-semantic，不覆盖旧清单或改普通默认。已读原协议、旧结果与当前 main，开始时工作区干净。
+
+真实原生加载初次 ERR_DLOPEN_FAILED；本机系统 VC++ DLL 较旧，隔离 Node 目录尝试也失败。用本机 Office 附带、签名 Valid 的三份微软 VC++ DLL 补充至 ONNX binding 自有目录后加载成功；没有替换系统或旧依赖文件。相关副本、摘要与两次失败保留在 .cache/memory-semantic-tools；实际运行库进入实验输入摘要。模型资产在 .cache/memory-semantic-assets/e5-small-q8-002，准备时首次父目录缺失的失败保留。
+
+杂志原型两阈值均未补齐目标：正文 7948 字符，National Geographic 排第 22、Architectural Digest 第 99；不改阈值或上限，不据此启动付费模型。定向首轮 24/25 通过，一项合成 fixture 使用空引文而被既有 schema 正确拒绝，修正 fixture 后通过；后续 26/26 通过。完整门禁与十一题正式离线结果待本轮后续记录，不能用原型或旧实验代替。 新增缓存身份回归后定向 27/27 通过。首次依赖审计有 Sharp 三项 high，定向 override 到上游修复 0.35.5 后 audit-002 为 high／critical 零、metadata low 一项但 advisories 为空，保留该不一致且不声称零漏洞；十二项 expanded 离线 proof-002 在新锁下通过。根锁及两份 evaluator 锁一致，渲染器保持原有精确值。
+
+
+最终 gates-001 串行 typecheck → lint → test → build 全通过：1503 tests、1500 pass、3 个既有 skip、零 fail／cancelled；约 1.947／1.315／455.465／3.815 秒。门禁前后所有受控文件摘要一致。之后仅补文档及离线结果，不改变已验证源码、测试、依赖或构建。
+
+正式 semantic-offline-001 prepare／preflight／report 均退出 0，prepare 约 187.0 秒。十一套完整库、a3045048 部分库单列；current、旧 protected、semantic-protected-075／080 均为必要证据 16/18、四锚点 4/4，两语义配置新增零、丢失零，全部基线 ID／顺序／正文完整保留。十一题 current 上下文与上一轮 protected-pilot-001 逐字一致。杂志题两配置均 7948 字符，Architectural Digest 名次 99／余弦约 0.784281，National Geographic 名次 22／约 0.800292，均在固定前八名外；不降低门槛或补刊物词典。selected=null、空计划，run --live 明确在读取凭据前拒绝，无 started.json／requests，新 API／提取请求、tokens、unknown／pending 全零。新 50 万预算未消费，不声称已解决语义漏匹配或产生新 QA 成绩。
+
+本地选择编码合计约 161.662 秒、user/system CPU 1819.265／8.531 秒，最大采样 RSS 792.4 MiB；后者不是峰值，两个阈值共用实例缓存，加载及固定 smoke 编码另计。完整事实、原文、角色／时间、排名与逐题得失在 report-6223e68d-965b-4d90-85bc-64ef5feef5c6/offline.json；汇总入口 .cache/memory-semantic-recall/summary.md 与 summary.json。663 个旧输入摘要未变，历史建库已知 2205808、旧 unknown 1 继续单列。
+
+冻结 sourceDigest `8542c11d8e3e6c5ccbd1574e528c7515cf75051780692c15f818e36ee3b29569`、buildDigest `350acc09aa337736f81a5f48f596f32f7e089e9097eb9e579d4a1fa588feae22`；模型 revision `761b726dd34fb83930e26aab4e9ac3899aa1fa78`，五份资产及原生运行库进入输入清单。真实合成编码检查通过，未把固定开发题的原型排名当作独立盲测。
+
+额外完整安全扫描不记为通过：scan-001 缺少必填输出参数而失败；scan-002 下载工具遇 UND_ERR_RES_CONTENT_LENGTH_MISMATCH；scan-003 完成 secrets 阶段后拒绝既有 en.json 的 CRLF 原字节摘要。核对其 LF 内容与 HEAD 完全相同且摘要已批准，其他命中均为已批准合成 fixture；原始失败、脱敏报告及 security-scan-003-analysis.json 保留，未改无关文件、放宽例外或跳过规则。scan-003 未执行后续 audit／license／SBOM；单独官方依赖 audit-002 高危与严重为零，low 元数据缺少明细的局限仍保留。
+
+已同步双语入口、Memory 专题、评测协议、PLAN、DECISIONS；普通默认继续 current。没有提交、推送、合并、改展示值或创建 tag／Release；不启动保留集、全量或新参数搜索。后续若研究其他模型或查询表达，应建立新方案与证据目录，不能把本轮失败改成通过。
+
+
 ## 剩余六文件审阅与交付（2026-11-04）
 
 用户授权检查剩余六个未提交文件，修正问题、跑测试后提交／推送并合并 main。基于已合并的 MCP 修复 d50932d，在当前检出创建 codex/review-bing-mcp-20261104；没有 stash、reset 或丢弃旧修改。初始六文件原字节摘要和完整 diff 保存在 `.cache/bing-mcp-review-20261104/attempt-001/`，本轮同时补本条交接。
