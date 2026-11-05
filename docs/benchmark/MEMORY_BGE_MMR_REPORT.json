@@ -1,0 +1,319 @@
+{
+  "schema": 1,
+  "date": "2026-11-05",
+  "scope": "Eleven previously studied development questions; one run per arm; no held-out evaluation",
+  "baseline": "current",
+  "candidate": "semantic-protected-bge-mmr",
+  "identity": {
+    "baseRevision": "bc26120b22e1c01766d3b0054da5cc5580f4553a",
+    "workingTreeUncommitted": true,
+    "sourceDigest": "f244cc2d01019025b405a82490b2eafcfe6473214361dab5ef70031660ac257e",
+    "buildDigest": "c8c25607dccfd5ecf9cb547b0218f886ef37e46881c9450a710c96f64fbf91fb"
+  },
+  "retrievalModel": {
+    "id": "Xenova/bge-base-en-v1.5",
+    "revision": "4d6cd88e18e51a5e020c2c305726d76ada9c03cf",
+    "precision": "q8",
+    "pooling": "cls",
+    "dimensions": 768,
+    "query": "memoryTerms(question,true), with vendor query instruction",
+    "topCandidates": 8,
+    "maxAdditions": 4,
+    "mmrLambda": 0.7,
+    "bodyCharacterBudget": 8000,
+    "assetHashes": {
+      "config.json": "d83c21fa7366994560727112ef0a31d8a2ec1c280c2a3e66326fdb877f64c91e",
+      "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
+      "tokenizer_config.json": "9261e7d79b44c8195c1cada2b453e55b00aeb81e907a6664974b4d7776172ab3",
+      "special_tokens_map.json": "b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3",
+      "onnx/model_quantized.onnx": "c9729cc84cbd0e9fecc759505d2be65916c9fe05222d7ea26c65fcb3382af38d"
+    }
+  },
+  "reader": {
+    "service": "Go",
+    "model": "deepseek-v4.1-flash",
+    "reasoning": "high",
+    "maxOutputTokens": 32768
+  },
+  "judge": {
+    "model": "deepseek-v4.1-flash",
+    "reasoning": "none",
+    "maxOutputTokens": 16
+  },
+  "offline": {
+    "current": {
+      "necessary": 16,
+      "totalNecessary": 18,
+      "anchors": 4,
+      "gained": 0,
+      "lost": 0
+    },
+    "protected": {
+      "necessary": 16,
+      "totalNecessary": 18,
+      "anchors": 4,
+      "gained": 0,
+      "lost": 0
+    },
+    "semantic-protected-bge-terms": {
+      "necessary": 17,
+      "totalNecessary": 18,
+      "anchors": 4,
+      "gained": 1,
+      "lost": 0
+    },
+    "semantic-protected-bge-mmr": {
+      "necessary": 18,
+      "totalNecessary": 18,
+      "anchors": 4,
+      "gained": 2,
+      "lost": 0
+    }
+  },
+  "groups": [
+    {
+      "arm": "current",
+      "planned": 11,
+      "completed": 11,
+      "correct": 9,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "arm": "semantic-protected-bge-mmr",
+      "planned": 11,
+      "completed": 11,
+      "correct": 10,
+      "failed": 0,
+      "skipped": 0
+    }
+  ],
+  "smoke": {
+    "planned": 12,
+    "completed": 12,
+    "correct": 12
+  },
+  "pairs": [
+    {
+      "questionId": "0862e8bf",
+      "correct": [
+        true,
+        true
+      ],
+      "sameContext": false,
+      "sameRequest": false,
+      "requestHashes": [
+        "b56dfc3d600e0f968c204f7652615d8154063d2876f5ef59c86a033831bec9af",
+        "8afa87890a633fbcbd4ef787748350209cbcd158cb1c4f06dd6f4dc11633eb78"
+      ]
+    },
+    {
+      "questionId": "bc8a6e93_abs",
+      "correct": [
+        true,
+        true
+      ],
+      "sameContext": true,
+      "sameRequest": true,
+      "requestHashes": [
+        "b840b8f9a56a489e653a50f6d1f2fd87ddf239baafb1faeff57318e3e23e93de",
+        "b840b8f9a56a489e653a50f6d1f2fd87ddf239baafb1faeff57318e3e23e93de"
+      ]
+    },
+    {
+      "questionId": "16c90bf4",
+      "correct": [
+        true,
+        true
+      ],
+      "sameContext": true,
+      "sameRequest": true,
+      "requestHashes": [
+        "c74e2ffe34783f60b1d0ad103d341a87b143b6041cddb99d32d33a552454827b",
+        "c74e2ffe34783f60b1d0ad103d341a87b143b6041cddb99d32d33a552454827b"
+      ]
+    },
+    {
+      "questionId": "18dcd5a5",
+      "correct": [
+        true,
+        true
+      ],
+      "sameContext": true,
+      "sameRequest": true,
+      "requestHashes": [
+        "02029ab6c84c830127d4f2dd419287bec9b2eef21de01a06328247ad5b372ec5",
+        "02029ab6c84c830127d4f2dd419287bec9b2eef21de01a06328247ad5b372ec5"
+      ]
+    },
+    {
+      "questionId": "57f827a0",
+      "correct": [
+        false,
+        false
+      ],
+      "sameContext": true,
+      "sameRequest": true,
+      "requestHashes": [
+        "5e930a8c35057250c36c9a489358f1af64f7c796e6da1ff868f0270e1b85e4f1",
+        "5e930a8c35057250c36c9a489358f1af64f7c796e6da1ff868f0270e1b85e4f1"
+      ]
+    },
+    {
+      "questionId": "505af2f5",
+      "correct": [
+        true,
+        true
+      ],
+      "sameContext": true,
+      "sameRequest": true,
+      "requestHashes": [
+        "17ba65749a2435dceb001d72e705eaa1e70b164d6f8d0bcbbb569938a0e234dc",
+        "17ba65749a2435dceb001d72e705eaa1e70b164d6f8d0bcbbb569938a0e234dc"
+      ]
+    },
+    {
+      "questionId": "4dfccbf7",
+      "correct": [
+        true,
+        true
+      ],
+      "sameContext": true,
+      "sameRequest": true,
+      "requestHashes": [
+        "a9cf20898a684f9443e82876f79b6c322656794589029b4cdde9e7fd84d0f573",
+        "a9cf20898a684f9443e82876f79b6c322656794589029b4cdde9e7fd84d0f573"
+      ]
+    },
+    {
+      "questionId": "07741c44",
+      "correct": [
+        true,
+        true
+      ],
+      "sameContext": true,
+      "sameRequest": true,
+      "requestHashes": [
+        "20ec1b948ebc224bcfecad38dc38d60af11299bf1ee4e428b78a120bbe3ac3a2",
+        "20ec1b948ebc224bcfecad38dc38d60af11299bf1ee4e428b78a120bbe3ac3a2"
+      ]
+    },
+    {
+      "questionId": "71315a70",
+      "correct": [
+        true,
+        true
+      ],
+      "sameContext": true,
+      "sameRequest": true,
+      "requestHashes": [
+        "0ae595ddcfcbbd56faaacc091200f1e32b139c6b5bc04243f15c182b9d28ac09",
+        "0ae595ddcfcbbd56faaacc091200f1e32b139c6b5bc04243f15c182b9d28ac09"
+      ]
+    },
+    {
+      "questionId": "1a8a66a6",
+      "correct": [
+        false,
+        true
+      ],
+      "sameContext": false,
+      "sameRequest": false,
+      "requestHashes": [
+        "c73eadc532e0754acd0e6e560616489fec5a3488453e6066b7b85a116da5c21e",
+        "411476b338f788ee431eb267663820cea43177633d57d378fe3350788351614e"
+      ]
+    },
+    {
+      "questionId": "91b15a6e",
+      "correct": [
+        true,
+        true
+      ],
+      "sameContext": true,
+      "sameRequest": true,
+      "requestHashes": [
+        "f3a63213c7b11f989b7ca3ce7e4ce697023d799e8fe7502e056eabe6276a6a9e",
+        "f3a63213c7b11f989b7ca3ce7e4ce697023d799e8fe7502e056eabe6276a6a9e"
+      ]
+    }
+  ],
+  "usage": {
+    "requests": 68,
+    "input": 62473,
+    "output": 5554,
+    "unknown": 0,
+    "pending": 0
+  },
+  "phases": {
+    "answer": {
+      "requests": 34,
+      "input": 56465,
+      "output": 5486,
+      "unknown": 0,
+      "pending": 0
+    },
+    "judge": {
+      "requests": 34,
+      "input": 6008,
+      "output": 68,
+      "unknown": 0,
+      "pending": 0
+    }
+  },
+  "pairedAnswerTokens": [
+    28104,
+    29295
+  ],
+  "pairedAnswerTokenRatio": 1.0423783091374894,
+  "regressions": [],
+  "complete": true,
+  "adoptionEligible": true,
+  "defaultStrategy": "current",
+  "productionDefaultChanged": false,
+  "extractionRequests": 0,
+  "retries": 0,
+  "budget": 500000,
+  "historicalCosts": {
+    "knownTokens": 2205808,
+    "unknownRequests": 1
+  },
+  "latency": {
+    "current": {
+      "meanSeconds": 7.117,
+      "medianSeconds": 6.156,
+      "maxSeconds": 16.746
+    },
+    "semantic-protected-bge-mmr": {
+      "meanSeconds": 6.302,
+      "medianSeconds": 4.968,
+      "maxSeconds": 12.753
+    },
+    "answer": {
+      "meanSeconds": 3.223,
+      "medianSeconds": 2.297,
+      "maxSeconds": 12.073
+    },
+    "judge": {
+      "meanSeconds": 1.172,
+      "medianSeconds": 1.003,
+      "maxSeconds": 3.204
+    }
+  },
+  "localEncoding": {
+    "selectionWallSeconds": 121.004,
+    "cpuUserSeconds": 1441.514,
+    "cpuSystemSeconds": 3.75,
+    "maximumSampledRssMiB": 582.9,
+    "note": "Includes both configurations, shared passage cache; sampled RSS is not peak; setup/loading and fixed smoke encoding are outside selection traces."
+  },
+  "formalIntervals": null,
+  "humanReviewed": false,
+  "limitations": [
+    "Model and method selection used the known magazine development case.",
+    "A single automatically graded paired run does not establish generalization.",
+    "Question 57f827a0 failed in both arms despite identical input and visible preference evidence.",
+    "Earlier failed models and prototypes are retained; they were not erased or rescored.",
+    "Ordinary Memory remains current; local model assets must be configured explicitly."
+  ]
+}

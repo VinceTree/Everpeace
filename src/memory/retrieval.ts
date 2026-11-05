@@ -1,7 +1,7 @@
 import type { LearnedEntry } from "./learned-memory.js";
 import { factLine, type MemoryFact } from "./facts.js";
 
-export type MemoryRetrievalStrategy = "current" | "terms" | "aggregate" | "protected";
+export type MemoryRetrievalStrategy = "current" | "terms" | "aggregate" | "protected" | import("./semantic-retrieval.js").SemanticStrategy;
 // Adoption requires a complete, metered paired experiment. Candidates remain opt-in.
 export const DEFAULT_MEMORY_RETRIEVAL: MemoryRetrievalStrategy = "current";
 
@@ -121,6 +121,7 @@ function protectedSelection(entries: readonly LearnedEntry[], query: string, now
 
 /** Only already-authorized entries may reach this function. Rejected oversized rows consume no diversity quota. */
 export function selectMemoryEntries(entries: readonly LearnedEntry[], query: string, now: Date, budget: number, strategy: MemoryRetrievalStrategy = DEFAULT_MEMORY_RETRIEVAL): LearnedEntry[] {
+  if (strategy.startsWith("semantic-protected-")) throw Error("Semantic retrieval requires the asynchronous encoder path");
   if (strategy === "protected") return protectedSelection(entries, query, now, budget);
   const remaining = rankMemoryEntries(entries, query, now, strategy);
   const seen = new Set<string>(), counts = new Map<string, number>(), selected: LearnedEntry[] = [];

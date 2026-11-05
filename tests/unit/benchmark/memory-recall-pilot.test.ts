@@ -9,6 +9,7 @@ import { MemoryRequestGate, readJson, writeJson, type MemoryRequestRecord } from
 import { normalizeFact } from "../../../src/memory/facts.js";
 import { digest } from "../../../src/benchmark/memory-data.js";
 import type { ResponsesClientLike } from "../../../src/agent/model-protocol.js";
+import { memoryEntryLine, memorySelectionText } from "../../../src/memory/retrieval.js";
 
 const fact = (i: number, text = "cat Luna") => normalizeFact({ id: `fact-${i.toString(16).padStart(24, "0")}`, lesson: text, createdAt: "2026-11-04",
   fact: { speaker: "user", quote: text, messageTime: "2026-11-04", sourceId: `message-${i}`, sourceMessageHash: digest(text), sessionId: `session-${i}` } });
@@ -73,6 +74,39 @@ test("UTF-8 and output reservations include concurrent requests and release afte
   release(); assert.equal(budget.reserved, 0);
   budget.spent = 8999;
   assert.throws(() => budget.reserve({}), /budget_exhausted/u);
+});
+
+test("semantic gain requires both missing facts and exact baseline text; ties prefer 0.80", () => {
+  const cases = [1, 2, 3, 4].map(i => {
+    const facts = [fact(i * 10), fact(i * 10 + 1, "I receive Cedar Review."), fact(i * 10 + 2, "I bought one Ocean Atlas issue.")];
+    const context = (rows: typeof facts) => ({ ids: rows.map(f => f.id), text: memorySelectionText(rows), bodyChars: rows.map(memoryEntryLine).join("\n").length, sources: [] });
+    return { question: { id: `semantic${i}`, type: "multi-session", question: "subscriptions", date: "2026-11-04", historyHash: "hash" }, facts,
+      contexts: { current: context(facts.slice(0, 1)), terms: context(facts.slice(0, 1)), aggregate: context(facts.slice(0, 1)), protected: context(facts.slice(0, 1)),
+        "semantic-protected-075": context(facts), "semantic-protected-080": context(facts) } };
+  });
+  const audit = cases.map((c, i) => ({ questionId: c.question.id, necessary: c.facts.map(f => f.id), anchor: c.facts[0]!.id, rationale: "fixed",
+    ...(i === 0 ? { semanticRequired: c.facts.slice(1).map(f => f.id) } : {}) }));
+  assert.equal(chooseRecallCandidate(cases, audit, "semantic-gain").selected, "semantic-protected-080");
+  cases[0]!.contexts["semantic-protected-080"].text = "changed quote";
+  assert.equal(chooseRecallCandidate(cases, audit, "semantic-gain").selected, "semantic-protected-075");
+  cases[0]!.contexts["semantic-protected-075"].ids.pop();
+  assert.equal(chooseRecallCandidate(cases, audit, "semantic-gain").selected, null);
+  assert.throws(() => chooseRecallCandidate(cases, audit.map(({ semanticRequired: _required, ...a }) => a), "semantic-gain"), /Semantic audit/u);
+});
+
+test("BGE gate selects only the new family and retains both evidence requirements", () => {
+  const cases = [1, 2, 3, 4].map(i => {
+    const facts = [fact(i * 10), fact(i * 10 + 1, "I receive Mountain Ledger."), fact(i * 10 + 2, "I bought one Ocean Atlas issue.")];
+    const context = (rows: typeof facts) => ({ ids: rows.map(f => f.id), text: memorySelectionText(rows), bodyChars: rows.map(memoryEntryLine).join("\n").length, sources: [] });
+    return { question: { id: `bge${i}`, type: "multi-session", question: "serials", date: "2026-11-04", historyHash: "hash" }, facts,
+      contexts: { current: context(facts.slice(0, 1)), terms: context(facts.slice(0, 1)), aggregate: context(facts.slice(0, 1)), protected: context(facts.slice(0, 1)),
+        "semantic-protected-080": context(facts), "semantic-protected-bge-terms": context(facts.slice(0, 2)), "semantic-protected-bge-mmr": context(facts) } };
+  });
+  const audit = cases.map((c, i) => ({ questionId: c.question.id, necessary: c.facts.map(f => f.id), anchor: c.facts[0]!.id, rationale: "fixed",
+    ...(i === 0 ? { semanticRequired: c.facts.slice(1).map(f => f.id) } : {}) }));
+  assert.equal(chooseRecallCandidate(cases, audit, "semantic-model-gain").selected, "semantic-protected-bge-mmr");
+  cases[0]!.contexts["semantic-protected-bge-mmr"].ids.pop();
+  assert.equal(chooseRecallCandidate(cases, audit, "semantic-model-gain").selected, null);
 });
 
 test("fixed provider requests persist once, settle usage and never call extraction", { timeout: 10_000 }, async t => {

@@ -199,6 +199,10 @@ pnpm build
 
 明确授权后，可用 `pnpm benchmark:memory-pilot prepare-skipped <新绝对目录> <已结束父批次目录>` 仅接续 skipped，再对新目录运行 `--live`。已完成项、失败项和通过的 smoke 保留；父批次未知用量继续披露。
 
+BGE base／MMR 实验使用 `pnpm benchmark:memory-recall prepare-bge-model <新模型目录>` 与 `prepare-bge <新目录> <父批次> <子批次> <语义审计JSON> <模型目录>`，然后沿用 `preflight`、`run --live` 和 `report`。完整保留基线证据，比较直接相关性与 MMR 的补充效果；模型资产仍须显式准备，普通默认继续 `current`。 本轮配对实测 22 项全部完成：`current` 9/11、BGE/MMR 10/11，原正确题无回退；恢复了杂志证据，含 smoke 与评分共用 68027 input+output tokens，满足预设实验采用条件。结果来自已研究开发题的一次重复，不是保留集验证。[公开结果](docs/benchmark/MEMORY_BGE_MMR_REPORT.json)。
+
+本地语义召回为显式实验候选。先执行 `pnpm benchmark:memory-recall prepare-model <新模型目录>`，再执行 `prepare-semantic <新目录> <父批次> <子批次> <语义审计JSON> <模型目录>`，之后使用 `preflight`、`run --live` 和 `report`。固定 E5 ONNX 模型在本机 CPU 编码，完整保留 BM25 基线；审计要求的两条遗漏事实必须同时补齐才允许实测。普通默认仍为 `current`，不隐式下载模型；Windows 需要兼容的 VC++ 运行库。 此前 E5 离线两个阈值均保留 16/18 条必要证据，但两条遗漏的杂志事实均未找回，未通过实测门禁，新增 API tokens 为零。见[评测协议](docs/benchmark/MEMORY_FACT_PRESERVATION.md)。
+
 聚合丢失修复使用 `pnpm benchmark:memory-recall prepare-protected <新绝对目录> <已结束父批次> <已结束子批次> <必要证据审计JSON>`。该入口显式冻结修复验收：保留全部基线条目并找回审计丢失后进入已授权实测，另报实际证据增益；默认采用仍须满足问答质量和成本条件。
 
 冻结事实库召回实验使用 `pnpm benchmark:memory-recall prepare <新绝对目录> <已结束父批次> <已结束子批次> <必要证据审计JSON>`，然后执行 `preflight <目录>`、`run <目录> --live` 和 `report <目录>`。它比较本地召回候选且不重新提取；默认 prepare 模式要求必要证据增加且无损失，并在明确授权及新设 50 万 token 预算下实测，否则止于离线。见[实验协议](docs/benchmark/MEMORY_FACT_PRESERVATION.md)。

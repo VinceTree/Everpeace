@@ -1,3 +1,5 @@
+import { selectMemoryEntriesAsync, type SemanticStrategy, type SemanticEncoder, type SemanticTrace } from "../memory/semantic-retrieval.js";
+import { loadLocalEncoder, prepareSemanticAssets, verifySemanticAssets, semanticRuntimeFiles, BGE_BASE_MODEL, E5_MODEL } from "../memory/local-encoder.js";
 /** Sealed-store retrieval ablation and explicitly authorized reader-only pilot. Never builds memory. */
 import path from "node:path";
 import { readFile, mkdir } from "node:fs/promises";
@@ -14,17 +16,21 @@ import type { ResponsesClientLike, ResponsesRequestOptions } from "../agent/mode
 import { assertCompletedModelResponse } from "../providers/capabilities.js";
 
 const BUDGET = 500_000;
-const strategies = ["current", "terms", "aggregate", "protected"] as const;
-interface Context { text: string; ids: string[]; bodyChars: number; sources: string[] }
-interface Case { question: Omit<MemoryQuestion, "history">; facts: MemoryFact[]; contexts: Record<MemoryRetrievalStrategy, Context> }
-interface EvidenceAudit { questionId: string; necessary: string[]; anchor?: string; rationale: string }
-export type RecallSelectionPolicy = "evidence-gain" | "preservation-repair";
+const legacyStrategies = ["current", "terms", "aggregate", "protected"] as const;
+const semanticStrategies = ["semantic-protected-075", "semantic-protected-080"] as const;
+const modelStrategies = ["semantic-protected-bge-terms", "semantic-protected-bge-mmr"] as const;
+const strategies = [...legacyStrategies, ...semanticStrategies, ...modelStrategies];
+interface Context { text: string; ids: string[]; bodyChars: number; sources: string[]; semantic?: SemanticTrace }
+interface Case { question: Omit<MemoryQuestion, "history">; facts: MemoryFact[]; contexts: Record<typeof legacyStrategies[number], Context> & Partial<Record<SemanticStrategy, Context>> }
+interface EvidenceAudit { questionId: string; necessary: string[]; anchor?: string; rationale: string; semanticRequired?: string[] }
+export type RecallSelectionPolicy = "evidence-gain" | "preservation-repair" | "semantic-gain" | "semantic-model-gain";
 interface Manifest {
   identity: Awaited<ReturnType<typeof memoryIdentity>>; files: Record<string, string>; inputHashes: Record<string, string>;
   model: { modelId: string; rawModelId: string; endpoint: string }; budget: number; seed: number;
   selected: MemoryRetrievalStrategy | null; createdAt: string; partial: string[];
   parentKnownTokens: number; parentUnknown: number;
   selectionPolicy?: RecallSelectionPolicy;
+  encoder?: { directory: string; identity: string };
 }
 interface PlanItem { key: string; questionId: string; arm: MemoryRetrievalStrategy; smoke: boolean }
 interface Result extends PlanItem { status: "completed" | "failed" | "skipped"; correct: boolean | null; hypothesis?: string; failure?: string; durationMs?: number }
@@ -41,32 +47,54 @@ export function recallContext(facts: readonly MemoryFact[], query: string, now: 
   return { text: memorySelectionText(selected), ids: selected.map(e => e.id), bodyChars: selected.map(memoryEntryLine).join("\n").length,
     sources: [...new Set(selected.flatMap(e => e.fact?.sessionId ? [e.fact.sessionId] : []))] };
 }
+export async function semanticRecallContext(facts: readonly MemoryFact[], query: string, now: Date, strategy: SemanticStrategy, encoder: SemanticEncoder): Promise<Context> {
+  const eligible = facts.filter(e => e.status === "active" && !memoryEntryExpired(e, now) && memoryEntryHasProvenance(e));
+  let trace: SemanticTrace | undefined;
+  const selected = await selectMemoryEntriesAsync(eligible, query, now, 8000, strategy, { encoder, trace: value => { trace = value; } });
+  return { text: memorySelectionText(selected), ids: selected.map(e => e.id), bodyChars: selected.map(memoryEntryLine).join("\n").length,
+    sources: [...new Set(selected.flatMap(e => e.fact?.source?.sessionId ?? e.fact?.sessionId ?? []))], ...(trace ? { semantic: trace } : {}) };
+}
 export function chooseRecallCandidate(cases: Case[], audit: EvidenceAudit[], policy: RecallSelectionPolicy = "evidence-gain"): { selected: MemoryRetrievalStrategy | null; counts: unknown; policy: RecallSelectionPolicy } {
   if (new Set(cases.map(c => c.question.id)).size !== cases.length || new Set(audit.map(a => a.questionId)).size !== cases.length || audit.length !== cases.length
     || audit.filter(a => a.anchor).length !== 4) throw Error("Audit coverage differs");
   const available = strategies.filter(s => cases.every(c => c.contexts[s]));
   if (policy === "preservation-repair" && !available.includes("protected")) throw Error("Protected strategy missing");
+  const semanticPolicy = policy === "semantic-gain" || policy === "semantic-model-gain";
+  const candidates = policy === "semantic-model-gain" ? modelStrategies : semanticStrategies;
+  if (semanticPolicy && (!candidates.every(s => available.includes(s)) || !audit.some(a => (a.semanticRequired?.length ?? 0) >= 2))) throw Error("Semantic audit or strategies missing");
   const counts = available.map(strategy => {
-    let gain = 0, lost = 0, anchors = 0, repairRequired = 0, repaired = 0, baselinePreserved = true;
+    let gain = 0, lost = 0, anchors = 0, repairRequired = 0, repaired = 0, baselinePreserved = true, semanticComplete = true;
     for (const c of cases) {
       const a = audit.find(v => v.questionId === c.question.id);
       if (!a || !a.necessary.length || new Set(a.necessary).size !== a.necessary.length || a.necessary.some(id => !c.facts.some(f => f.id === id))
         || a.anchor && !a.necessary.includes(a.anchor)) throw Error("Audit fact missing");
       const before = a.necessary.filter(id => c.contexts.current.ids.includes(id)).length;
-      const after = a.necessary.filter(id => c.contexts[strategy].ids.includes(id)).length;
+      const after = a.necessary.filter(id => c.contexts[strategy]!.ids.includes(id)).length;
       gain += Math.max(0, after - before);
-      lost += a.necessary.filter(id => c.contexts.current.ids.includes(id) && !c.contexts[strategy].ids.includes(id)).length;
-      if (a.anchor && c.contexts[strategy].ids.includes(a.anchor)) anchors++;
+      lost += a.necessary.filter(id => c.contexts.current.ids.includes(id) && !c.contexts[strategy]!.ids.includes(id)).length;
+      if (a.anchor && c.contexts[strategy]!.ids.includes(a.anchor)) anchors++;
       const oldLosses = a.necessary.filter(id => c.contexts.current.ids.includes(id) && !c.contexts.aggregate.ids.includes(id));
       repairRequired += oldLosses.length;
-      repaired += oldLosses.filter(id => c.contexts[strategy].ids.includes(id)).length;
-      baselinePreserved &&= c.contexts.current.ids.every((id, i) => c.contexts[strategy].ids[i] === id) && c.contexts[strategy].bodyChars <= 8000;
+      repaired += oldLosses.filter(id => c.contexts[strategy]!.ids.includes(id)).length;
+      baselinePreserved &&= c.contexts.current.ids.every((id, i) => c.contexts[strategy]!.ids[i] === id) && c.contexts[strategy]!.bodyChars <= 8000;
+      if (semanticPolicy) {
+        const entries = c.contexts[strategy]!.ids.map(id => {
+          const fact = c.facts.find(f => f.id === id); if (!fact) throw Error("Unknown context fact"); return fact;
+        });
+        baselinePreserved &&= c.contexts[strategy]!.text === memorySelectionText(entries)
+          && c.contexts[strategy]!.bodyChars === entries.map(memoryEntryLine).join("\n").length;
+      }
+      if (a.semanticRequired) {
+        if (new Set(a.semanticRequired).size !== a.semanticRequired.length || a.semanticRequired.some(id => !a.necessary.includes(id) || c.contexts.current.ids.includes(id))) throw Error("Invalid semantic audit requirement");
+        semanticComplete &&= a.semanticRequired.every(id => c.contexts[strategy]!.ids.includes(id));
+      }
     }
     const eligible = policy === "preservation-repair" ? strategy === "protected" && baselinePreserved && repairRequired > 0 && repaired === repairRequired && lost === 0 && anchors === 4
+      : semanticPolicy ? candidates.some(s => s === strategy) && baselinePreserved && semanticComplete && gain > 0 && lost === 0 && anchors === 4
       : strategy !== "current" && gain > 0 && lost === 0 && anchors === 4;
-    return { strategy, gain, lost, anchors, repairRequired, repaired, baselinePreserved, eligible };
+    return { strategy, gain, lost, anchors, repairRequired, repaired, baselinePreserved, semanticComplete, eligible };
   });
-  const winner = counts.filter(c => c.eligible).sort((a, b) => b.gain - a.gain || strategies.indexOf(a.strategy) - strategies.indexOf(b.strategy))[0];
+  const winner = counts.filter(c => c.eligible).sort((a, b) => b.gain - a.gain || (semanticPolicy ? strategies.indexOf(b.strategy) - strategies.indexOf(a.strategy) : strategies.indexOf(a.strategy) - strategies.indexOf(b.strategy)))[0];
   return { selected: winner?.strategy ?? null, counts, policy };
 }
 
@@ -76,18 +104,24 @@ export async function verifyRecallInputs(root: string, checkIdentity = true): Pr
   const m = JSON.parse(bytes.toString("utf8")) as Manifest;
   if (m.budget !== BUDGET || m.seed !== 16716 || m.model.rawModelId !== "deepseek-v4.1-flash"
     || m.model.endpoint !== "https://opencode.ai/inference/go/openai/v1"
-    || m.selectionPolicy !== undefined && !["evidence-gain", "preservation-repair"].includes(m.selectionPolicy)) throw Error("Unreviewed authorization or model");
+    || m.selectionPolicy !== undefined && !["evidence-gain", "preservation-repair", "semantic-gain", "semantic-model-gain"].includes(m.selectionPolicy)) throw Error("Unreviewed authorization or model");
   if (checkIdentity && JSON.stringify(m.identity) !== JSON.stringify(await memoryIdentity())) throw Error("Candidate identity changed");
+  if (m.selectionPolicy === "semantic-gain" || m.selectionPolicy === "semantic-model-gain") {
+    if (!m.encoder) throw Error("Encoder identity missing");
+    const assets = await verifySemanticAssets(m.encoder.directory);
+    if (assets.identity !== m.encoder.identity || assets.model !== (m.selectionPolicy === "semantic-model-gain" ? BGE_BASE_MODEL : E5_MODEL)) throw Error("Encoder identity changed");
+  }
   for (const [file, hash] of Object.entries({ ...m.inputHashes, ...Object.fromEntries(Object.entries(m.files).map(([f, h]) => [path.join(root, f), h])) })) {
     if (digest(await readFile(file)) !== hash) throw Error("Frozen input changed");
   }
   return m;
 }
 
-async function prepare(root: string, parent: string, child: string, auditFile: string, policy: RecallSelectionPolicy = "evidence-gain"): Promise<void> {
+async function prepare(root: string, parent: string, child: string, auditFile: string, policy: RecallSelectionPolicy = "evidence-gain", encoderDirectory?: string): Promise<void> {
   // Atomic directory claim makes all subsequent writes owned and refuses all prior output.
   if ([parent, child].some(p => root === p || root.startsWith(p + path.sep))) throw Error("Output must be outside old experiments");
   await mkdir(root);
+  const identity = await memoryIdentity();
   const inputHashes: Record<string, string> = {};
   const frozen = async <T>(file: string): Promise<T> => { const bytes = await readFile(file); inputHashes[file] = digest(bytes); return JSON.parse(bytes.toString("utf8")) as T; };
   const cm = await frozen<{ continuation: { parentRoot: string }; planned: Array<{ key: string; questionId: string; arm: string }>; model: Manifest["model"] }>(path.join(child, "manifest.json"));
@@ -105,6 +139,7 @@ async function prepare(root: string, parent: string, child: string, auditFile: s
   }
   const questions = await frozen<MemoryQuestion[]>(path.join(child, "history.json"));
   const cases: Case[] = [], partial: string[] = [];
+  const caseTimes = new Map<string, Date>();
   for (const item of cm.planned.filter(p => p.arm === "fact-memory")) {
     const row = rows.find(r => r.key === item.key); if (!row) throw Error("Missing source row");
     const owner = row.retainedFrom ? path.resolve(row.retainedFrom) : child;
@@ -115,10 +150,28 @@ async function prepare(root: string, parent: string, child: string, auditFile: s
     if (!completeFactStore(checkpoint.next, q.history.length)) { partial.push(q.id); continue; }
     const facts = (await frozen<unknown[]>(recallFactsFile(sample))).map(normalizeFact);
     const question = { id: q.id, type: q.type, question: q.question, date: q.date, historyHash: q.historyHash };
-    const contexts = Object.fromEntries(strategies.map(s => [s, recallContext(facts, q.question, new Date(stops.get(owner)!), s)])) as Case["contexts"];
+    const contexts = Object.fromEntries(legacyStrategies.map(s => [s, recallContext(facts, q.question, new Date(stops.get(owner)!), s)])) as Case["contexts"];
     cases.push({ question, facts, contexts });
+    caseTimes.set(q.id, new Date(stops.get(owner)!));
   }
   if (cases.length !== 11 || partial.length !== 1) throw Error("Expected eleven complete stores and one partial");
+  let encoder: Manifest["encoder"];
+  const candidates = policy === "semantic-model-gain" ? modelStrategies : semanticStrategies;
+  if (policy === "semantic-gain" || policy === "semantic-model-gain") {
+    if (!encoderDirectory) throw Error("Encoder directory required");
+    const assets = await verifySemanticAssets(encoderDirectory);
+    if (policy === "semantic-model-gain" && assets.model !== BGE_BASE_MODEL) throw Error("BGE base assets required");
+    if (policy === "semantic-gain" && assets.model !== E5_MODEL) throw Error("E5 assets required");
+    Object.assign(inputHashes, assets.files, await semanticRuntimeFiles());
+    encoder = { directory: encoderDirectory, identity: assets.identity };
+    const local = await loadLocalEncoder(encoderDirectory);
+    try {
+      for (const c of cases) for (const strategy of candidates) {
+        c.contexts[strategy] = await semanticRecallContext(c.facts, c.question.question, caseTimes.get(c.question.id)!, strategy, local);
+        console.log(JSON.stringify({ prepared: c.question.id, strategy, bodyChars: c.contexts[strategy]!.bodyChars }));
+      }
+    } finally { await local.dispose(); }
+  }
   // Retrieval finishes before any audit labels or references are loaded.
   const audit = await frozen<EvidenceAudit[]>(auditFile);
   const selection = chooseRecallCandidate(cases, audit, policy);
@@ -126,6 +179,12 @@ async function prepare(root: string, parent: string, child: string, auditFile: s
   const templates = await frozen<string[]>(path.join(child, "judge-templates.json"));
   const smokes = await smokeCases();
   inputHashes[path.join(MEMORY_REPOSITORY, "tests/fixtures/memory-fact-preservation.json")] = digest(await readFile(path.join(MEMORY_REPOSITORY, "tests/fixtures/memory-fact-preservation.json")));
+  if (encoder) {
+    const local = await loadLocalEncoder(encoder.directory);
+    try { for (const c of smokes.cases) for (const strategy of candidates)
+      c.contexts[strategy] = await semanticRecallContext(c.facts, c.question.question, new Date(c.question.date), strategy, local);
+    } finally { await local.dispose(); }
+  }
   const planned = pairedPlan(cases, smokes.cases, selection.selected);
   const files: Record<string, string> = {};
   for (const [name, value] of Object.entries({ "cases.json": cases, "audit.json": audit, "references.json": [...refs.filter(r => cases.some(c => c.question.id === r.id)), ...smokes.references],
@@ -133,11 +192,12 @@ async function prepare(root: string, parent: string, child: string, auditFile: s
     "prompts.json": { reader: READER_INSTRUCTIONS, reasoning: "high", output: 32768, judgeOutput: 16, bodyChars: 8000 } })) {
     await writeJson(path.join(root, name), value, true); files[name] = digest(await readFile(path.join(root, name)));
   }
-  const manifest: Manifest = { identity: await memoryIdentity(), files, inputHashes, model: cm.model, selected: selection.selected,
-    budget: BUDGET, seed: 16716, createdAt: new Date().toISOString(), partial, parentKnownTokens, parentUnknown, selectionPolicy: policy };
+  if (JSON.stringify(identity) !== JSON.stringify(await memoryIdentity())) throw Error("Candidate changed during preparation");
+  const manifest: Manifest = { identity, files, inputHashes, model: cm.model, selected: selection.selected,
+    budget: BUDGET, seed: 16716, createdAt: new Date().toISOString(), partial, parentKnownTokens, parentUnknown, selectionPolicy: policy, ...(encoder ? { encoder } : {}) };
   await writeJson(path.join(root, "manifest.json"), manifest, true);
   await writeJson(path.join(root, "manifest-hash.json"), { sha256: digest(await readFile(path.join(root, "manifest.json"))) }, true);
-  await writeJson(path.join(root, "authorization.json"), { liveAuthorized: true, executableCampaign: selection.selected !== null, selectionPolicy: policy, totalInputOutputTokens: BUDGET, source: "User explicitly authorized the local chat to repair aggregation and run the 500000-token pilot after offline acceptance without asking again", extractionRequests: 0 }, true);
+  await writeJson(path.join(root, "authorization.json"), { liveAuthorized: true, executableCampaign: selection.selected !== null, selectionPolicy: policy, totalInputOutputTokens: BUDGET, source: policy === "semantic-gain" || policy === "semantic-model-gain" ? "User authorized the local semantic recall pilot with a new 500000-token budget after offline acceptance, without asking again" : "User explicitly authorized the local chat to repair aggregation and run the 500000-token pilot after offline acceptance without asking again", extractionRequests: 0 }, true);
   await verifyRecallInputs(root);
   console.log(JSON.stringify({ ...selection, completeStores: cases.length, partial, modelRequests: 0 }));
 }
@@ -158,7 +218,7 @@ async function smokeCases(): Promise<{ cases: Case[]; references: MemoryReferenc
     const facts = t.history.flatMap(s => s.messages.map((m, i) => normalizeFact({ id: `fact-${digest(`${id}:${s.id}:${i}`).slice(0, 24)}`, scope: "project", lesson: m.content,
       createdAt: s.date, fact: { speaker: m.role, quote: m.content, messageTime: s.date, sourceId: `${s.id}:${i}`, sessionId: s.id, sourceMessageHash: digest(m.content) } })));
     const question: Case["question"] = { id: `smoke-${id}${t.expected.answer === null ? "_abs" : ""}`, question: t.question, date: t.questionDate, historyHash: digest(JSON.stringify(t.history)), type: id === "update-current" ? "knowledge-update" : "single-session-user" };
-    cases.push({ question, facts, contexts: Object.fromEntries(strategies.map(s => [s, recallContext(facts, t.question, new Date(t.questionDate), s)])) as Case["contexts"] });
+    cases.push({ question, facts, contexts: Object.fromEntries(legacyStrategies.map(s => [s, recallContext(facts, t.question, new Date(t.questionDate), s)])) as Case["contexts"] });
     references.push({ id: question.id, answer: t.expected.answer ?? "Not enough information is available to answer.", evidence: [] });
   }
   return { cases, references };
@@ -213,8 +273,10 @@ async function preflight(root: string): Promise<void> {
   const m = await verifyRecallInputs(root);
   const cases = [...await readJson<Case[]>(path.join(root, "cases.json")), ...await readJson<Case[]>(path.join(root, "smoke.json"))];
   for (const c of cases) for (const s of strategies.filter(s => c.contexts[s])) {
-    const context = c.contexts[s];
+    const context = c.contexts[s]!;
     if (context.bodyChars > 8000 || context.ids.some(id => !c.facts.some(f => f.id === id))) throw Error("Invalid context");
+    const entries = context.ids.map(id => c.facts.find(f => f.id === id)!);
+    if (context.text !== memorySelectionText(entries) || context.bodyChars !== entries.map(memoryEntryLine).join("\n").length) throw Error("Context differs from frozen facts");
   }
   const selection = chooseRecallCandidate(cases.filter(c => !c.question.id.startsWith("smoke-")), await readJson(path.join(root, "audit.json")), m.selectionPolicy);
   if (selection.selected !== m.selected) throw Error("Selection differs");
@@ -249,7 +311,7 @@ async function run(root: string): Promise<void> {
     row.status = "failed"; const started = performance.now();
     try {
       const c = cases.get(item.questionId)!;
-      row.hypothesis = await answerMemoryQuestion(client(item.key, "answer"), model.model_name, c.question.question, c.question.date, c.contexts[item.arm].text, gate.controller.signal);
+      row.hypothesis = await answerMemoryQuestion(client(item.key, "answer"), model.model_name, c.question.question, c.question.date, c.contexts[item.arm]!.text, gate.controller.signal);
       const response = await client(item.key, "judge").responses.create({ model: model.model_name, store: false, input: judgePrompt(templates, c.question as MemoryQuestion, refs.get(item.questionId)!.answer, row.hypothesis), reasoning: { effort: "none" }, max_output_tokens: 16 }, { signal: gate.controller.signal, maxRetries: 0, timeout: 30000 });
       assertCompletedModelResponse(response, "doctor"); row.correct = parseJudgeLabel(response.output_text); row.status = "completed";
       if (item.smoke && !row.correct) gate.stop("smoke_failed");
@@ -286,10 +348,18 @@ async function report(root: string): Promise<void> {
   const offline = cases.map(c => {
     const a = audit.find(a => a.questionId === c.question.id)!;
     return { questionId: c.question.id, query: c.question.question, strategies: strategies.filter(s => c.contexts[s]).map(strategy => {
-      const context = c.contexts[strategy], baseline = c.contexts.current;
+      const context = c.contexts[strategy]!, baseline = c.contexts.current;
       const necessary = a.necessary.filter(id => context.ids.includes(id));
       return { strategy, bodyChars: context.bodyChars, facts: context.ids.length, sources: context.sources.length,
+        evidence: a.necessary.map(id => {
+          const f = c.facts.find(f => f.id === id)!;
+          const ranked = context.semantic?.ranked.find(r => r.id === id);
+          return { id, statement: f.lesson, quote: f.fact.quote, speaker: f.fact.speaker, messageTime: f.fact.messageTime, eventTime: f.fact.eventTime,
+            source: f.fact.source?.sessionId ?? f.fact.sessionId, present: context.ids.includes(id), baseline: baseline.ids.includes(id),
+            score: ranked?.score, rank: ranked ? context.semantic!.ranked.indexOf(ranked) + 1 : null };
+        }),
         necessary, gainedNecessary: necessary.filter(id => !baseline.ids.includes(id)), lostNecessary: a.necessary.filter(id => baseline.ids.includes(id) && !context.ids.includes(id)),
+        semantic: context.semantic,
         gainedSources: context.sources.filter(id => !baseline.sources.includes(id)), lostSources: baseline.sources.filter(id => !context.sources.includes(id)),
         anchorVisible: a.anchor ? context.ids.includes(a.anchor) && context.text.includes(c.facts.find(f => f.id === a.anchor)!.fact.quote) : null,
         exactDuplicateChars: context.ids.reduce((result, id, i) => { const f = c.facts.find(f => f.id === id)!;
@@ -333,12 +403,16 @@ async function report(root: string): Promise<void> {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [command, arg, parent, child, audit] = process.argv.slice(2);
+  const [command, arg, parent, child, audit, encoderDirectory] = process.argv.slice(2);
   if (!arg || !path.isAbsolute(arg)) throw Error("Supply an absolute new evidence root");
-  if (command === "prepare" && parent && child && audit) await prepare(arg, path.resolve(parent), path.resolve(child), path.resolve(audit));
+  if (command === "prepare-bge-model") await prepareSemanticAssets(path.resolve(arg), BGE_BASE_MODEL);
+  else if (command === "prepare-bge" && parent && child && audit && encoderDirectory) await prepare(arg, path.resolve(parent), path.resolve(child), path.resolve(audit), "semantic-model-gain", path.resolve(encoderDirectory));
+  else if (command === "prepare-model") await prepareSemanticAssets(path.resolve(arg));
+  else if (command === "prepare-semantic" && parent && child && audit && encoderDirectory) await prepare(arg, path.resolve(parent), path.resolve(child), path.resolve(audit), "semantic-gain", path.resolve(encoderDirectory));
+  else if (command === "prepare" && parent && child && audit) await prepare(arg, path.resolve(parent), path.resolve(child), path.resolve(audit));
   else if (command === "prepare-protected" && parent && child && audit) await prepare(arg, path.resolve(parent), path.resolve(child), path.resolve(audit), "preservation-repair");
   else if (command === "preflight") await preflight(arg);
   else if (command === "run" && parent === "--live") await run(arg);
   else if (command === "report") await report(arg);
-  else throw Error("Use prepare <new-root> <parent> <child> <audit>, preflight <root>, run <root> --live, or report <root>");
+  else throw Error("Use prepare-bge-model <new-model-root>, prepare-bge <new-root> <parent> <child> <audit> <model-root>, prepare-model <new-model-root>, prepare-semantic <new-root> <parent> <child> <audit> <model-root>, prepare <new-root> <parent> <child> <audit>, preflight <root>, run <root> --live, or report <root>");
 }

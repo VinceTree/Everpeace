@@ -136,3 +136,43 @@ English: compare `current`, conservative plural normalization (`terms`), and sou
 修复路径只允许 protected：每题 current ID 和顺序均为候选前缀、8000 字符正文内、必要证据逐条无损失、四个锚点保留，并且旧 aggregate 至少存在一条审计丢失且全部找回。报告保留 gain/lost、repairRequired/repaired、baselinePreserved 和实际策略。关联事实只从已授权语料构建局部稀有词图，在剩余预算里完整添加；不使用答案、gold Session、人工关键词或模型提取。原始引文和角色／时间归属保留。
 
 通过修复验收后的 preflight/run/report 沿用原入口及独立新目录。本轮用户已明确授权新 500000 input+output 总预算，smoke、回答、评分全部计入，不再重复询问。真实问答仍比较 current 与 protected 的相同十一题，各一次；六项固定事实 smoke 双臂前置，最大并发二，未知用量与服务故障停止新准入，不自动重试。未达到原 evidence-gain 的事实须持续披露。生产默认采用继续由 QA 完整性、正确数提高、零原正确题回退与回答成本比不超过 1.5 决定。
+
+
+### 本地语义补充与必要证据门禁
+
+```powershell
+pnpm benchmark:memory-recall prepare-model <新模型绝对目录>
+pnpm benchmark:memory-recall prepare-semantic <新实验绝对目录> <已结束父批次> <已结束子批次> <语义审计JSON> <模型绝对目录>
+pnpm benchmark:memory-recall preflight <实验目录>
+pnpm benchmark:memory-recall run <实验目录> --live
+pnpm benchmark:memory-recall report <实验目录>
+```
+
+English: explicitly prepare pinned local E5 ONNX assets, then compare baseline-preserving semantic supplements at fixed 0.75 and 0.80 cosine thresholds. Encoding runs on the local CPU without remote model loading. The ordinary Memory default stays current. Windows requires compatible VC++ runtime libraries; native loading errors fail preparation. CI uses controlled encoders and does not download weights.
+
+prepare-model 独占新目录，固定上游 revision、五份推理资产摘要及 Transformers.js 版本；prepare-semantic 额外冻结实际 ONNX 原生运行库文件。不得覆盖旧目录。模型下载通过既有公共 HTTP／DNS／重定向边界，不传入事实或凭据；编码禁止远程加载。当前固定参数为 480 内容 token 窗、64 重叠、query／passage 前缀、mean pooling、归一化及窗口最大余弦分数。超过模型输入上限时只分窗编码，不裁剪注入事实。
+
+语义审计复用原逐题数组，在需要强制补齐的题目添加 semanticRequired 事实 ID 数组。它必须是 necessary 子集，且不能包含基线已召回项；本轮杂志题固定为 Architectural Digest 与单期购买 National Geographic 两条，排序不读取这些 ID。semantic-gain 要求两者同时可见、current 全部 ID／顺序／原文保留、四锚点保留、必要证据逐条无损失及正文预算通过。两候选均通过时先比增益，同分选 0.80；都失败时 selected=null、空计划，run 在读取凭据前拒绝。先生成全部上下文再读标签；开发题已被研究，不声称盲测。
+
+新授权 500000 input+output 仅在门禁通过后执行原六项双臂 smoke 与十一题配对一次，沿用原模型、reader、judge、种子、并发与计量停止规则。所有回答／评分计入同一新预算，不重新提取。原批次建库成本与 unknown 单列。报告保留必要事实原文、角色／时间、相关度和名次、来源与重复字符，编码墙钟、CPU 时间与采样 RSS 另列，RSS 不称作峰值。模型加载和缓存复用不计为 API tokens；API 零调用不等于未做本地推理。
+
+未通过时保留失败配置与证据，不降低门槛、改 top-k 或补刊物词典。新增模型依赖只作显式候选，即使 QA 采用门槛满足也只标记可采用；本轮不自动切换普通安装默认值。
+
+
+### BGE base 与 MMR 的新批次
+
+```powershell
+pnpm benchmark:memory-recall prepare-bge-model <新模型绝对目录>
+pnpm benchmark:memory-recall prepare-bge <新实验绝对目录> <已结束父批次> <已结束子批次> <语义审计JSON> <BGE模型绝对目录>
+pnpm benchmark:memory-recall preflight <实验目录>
+pnpm benchmark:memory-recall run <实验目录> --live
+pnpm benchmark:memory-recall report <实验目录>
+```
+
+English: the BGE-base candidate uses pinned quantized ONNX weights, CLS pooling and the model's query instruction. Compare relevance-only and fixed 0.7 MMR supplements to the unchanged baseline. MMR considers only eligible baseline facts and the eight candidate facts; it never removes baseline entries. Existing E5 manifests retain their original policy and parameters. No automatic asset downloads or default switch occur.
+
+prepare-bge 冻结 semantic-model-gain。两个候选共用 memoryTerms(question,true) 的词项查询与原陈述／引文；普通 reader 题面不变。语义相似度是相对排序，不沿用另一模型的绝对阈值；候选池仍前八，最多补四，正文仍 8000 字符。MMR 在相同池内贪心选 `0.7 × relevance − 0.3 × max similarity(selected)`，装不下不计作已选，同分保持既有稳定次序；两候选门禁同分时选 MMR。
+
+审计沿用 semanticRequired，必须补齐本轮两条遗漏、逐条必要证据无损失、全部 baseline 原文与 ID／顺序原样保留、四锚点可见；先生成上下文再加载标签。模型和方法选择使用过已知开发题，全部原型、失败和诊断保留，不能称作盲测或泛化验证。
+
+用户明确授权同范围 Memory 小样本后续直接使用 tokens，不再重复询问；本轮及后续独立批次默认上限为 500000 input+output。通过离线门禁后自动运行固定六项双臂 smoke 与十一题各组一次，沿用原 Go 模型、reader／judge 设置、种子和并发二。每批从新目录与新账本开始，不自动恢复、重发或删除失败，不把旧 unknown 清零。正式采用仍由完整问答、计量、无回退和成本条件判定，本轮新增依赖保持显式候选。
