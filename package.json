@@ -60,7 +60,7 @@
     "benchmark:product-plan": "node scripts/benchmark/prepare-product-plan.mjs"
   },
   "dependencies": {
-    "@huggingface/transformers": "3.8.1",
+    "@huggingface/transformers": "4.3.2",
     "@inkjs/ui": "2.0.0",
     "@modelcontextprotocol/sdk": "1.32.2",
     "@napi-rs/keyring": "2.1.2",
