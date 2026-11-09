@@ -1,5 +1,11 @@
 # 当前交接
 
+## 依赖修复合并 main（2026-11-09）
+
+用户已授权将 `codex/dependency-pr-compat-20261109` 合并至 main。提交范围继续仅为依赖升级及配套兼容修复；原有 Memory reader／wide、实验报告、脚本入口和测试调整留在本地。本阶段只补合并交接，功能、测试和依赖字节继续匹配已验证的独立提交树；原本地四门禁与完整安全扫描证据见下节。
+
+通过 PR 进入 main，合并前按实际 head SHA 核对 Windows full、Linux portable、security 与 Required checks，失败时修复并重新验证，不绕过检查；合并后核对远端 main、主分支 CI 和本地改动保留情况。实际 PR、工作流、合并 SHA 与保留收据保存在 `.cache/dependency-pr-review-20261109/attempt-001/merge-001/`。本阶段不修改展示版本、不创建 tag 或 Release；提交使用 `[skip publish]`，Release 仍只接受显式手动 dispatch。
+
 ## 依赖 PR 本地整合与兼容修复（2026-11-09）
 
 用户要求处理 GitHub 全部六个依赖 PR #33–#38。本轮在现有 main 检出整合 pnpm/action-setup、OpenAI SDK、Oxlint、Marked、Codex 原生后端与 Transformers.js 升级；开始时已有的 Memory reader／wide 源码、测试、公开报告及文档改动全部保留，原字节和完整 diff 保存于 `.cache/dependency-pr-review-20261109/attempt-001/`。用户随后明确授权本轮修复提交和推送；未授权合并、展示版本或 tag／Release。
