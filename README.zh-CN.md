@@ -203,6 +203,8 @@ BGE base／MMR 实验使用 `pnpm benchmark:memory-recall prepare-bge-model <新
 
 本地语义召回为显式实验候选。先执行 `pnpm benchmark:memory-recall prepare-model <新模型目录>`，再执行 `prepare-semantic <新目录> <父批次> <子批次> <语义审计JSON> <模型目录>`，之后使用 `preflight`、`run --live` 和 `report`。固定 E5 ONNX 模型在本机 CPU 编码，完整保留 BM25 基线；审计要求的两条遗漏事实必须同时补齐才允许实测。普通默认仍为 `current`，不隐式下载模型；Windows 需要兼容的 VC++ 运行库。 此前 E5 离线两个阈值均保留 16/18 条必要证据，但两条遗漏的杂志事实均未找回，未通过实测门禁，新增 API tokens 为零。见[评测协议](docs/benchmark/MEMORY_FACT_PRESERVATION.md)。
 
+编码器资产清单绑定已审阅的运行时。升级 Transformers.js 后，用上述命令在新目录准备资产；旧清单会被拒绝，历史实验文件保留原状。
+
 聚合丢失修复使用 `pnpm benchmark:memory-recall prepare-protected <新绝对目录> <已结束父批次> <已结束子批次> <必要证据审计JSON>`。该入口显式冻结修复验收：保留全部基线条目并找回审计丢失后进入已授权实测，另报实际证据增益；默认采用仍须满足问答质量和成本条件。
 
 冻结事实库召回实验使用 `pnpm benchmark:memory-recall prepare <新绝对目录> <已结束父批次> <已结束子批次> <必要证据审计JSON>`，然后执行 `preflight <目录>`、`run <目录> --live` 和 `report <目录>`。它比较本地召回候选且不重新提取；默认 prepare 模式要求必要证据增加且无损失，并在明确授权及新设 50 万 token 预算下实测，否则止于离线。见[实验协议](docs/benchmark/MEMORY_FACT_PRESERVATION.md)。

@@ -10,6 +10,8 @@ semantic-protected-bge-terms 直接按相关性追加；semantic-protected-bge-m
 
 ## 显式本地语义补充候选
 
+资产清单必须绑定当前已审阅的编码运行时，依赖升级后拒绝旧运行时清单；新目录重新准备，旧资产、实验身份和成绩不改写。
+
 semantic-protected-075／080 先原样保留 current 全部条目，再按本机语义分数检查前八条未选事实，阈值分别为 0.75／0.80，最多追加四条，仍为 8000 字符整条正文。同来源、说话者、时间、陈述与引文完全重复的追加项折叠，状态更新分别保留。同步选择器拒绝语义策略；内部异步选择器供 snapshot 与离线入口共用，普通 snapshot 继续 current，不加载编码器。
 
 编码使用固定 revision 的 Xenova/multilingual-e5-small 量化 ONNX 与精确 Transformers.js 依赖，在本机 CPU 执行。query／passage 前缀、均值池化、归一化，正文按 480 内容 tokens、64 tokens 重叠分窗，取最高余弦分数；引文和事实不改写。模型、tokenizer 和实际原生运行库均按字节冻结；编码阶段禁止远程模型加载。缓存限于单个编码器实例，并按角色与正文摘要隔离，dispose 清除。模型资产由显式准备命令下载，不在普通聊天或 CI 自动下载。Windows 需要兼容的 VC++ 运行库，原生加载失败明确报错。

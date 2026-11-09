@@ -1,5 +1,27 @@
 # 当前交接
 
+## 依赖修复合并 main（2026-11-09）
+
+用户已授权将 `codex/dependency-pr-compat-20261109` 合并至 main。提交范围继续仅为依赖升级及配套兼容修复；原有 Memory reader／wide、实验报告、脚本入口和测试调整留在本地。本阶段只补合并交接，功能、测试和依赖字节继续匹配已验证的独立提交树；原本地四门禁与完整安全扫描证据见下节。
+
+通过 PR 进入 main，合并前按实际 head SHA 核对 Windows full、Linux portable、security 与 Required checks，失败时修复并重新验证，不绕过检查；合并后核对远端 main、主分支 CI 和本地改动保留情况。实际 PR、工作流、合并 SHA 与保留收据保存在 `.cache/dependency-pr-review-20261109/attempt-001/merge-001/`。本阶段不修改展示版本、不创建 tag 或 Release；提交使用 `[skip publish]`，Release 仍只接受显式手动 dispatch。
+
+## 依赖 PR 本地整合与兼容修复（2026-11-09）
+
+用户要求处理 GitHub 全部六个依赖 PR #33–#38。本轮在现有 main 检出整合 pnpm/action-setup、OpenAI SDK、Oxlint、Marked、Codex 原生后端与 Transformers.js 升级；开始时已有的 Memory reader／wide 源码、测试、公开报告及文档改动全部保留，原字节和完整 diff 保存于 `.cache/dependency-pr-review-20261109/attempt-001/`。用户随后明确授权本轮修复提交和推送；未授权合并、展示版本或 tag／Release。
+
+原 GitHub CI：#33 完整通过，#34／35／36 因 expanded evaluator 锁未同步而在 Windows setup 失败；#38 还有编码器运行时身份不匹配；#37 两平台均因 Linux 原生后端固定身份未同步被工作流检查拒绝。原 PR 内容、head SHA、检查结果和失败日志均保存，不将本地验证记作远端 PR 已通过。
+
+同步根锁、两份 evaluator 冻结锁，保留 Sharp 修复约束并绑定新 Transformers.js；同步编码器已审阅运行时及资产回归，旧运行时清单继续明确拒绝，不改写历史模型资产／实验成绩。ONNX 原生目录从 napi-v3 改为新包实际使用的 napi-v6，继续按字节冻结真实运行库。核对固定 Codex tag 的 sandbox、MXC 配置与 Node launcher 源码，同步 Linux CI 的明确身份与原生验证收据，隔离／审批／禁止回退策略不变。对应专题及双语资产准备说明已更新。
+
+定向 40/40 通过，含真实 Windows 的 workspace 保护、LSP 写入／状态读取／网络拒绝和 detached 后代取消。E5、BGE small、BGE base 在独立新身份目录复用已校验权重，实际 CPU 编码、相似度矩阵及长文分窗均通过；零模型 API 请求、零模型下载，旧资产逐项摘要未变。首次 CPU smoke 因 VC++ 前提缺失以 0xC0000005 崩溃；逐阶段探针定位到创建 pipeline，向新 ONNX binding 目录补入三份本机已有、Microsoft 签名 Valid 的兼容运行库后通过。原失败、来源和 DLL 摘要保留，未改系统 DLL、旧模型目录或扩大依赖脚本准入。
+
+混合工作区 `gates-001` 串行 typecheck → lint → test → build 全通过，约 2.977／2.747／374.701／2.668 秒；1525 tests、1522 pass、3 个既有 skip、零 fail／cancelled。962 份源码、测试、脚本、工作流及依赖输入在验证后摘要一致。`install:verify`、文件／进程 owner smoke 和源码安装 CLI／SDK／PTY smoke 均通过。九项 expanded proof 9/9 通过，正常基线、植入缺陷和参考修复均验证，零模型请求。完整安全扫描 `security-002` 通过：全历史与当前凭据审阅、许可证和锁 SBOM 齐全，unreviewedSecrets=0。官方 audit high／critical 为零；low 元数据一项但 advisories 为空的局限仍保留。`security-001` 的许可证步骤因迁移后默认 store 与实际安装 store 不一致而失败；只在本轮命令环境指定既有 store 后重新完整执行，未改仓库或用户全局配置。最终文档、文案、工作流与差异检查及原有改动保留收据见 `closing-verification.json`；本轮修改单独存于 `task-only.patch`。上述证据属于含原有 Memory 改动的工作区。提交前另外隔离本轮差异，重新验证实际提交树；该树的门禁与推送结果见本节后续记录。原有 Memory 改动留在本地，不进入本轮提交。
+
+### 提交树验证与推送
+
+用户已明确授权本轮修复提交和推送。独立提交树只包含本轮十九个文件，原有 Memory reader／wide 及其报告、脚本入口和测试调整继续留在本地。独立 `submit-001/gates-001` 串行四门禁全通过，耗时约 2.570／2.340／335.099／2.152 秒；1506 tests、1503 pass、3 个既有 skip、零 fail／cancelled。956 份代码、测试、依赖和工作流输入在门禁后逐项摘要一致。该提交树的完整 `submit-001/security-001` 也通过；原混合工作区的验证记录与失败均保留，不混为同一代码身份。提交推送目标为 `codex/dependency-pr-compat-20261109`，提交使用 `[skip publish]`；Release 仍只允许手动 dispatch，CI 触发条件保持不变。实际提交 SHA 与远端分支核对收据保存在本轮私有提交证据中；本次没有合并、展示版本、tag 或 Release 操作。
+
 ## Memory 未提交改动审阅与主分支交付（2026-11-05）
 
 用户授权审阅全部 Memory 未提交改动，测试通过后提交、推送并合并 main。开始时二十个相关文件均保存原字节、摘要与完整 diff 至 .cache/memory-submit-review/attempt-001；复用当前检出创建 codex/review-memory-semantic-20261105，未丢弃任何旧修改。核对共享召回、模型资产、标签隔离、权限与取消、预算准入、冻结输入、公开结果与双语文档。默认 current、8000 字符整条正文及原 SDK 语义不变，不重新运行付费实验。
