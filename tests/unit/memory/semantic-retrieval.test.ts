@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { normalizeFact } from "../../../src/memory/facts.js";
 import { selectMemoryEntriesAsync, type SemanticEncoder } from "../../../src/memory/semantic-retrieval.js";
 import { selectMemoryEntries, memoryEntryLine } from "../../../src/memory/retrieval.js";
-import { semanticWindows, verifySemanticAssets, semanticCacheKey } from "../../../src/memory/local-encoder.js";
+import { LOCAL_ENCODER_RUNTIME, semanticWindows, verifySemanticAssets, semanticCacheKey } from "../../../src/memory/local-encoder.js";
 import { semanticRecallContext } from "../../../src/benchmark/memory-recall-pilot.js";
 
 const now = new Date("2026-11-04");
@@ -87,9 +87,13 @@ test("local asset manifests bind runtime, exact file set and bytes, and reject c
   const names = ["config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "onnx/model_quantized.onnx"];
   await mkdir(path.join(root, "onnx"));
   for (const name of names) await writeFile(path.join(root, name), name);
-  const manifest = JSON.stringify({ model: "Xenova/multilingual-e5-small", runtime: "3.8.1", revision: "a".repeat(40), files: Object.fromEntries(names.map(n => [n, hash(n)])) });
+  const manifest = JSON.stringify({ model: "Xenova/multilingual-e5-small", runtime: LOCAL_ENCODER_RUNTIME, revision: "a".repeat(40), files: Object.fromEntries(names.map(n => [n, hash(n)])) });
   await writeFile(path.join(root, "assets.json"), manifest); await writeFile(path.join(root, "assets.sha256"), hash(manifest));
   const valid = await verifySemanticAssets(root); assert.equal(Object.keys(valid.files).length, 7);
+  const oldRuntime = JSON.stringify({ ...JSON.parse(manifest), runtime: "3.8.1" });
+  await writeFile(path.join(root, "assets.json"), oldRuntime); await writeFile(path.join(root, "assets.sha256"), hash(oldRuntime));
+  await assert.rejects(verifySemanticAssets(root), /Unexpected encoder assets/u);
+  await writeFile(path.join(root, "assets.json"), manifest); await writeFile(path.join(root, "assets.sha256"), hash(manifest));
   await writeFile(path.join(root, "tokenizer.json"), "changed"); await assert.rejects(verifySemanticAssets(root), /asset changed/u);
   await writeFile(path.join(root, "assets.json"), manifest + " "); await assert.rejects(verifySemanticAssets(root), /manifest changed/u);
 });

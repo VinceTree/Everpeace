@@ -10,7 +10,8 @@ export const E5_MODEL = MODEL;
 export const BGE_MODEL = "Xenova/bge-small-en-v1.5";
 export const BGE_BASE_MODEL = "Xenova/bge-base-en-v1.5";
 type LocalEncoderModel = typeof MODEL | typeof BGE_MODEL | typeof BGE_BASE_MODEL;
-const RUNTIME = "3.8.1";
+export const LOCAL_ENCODER_RUNTIME = "4.3.2";
+const RUNTIME = LOCAL_ENCODER_RUNTIME;
 const FILES = ["config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "onnx/model_quantized.onnx"];
 const sha = (data: Uint8Array | string) => createHash("sha256").update(data).digest("hex");
 interface Assets { model: string; revision: string; runtime: string; files: Record<string, string> }
@@ -25,7 +26,7 @@ async function runtimeVersion(): Promise<string> {
 export async function semanticRuntimeFiles(): Promise<Record<string, string>> {
   const require = createRequire(import.meta.url), hf = require.resolve("@huggingface/transformers");
   const ort = createRequire(hf).resolve("onnxruntime-node");
-  const root = path.resolve(path.dirname(ort), "../bin/napi-v3", process.platform, process.arch);
+  const root = path.resolve(path.dirname(ort), "../bin/napi-v6", process.platform, process.arch);
   const files: Record<string, string> = {};
   for (const name of (await readdir(root)).sort()) {
     const file = path.join(root, name), stat = await lstat(file);

@@ -33,6 +33,8 @@ pnpm dev
 
 根锁文件变化后同步审阅并冻结 `tests/fixtures/expanded/pnpm-lock.yaml`、`docs/benchmark/real-fixtures/evaluator-lock.yaml` 和 expanded setup 的实际渲染器版本。重新运行对应离线 proof；既有 evaluation 摘要、真实评测成绩和性能数据仍只属于原先冻结候选，不能当作新依赖的结果。
 
+Transformers.js 升级同时复核本地编码器的固定运行时、Sharp 安全补丁 override 和真实 CPU 编码。资产清单与运行时严格绑定；旧实验资产和收据保留原字节，不能改写旧清单使其通过新运行时检查。新实验使用新目录准备资产，升级后的机械回归不替代旧候选的质量评测。
+
 审阅机器人生成的锁差异时也核对传递依赖的降级。新的直接依赖版本不保证所有既有补丁都被保留；无升级兼容性依据时，应保留已经验证的修复，并以实际安装和审计重新确认。
 
 Codex 原生后端更新还须核对固定 tag 的 sandbox 参数与真实隔离测试，同步 Linux CI 的明确已审阅身份和 native receipt。`ci:verify` 检查该身份与 manifest 的精确依赖一致；只改依赖与根锁的机器人 PR 不能替代后端复核。HTTP 客户端跨主版本更新也须核对官方 engines 与当前 Node 最低基线，实测代理、重定向和取消关闭。
