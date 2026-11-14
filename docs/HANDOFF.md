@@ -1,5 +1,85 @@
 # 当前交接
 
+## 流清理修复合并 main（2026-11-14）
+
+用户已授权将`codex/go-stream-cleanup-20261114`合并到main。功能提交54c8407及上述验收证据保持不变；此次仅补合并交接，通过PR核对准确head的Windows、Linux、安全与Required checks后合并，再同步本地主分支。保留本地Memory等未提交改动，不操作代理软件、节点或配置，不创建tag或Release。实际PR、CI、合并SHA与保留校验记录见`.cache/go-proxy-20261114-001/merge.json`。
+
+## Go 代理路径验收与流清理修复（2026-11-14）
+
+用户授权仅修改项目代码，沿用现有代理从零真实编码、token不限，宿主和独立验收通过后提交推送。此次续测没有操作代理软件、节点、配置或端口，没有直连回退；测试进程使用既有127.0.0.1:7892。此前曾操作代理首页、启动独立临时诊断核心，临时核心因旧配置失效不构成有效对照，已停止并清理；后续严格保留用户代理状态。
+
+证据根`.cache/go-proxy-20261114-001`，`summary.json`绑定各原始结果SHA，`gate-receipt.json`绑定完整门禁日志与代码摘要。最终两项都从固定上游Git archive、新工作区和单个基线提交开始，模型调用前证明baseline通过、独立缺陷断言失败；没有旧补丁或未来Git对象。步骤上限MAX_SAFE_INTEGER、任务token null、任务30分钟、流空闲180秒，超时、取消、sandbox、未知用量停止仍保留。原始模型ID为deepseek-v4.1-flash。
+
+| 最终任务 | 参数 | 请求／工具调用 | 已知tokens | 结算 |
+| --- | --- | --- | --- | --- |
+| Chalk browser efficient-001 | low／单次输出32768 | 11／17 | 149276 | completed／verified，acceptance与regression通过 |
+| Commander ANSI staged-003 | low／单次输出8192 | 39／54 | 1378208 | completed／verified，acceptance与regression通过 |
+
+最终两项计量完整、cleanupFailed=false，总50请求／71工具调用／1527484tokens。单次输出上限不是总token预算；不把不同参数混为同配置可靠性成绩。提示要求批量读改；Commander还提供相关文件位置及两处直接迁移的要求，没有提供参考补丁，不宣称无定位提示的盲测。Commander实际加载独立提交树的生产运行时（临时验证提交494602dd，树25343c87ae7682fc781b413ed0a08555923364b7），与待提交源码一致，排除了本地Memory改动；之后仅补交接证据。
+
+Chalk修复缺少navigator时的导入，新增五类浏览器回归；宿主npm test包含XO、AVA覆盖率和tsd，原有警告未关闭。package-lock来自调用前的固定setup，并非模型新增。Commander在help宽度和command默认输出配置中直接调用原生函数，保留stripColor导出包装；新增SGR／OSC／纯文本／宽度／输出布局回归。原非SGR断言保留输入并按Node原生语义更新，未删实质覆盖或改弱检查脚本。宿主npm test通过1381测试（1376pass／5既有skip）及tsd、tsc；不宣称上游不存在的标准typecheck/lint/build脚本被执行。两项最终补丁人工审阅及diff检查通过。
+
+**外部socket断连的具体根因尚未证实，不能宣称已经根治。** baseline-001 HTTP CONNECT与socks-001曾同步截断；后续两项low任务也在约46毫秒内一起关闭，均早于180秒本地截止。另有TLS握手前重置、响应头前EOF和SSE中途EOF；baseline-002失败期间186次公共探针全部200，不能简单归因整个代理不可达。实际协商HTTP/1.1；证据不能区分代理核心、节点或Go上游。
+
+反例全部保留：native-001与显式Connection:close的close-001分别完成50／48请求并通过宿主及独立检查，但native keep-alive、pipelining:0生产候选及重复的显式close-002均再次断连；单任务串行、low推理也有失败。因此这些传输候选、专用证书和请求头修改已撤回，最终代理传输策略与原代码一致。staged-002首轮宿主通过但独立验收发现command遗漏，模型补齐后最终响应又断流，仍保留失败与unknown，不能晋升成功。最终staged-003重新从零开始，没有继承该补丁。
+
+本证据根18次编码尝试共391次请求；另有一次完整计量的短请求头探针63tokens。合计392实际请求、已知13157847tokens、14未知请求；失败消耗已包含，reasoning不与output重复计数。四项完整通过中两项是诊断传输对照，最终生产路径的两个通过不代表一次性2/2或总体计量完整。旧结果与未知用量未重写、未在失败任务内自动重试。
+
+提交仅包含已确定的项目修复：ownResponseStream不再将已结算body的相同读取错误误报为cleanup failure，原传输错误、未知usage和停止准入保留；真实本地CONNECT截断SSE回归确认半帧不成为工具调用、后续请求被拒绝。factory支持显式streamIdleTimeoutMs，默认期限与产品默认步骤上限不变。
+
+最终交付代码匹配独立提交树的typecheck→lint→test→build完整门禁（gates-submission-002）：1509总／1506pass／3既有skip／零fail、cancelled，test约380.278秒。首次独立全量有一项MCP清理失败，单独复查2/2及随后完整门禁通过，原日志保留；更早在主工作区构建遇到活动原生程序文件锁时已首败停止。两种候选网络策略虽通过离线门禁，因live反例仍撤回，不把其额外测试数计入交付结果。最终源码及测试摘要与已通过门禁逐项一致，文档证据另补。
+
+交付分支`codex/go-stream-cleanup-20261114`，提交使用`[skip publish]`；Release workflow核对为仅手动dispatch。提交／推送收据见本地delivery.json。保留原有Memory及迁移等改动，不改展示版本、不创建tag或Release。
+
+## Go 三项从零编码验收（2026-11-14，已结算）
+
+用户授权真实任务从零开始、放开32步、token不限并持续修复。本轮 `.cache/go-fresh-20261114-001/summary.json` 绑定各原始报告SHA。三个任务均从固定上游Git archive导出，新工作区仅一个基线提交，无旧模型补丁或未来Git对象；调用前证明baseline通过、独立缺陷断言失败。Windows链接按core.symlinks=false写链接文本；仅测试进程清除颜色变量。步骤为MAX_SAFE_INTEGER，token budget null，超时、取消、unknown停止与sandbox不变。
+
+| 最终任务 | 请求／工具调用 | 已知tokens | 结算 |
+| --- | --- | --- | --- |
+| Chalk browser 001 | 20／25 | 345048 | completed／verified，独立acceptance与regression通过 |
+| Commander ANSI 009 | 68／87 | 2983021 | completed／verified，独立acceptance与regression通过 |
+| Day.js locale 005＋review-001 | 61／83 | 3398277 | 同一从零任务恢复审阅，最终completed／verified，独立acceptance与regression通过 |
+
+最终三项计量完整、cleanupFailed=false。Chalk修复navigator不存在的浏览器探测并加四类浏览器回归。Commander在command/help两处使用Node原生函数，保留stripColor内部包装，新增OSC／SGR／纯文本／布局回归；原非SGR控制序列断言按原生语义更新，未删实质覆盖。宿主npm test通过，包含1386测试（1381pass／5既有skip）及tsd、tsc；额外check由模型运行，不宣称不存在的标准lint/build已被宿主发现。
+
+Day.js保留全部原测试、四轮时区测试、100%行覆盖率及build/size；修复Windows脚本、将覆盖率阈值移入Jest配置、给旧size工具添加OpenSSL兼容参数。换行规则仍为error，改为严格匹配原始Git字节CRLF，并非关闭规则；差异检查用cr-at-eol区分既有换行与尾空格。最终93套／772测试、每轮6个时区测试通过。宿主串行lint／test／build实际退出0（约4.066／28.941／77.866秒），独立断言通过；无独立typecheck脚本，不声称执行了不存在的检查。
+
+Day.js 005原48请求完成但诊断入口漏接verification_basis确认，正确停为unverified。审阅具体package脚本后，以SHA绑定授权恢复同一task_id与verification债务、原context，追加13请求；原结果和账本不改写。模型未得到参考补丁；恢复属于本轮从零任务的宿主审阅阶段，不作为第二个从零成绩。授权来自用户已明确要求发现问题继续修，未扩大系统权限。测试入口修复在私有run-reviewed.ts，无产品保护绕过。
+
+失败全部保留：Commander 001归档链接准备失败零请求；002宿主通过但遗漏command迁移，独立验收失败；003本地60秒流空闲；004/006/007/008分别在流式、非流式、low推理、每请求新连接对照中出现UND_ERR_SOCKET。005非流式适配器错误只产生1账本attempt，未发HTTP。Day.js 001原Windows脚本导致三轮宿主修复失败，002/003/004分别在流式、非流式、low推理下socket失败。全轮526账本attempt、525实际发起请求、已知24716955tokens，8实际请求unknown＋1本地未发请求unknown；unknown未清零，不推断完整总账单。失败消耗计入上述总数，不将3项最终通过描述为一次性3/3成功率。
+
+链路定位：延长空闲、缓冲响应、low推理和关闭连接复用均未消除代理路径故障；直连同一Go地址后Commander与Day.js收尾成功。直连仅在测试进程设置NO_PROXY，未改全局代理；本机代理监听为MaoMaoCloudCore。只能确认该直接路径本轮完成，不能区分代理／中间链路／上游根因，也不宣称SSE故障彻底修复。Chalk为high代理流式；Commander/Day.js最终为low直连流式，配置差异不混报。
+
+生产修复新增factory显式streamIdleTimeoutMs透传，默认60秒保留；13项定向回归通过。完整typecheck→lint→test→build通过：1527tests／1524pass／3既有skip／零fail或cancelled，约375.493秒全量测试，证据gates-idle-override。本轮未再修改门禁后的产品源码；原流清理错误分类修复继续生效。文档及主仓库diff --check通过。既有Memory等改动保留，未提交／推送／更改版本。
+
+## Go 长任务完成宿主验证（2026-11-14）
+
+用户要求放开32步、继续诊断流故障直到真实任务完整通过，token不限。本轮 .cache/go-unbounded-20261114-001/stream-001 已结算：Commander ANSI 迁移接续 completed／verified，firstVerification=failed、diagnosticRounds=1、最终 suite passed、独立 acceptance passed。37 次真实请求、53 次工具调用、input2237599／output20844，共2258443 tokens，零新增 unknown、零 cleanupFailed。宿主 npm test 执行1380测试（1375pass／5既有skip／0fail）及 tsd、tsc；不宣称上游不存在的标准 lint/build 脚本已被宿主执行。源码实际额外 lint／JS类型检查由模型工具执行，具体输出保留 Session。
+
+步骤上限仅在显式隔离诊断入口设为 Number.MAX_SAFE_INTEGER（9007199254740991），task token null，30分钟超时与取消继续保留；不改产品32步默认。本轮超过32次请求仍完成，证明限制已在评测中解除。沿用原已知用量完整的 ANSI step_limit 补丁，复制新目录／新Session，父报告摘要冻结，不重发旧 unknown 请求；这是接续完成而非从零独立成绩。
+
+真实宿主首轮测试受环境 NO_COLOR=1 影响，DeepSeek 修复 tests/command.configureOutput.test.js：保存并清除三个颜色变量，在 finally 恢复，两个原断言保留，没有修改 manifest／脚本或跳过测试。新增 ANSI layout 回归，并保留 OSC／SGR／纯文本断言。模型在失败后完成一轮实际诊断，宿主重新验证通过；差异审阅及 diff --check 通过。补丁仅在隔离上游任务目录，本仓库产品源码与上一轮已通过四门禁的内容一致，因此本轮未重跑本仓库全套门禁。
+
+流故障排查：本地代理地址仅记录127.0.0.1:7892，生产 coding总超时10分钟／流空闲60秒；诊断包装支持受限错误链、事件数及首事件／空闲时长，不保存凭据。此次37请求全部完整，未复现断流，不能断言代理或服务端根因已修复。上一轮误报清理失败的修复继续生效，全部旧4个unknown与失败保留。可核对报告 stream-001/summary.json（绑定原result SHA256），完整结果 result.json 与 Session。未提交／推送／更改版本。
+
+## Go 真实编码与流清理修复（2026-11-14，已结算）
+
+用户明确授权真实编码、文件修改、测试修复、多轮调用及不限 tokens。独立证据 .cache/go-real-20261114-001；task/campaign budget null。四项真实上游任务先做离线证明：Commander 三项通过；Day.js 旧缓存缺 Git 对象导致基线失败，新克隆与 proof-dayjs-fresh 通过，旧证据保留。首个 proof 的任务名缓存映射错误同样保留。
+
+Day.js locale merge 已修改实现、测试及 package.json，31 工具调用／22 请求，已知 523419 tokens，1 unknown；未通过最终验收。Commander help-option 38 工具调用后流故障停止，23 请求、已知 949270 tokens、1 unknown；余下两个任务 skipped。两批均报告 cleanup_failed，原记录不重写。Commander 收尾时写入取消文件，实际结果已按流故障结算，不能改称成功或完整计量。
+
+离线复现确认 ownResponseStream 将已结束响应体的相同传输错误误报为清理失败，虽然 reader 锁已经释放。最小修复仅在等待 pendingRead 时忽略已记录且同对象的 body error，仍传播原请求错误，保持 unknown、挂起关闭和超时边界。复现修复前 ModelStreamCleanupError／cleanupFailed=true，修复后原 Error／false，bodyLocked 均 false。新增回归及 DeepSeek 契约定向 14/14 通过；完整 typecheck → lint → test → build 全通过，1526 tests／1523 pass／3 skip／零 fail 与 cancelled，日志 gates/。修复后 native-fixed 与 migration-fixed 独立批次已结算，只执行原 skipped 两项，身份及账本分别冻结。ANSI 迁移修改三个文件，43 工具调用／32 请求，1116782 tokens 全计量，外部 acceptance 与 regression 通过，但默认 step_limit 阻止宿主完成，整体 failed。测试框架迁移修改约115文件，51 工具调用／32 请求，已知1403052 tokens＋1 unknown；传输错误正确记录 transport_failure／usage_limited，cleanupFailed 未置位，证实修复真实路径生效；根目录 test-output.log 造成 outsideScope=1，且模型查看过上游目标附近 Git 历史，不能作为独立解题成绩。Day.js 事后独立 acceptance 通过（dayjs-postmortem-acceptance.log），但原宿主验证未完成，原失败与 unknown 不变。未提交推送，既有改动保留。
+
+
+
+ANSI 显式128步接续仅复制已有修改到 native-continuation-001，新 Session／新账本，不改变产品默认或旧失败。两次成功请求后第三次 transport_failure，已知10106 tokens＋1 unknown，cleanupFailed=false，独立 acceptance 仍通过，未完成宿主验证。全部五次运行（四任务＋一次接续）已结束：112请求、已知4002629 tokens、4 unknown，完整编码成功0；推理包含在 output，不重复计费。summary.json 汇总可核对路径。真实请求不能证明服务端根因；本地误分类修复已验证，32步限制属于现有策略而非 token 上限。全部旧失败／跳过与模型修改保留，未重发未知请求。
+
+## Go DeepSeek 真实兼容复测（2026-11-14）
+
+用户授权继续自由测试且不设 token 总上限。本轮复用既有 Go 专用兼容入口，在独立 D:/coding-agent/go-ds-20261114-001 冻结当前源码／构建身份，task/campaign budget 均为 null。文本与两轮只读文件工具验收 2/2 通过，4 次真实请求全部计量完整：input 17705、output 441，共 18146 tokens；206 reasoning 已包含在 output。两次文件读取正确返回随机标记，文件未改动；观察到的推理摘要持久化并原样回传一次，不能记作 full-content 验收。无跳过、请求失败或清理失败。详情 live-result.json 与各 Session；未改生产代码，未重跑四门禁，不将历史门禁作为本轮证据。既有工作区改动保留，未提交／推送。
+
+
 ## 依赖修复合并 main（2026-11-09）
 
 用户已授权将 `codex/dependency-pr-compat-20261109` 合并至 main。提交范围继续仅为依赖升级及配套兼容修复；原有 Memory reader／wide、实验报告、脚本入口和测试调整留在本地。本阶段只补合并交接，功能、测试和依赖字节继续匹配已验证的独立提交树；原本地四门禁与完整安全扫描证据见下节。
