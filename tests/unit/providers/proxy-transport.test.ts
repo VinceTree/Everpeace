@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { connect, type Socket } from "node:net";
 import { test, type TestContext } from "node:test";
+import { ModelStreamCleanupError } from "../../../src/agent/response-errors.js";
+import { RequestAttemptLedger } from "../../../src/agent/request-attempt-ledger.js";
+import { RequestExecutor } from "../../../src/agent/request-executor.js";
 import { createProviderClient, createProviderRuntime, disposeProviderClient, listOfficialModelIds } from "../../../src/providers/openai-compatible.js";
 
 function environment(t: TestContext, values: Record<string, string>) {
@@ -136,4 +139,61 @@ test("invalid proxy configuration fails without revealing embedded credentials",
   assert.throws(() => createProviderClient("https://model-fixture.invalid/v1", "offline-key"), (error: unknown) => {
     assert.ok(error instanceof Error); assert.equal(error.message, "Invalid model HTTP proxy configuration"); return true;
   });
+});
+
+test("a proxy stream peer closing before the terminal preserves the transport error without retry", { timeout: 10_000 }, async (t) => {
+  let requests = 0, tunnels = 0;
+  const target = createServer((_req, res) => {
+    requests++;
+    res.setHeader("Content-Type", "text/event-stream");
+    res.write(`data: ${JSON.stringify({ type: "response.created", response: { id: "interrupted", status: "in_progress" } })}\n\n`);
+    // A partial SSE frame must never become a completed response or tool call.
+    res.write('data: {"type":"response.function_call_arguments.delta","delta":"');
+    const timer = setTimeout(() => res.destroy(), 50);
+    res.on("close", () => clearTimeout(timer));
+  });
+  const targetPort = await listen(t, target);
+  const proxy = createServer();
+  proxy.on("connect", (_req, socket, head) => {
+    tunnels++;
+    const upstream = connect(targetPort, "127.0.0.1", () => {
+      socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      if (head.length) upstream.write(head);
+      socket.pipe(upstream); upstream.pipe(socket);
+    });
+    socket.on("close", () => upstream.destroy());
+    upstream.on("error", () => socket.destroy());
+    upstream.on("close", () => socket.destroy());
+  });
+  const port = await listen(t, proxy);
+  environment(t, { HTTPS_PROXY: `http://127.0.0.1:${port}`, HTTP_PROXY: `http://127.0.0.1:${port}` });
+  const provider = createProviderRuntime("http://model-fixture.invalid/v1", "offline-key", undefined, "fixture");
+  const events: string[] = [];
+  const ledger = new RequestAttemptLedger();
+  const executor = new RequestExecutor(ledger);
+  try {
+    await assert.rejects(executor.execute("coding", async () => {
+      const stream = await provider.responses.stream({ model: "fixture", input: [] }, { maxRetries: 0 });
+      for await (const event of stream) events.push(String(event.type));
+      throw new Error("The interrupted stream must fail before EOF");
+    }), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.ok(!(error instanceof ModelStreamCleanupError));
+      assert.equal((error.cause as { code?: string } | undefined)?.code, "UND_ERR_SOCKET");
+      return true;
+    });
+    assert.deepEqual(events, ["response.created"]);
+    assert.equal(ledger.snapshot().complete, false);
+    assert.equal(ledger.snapshot().attempts[0]?.unknownReason, "transport_failure");
+    let restarted = false;
+    await assert.rejects(executor.execute("coding", async () => {
+      restarted = true;
+      return { usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } };
+    }), { name: "RequestUsageIncompleteError" });
+    assert.equal(restarted, false);
+    assert.deepEqual(ledger.snapshot().attempts.map(attempt => attempt.status), ["failed", "rejected"]);
+    assert.equal(ledger.snapshot().complete, false);
+  } finally { await provider.dispose?.(); }
+  assert.equal(requests, 1);
+  assert.equal(tunnels, 1);
 });

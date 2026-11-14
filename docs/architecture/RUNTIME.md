@@ -25,6 +25,10 @@
 
 ## 生产调用关系
 
+响应流关闭时，已结束响应体的原始传输错误不等于资源清理失败。`ownResponseStream` 等待读取结算后，只忽略与响应体已记录错误对象完全相同的读取拒绝，并继续释放 reader 锁；其他关闭错误、未结算读取和清理超时仍失败关闭。请求错误与未知 usage 保留，不因此重发请求或把缺失用量记为零。回归见 `tests/unit/agent/stream-deadline.test.ts`；`tests/unit/providers/proxy-transport.test.ts` 通过真实本地 CONNECT 截断 SSE，验证原错误、半帧拒绝、未知 usage 和后续请求停止。
+
+生产 factory 接受显式 `streamIdleTimeoutMs`，转交已有 Agent 流消费者；省略仍使用默认空闲期限。受控评测可根据已记录的事件间隔调整等待时间，但不改变单次请求总超时、取消、清理期限或未知用量停止规则。短／长等待的真实消费者回归见 `tests/unit/runtime/production.test.ts`。
+
 [DeepSeek 官方契约回归](../../tests/unit/providers/deepseek-contract.test.ts) 通过实际 SDK 与 fake fetch 观察生产请求及 Session 计量。覆盖原始模型 ID、high/输出上限、不发送服务端会话参数、工具调用配对、completed/incomplete/failed、无终止事件、缺失 usage 和取消。请求从未接触真实模型；reasoning 包含在 output 里，不重复扣预算。官方协议出处：[Responses API](https://api-docs.deepseek.com/guides/responses_api/)。
 
 ```text

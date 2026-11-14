@@ -86,7 +86,12 @@ export function ownResponseStream(response: Response, controller: AbortControlle
       } finally {
         controller.abort();
         signal.removeEventListener("abort", abort);
-        const [closed] = await Promise.allSettled([cleanupDeadline().wait(Promise.all([cancel(), pendingRead ?? Promise.resolve()]), 'response_body')]);
+        // A rejected read can be the already-settled body's transport error.
+        // Joining it proves settlement; it does not imply failed ownership cleanup.
+        const joinedRead = pendingRead?.catch((error: unknown) => {
+          if (!bodyErrored || error !== bodyError) throw error;
+        }) ?? Promise.resolve();
+        const [closed] = await Promise.allSettled([cleanupDeadline().wait(Promise.all([cancel(), joinedRead]), 'response_body')]);
         let failed = closed?.status === "rejected";
         let failure: unknown = closed?.status === "rejected" ? closed.reason : undefined;
         try { reader.releaseLock(); } catch (error) { if (!failed) failure = error; failed = true; }

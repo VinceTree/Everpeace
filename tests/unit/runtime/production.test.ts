@@ -45,6 +45,35 @@ const io: AgentIO = {
   async runBash() { return { stdout: "", stderr: "", exitCode: 0, signal: null }; },
   writeAssistant() {},
 };
+test("production stream idle override bounds silence without inventing usage", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-idle-override-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  for (const [idle, completes] of [[10, false], [1000, true]] as const) {
+    const provider = fakeProvider();
+    const original = provider.responses.stream!;
+    provider.responses.stream = async (params, options) => {
+      const terminal = await original(params, options);
+      return (async function* () {
+        yield { type: 'response.created', response: { id: 'delayed', status: 'in_progress' } };
+        await new Promise(resolve => setTimeout(resolve, 60));
+        yield* terminal;
+      })();
+    };
+    const ledger = new RequestAttemptLedger();
+    const handle = createProductionAgent({
+      model: { id: 'offline', model_name: 'offline', base_url: 'https://compatible.invalid/v1', api_key: 'offline' },
+      workspacePath: root, io, sessionStore: new SessionStore({ directory: path.join(root, String(idle)) }), sessionId: () => undefined,
+      providerRuntime: provider, requestAttemptLedger: ledger, streamIdleTimeoutMs: idle,
+      skills: null, mcp: null, learnedMemoryStore: null, codeNavigation: null, costSettingsStore: null,
+    });
+    try {
+      const result = await handle.agent.runTurn('offline fixture');
+      assert.equal(result.stopReason, completes ? undefined : 'usage_limited');
+      assert.equal(ledger.snapshot().complete, completes);
+      assert.equal(ledger.snapshot().attempts.length, 1);
+    } finally { await handle.dispose(); }
+  }
+});
 test("late request cost retains its admitted Session and price snapshot", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "everpeace-cost-owner-")); t.after(() => fs.rm(root, { recursive: true, force: true }));
   const store = new SessionStore({ directory: path.join(root, "sessions") }), prices = new CostSettingsStore(path.join(root, "cost.json"));

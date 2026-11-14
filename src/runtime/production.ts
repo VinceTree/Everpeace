@@ -110,6 +110,8 @@ export interface ProductionAgentOptions {
   loopStrategy?: import("../agent/tool-feedback-policy.js").LoopStrategy;
   maxSteps?: number;
   maxTurnDurationMs?: number;
+  /** Explicit host override; omitted keeps the agent's normal idle deadline. */
+  streamIdleTimeoutMs?: number;
   memoryIdleDelayMs?: number;
   memoryMinTranscriptChars?: number;
 }
@@ -401,6 +403,7 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     ...(codeNavigation ? { codeNavigation } : {}),
     ...(options.maxSteps === undefined ? {} : { maxSteps: options.maxSteps }),
     ...(options.maxTurnDurationMs === undefined ? {} : { maxTurnDurationMs: options.maxTurnDurationMs }),
+    ...(options.streamIdleTimeoutMs === undefined ? {} : { streamIdleTimeoutMs: options.streamIdleTimeoutMs }),
     ...(provider.capabilities.promptCacheOptions && isOfficialOpenAiBaseUrl(options.model.base_url)
       ? {
           promptCacheKey: () => {

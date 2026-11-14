@@ -8,6 +8,16 @@ import { ownResponseStream } from '../../../src/providers/response-stream.js';
 import OpenAI from 'openai';
 
 const never = () => new Promise<never>(() => {});
+test('settled transport error releases the body without reporting cleanup failure', async () => {
+  const transportError = new Error('synthetic transport termination');
+  const body = new ReadableStream<Uint8Array>({ pull(controller) { controller.error(transportError); } });
+  const controller = new AbortController();
+  let cleanupFailed = false;
+  const stream = ownResponseStream(new Response(body, { headers: { 'content-type': 'text/event-stream' } }), controller, controller.signal, new OpenAI({ apiKey: 'offline' }), () => { cleanupFailed = true; });
+  await assert.rejects(async () => { for await (const event of stream) void event; }, error => error === transportError);
+  assert.equal(cleanupFailed, false);
+  assert.equal(body.locked, false);
+});
 for (const hanging of ['return', 'next'] as const) {
   test(`stream ${hanging} cleanup is bounded`, { timeout: 1500 }, async () => {
     const consumer = new ResponseStreamConsumer({ recovery: false, recoveryCacheMaxBytes: 0, idleTimeoutMs: 10, cleanupTimeoutMs: 30 });
