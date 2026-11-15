@@ -1,5 +1,13 @@
 # 当前交接
 
+## 依赖 PR 验证修复（2026-11-15）
+
+整合 Dependabot #41–#45 的原提交，覆盖 Marked、Undici、OpenAI SDK、Codex 原生后端和 Oxlint。原 #41／#42／#43／#45 的 Windows expanded fixture 在准备阶段发现冻结锁与根锁不一致，#44 的 Windows 和 Linux 都被原生后端身份检查拒绝。合并 OpenAI 与 Undici 的 peer 解析后，同步两份冻结评测锁。九项 expanded proof 均通过正常基线、植入缺陷、参考修复三阶段，模型请求为零。
+
+核对 Codex 固定上游提交 `ce21072c90d32c40af7a55b60b2fb35c84a43a6a` 的沙箱入口、Windows MXC 配置和 Node launcher，三份源码与旧固定版本逐字节一致。更新 Linux AppArmor 准入身份与 Windows native receipt，实际 Windows 运行时参数下的 MXC 启动通过。冻结安装、安装补丁、工作流结构、文档链接校验通过，依赖审计为零高危／严重项，另有八项低危／中危公告。
+
+独立检出用于验证和交付，原工作区的 Memory 等未提交改动保留。串行门禁日志、原 PR 失败日志和合并收据在 `.cache/pr-repair-20261115/`。整合 PR 按最终 head 核对 Windows full、Linux portable、安全扫描与 Required checks，再通过 GitHub merge commit 将五个源提交一起纳入 main。提交使用 `[skip publish]`，Release workflow 仍为独立手动入口。
+
 ## 流清理修复合并 main（2026-11-14）
 
 用户已授权将`codex/go-stream-cleanup-20261114`合并到main。功能提交54c8407及上述验收证据保持不变；此次仅补合并交接，通过PR核对准确head的Windows、Linux、安全与Required checks后合并，再同步本地主分支。保留本地Memory等未提交改动，不操作代理软件、节点或配置，不创建tag或Release。实际PR、CI、合并SHA与保留校验记录见`.cache/go-proxy-20261114-001/merge.json`。
