@@ -12,6 +12,8 @@
 
 交付分支在 Windows 上串行通过 `typecheck → lint → test → build`。共 1533 项测试，1530 通过、3 跳过。179 个文档文件的路径与链接、1011 项双语键、安全扫描及 diff 检查通过。构建版冒烟验证了原版页面、同源鉴权和 OpenCode Go `deepseek-v4.1-flash` 的默认注册项。验证日志在交付工作树的 `.cache/harness-delivery-gates/`。
 
+PR 的 Windows CI 使用可通过目录联接访问的临时目录。网页测试夹具现在先解析其真实路径，和正式 CLI 一样使用规范工作区保存及查找会话。本机以目录联接复现原失败，修正后在相同环境通过 23 项网页协议及工作台回归。
+
 ## 依赖 PR 验证修复（2026-11-15）
 
 整合 Dependabot #41–#45 的原提交，覆盖 Marked、Undici、OpenAI SDK、Codex 原生后端和 Oxlint。原 #41／#42／#43／#45 的 Windows expanded fixture 在准备阶段发现冻结锁与根锁不一致，#44 的 Windows 和 Linux 都被原生后端身份检查拒绝。合并 OpenAI 与 Undici 的 peer 解析后，同步两份冻结评测锁。九项 expanded proof 均通过正常基线、植入缺陷、参考修复三阶段，模型请求为零。

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { appendFile, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -39,7 +39,8 @@ export async function startWebFixture(
   initialModel?: string,
   desktop?: HarnessDesktop,
 ) {
-  const root = await mkdtemp(join(tmpdir(), "everpeace-workbench-"));
+  // The CLI resolves the workspace before creating a workbench. TEMP can be a junction on Windows.
+  const root = await realpath(await mkdtemp(join(tmpdir(), "everpeace-workbench-")));
   const workspace = join(root, "workspace");
   await mkdir(workspace);
   await writeFile(join(workspace, "README.md"), "# Offline workbench\nSecond line.\n");
