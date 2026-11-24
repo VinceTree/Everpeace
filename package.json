@@ -90,7 +90,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "esbuild": "0.28.2",
-    "fast-check": "4.10.2",
+    "fast-check": "4.10.3",
     "ink-testing-library": "4.0.0",
     "oxlint": "1.93.0",
     "react-test-renderer": "19.3.1",
