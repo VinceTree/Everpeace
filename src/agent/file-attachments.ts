@@ -2,9 +2,11 @@ import { spawnOwned as spawn } from "../tools/owned-process.js";
 import { runFileTool } from "../tools/files.js";
 import { ToolArgumentError } from "../tools/tool-feedback.js";
 import { resolveBundledRipgrep, type RipgrepPathResolver } from "../tools/ripgrep.js";
+import type { InputImageReference } from "./input-images.js";
 
 export const MAX_FILE_ATTACHMENTS = 8;
 export const MAX_ATTACHMENT_BYTES = 32 * 1024;
+export const MAX_BINARY_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 export const MAX_TOTAL_ATTACHMENT_BYTES = 64 * 1024;
 export const DEFAULT_ATTACHMENT_LINES = 200;
 export const MAX_ATTACHMENT_LINES = 1_000;
@@ -18,6 +20,7 @@ export interface FileReference {
 }
 
 export interface FileAttachment {
+  source?: "upload" | "binary";
   path: string;
   startLine: number;
   endLine: number;
@@ -25,6 +28,12 @@ export interface FileAttachment {
   content: string;
   sha256: string;
   truncated: boolean;
+}
+
+export type PromptAttachment = FileAttachment | { source: "image"; reference: InputImageReference };
+
+export function hasPromptImages(attachments?: readonly PromptAttachment[]): boolean {
+  return attachments?.some(attachment => attachment.source === "image") ?? false;
 }
 
 function decodeQuotedPath(value: string): string {
@@ -234,6 +243,7 @@ export async function resolveFileAttachments(
 
 export function attachmentInputText(attachment: FileAttachment): string {
   const metadata = JSON.stringify({
+    ...(attachment.source === undefined ? {} : { source: attachment.source }),
     path: attachment.path,
     start_line: attachment.startLine,
     end_line: attachment.endLine,
@@ -241,19 +251,22 @@ export function attachmentInputText(attachment: FileAttachment): string {
     sha256: attachment.sha256,
     truncated: attachment.truncated,
   });
+  if (attachment.source === "binary") return `<host_binary_attachment ${metadata}>\n${attachment.content}\n</host_binary_attachment>`;
   return `<host_file_attachment ${metadata}>\n${attachment.content}\n</host_file_attachment>`;
 }
 
 export function userMessageWithAttachments(
   text: string,
-  attachments: readonly FileAttachment[] = [],
+  attachments: readonly PromptAttachment[] = [],
 ): Record<string, unknown> {
   if (attachments.length === 0) return { role: "user", content: text };
   return {
     role: "user",
     content: [
       { type: "input_text", text },
-      ...attachments.map((attachment) => ({ type: "input_text", text: attachmentInputText(attachment) })),
+      ...attachments.map(attachment => attachment.source === "image"
+        ? { type: "everpeace_input_image", attachment: attachment.reference }
+        : { type: "input_text", text: attachmentInputText(attachment) }),
     ],
   };
 }

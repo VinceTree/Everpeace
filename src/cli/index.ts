@@ -2,6 +2,7 @@
 import {uiText} from '../localization/messages.js';
 
 import { pathToFileURL } from "node:url";
+import { parseArgs as parseOptions } from "node:util";
 import { realpathSync } from "node:fs";
 import { parseArgs, type CliCommand } from "./args.js";
 import type { CommandHandler } from "./commands/types.js";
@@ -38,6 +39,30 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     return 2;
   }
   const HELP = uiText('help.main');
+  if (args[0] === "web") {
+    if (args.length === 2 && ["-h", "--help"].includes(args[1]!)) {
+      process.stdout.write(uiText("web.usage") + "\n");
+      return 0;
+    }
+    const webFlags = { "no-open": { type: "boolean" }, model: { type: "string" }, "harness-client": { type: "string" } } as const;
+    let options;
+    try {
+      options = parseOptions({ args: args.slice(1), options: webFlags });
+    } catch { /* Invalid options share the web usage message. */ }
+    if (!options || presentation.accessible || options.values.model?.trim() === "" || options.values["harness-client"]?.trim() === "") {
+      process.stderr.write(uiText("web.usage") + "\n");
+      return 2;
+    }
+    try {
+      const { runWebCommand } = await import("./commands/web.js");
+      return await runWebCommand(await createRegistry(), {
+        open: !options.values["no-open"], model: options.values.model, harnessClient: options.values["harness-client"],
+      });
+    } catch (error) {
+      process.stderr.write(uiText("mbf1dbe4aa0f6", { p0: error instanceof Error ? error.message : String(error) }));
+      return 1;
+    }
+  }
   if (args[0] === 'recover-batch') { const { runRecoverBatch } = await import('./commands/recover-batch.js'); return runRecoverBatch(args.slice(1)); }
   if (args[0] === 'recover-file') {
     if (args.length !== 3) { process.stderr.write(uiText('security.recoveryUsage') + '\n'); return 2; }

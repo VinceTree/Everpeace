@@ -1372,7 +1372,7 @@ export function EverpeaceApp({
 
         const restoredTimeline: TimelineEntry[] = [
           { id: 0, kind: "banner", modelName: model.model_name },
-          ...loaded.timeline.map((entry, index): TimelineEntry =>
+          ...loaded.timeline.filter(entry => entry.kind === "status" || !entry.web_turn_outcome && !entry.web_skill_name).map((entry, index): TimelineEntry =>
             entry.kind === "status"
               ? {
                   id: index + 1,

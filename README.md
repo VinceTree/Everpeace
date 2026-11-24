@@ -64,6 +64,56 @@ everpeace
 
 Current source version: **0.6.0-rc.4** (source prerelease).
 
+## Browser workbench
+
+Run `everpeace web` from your project directory. It opens a local browser workspace with a session sidebar, streaming chat, tool results, approval cards, model selection and a stop control. The browser shares your registered models and saved workspace sessions with the terminal. Refreshing reconnects to an active turn and its pending approval.
+
+Use `everpeace web --no-open` to print the browser link. From a source checkout, use `pnpm dev web`. Press Ctrl+C in the launching terminal to stop the workbench. The interface uses MIT-licensed components and styles from [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness/tree/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/packages/client).
+
+Pass `--model <registered-id-or-name>` to choose the default for new sessions in this launch. Existing sessions use their saved model. The model picker groups registrations by provider, including OpenCode Go. When OpenCode Go `deepseek-v4.1-flash` is registered, `everpeace web` selects it for new sessions by default, so browser requests go through the Everpeace backend and then the OpenCode Go Responses route. An explicit `--model` still selects the requested registration.
+
+If an MCP server is waiting for startup approval, the workbench lets you continue the task with the model and available tools. Use `/mcp` in the terminal to manage startup trust.
+
+After preparing the upstream browser assets below, `everpeace web` opens the DeepSeek Harness coding workbench with Everpeace's runtime, models, and sessions. Run `pnpm build` after preparing the assets to include them in `dist` and in packages built from that output. Use `--harness-client <asset-directory>` to select another prepared directory. A checkout or install with no prepared assets opens the bundled Everpeace workbench. See the [workbench notes](docs/architecture/STATE_AND_UI.md#本地网页工作台) for integration coverage.
+
+In the upstream client, use the session menu to rename, pin, archive, or fork a session. You can also branch from a completed reply. The right sidebar browses and previews files from the current session's workspace. General settings save appearance, fonts, and the browser language across launches.
+
+Use **Add workspace** in the sidebar to select another local directory in the system folder picker. Each session opens its own project's files and runs under that project's policy. Everpeace remembers the workspace list and its order when you relaunch from the same directory. Removing a workspace moves its sessions to **Ungrouped** and keeps their tasks, files, and conversation history.
+
+Type `@` to reference a workspace file, folder, or earlier session. Use the File action in the composer’s `+` menu to upload UTF-8 text files up to 32 KiB each. Sent files remain visible in the conversation.
+
+Use the same File action to attach up to four JPEG, PNG, WebP, or GIF images of up to 4 MiB each. Image input is available for OpenCode Go `deepseek-v4.1-flash` and DeepSeek `deepseek-flash`. Everpeace resizes images to fit within 1024 pixels per side, stores GIFs as a still frame, and lets you reopen sent images after a refresh.
+
+Type `/` to find installed Skills. Select a Skill or start the message with `/skill-name` to load its instructions. Click the Skill name in a submitted message to open its document in the sidebar. Resolve duplicate names through `/skills` in the terminal.
+
+Use `/plan` to enter read-only planning, or add a task after `/plan` to start drafting immediately. Open the full proposal in the sidebar and request changes or approve it to start implementation. Tool approvals and project checks still apply during implementation. Use `/plan off` to leave planning.
+
+The upstream conversation records whether a turn finished, was stopped, or failed. Refreshing the page or reopening a session restores the recorded result, including verification and cleanup failures.
+
+The upstream workbench can run multiple sessions across its workspaces. Start a task in another session while the first runs, then switch back to see its live output or pending approvals. The stop button acts on the session currently shown.
+
+Messages sent while a session is running appear in the queue. Edit text-only messages, remove a message, or use Steer to apply it to the current coding turn at its next safe checkpoint. Pending messages survive a refresh or service restart. After a stop or failure, submit another message to resume the preserved queue.
+
+Open the Session panel to see background shell jobs. Expand a job to read its live output and use the two-press stop control to cancel that job. Recent jobs and retained output reopen after a browser refresh while the workbench service stays running.
+
+Use the access-mode picker or `/permission` to choose a session preset within the workspace's policy. General settings saves the default for new sessions. Changing the preset during a turn stops that turn and expires its pending approvals before the new preset takes effect.
+
+Start a coding goal with `/goal <objective>`. You can edit, pause, resume, or clear it from the Goal bar. Add `--tokens <count>` and `--rounds <count>` after the objective to set limits. Use `/goal edit --rounds <count>` to raise the round limit before continuing. A session reopened after restarting retains the goal and waits for your instruction to resume.
+
+The workspace file panel can open the workspace in File Explorer or another detected desktop application. File previews can reveal a file or use one of the handlers reported by Windows. Everpeace validates the target against the registered workspace before starting a native process.
+
+The Automation tasks panel stores delayed, one-time, and recurring prompts for a workspace Session. Tasks can be created, edited, paused, run immediately, and removed. UTF-8 text files remain inline attachments. Other files are admitted as bounded binary references and remain visible in the Session. The model receives the attachment name and metadata.
+
+The plugin manager reads a workspace-bound local profile, shows UI plugins shipped with the Harness client, and stores enablement preferences. Applying preferences to client modules and installing third-party bundles require further integration.
+
+```sh
+npm install --prefix .cache/deepseek-stock-client --ignore-scripts --no-audit --no-fund --save-exact @deepseek-ai/dsh-web-app@0.2.3-alpha.2 @deepseek-ai/dsh-base@0.2.3-alpha.2
+node scripts/prepare-harness-client.mjs .cache/deepseek-stock-client/node_modules .cache/deepseek-stock-client/public
+pnpm dev web
+```
+
+If your OpenCode Go registration includes `deepseek-v4.1-flash`, `pnpm dev web` selects it automatically. Use `pnpm dev web --model deepseek-v4.1-flash` to choose it explicitly.
+
 ## Real tools, checked changes
 
 | Historical plan | Success / planned | Failed | Timeout / error / cancelled / skipped | Unknown Usage |

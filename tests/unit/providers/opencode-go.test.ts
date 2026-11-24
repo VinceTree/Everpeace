@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import sharp from "sharp";
 import { isolateOfflineModelProxy } from "../../fixtures/offline-model-proxy.js";
 import { RequestAttemptLedger } from "../../../src/agent/request-attempt-ledger.js";
 import { createProviderClient, createProviderRuntime, disposeProviderClient, getProviderDefinition, listOfficialModelIds } from "../../../src/providers/openai-compatible.js";
@@ -89,7 +91,7 @@ test("Go routing metadata stays confined to exact documented HTTPS service route
   }
 });
 
-test("production Go tool rounds and restored Sessions use the persisted Session ID", async (t) => {
+test("production Go tool rounds and restored Sessions carry images and the persisted Session ID over Responses", async (t) => {
   t.after(isolateOfflineModelProxy());
   const root = await mkdtemp(path.join(os.tmpdir(), "everpeace-go-contract-"));
   const workspacePath = path.join(root, "workspace");
@@ -98,10 +100,20 @@ test("production Go tool rounds and restored Sessions use the persisted Session 
   const store = new SessionStore({ directory: path.join(root, "sessions") });
   const model = { id: "go-fixture", model_name: "deepseek-v4.1-flash", base_url: baseURL, api_key: "offline-only" };
   const session = await store.create({ title: "fixture", titlePending: false, workspacePath, model });
+  const bytes = await sharp({ create: { width: 3, height: 2, channels: 3, background: "blue" } }).webp().toBuffer();
+  const reference = { attachmentId: `sha256:${createHash("sha256").update(bytes).digest("hex")}`, name: "blue.webp",
+    bytes: bytes.length, width: 3, height: 2, mediaType: "image/webp" as const };
+  await store.saveInputImage(session.id, reference, bytes);
   let requests = 0;
-  t.mock.method(globalThis, "fetch", async (_url: unknown, init?: RequestInit) => {
+  t.mock.method(globalThis, "fetch", async (url: unknown, init?: RequestInit) => {
+    assert.equal(String(url), `${baseURL}/responses`);
     assert.equal(new Headers(init?.headers).get("x-opencode-session"), session.id);
     const request = JSON.parse(String(init?.body));
+    assert.equal(request.model, model.model_name);
+    const blocks = request.input.flatMap((item: { content?: unknown }) => Array.isArray(item.content) ? item.content : []);
+    assert.deepEqual(blocks.filter((block: { type: string }) => block.type === "input_image"), [
+      { type: "input_image", image_url: `data:image/webp;base64,${bytes.toString("base64")}`, detail: "auto" },
+    ]);
     requests++;
     if (requests === 1) return sse(completed([{ type: "function_call", call_id: "read-fixture", name: "read_file", arguments: '{"path":"fixture.txt"}' }], ""));
     const output = request.input.find((item: { type: string }) => item.type === "function_call_output");
@@ -121,7 +133,10 @@ test("production Go tool rounds and restored Sessions use the persisted Session 
   });
   try {
     const handle = makeHandle();
-    try { assert.equal((await handle.agent.runTurn("Read fixture.txt.")).stopReason, undefined); }
+    try {
+      const result = await handle.agent.runTurn("Read fixture.txt.", undefined, { attachments: [{ source: "image", reference }] });
+      assert.equal(result.stopReason, undefined);
+    }
     finally { await handle.dispose(); }
     const saved = await store.load(session.id);
     assert.equal(saved.context.filter((item) => item.type === "function_call_output").length, 1);

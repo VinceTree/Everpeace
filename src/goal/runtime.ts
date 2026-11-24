@@ -16,6 +16,13 @@ export interface GoalRuntimeStore {
 export interface GoalCreateInput {
   objective: string;
   tokenBudget?: number;
+  maxGoalRounds?: number;
+}
+
+export class GoalRoundLimitError extends Error {}
+
+export function validGoalRoundLimit(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 export type GoalCommand = { action: "status" | "pause" | "resume" } | { action: "create"; objective: string; tokenBudget?: number };
@@ -65,6 +72,19 @@ export class GoalRuntime {
     return this.#getGoal();
   }
 
+  async stopAtRoundLimit(signal?: AbortSignal): Promise<boolean> {
+    signal?.throwIfAborted();
+    const goal = await this.#getGoal();
+    signal?.throwIfAborted();
+    return this.#stopIfRoundLimit(goal);
+  }
+
+  async #stopIfRoundLimit(goal: SessionGoal | undefined): Promise<boolean> {
+    if (goal?.status !== "active" || goal.max_goal_rounds === undefined || (goal.rounds_started ?? 0) < goal.max_goal_rounds) return false;
+    await this.#setGoal({ ...goal, status: "blocked", updated_at: this.#now().toISOString() });
+    return true;
+  }
+
   /** Called once per host coding turn, never by model tool dispatch. */
   async beginTurn(signal?: AbortSignal): Promise<SessionGoal | undefined> {
     signal?.throwIfAborted();
@@ -72,8 +92,15 @@ export class GoalRuntime {
     const goal = await this.#getGoal();
     signal?.throwIfAborted();
     if (!goal || goal.status !== "active") return goal;
+    const rounds = goal.rounds_started ?? 0;
+    if (await this.#stopIfRoundLimit(goal)) {
+      throw new GoalRoundLimitError("Goal round limit reached");
+    }
     const reportedLastTurn = goal.goal_turn_id !== undefined && goal.goal_turn_id === goal.blocked_turn_id;
-    const updated = { ...goal, goal_turn_id: this.#turnId, blocked_streak: reportedLastTurn ? goal.blocked_streak ?? 0 : 0, updated_at: this.#now().toISOString() };
+    const updated = {
+      ...goal, goal_turn_id: this.#turnId, blocked_streak: reportedLastTurn ? goal.blocked_streak ?? 0 : 0,
+      ...(goal.max_goal_rounds === undefined ? {} : { rounds_started: rounds + 1 }), updated_at: this.#now().toISOString(),
+    };
     await this.#setGoal(updated);
     return updated;
   }
@@ -91,6 +118,7 @@ export class GoalRuntime {
     if (input.tokenBudget !== undefined && (!Number.isSafeInteger(input.tokenBudget) || input.tokenBudget <= 0)) {
       throw new Error("Goal token budget must be a positive integer");
     }
+    if (input.maxGoalRounds !== undefined && !validGoalRoundLimit(input.maxGoalRounds)) throw new Error("Invalid Goal round limit");
     const existing = await this.#getGoal();
     if (existing && !TERMINAL.has(existing.status)) {
       throw new Error("Cannot create a new goal while this session has an unfinished goal");
@@ -100,6 +128,7 @@ export class GoalRuntime {
       goal_id: this.#id(), objective, status: "active",
       token_budget: input.tokenBudget ?? null, tokens_used: 0, usage_complete: true,
       time_used_seconds: 0, blocked_streak: 0, created_at: at, updated_at: at,
+      ...(input.maxGoalRounds === undefined ? {} : { max_goal_rounds: input.maxGoalRounds, rounds_started: 0 }),
       ...(this.#turnId === undefined ? {} : { goal_turn_id: this.#turnId }),
     };
     await this.#setGoal(goal);
@@ -134,7 +163,26 @@ export class GoalRuntime {
   async resume(): Promise<SessionGoal> {
     const goal = await this.#getGoal();
     if (!goal || (goal.status !== "paused" && goal.status !== "blocked")) throw new Error("Only a paused or blocked goal can be resumed");
+    if (goal.max_goal_rounds !== undefined && (goal.rounds_started ?? 0) >= goal.max_goal_rounds) {
+      throw new GoalRoundLimitError("Increase the Goal round limit before resuming");
+    }
     const updated = { ...goal, status: "active" as const, goal_turn_id: randomUUID(), blocked_streak: 0, updated_at: this.#now().toISOString() };
+    await this.#setGoal(updated);
+    return updated;
+  }
+
+  async edit(input: { objective?: string; maxGoalRounds?: number }): Promise<SessionGoal> {
+    const goal = await this.#getGoal();
+    if (!goal || goal.status === "complete") throw new Error("Select an unfinished goal to edit");
+    const objective = input.objective === undefined ? goal.objective : cleanObjective(input.objective);
+    if (!objective) throw new Error("Goal objective cannot be empty");
+    if (input.maxGoalRounds !== undefined && (!validGoalRoundLimit(input.maxGoalRounds) || input.maxGoalRounds < (goal.rounds_started ?? 0))) {
+      throw new Error("The Goal round limit must cover already started rounds");
+    }
+    const updated = {
+      ...goal, objective, goal_turn_id: randomUUID(), blocked_streak: 0, updated_at: this.#now().toISOString(),
+      ...(input.maxGoalRounds === undefined ? {} : { max_goal_rounds: input.maxGoalRounds }),
+    };
     await this.#setGoal(updated);
     return updated;
   }

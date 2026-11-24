@@ -1,7 +1,7 @@
-import type { AgentTaskOptions, AgentTurnResult } from "../agent/react-agent.js";
+import type { AgentSkillInput, AgentTaskOptions, AgentTurnOptions, AgentTurnResult } from "../agent/react-agent.js";
 import type { LearnedTurnOutcome } from "../memory/learned-memory.js";
 import type { AgentMode } from "../plan/runtime.js";
-import type { FileAttachment } from "../agent/file-attachments.js";
+import type { PromptAttachment } from "../agent/file-attachments.js";
 import type { SessionGoal } from "../storage/session-store.js";
 import type { BashResult } from "../tools/bash.js";
 import { ResourceCleanupError } from "../util/resource-cleanup-error.js";
@@ -12,7 +12,8 @@ import { verificationPrompt } from "./verifier.js";
 export interface CodingTaskAgent {
   recordPerformanceTiming?(operation: string, ms: number): void;
   recordRepairRound?(): void;
-  runTurn(userInput: string, signal?: AbortSignal, options?: { mode?: AgentMode; attachments?: readonly FileAttachment[] }): Promise<AgentTurnResult>;
+  runTurn(userInput: string, signal?: AbortSignal, options?: AgentTurnOptions): Promise<AgentTurnResult>;
+  stopAtGoalRoundLimit?(signal?: AbortSignal): Promise<boolean>;
   finishTeamVerification?: ((verified: boolean) => Promise<void>) | undefined;
   prepareTeamVerification?: ((signal?: AbortSignal) => Promise<string | undefined>) | undefined;
   beginTask?(options: AgentTaskOptions): void | Promise<void>;
@@ -37,10 +38,12 @@ export interface CodingTaskRunnerHost {
 
 export interface CodingTaskRunnerInput {
   text: string;
-  attachments?: readonly FileAttachment[];
+  attachments?: readonly PromptAttachment[];
+  skillInput?: AgentSkillInput;
   mode?: AgentMode;
   source?: WorkflowTaskSource;
   signal?: AbortSignal;
+  continueRequestAccounting?: true;
 }
 
 export interface CodingTaskRunnerResult {
@@ -57,6 +60,7 @@ function stoppedMessage(result: AgentTurnResult): string {
   if (result.stopReason === "budget_limited") return "Request token budget reached. Work stopped before further tools or model requests; in-flight billing is not a hard spending cap.";
   if (result.stopReason === "usage_limited") return [result.requestFailure, "Goal usage could not be measured reliably. Work stopped before further tools or model requests."].filter(Boolean).join(" ");
   if (result.stopReason === "step_limit") return "Agent step limit reached. Work stopped without reporting completion.";
+  if (result.stopReason === "goal_round_limit") return "Goal round limit reached. Work stopped before another model request.";
   return "Agent turn deadline reached. Work stopped without reporting completion.";
 }
 
@@ -82,6 +86,7 @@ export class CodingTaskRunner {
     let nextText = input.text;
     let nextMode = input.mode ?? "default";
     let nextAttachments = input.attachments;
+    let nextSkillInput = input.skillInput;
     let taskSource = input.source ?? "user";
     let workflowStarted = false;
     let lastAgentResult: AgentTurnResult = {};
@@ -101,14 +106,16 @@ export class CodingTaskRunner {
     });
 
     try {
-      await this.#agent.beginTask?.({ mode: nextMode, source: taskSource });
+      await this.#agent.beginTask?.({ mode: nextMode, source: taskSource,
+        ...(input.continueRequestAccounting === true ? { continueRequestAccounting: true } : {}) });
       while (true) {
       input.signal?.throwIfAborted();
-      if (nextMode === "default" && !workflowStarted) {
+      const goalLimitReached = nextMode === "default" && await this.#agent.stopAtGoalRoundLimit?.(input.signal);
+      if (!goalLimitReached && nextMode === "default" && !workflowStarted) {
         if (taskSource === "session_resume") await this.#workflow.resumeTurn(input.signal);
         else await this.#workflow.beginTurn({ mode: "default", source: taskSource, ...(input.signal ? { signal: input.signal } : {}) });
         workflowStarted = true;
-      } else if (nextMode === "default" && this.#workflow.state.phase === "diagnose") {
+      } else if (!goalLimitReached && nextMode === "default" && this.#workflow.state.phase === "diagnose") {
         const evaluationStop = this.#host.evaluationRepairDecision?.(this.#workflow.state);
         if (evaluationStop) {
           await this.#workflow.stopEvaluationRepairs(evaluationStop);
@@ -128,15 +135,18 @@ export class CodingTaskRunner {
 
       const started = now();
       const repairStarted = this.#workflow.state.repair_attempts > 0 && this.#workflow.state.phase === "implement" ? performance.now() : undefined;
-      try {
+      if (goalLimitReached) lastAgentResult = { stopReason: "goal_round_limit" };
+      else try {
         lastAgentResult = await this.#agent.runTurn(nextText, input.signal, {
           mode: nextMode,
           ...(nextAttachments === undefined ? {} : { attachments: nextAttachments }),
+          ...(nextSkillInput === undefined ? {} : { skillInput: nextSkillInput }),
         }) ?? {};
       } finally {
         if (repairStarted !== undefined) this.#agent.recordPerformanceTiming?.("repair", performance.now() - repairStarted);
       }
       nextAttachments = undefined;
+      nextSkillInput = undefined;
       input.signal?.throwIfAborted();
       if (lastAgentResult.interactionRequired) {
         await this.#agent.cancelBackgroundJobs?.(new Error("Task stopped for host interaction"));

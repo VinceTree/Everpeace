@@ -105,8 +105,10 @@ test("project map reports malformed manifests and all bounded scan/metadata/outp
     await fs.rm(path.join(root, "broken"), { recursive: true });
     await fs.rm(path.join(root, "large"), { recursive: true });
     for (let index = 0; index < 33; index++) await write(`pkg${index}/package.json`, JSON.stringify({ name: `pkg${index}` }));
-    const count = await runProjectMap({}, root);
-    assert.equal(count.packages.length, 32);
+    // Exercise the manifest-count cap independently of native enumeration timing.
+    // The zero-timeout case below still verifies the time boundary explicitly.
+    const count = await runProjectMap({}, root, undefined, resolveBundledRipgrep, { ...projectMapLimits, timeoutMs: 30_000 });
+    assert.equal(count.packages.length, 32, JSON.stringify({ reasons: count.reasons, observedFiles: count.observedFiles, diagnostics: count.diagnostics }));
     assert.ok(count.reasons.includes("manifest_count_limit"));
     for (const [limits, expected] of [
       [{ paths: 2 }, "path_limit"], [{ scanBytes: 32 }, "enumeration_byte_limit"],

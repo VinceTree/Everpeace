@@ -47,7 +47,7 @@ stdio 的宿主进程启动与 MCP tool-call 审批是独立权限边界。默�
 
 [信任存储](../../src/mcp/trust.ts)在平台用户配置目录保存 `mcp-trust.json` schema v1，记录规范化工作区、服务名、授权种类和 HMAC 指纹；密钥仅通过 AuthStorage/keyring 保存。fingerprint 包含 transport、实际解析的 command、args、cwd 和冻结的完整环境，HTTP 例外绑定完整 URL、header 来源和实际凭据。项目配置不能授予信任，Session 也不恢复授权。文件读写使用跨进程锁和原子替换；坏文件、丢失密钥、keyring 或写入异常均不能自动放行。审批提交及落盘前重读配置并核对预览指纹、存储 revision 与 runtime generation。确认取消不授予权限。
 
-启动、自动重连、目录准备及工具派发检查当前配置和授权；stdio 与本机 HTTP 未信任时是 `trust_required`，不进入自动重试。`/mcp revoke <server>` 先使当前 callable/binding 失效，取消初始化、计时器和活动调用，再等待关闭和持久撤销。其他进程的撤销在下一次检查时生效，不声称可以即时终止另一进程已经运行的程序。`full-access` 和普通 MCP tool-call 批准不能授予启动权限。非交互 CLI/SDK 在模型请求前以 `interaction_required`、`mcp_start`/`mcp_http` 返回；默认交互编码任务也暂停并提示使用 `/mcp`。
+启动、自动重连、目录准备及工具派发检查当前配置和授权；stdio 与本机 HTTP 未信任时是 `trust_required`，不进入自动重试。`/mcp revoke <server>` 先使当前 callable/binding 失效，取消初始化、计时器和活动调用，再等待关闭和持久撤销。其他进程的撤销在下一次检查时生效，不声称可以即时终止另一进程已经运行的程序。`full-access` 和普通 MCP tool-call 批准不能授予启动权限。非交互 CLI/SDK 在模型请求前以 `interaction_required`、`mcp_start`/`mcp_http` 返回。终端交互任务提示使用 `/mcp`。网页工作台在任务内询问是否使用模型和已可用的工具继续。等待授权的服务仍由 MCP runtime 拦截，选择仅作用于当前任务，授权管理仍使用终端 `/mcp`。
 
 非回环 HTTP 无论凭据是否存在均拒绝；HTTPS 保留证书校验，允许公网与内网端点。HTTP 只对字面 `127.0.0.0/8`、`::1` 和固定连接到回环的 `localhost` 提供单独批准，其他域名即使 DNS 返回回环也不获得例外。[MCP HTTP 客户端](../../src/mcp/http.ts)使用 transport 自有 dispatcher，适配长期 SSE；SDK 初始化、POST、GET/SSE/恢复、DELETE 共用自定义 fetch，所有 3xx 都释放响应并拒绝下一跳。禁止 URL 内嵌凭据和 fragment。Header 和 stdio 环境在获准连接前冻结，参数、header 值、URL 路径/查询和内部异常不直接进入 UI 或诊断。生产仍不接入 OAuth。
 
@@ -94,6 +94,8 @@ MCP SDK 安全修复按 [官方公告](https://github.com/modelcontextprotocol/t
 目录 symlink 可以指向 Skill；读取引用资源时再次 realpath，并拒绝逃逸 Skill 根目录。`SKILL.md` 必须有 YAML frontmatter 和非空 `description`，管理器创建或安装的新 Skill 名称还必须使用小写字母、数字和连字符且最长 64 个字符；扫描深度、条目数、单文件大小和模型 catalog 均有限制。
 
 模型请求只预载名称、描述和路径。用户写 `$skill-name` 时，本轮在首次采样前完整注入对应 `SKILL.md`；隐式匹配由模型根据 catalog 判断，并通过 `read_skill` 分页读取完整说明或相对资源。Skill 不自动延续到下一轮。`/skills` 重新扫描并显示全部发现结果和错误数。
+
+DeepSeek Harness 浏览器输入框的 `/` 候选使用同一套发现规则。网页用户消息开头的 `/skill-name` 在模型采样前重新解析，队列领取与插话同样适用。`/plan`、`/permission` 和 `/goal` 由网页宿主命令处理。历史会话摘录不能触发 Skill。成功的网页显式调用仅向时间轴写入 Skill 名称，以便原版前端恢复可点击引用。
 
 `/skills` 现为三入口管理向导：
 

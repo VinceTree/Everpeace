@@ -70,7 +70,7 @@ export interface ToolCapabilities {
 
 export type ToolCapabilityResolver = (call: ToolCall) => ToolCapabilities | undefined;
 
-export type LoopStopReason = "budget_limited" | "usage_limited" | "step_limit" | "deadline_exceeded";
+export type LoopStopReason = "budget_limited" | "usage_limited" | "step_limit" | "goal_round_limit" | "deadline_exceeded";
 export class LoopStoppedError extends Error {
   constructor(readonly reason: LoopStopReason) {
     super(`Agent turn stopped: ${reason}`);
