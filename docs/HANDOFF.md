@@ -1,5 +1,13 @@
 # 当前交接
 
+## 依赖 PR 验证修复（2026-11-24）
+
+整合 Dependabot #47–#51 的原提交，覆盖 fast-check、OpenAI SDK、Codex 原生后端、Marked 和 Oxlint。根锁文件与两份冻结评测锁保持逐字节一致，Windows 冻结安装、类型检查和 lint 已通过。
+
+复核固定的上游提交 ccf9be8cc458bd6b8336fe84d68d8893f2691a5e。CLI 通过共享 sandbox manager 实施权限，Node launcher 继续转发终止信号。Linux CI 准入和 Windows 验收收据绑定已复核身份。Windows 实装 CLI 与 12 项沙箱边界测试通过，覆盖工作区写入、受保护文件、禁止直连和终止子进程。
+
+整合候选的 Windows、Linux 与安全检查由 GitHub Actions 记录。主分支合并保留五个原 PR 的提交。Release 保持手动触发。
+
 ## DeepSeek Harness 网页工作台（2026-11-24）
 
 `everpeace web` 在本机启动网页工作台。准备固定 npm 包的浏览器资源后，页面使用 DeepSeek Harness 编码工作台，构建会携带其资源和 MIT 许可。浏览器用同源 RPC 和 SSE 连接 Everpeace。生产 `SessionStore`、模型注册、权限、沙箱、编码验证和任务 runner 管理实际工作。完整接入范围和准备方法见 [网页工作台](architecture/STATE_AND_UI.md#本地网页工作台) 及 [README](../README.zh-CN.md#网页工作台)。
