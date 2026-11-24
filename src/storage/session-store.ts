@@ -1,12 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isCostEstimate, type CostEstimate } from "../status/cost.js";
 import { createReadStream, promises as fs } from "node:fs";
-import { createInterface } from "node:readline";
 import os from "node:os";
 import path from "node:path";
 import lockfile from "proper-lockfile";
 import { PerformanceTrace } from "../performance/trace.js";
+import { inputImageReferences, isInputImageReference, type InputImageReference } from "../agent/input-images.js";
 import { SessionActivity } from "./session-activity.js";
+import { SessionInputImages } from "./session-input-images.js";
+import { isWebPermissionMode, type WebPermissionMode } from "../permissions/policy.js";
+import { applyWebInboxChange, isWebInboxChange, isWebInboxIdentity, type WebInbox, type WebInboxChange, type WebInboxItem } from "./web-inbox.js";
 import { isTaskPerformanceReport, type TaskPerformanceReport } from "../performance/task-report.js";
 import { isVerificationEvidence } from "../workflow/verification-evidence.js";
 import { isCommandRecord, type CommandRecord } from "../tools/command-record.js";
@@ -109,14 +112,44 @@ export interface SessionGoal {
   blocked_turn_id?: string;
   /** Digest of the stable blocker description, never its plaintext. */
   blocked_reason_hash?: string;
+  max_goal_rounds?: number;
+  rounds_started?: number;
   created_at: string;
   updated_at: string;
 }
+
+export interface TimelineInputFile {
+  attachmentId: string;
+  name: string;
+  bytes: number;
+  mediaType?: string;
+  width?: number;
+  height?: number;
+}
+
+export interface TimelinePlan {
+  callId: string;
+  phase: "submitted" | "settled";
+}
+
+const WEB_TURN_OUTCOMES = [
+  "verified", "no_changes", "plan", "cancelled", "permission_changed",
+  "unverified", "verification_failed", "budget_limited", "usage_limited",
+  "step_limit", "goal_round_limit", "deadline_exceeded", "interaction_required", "configuration_error",
+  "runtime_error", "persistence_failed", "cleanup_failed",
+] as const;
+export type WebTurnOutcome = typeof WEB_TURN_OUTCOMES[number];
 
 export interface StoredTextTimelineEntry {
   command?: CommandRecord;
   kind: SessionTimelineKind;
   text: string;
+  input_files?: TimelineInputFile[];
+  plan?: TimelinePlan;
+  web_turn_started?: true;
+  web_turn_outcome?: WebTurnOutcome;
+  web_skill_name?: string;
+  web_input?: Pick<WebInboxItem, "id" | "requestId" | "revision">;
 }
 
 export interface StoredStatusTimelineEntry {
@@ -128,7 +161,22 @@ export type StoredTimelineEntry =
   | StoredTextTimelineEntry
   | StoredStatusTimelineEntry;
 
-export interface SessionTeamReference { teamId: string; state: string; members: Array<{ agentId: string; taskId: string; sessionId?: string; state: string }>; }
+export interface SessionTeamMemberReference {
+  agentId: string;
+  taskId: string;
+  sessionId?: string;
+  state: string;
+  role?: string;
+  goal?: string;
+  acceptance?: string;
+  paths?: string[];
+  dependencies?: string[];
+  summary?: string;
+  verification?: string;
+  changedPaths?: string[];
+}
+
+export interface SessionTeamReference { teamId: string; state: string; members: SessionTeamMemberReference[]; }
 
 export interface SessionSummary {
   team?: SessionTeamReference;
@@ -140,9 +188,11 @@ export interface SessionSummary {
   workspace_path: string;
   model: SessionModelRef;
   goal?: SessionGoal;
+  goal_revision?: number;
   workflow?: WorkflowState;
   task_progress?: TaskProgress;
   memory_policy?: LearnedMemoryPolicy;
+  web_permission_mode?: WebPermissionMode;
   lineage?: SessionLineage;
   fork_pending_resume?: boolean;
 }
@@ -159,6 +209,7 @@ export interface LoadedSession {
   costs?: import("../status/cost.js").CostEstimate[];
   summary: SessionSummary;
   timeline: StoredTimelineEntry[];
+  webInbox?: WebInbox;
   context: Array<Record<string, unknown>>;
   usage: SessionUsage;
   goal?: SessionGoal;
@@ -203,11 +254,14 @@ export interface CreateSessionInput {
   titlePending: boolean;
   workspacePath: string;
   model: SessionModelRef;
+  webPermissionMode?: WebPermissionMode;
 }
 
 export interface ForkSessionInput {
   title?: string;
   signal?: AbortSignal;
+  /** Visible timeline entry, excluding terminal status snapshots. */
+  throughTimelineIndex?: number;
 }
 
 export interface SessionStoreLike {
@@ -271,6 +325,7 @@ interface SessionCreatedEvent extends EventBase {
   workspace_path: string;
   model: SessionModelRef;
   usage_tracking: boolean;
+  web_permission_mode?: WebPermissionMode;
   lineage?: SessionLineage;
 }
 
@@ -288,6 +343,7 @@ interface ContextAppendEvent extends EventBase {
   type: "context_append";
   items: Array<Record<string, unknown>>;
   tool_output_attachment?: ToolOutputAttachmentReference;
+  web_steering_entry?: StoredTextTimelineEntry;
 }
 
 interface ContextCompactedEvent extends EventBase {
@@ -322,7 +378,7 @@ interface UsageRecordedEvent extends EventBase {
 
 interface GoalUpdatedEvent extends EventBase {
   type: "goal_updated";
-  goal: SessionGoal;
+  goal: SessionGoal | null;
 }
 
 interface WorkflowUpdatedEvent extends EventBase {
@@ -356,6 +412,8 @@ interface ForkResumeUpdatedEvent extends EventBase {
 interface TeamUpdatedEvent extends EventBase { type: "team_updated"; team: SessionTeamReference; }
 
 type SessionEvent =
+  | (EventBase & { type: "web_permission_selected"; mode: WebPermissionMode })
+  | (EventBase & { type: "web_inbox_changed"; change: WebInboxChange })
   | (EventBase & { type: "cost_estimated"; estimate: import("../status/cost.js").CostEstimate })
   | (EventBase & { type: "performance_report"; report: TaskPerformanceReport })
   | TeamUpdatedEvent
@@ -452,7 +510,23 @@ function isTimelineEntry(value: unknown): value is StoredTimelineEntry {
   return (
     isRecord(value) &&
     isTimelineKind(value.kind) &&
+    (value.web_turn_started === undefined || (value.kind === "user" && value.web_turn_started === true)) &&
+    (value.web_input === undefined || (value.kind === "user" && isWebInboxIdentity(value.web_input))) &&
+    (value.web_turn_outcome === undefined || (value.kind === "system" && value.text === "" &&
+      WEB_TURN_OUTCOMES.some(outcome => outcome === value.web_turn_outcome))) &&
+    (value.web_skill_name === undefined || (value.kind === "system" && value.text === "" && value.web_turn_outcome === undefined &&
+      typeof value.web_skill_name === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(value.web_skill_name))) &&
     (value.command === undefined || (value.kind === "output" && isCommandRecord(value.command))) &&
+    (value.plan === undefined || (value.kind === "tool" && isRecord(value.plan) &&
+      typeof value.plan.callId === "string" && /^[A-Za-z0-9_-]{1,128}$/u.test(value.plan.callId) &&
+      (value.plan.phase === "submitted" || value.plan.phase === "settled"))) &&
+    (value.input_files === undefined || (value.kind === "user" && Array.isArray(value.input_files) &&
+      value.input_files.length <= 8 && value.input_files.every(file => isRecord(file) &&
+        typeof file.attachmentId === "string" && /^sha256:[a-f0-9]{64}$/u.test(file.attachmentId) &&
+        typeof file.name === "string" && file.name.length > 0 && file.name.length <= 180 &&
+        typeof file.bytes === "number" && Number.isSafeInteger(file.bytes) && file.bytes >= 0 &&
+        (file.mediaType === undefined || file.mediaType === "image/webp" && isInputImageReference(file) ||
+          typeof file.mediaType === "string" && /^[a-z][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9!#$&^_.+-]{1,126}$/iu.test(file.mediaType))))) &&
     typeof value.text === "string"
   );
 }
@@ -481,7 +555,8 @@ function parseEvent(value: unknown): SessionEvent {
       !isNonEmptyString(value.session_id) ||
       !isNonEmptyString(value.title) ||
       !isNonEmptyString(value.workspace_path) ||
-      !isModelRef(value.model)
+      !isModelRef(value.model) ||
+      (value.web_permission_mode !== undefined && !isWebPermissionMode(value.web_permission_mode))
     ) {
       throw new Error("Session header is invalid");
     }
@@ -499,6 +574,7 @@ function parseEvent(value: unknown): SessionEvent {
       model: value.model,
       usage_tracking:
         typeof value.usage_tracking === "boolean" ? value.usage_tracking : false,
+      ...(value.web_permission_mode === undefined ? {} : { web_permission_mode: value.web_permission_mode }),
       ...(value.lineage === undefined ? {} : { lineage: cloneLineage(value.lineage) }),
     };
   }
@@ -513,6 +589,16 @@ function parseEvent(value: unknown): SessionEvent {
     return { ...base, type: "timeline_entry", entry: value.entry };
   }
 
+  if (value.type === "web_inbox_changed") {
+    if (!isWebInboxChange(value.change)) throw new Error("Web inbox change is invalid");
+    return { ...base, type: "web_inbox_changed", change: value.change };
+  }
+
+  if (value.type === "web_permission_selected") {
+    if (!isWebPermissionMode(value.mode)) throw new Error("Web permission mode is invalid");
+    return { ...base, type: "web_permission_selected", mode: value.mode };
+  }
+
   if (value.type === "context_append") {
     if (!Array.isArray(value.items) || !value.items.every(isRecord)) {
       throw new Error("Session context is invalid");
@@ -520,9 +606,15 @@ function parseEvent(value: unknown): SessionEvent {
     if (value.tool_output_attachment !== undefined && !isToolOutputAttachmentReference(value.tool_output_attachment)) {
       throw new Error("Session tool output attachment is invalid");
     }
+    const steering = value.web_steering_entry;
+    if (steering !== undefined && (!isTimelineEntry(steering) || steering.kind !== "user" ||
+      !steering.web_input || steering.web_turn_started || value.tool_output_attachment !== undefined)) {
+      throw new Error("Web steering entry is invalid");
+    }
     return {
       ...base, type: "context_append", items: value.items,
       ...(value.tool_output_attachment === undefined ? {} : { tool_output_attachment: value.tool_output_attachment }),
+      ...(steering === undefined ? {} : { web_steering_entry: steering }),
     };
   }
 
@@ -590,12 +682,22 @@ function parseEvent(value: unknown): SessionEvent {
   }
 
   if (value.type === "goal_updated") {
-    if (!isGoal(value.goal)) throw new Error("Session goal is invalid");
+    if (value.goal !== null && !isGoal(value.goal)) throw new Error("Session goal is invalid");
     return { ...base, type: "goal_updated", goal: value.goal };
   }
 
   if (value.type === "team_updated") {
-    if (!isRecord(value.team) || typeof value.team.teamId !== "string" || typeof value.team.state !== "string" || !Array.isArray(value.team.members) || value.team.members.length > 32 || value.team.members.some((member) => !isRecord(member) || typeof member.agentId !== "string" || typeof member.taskId !== "string" || typeof member.state !== "string" || member.sessionId !== undefined && typeof member.sessionId !== "string")) throw new Error("Invalid team reference");
+    const validMember = (member: unknown): member is SessionTeamMemberReference => {
+      if (!isRecord(member) || typeof member.agentId !== "string" || typeof member.taskId !== "string" || typeof member.state !== "string" || member.sessionId !== undefined && typeof member.sessionId !== "string") return false;
+      for (const field of ["role", "goal", "acceptance", "summary", "verification"] as const) {
+        if (member[field] !== undefined && (typeof member[field] !== "string" || member[field].length > 16 * 1024)) return false;
+      }
+      for (const field of ["paths", "dependencies", "changedPaths"] as const) {
+        if (member[field] !== undefined && (!Array.isArray(member[field]) || member[field].length > 256 || member[field].some(item => typeof item !== "string" || item.length > 2048))) return false;
+      }
+      return true;
+    };
+    if (!isRecord(value.team) || typeof value.team.teamId !== "string" || typeof value.team.state !== "string" || !Array.isArray(value.team.members) || value.team.members.length > 32 || value.team.members.some(member => !validMember(member))) throw new Error("Invalid team reference");
     return { ...base, type: "team_updated", team: value.team as unknown as SessionTeamReference };
   }
   if (value.type === "workflow_updated") {
@@ -671,7 +773,16 @@ function isGoal(value: unknown): value is SessionGoal {
     (value.goal_turn_id === undefined || isNonEmptyString(value.goal_turn_id)) &&
     (value.blocked_turn_id === undefined || isNonEmptyString(value.blocked_turn_id)) &&
     (value.blocked_reason_hash === undefined || (typeof value.blocked_reason_hash === "string" && /^[a-f0-9]{64}$/u.test(value.blocked_reason_hash))) &&
+    (value.max_goal_rounds === undefined || (typeof value.max_goal_rounds === "number" && Number.isSafeInteger(value.max_goal_rounds) && value.max_goal_rounds > 0)) &&
+    (value.rounds_started === undefined || (typeof value.rounds_started === "number" && Number.isSafeInteger(value.rounds_started) && value.rounds_started >= 0)) &&
     isNonEmptyString(value.created_at) && isNonEmptyString(value.updated_at);
+}
+
+/** Usage, elapsed time and rounds can advance while a user action is in flight. */
+export function nextGoalRevision(previous: SessionGoal | undefined, next: SessionGoal | undefined, revision: number): number {
+  const changed = previous?.goal_id !== next?.goal_id || previous?.objective !== next?.objective ||
+    previous?.status !== next?.status || previous?.token_budget !== next?.token_budget || previous?.max_goal_rounds !== next?.max_goal_rounds;
+  return changed ? revision + 1 : revision;
 }
 
 function isVerificationResult(value: unknown): value is VerificationResult {
@@ -812,19 +923,27 @@ async function* sessionRecordBatches(filePath: string, trace: PerformanceTrace, 
   }
 }
 
-async function readSession(filePath: string, trace: PerformanceTrace, summaryOnly = false): Promise<LoadedSession> {
+function eventTimelineEntry(event: SessionEvent): StoredTimelineEntry | undefined {
+  if (event.type === "timeline_entry") return event.entry;
+  if (event.type === "context_append") return event.web_steering_entry;
+}
+
+async function readSession(filePath: string, trace: PerformanceTrace, summaryOnly = false, includeWebInbox = !summaryOnly): Promise<LoadedSession> {
   let header: SessionCreatedEvent | undefined;
   let title = "";
   let titlePending = false;
   let model: SessionModelRef | undefined;
   let updatedAt = "";
+  let webPermissionMode: WebPermissionMode | undefined;
   const timeline: StoredTimelineEntry[] = [];
+  const inbox: WebInbox = { pending: [], accepted: [] };
   let context: Array<Record<string, unknown>> = [];
   let usage = createEmptySessionUsage();
   const costs: CostEstimate[] = [];
   let performanceReport: TaskPerformanceReport | undefined;
 
   let goal: SessionGoal | undefined;
+  let goalRevision = 0;
   let workflow: WorkflowState | undefined;
   let taskProgress: TaskProgress | undefined;
   let memoryPolicy: LearnedMemoryPolicy | undefined;
@@ -848,6 +967,7 @@ async function readSession(filePath: string, trace: PerformanceTrace, summaryOnl
         title = header.title;
         titlePending = header.title_pending;
         model = header.model;
+        webPermissionMode = header.web_permission_mode;
         updatedAt = header.at;
         usage = createEmptySessionUsage(header.usage_tracking);
         lineage = header.lineage === undefined ? undefined : cloneLineage(header.lineage);
@@ -860,7 +980,15 @@ async function readSession(filePath: string, trace: PerformanceTrace, summaryOnl
         title = event.title;
         titlePending = false;
       }
-      if (event.type === "timeline_entry" && !summaryOnly) timeline.push(event.entry);
+      if (event.type === "web_permission_selected") webPermissionMode = event.mode;
+      if (!summaryOnly || includeWebInbox) {
+        const entry = eventTimelineEntry(event);
+        if (entry && !summaryOnly) timeline.push(entry);
+        if (includeWebInbox && event.type === "web_inbox_changed") applyWebInboxChange(inbox, event.change);
+        if (includeWebInbox && entry?.kind === "user" && entry.web_input) {
+          applyWebInboxChange(inbox, { kind: "remove", id: entry.web_input.id });
+        }
+      }
       if (event.type === "context_append" && !summaryOnly) context.push(...event.items);
       if (event.type === "context_compacted") {
         if (!summaryOnly) context = event.items.map((item) => ({ ...item }));
@@ -882,7 +1010,11 @@ async function readSession(filePath: string, trace: PerformanceTrace, summaryOnl
         usage = applyUsageSample(usage, event.usage);
         if (event.preserve_context && event.usage !== null) usage.context_tokens = context;
       }
-      if (event.type === "goal_updated") goal = { ...event.goal };
+      if (event.type === "goal_updated") {
+        const next = event.goal ?? undefined;
+        goalRevision = nextGoalRevision(goal, next, goalRevision);
+        goal = next;
+      }
       if (event.type === "team_updated") team = structuredClone(event.team);
       if (event.type === "workflow_updated") workflow = { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
       if (event.type === "task_progress_updated") taskProgress = cloneTaskProgress(event.progress);
@@ -891,6 +1023,7 @@ async function readSession(filePath: string, trace: PerformanceTrace, summaryOnl
         lineage = cloneLineage(event.lineage);
         usage = createEmptySessionUsage(header.usage_tracking);
         goal = undefined;
+        goalRevision = 0;
         workflow = event.workflow === undefined
           ? undefined
           : { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
@@ -914,8 +1047,10 @@ async function readSession(filePath: string, trace: PerformanceTrace, summaryOnl
       updated_at: updatedAt,
       workspace_path: header.workspace_path,
       model,
+      ...(webPermissionMode === undefined ? {} : { web_permission_mode: webPermissionMode }),
       ...(team ? { team } : {}),
       ...(goal ? { goal } : {}),
+      ...(goalRevision ? { goal_revision: goalRevision } : {}),
       ...(workflow ? { workflow } : {}),
       ...(taskProgress ? { task_progress: cloneTaskProgress(taskProgress) } : {}),
       ...(memoryPolicy ? { memory_policy: memoryPolicy } : {}),
@@ -923,6 +1058,7 @@ async function readSession(filePath: string, trace: PerformanceTrace, summaryOnl
       ...(lineage ? { fork_pending_resume: forkPendingResume } : {}),
     },
     timeline,
+    ...(inbox.accepted.length ? { webInbox: inbox } : {}),
     context,
     usage,
     ...(costs.length ? { costs } : {}),
@@ -1023,6 +1159,7 @@ async function readSearchProjection(filePath: string, trace: PerformanceTrace, s
   let model: SessionModelRef | undefined;
   let updatedAt = "";
   let goal: SessionGoal | undefined;
+  let goalRevision = 0;
   let workflow: WorkflowState | undefined;
   let taskProgress: TaskProgress | undefined;
   let memoryPolicy: LearnedMemoryPolicy | undefined;
@@ -1030,6 +1167,7 @@ async function readSearchProjection(filePath: string, trace: PerformanceTrace, s
   let forkPendingResume = false;
   let team: SessionTeamReference | undefined;
   let timelineIndex = 0;
+  let webPermissionMode: WebPermissionMode | undefined;
   const messages: SessionSearchProjection["messages"] = [];
 
   const processLine = (line: string, allowIncomplete: boolean) => {
@@ -1046,6 +1184,7 @@ async function readSearchProjection(filePath: string, trace: PerformanceTrace, s
     if (!header) {
       if (event.type !== "session_created") throw new Error(`Session file has no valid header: ${filePath}`);
       header = event;
+      webPermissionMode = event.web_permission_mode;
       title = event.title;
       titlePending = event.title_pending;
       model = event.model;
@@ -1058,14 +1197,20 @@ async function readSearchProjection(filePath: string, trace: PerformanceTrace, s
       title = event.title;
       titlePending = false;
     }
-    if (event.type === "timeline_entry") {
-      if (event.entry.kind === "user" || event.entry.kind === "assistant") {
-        messages.push({ kind: event.entry.kind, text: event.entry.text, timelineIndex });
+    const entry = eventTimelineEntry(event);
+    if (entry) {
+      if (entry.kind === "user" || entry.kind === "assistant") {
+        messages.push({ kind: entry.kind, text: entry.text, timelineIndex });
       }
       timelineIndex += 1;
     }
     if (event.type === "model_selected") model = event.model;
-    if (event.type === "goal_updated") goal = { ...event.goal };
+    if (event.type === "web_permission_selected") webPermissionMode = event.mode;
+    if (event.type === "goal_updated") {
+      const next = event.goal ?? undefined;
+      goalRevision = nextGoalRevision(goal, next, goalRevision);
+      goal = next;
+    }
     if (event.type === "team_updated") team = structuredClone(event.team);
     if (event.type === "workflow_updated") workflow = { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
     if (event.type === "task_progress_updated") taskProgress = cloneTaskProgress(event.progress);
@@ -1073,6 +1218,7 @@ async function readSearchProjection(filePath: string, trace: PerformanceTrace, s
     if (event.type === "fork_boundary") {
       lineage = cloneLineage(event.lineage);
       goal = undefined;
+      goalRevision = 0;
       workflow = event.workflow === undefined
         ? undefined
         : { ...event.workflow, changed_paths: [...event.workflow.changed_paths] };
@@ -1100,8 +1246,10 @@ async function readSearchProjection(filePath: string, trace: PerformanceTrace, s
       updated_at: updatedAt,
       workspace_path: header.workspace_path,
       model,
+      ...(webPermissionMode === undefined ? {} : { web_permission_mode: webPermissionMode }),
       ...(team ? { team } : {}),
       ...(goal ? { goal } : {}),
+      ...(goalRevision ? { goal_revision: goalRevision } : {}),
       ...(workflow ? { workflow } : {}),
       ...(taskProgress ? { task_progress: cloneTaskProgress(taskProgress) } : {}),
       ...(memoryPolicy ? { memory_policy: memoryPolicy } : {}),
@@ -1184,6 +1332,28 @@ function sessionHeaderDigest(serialized: string): string {
   return createHash("sha256").update(Buffer.from(serialized, "utf8")).digest("hex");
 }
 
+/** Fork lineage records original byte offsets, including CRLF in older logs. */
+async function* forkSourceLines(file: string, size: number) {
+  let offset = 0;
+  let pending: Buffer[] = [];
+  const stream = createReadStream(file, { end: size - 1 });
+  for await (const bytes of stream as AsyncIterable<Buffer>) {
+    let start = 0;
+    let newline: number;
+    while ((newline = bytes.indexOf(10, start)) >= 0) {
+      pending.push(bytes.subarray(start, newline));
+      offset += newline - start + 1;
+      yield { line: Buffer.concat(pending).toString("utf8").replace(/\r$/u, ""), end: offset };
+      pending = [];
+      start = newline + 1;
+    }
+    if (start < bytes.length) {
+      pending.push(bytes.subarray(start));
+      offset += bytes.length - start;
+    }
+  }
+}
+
 export class SessionStore implements SessionStoreLike {
   readonly activity: SessionActivity;
   readonly performanceTrace: PerformanceTrace;
@@ -1194,6 +1364,7 @@ export class SessionStore implements SessionStoreLike {
   readonly #deletedSessionIds = new Set<string>();
   readonly #searchCache = new Map<string, CachedSearchProjection>();
   readonly #outputs: SessionOutputStorage;
+  readonly #inputImages: SessionInputImages;
   readonly #outputReferences = new Map<string, OutputReferenceState>();
   #outputStartup: Promise<void> | undefined;
   #forkStartup: Promise<void> | undefined;
@@ -1206,10 +1377,23 @@ export class SessionStore implements SessionStoreLike {
     this.#now = options.now ?? (() => new Date());
     this.#createId = options.createId ?? randomUUID;
     this.#outputs = new SessionOutputStorage(this.#directory, this.performanceTrace);
+    this.#inputImages = new SessionInputImages(this.#directory);
   }
 
   get directory(): string {
     return this.#directory;
+  }
+
+  saveInputImage(sessionId: string, ref: InputImageReference, bytes: Uint8Array, signal?: AbortSignal): Promise<void> {
+    return this.#enqueue(sessionId, async () => {
+      signal?.throwIfAborted();
+      await fs.access(this.#filePath(sessionId));
+      await this.#inputImages.write(sessionId, ref, bytes, signal);
+    });
+  }
+
+  readInputImage(sessionId: string, ref: InputImageReference, signal?: AbortSignal): Promise<Uint8Array> {
+    return this.#inputImages.read(sessionId, ref, signal);
   }
 
   async create(input: CreateSessionInput): Promise<SessionSummary> {
@@ -1230,6 +1414,7 @@ export class SessionStore implements SessionStoreLike {
         workspace_path: input.workspacePath,
         model: modelRef(input.model),
         usage_tracking: true,
+        ...(input.webPermissionMode === undefined ? {} : { web_permission_mode: input.webPermissionMode }),
       };
       try {
         const handle = await fs.open(this.#filePath(id), "wx", 0o600);
@@ -1247,6 +1432,7 @@ export class SessionStore implements SessionStoreLike {
           updated_at: at,
           workspace_path: input.workspacePath,
           model: modelRef(input.model),
+          ...(input.webPermissionMode === undefined ? {} : { web_permission_mode: input.webPermissionMode }),
         };
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
@@ -1272,6 +1458,52 @@ export class SessionStore implements SessionStoreLike {
       at: this.#now().toISOString(),
       entry: { ...entry },
     });
+  }
+
+  async updateWebInbox(
+    sessionId: string,
+    change: (inbox: Readonly<WebInbox>) => WebInboxChange | undefined,
+  ): Promise<WebInbox> {
+    let inbox!: WebInbox;
+    await this.#append(sessionId, async () => {
+      inbox = await this.#readWebInbox(sessionId);
+      const edit = change(inbox);
+      if (!edit) return;
+      if (!isWebInboxChange(edit)) throw new Error("Invalid web inbox change");
+      applyWebInboxChange(inbox, edit);
+      return { version: SESSION_FORMAT_VERSION, type: "web_inbox_changed", at: this.#now().toISOString(), change: edit };
+    });
+    return inbox;
+  }
+
+  /** Commit delivery with the transcript, and steering with model context in the same record. */
+  commitWebInput(sessionId: string, entry: StoredTextTimelineEntry, steeringItems?: readonly Record<string, unknown>[]): Promise<void> {
+    return this.#append(sessionId, async () => {
+      const inbox = await this.#readWebInbox(sessionId);
+      if (!entry.web_input || !inbox.pending.some(item => item.id === entry.web_input?.id
+        && item.revision === entry.web_input.revision && item.requestId === entry.web_input.requestId)) {
+        throw new Error("The pending input changed before delivery");
+      }
+      const base = { version: SESSION_FORMAT_VERSION, at: this.#now().toISOString() } as const;
+      return steeringItems
+        ? { ...base, type: "context_append", items: steeringItems.map(item => ({ ...item })), web_steering_entry: entry }
+        : { ...base, type: "timeline_entry", entry };
+    });
+  }
+
+  async #readWebInbox(sessionId: string): Promise<WebInbox> {
+    const session = await readSession(this.#filePath(sessionId), this.performanceTrace, true, true);
+    return session.webInbox ?? { pending: [], accepted: [] };
+  }
+
+  /** Order the outcome before the next activity owner's writes, even if releasing activity fails. */
+  settleWebTurn(sessionId: string, settle: () => Promise<WebTurnOutcome>): Promise<void> {
+    return this.#append(sessionId, async () => ({
+      version: SESSION_FORMAT_VERSION,
+      type: "timeline_entry",
+      at: this.#now().toISOString(),
+      entry: { kind: "system", text: "", web_turn_outcome: await settle() },
+    }));
   }
 
   appendContext(
@@ -1467,6 +1699,10 @@ export class SessionStore implements SessionStoreLike {
     return this.#append(sessionId, { version: SESSION_FORMAT_VERSION, type: "goal_updated", at: this.#now().toISOString(), goal: { ...goal } });
   }
 
+  clearGoal(sessionId: string): Promise<void> {
+    return this.#append(sessionId, { version: SESSION_FORMAT_VERSION, type: "goal_updated", at: this.#now().toISOString(), goal: null });
+  }
+
   async updateGoal(sessionId: string, patch: Partial<Pick<SessionGoal, "status" | "tokens_used" | "usage_complete" | "time_used_seconds" | "blocked_streak" | "updated_at">>): Promise<void> {
     const current = (await this.load(sessionId)).goal;
     if (!current) throw new Error("No goal exists for this session");
@@ -1507,6 +1743,10 @@ export class SessionStore implements SessionStoreLike {
 
   async fork(sessionId: string, input: ForkSessionInput = {}): Promise<SessionSummary> {
     this.#assertSessionId(sessionId);
+    const through = input.throughTimelineIndex;
+    if (through !== undefined && (!Number.isSafeInteger(through) || through < 0)) {
+      throw new RangeError("Invalid Session fork timeline entry");
+    }
     input.signal?.throwIfAborted();
     await this.#ensureOutputsInitialized();
     let created: SessionSummary | undefined;
@@ -1514,11 +1754,15 @@ export class SessionStore implements SessionStoreLike {
       input.signal?.throwIfAborted();
       await this.#recoverTail(sessionId);
       const sourcePath = this.#filePath(sessionId);
-      const boundary = (await fs.stat(sourcePath)).size;
+      let boundary = (await fs.stat(sourcePath)).size;
       if (boundary <= 0) throw new Error("Cannot fork an empty Session log");
       const references = (await this.#references(sessionId)).references.slice(-RETAINED_TOOL_OUTPUTS);
+      const retainedIds = through === undefined ? undefined : new Set(references.map(reference => reference.output_id));
+      const copiedIds = new Set<string>();
+      const copiedImages = new Map<string, InputImageReference>();
       const transaction = await this.#createForkTransaction(sessionId);
       let outputsPublished = false;
+      let imagesPublished = false;
       let logPublished = false;
       try {
         const copiedPath = path.join(transaction.directory, "copied-events.jsonl");
@@ -1526,19 +1770,15 @@ export class SessionStore implements SessionStoreLike {
         let header: SessionCreatedEvent | undefined;
         let sourceTitle = "";
         let sourceModel: SessionModelRef | undefined;
+        let sourceWebPermission: WebPermissionMode | undefined;
         let sourceWorkflow: WorkflowState | undefined;
         let sourceTaskProgress: TaskProgress | undefined;
         let sourceMemoryPolicy: LearnedMemoryPolicy | undefined;
         let sourceHeaderSha256 = "";
         let lineNumber = 0;
-        const stream = createReadStream(sourcePath, {
-          encoding: "utf8",
-          start: 0,
-          end: boundary - 1,
-        });
-        const lines = createInterface({ input: stream, crlfDelay: Infinity });
+        let timelineIndex = -1;
         try {
-          for await (const line of lines) {
+          for await (const { line, end } of forkSourceLines(sourcePath, boundary)) {
             input.signal?.throwIfAborted();
             lineNumber += 1;
             if (!line.trim()) continue;
@@ -1556,11 +1796,13 @@ export class SessionStore implements SessionStoreLike {
               header = event;
               sourceTitle = event.title;
               sourceModel = modelRef(event.model);
+              sourceWebPermission = event.web_permission_mode;
               sourceHeaderSha256 = sessionHeaderDigest(line);
               continue;
             }
             if (event.type === "title_updated") sourceTitle = event.title;
             if (event.type === "model_selected") sourceModel = modelRef(event.model);
+            if (event.type === "web_permission_selected") sourceWebPermission = event.mode;
             if (event.type === "workflow_updated") sourceWorkflow = workflowSnapshot(event.workflow);
             if (event.type === "task_progress_updated") sourceTaskProgress = cloneTaskProgress(event.progress);
             if (event.type === "memory_policy_updated") sourceMemoryPolicy = { ...event.policy };
@@ -1570,13 +1812,37 @@ export class SessionStore implements SessionStoreLike {
               sourceMemoryPolicy = event.memory_policy === undefined ? undefined : { ...event.memory_policy };
             }
             if (FORK_COPY_EVENT_TYPES.has(event.type)) {
-              await copiedHandle.writeFile(`${line}\n`, "utf8");
+              const entry = eventTimelineEntry(event);
+              if (entry && entry.kind !== "status") {
+                for (const ref of entry.input_files ?? []) {
+                  if (isInputImageReference(ref)) copiedImages.set(ref.attachmentId, ref);
+                }
+              }
+              if ("items" in event && Array.isArray(event.items)) {
+                for (const item of event.items) {
+                  for (const ref of inputImageReferences(item)) copiedImages.set(ref.attachmentId, ref);
+                }
+              }
+              let copiedLine = line;
+              if (retainedIds && event.type === "context_append" && event.tool_output_attachment) {
+                const outputId = event.tool_output_attachment.output_id;
+                if (retainedIds.has(outputId)) copiedIds.add(outputId);
+                else {
+                  delete event.tool_output_attachment;
+                  copiedLine = JSON.stringify(event);
+                }
+              }
+              await copiedHandle.writeFile(`${copiedLine}\n`, "utf8");
+            }
+            const entry = eventTimelineEntry(event);
+            if (through !== undefined && entry !== undefined && entry.kind !== "status" && ++timelineIndex === through) {
+              boundary = end;
+              break;
             }
           }
+          if (through !== undefined && timelineIndex !== through) throw new RangeError("Session fork timeline entry is unavailable");
           await copiedHandle.sync();
         } finally {
-          lines.close();
-          stream.destroy();
           await copiedHandle.close();
         }
         if (!header || !sourceModel || !sourceHeaderSha256) {
@@ -1605,6 +1871,7 @@ export class SessionStore implements SessionStoreLike {
           workspace_path: header.workspace_path,
           model: modelRef(sourceModel),
           usage_tracking: true,
+          ...(sourceWebPermission === undefined ? {} : { web_permission_mode: sourceWebPermission }),
           lineage,
         };
         const boundaryEvent: ForkBoundaryEvent = {
@@ -1636,10 +1903,18 @@ export class SessionStore implements SessionStoreLike {
         }
 
         const stagedOutputs = path.join(transaction.directory, "outputs");
-        await this.#outputs.stageFork(sessionId, stagedOutputs, references, input.signal);
+        const copiedReferences = retainedIds ? references.filter(reference => copiedIds.has(reference.output_id)) : references;
+        await this.#outputs.stageFork(sessionId, stagedOutputs, copiedReferences, input.signal);
         input.signal?.throwIfAborted();
         await this.#outputs.publishFork(transaction.sessionId, stagedOutputs);
         outputsPublished = true;
+        if (copiedImages.size) {
+          const stagedImages = path.join(transaction.directory, "images");
+          await this.#inputImages.stageFork(sessionId, stagedImages, [...copiedImages.values()], input.signal);
+          input.signal?.throwIfAborted();
+          await this.#inputImages.publishFork(transaction.sessionId, stagedImages);
+          imagesPublished = true;
+        }
         input.signal?.throwIfAborted();
         await fs.rename(stagedLogPath, this.#filePath(transaction.sessionId));
         logPublished = true;
@@ -1652,6 +1927,7 @@ export class SessionStore implements SessionStoreLike {
           updated_at: at,
           workspace_path: header.workspace_path,
           model: modelRef(sourceModel),
+          ...(sourceWebPermission === undefined ? {} : { web_permission_mode: sourceWebPermission }),
           workflow: workflowSnapshot(workflow),
           ...(taskProgress === undefined ? {} : { task_progress: cloneTaskProgress(taskProgress) }),
           ...(sourceMemoryPolicy === undefined ? {} : { memory_policy: { ...sourceMemoryPolicy } }),
@@ -1661,6 +1937,9 @@ export class SessionStore implements SessionStoreLike {
       } catch (error) {
         if (outputsPublished && !logPublished) {
           await this.#outputs.deleteSession(transaction.sessionId).catch(() => undefined);
+        }
+        if (imagesPublished && !logPublished) {
+          await this.#inputImages.deleteSession(transaction.sessionId).catch(() => undefined);
         }
         throw error;
       } finally {
@@ -1678,6 +1957,12 @@ export class SessionStore implements SessionStoreLike {
       type: "fork_resume_updated",
       at: this.#now().toISOString(),
       pending,
+    });
+  }
+
+  setWebPermissionMode(sessionId: string, mode: WebPermissionMode): Promise<void> {
+    return this.#append(sessionId, {
+      version: SESSION_FORMAT_VERSION, type: "web_permission_selected", at: this.#now().toISOString(), mode,
     });
   }
 
@@ -1797,6 +2082,7 @@ export class SessionStore implements SessionStoreLike {
             this.#dropSearchCache(this.#filePath(sessionId));
             try {
               await this.#outputs.deleteSession(sessionId);
+              await this.#inputImages.deleteSession(sessionId);
               const { InputHistory } = await import('./input-history.js');
               await new InputHistory(path.join(path.dirname(this.#directory), 'input-history.json')).removeSessions([sessionId]);
               await fs.rm(this.#filePath(sessionId), { force: true });
@@ -1822,14 +2108,17 @@ export class SessionStore implements SessionStoreLike {
     finally { this.performanceTrace.record("session_load", performance.now() - started); }
   }
 
-  #append(sessionId: string, event: SessionEvent): Promise<void> {
-    const serialized = `${JSON.stringify(event)}\n`;
+  #append(sessionId: string, event: SessionEvent | (() => Promise<SessionEvent | undefined>)): Promise<void> {
+    const serialized = typeof event === "function" ? undefined : `${JSON.stringify(event)}\n`;
     this.#dropSearchCache(this.#filePath(sessionId));
     return this.#enqueue(sessionId, async () => {
       await this.#recoverTail(sessionId);
+      const resolved = typeof event === "function" ? await event() : event;
+      if (!resolved) return;
+      const record = serialized ?? `${JSON.stringify(resolved)}\n`;
       const cached = this.#outputReferences.get(sessionId);
       const before = await fs.stat(this.#filePath(sessionId));
-      await fs.appendFile(this.#filePath(sessionId), serialized, { encoding: "utf8", mode: 0o600 });
+      await fs.appendFile(this.#filePath(sessionId), record, { encoding: "utf8", mode: 0o600 });
       // Ordinary events cannot change attachment refs. Avoid rescanning the entire long task
       // after each usage/timeline append; an external writer still invalidates this cache.
       if (cached && before.size === cached.size && before.mtimeMs === cached.mtimeMs) {
@@ -1975,6 +2264,16 @@ export class SessionStore implements SessionStoreLike {
   #ensureOutputsInitialized(): Promise<void> {
     this.#outputStartup ??= (async () => {
       await this.#ensureForkStagingInitialized();
+      for (const sessionId of await this.#inputImages.sessions()) {
+        if (await this.#forkTransactionActive(sessionId)) continue;
+        await this.#withSessionLock(sessionId, async () => {
+          try { await fs.access(this.#filePath(sessionId)); }
+          catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+            await this.#inputImages.deleteSession(sessionId);
+          }
+        });
+      }
       for (const sessionId of await this.#outputs.sessions()) {
         if (await this.#forkTransactionActive(sessionId)) continue;
         await this.#withSessionLock(sessionId, async () => {

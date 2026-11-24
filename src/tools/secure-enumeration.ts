@@ -7,7 +7,7 @@ export function globPattern(pattern: string): RegExp {
   return new RegExp(`^${escaped}$`, 'u');
 }
 interface IgnoreRule { prefix: string; expression: RegExp; basename: boolean; negate: boolean; directory: boolean }
-export async function enumerateSafeFiles(workspace: string, requested: string, signal?: AbortSignal, options: { timeoutMs?: number; maxPaths?: number; maxBytes?: number; excluded?: ReadonlySet<string> } = {}): Promise<{ paths: string[]; incomplete: boolean; reasons: string[] }> {
+export async function enumerateSafeFiles(workspace: string, requested: string, signal?: AbortSignal, options: { timeoutMs?: number; maxPaths?: number; maxBytes?: number; excluded?: ReadonlySet<string>; respectIgnore?: boolean } = {}): Promise<{ paths: string[]; incomplete: boolean; reasons: string[] }> {
   const paths: string[] = []; const reasons = new Set<string>();
   const timeout = options.timeoutMs ?? 5000; const deadline = Date.now() + timeout;
   const maximum = options.maxPaths ?? 10_000; const maxBytes = options.maxBytes ?? 2 * 1024 * 1024;
@@ -27,7 +27,7 @@ export async function enumerateSafeFiles(workspace: string, requested: string, s
     if (Date.now() >= deadline) { reasons.add('enumeration_timeout'); return; }
     const rules = [...inherited]; const prefix = relative === '.' ? '' : relative.split(path.sep).join('/') + '/';
     const { entries, ignores } = await safeReadDirectory(workspace, relative, signal);
-    for (const value of ignores) {
+    for (const value of options.respectIgnore === false ? [] : ignores) {
       if (value === '\x01') { reasons.add('ignore_byte_limit'); continue; }
       for (let pattern of value.split(/\r?\n/u)) {
         if (!pattern || pattern.startsWith('#')) continue;

@@ -11,7 +11,7 @@ import {
 import { parse as parseYaml } from "yaml";
 
 const MAX_SKILL_NAME_CHARS = 64;
-const MAX_SKILL_FILE_BYTES = 512 * 1024;
+export const MAX_SKILL_DOCUMENT_BYTES = 512 * 1024;
 const SKILL_PAGE_CHARS = 32 * 1024;
 const MAX_CATALOG_CHARS = 8_000;
 const MAX_SCAN_ENTRIES = 20_000;
@@ -43,6 +43,7 @@ export interface SkillSnapshot {
 export interface SkillTurnContext extends SkillSnapshot {
   explicitInstructions: string;
   explicitNames: readonly string[];
+  loadedSlashNames?: readonly string[];
 }
 
 export interface SkillReadResult {
@@ -53,7 +54,7 @@ export interface SkillReadResult {
 }
 
 export interface SkillCatalogLike {
-  prepareTurn(input: string): Promise<SkillTurnContext>;
+  prepareTurn(input: string, slashNames?: readonly string[]): Promise<SkillTurnContext>;
   read(argumentsJson: string): Promise<string>;
 }
 
@@ -201,7 +202,7 @@ async function discoverRoot(root: SkillRoot): Promise<{ skills: SkillMetadata[];
       const path = join(canonical, skillFile.name);
       try {
         const stats = await fs.stat(path);
-        if (stats.size > MAX_SKILL_FILE_BYTES) throw new Error(`SKILL.md exceeds ${MAX_SKILL_FILE_BYTES} bytes`);
+        if (stats.size > MAX_SKILL_DOCUMENT_BYTES) throw new Error(`SKILL.md exceeds ${MAX_SKILL_DOCUMENT_BYTES} bytes`);
         skills.push(parseSkillMetadata(await fs.readFile(path, "utf8"), path, root.scope));
       } catch (error) {
         errors.push({ path, message: error instanceof Error ? error.message : String(error) });
@@ -314,10 +315,13 @@ export class SkillCatalog {
     };
   }
 
-  async prepareTurn(input: string): Promise<SkillTurnContext> {
+  async prepareTurn(input: string, slashNames: readonly string[] = []): Promise<SkillTurnContext> {
     const snapshot = await this.refresh();
-    const explicitNames = explicitMentions(input);
+    const knownNames = new Set(snapshot.skills.map(skill => skill.name));
+    const slash = new Set(slashNames.filter(name => knownNames.has(name)));
+    const explicitNames = [...new Set([...explicitMentions(input), ...slash])];
     const bodies: string[] = [];
+    const loadedSlashNames: string[] = [];
     for (const name of explicitNames) {
       const matches = snapshot.skills.filter((candidate) => candidate.name === name);
       if (matches.length > 1) {
@@ -332,6 +336,7 @@ export class SkillCatalog {
       try {
         const body = await fs.readFile(skill.path, "utf8");
         bodies.push(`## Explicit skill: ${skill.name}\nSource: ${skill.path}\n\n${body}`);
+        if (slash.has(name)) loadedSlashNames.push(name);
       } catch (error) {
         bodies.push(`Explicit skill $${name} could not be read: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -340,6 +345,7 @@ export class SkillCatalog {
       ...snapshot,
       explicitNames,
       explicitInstructions: bodies.join("\n\n"),
+      ...(loadedSlashNames.length ? { loadedSlashNames } : {}),
     };
   }
 
@@ -371,7 +377,7 @@ export class SkillCatalog {
       if (relation.startsWith("..") || isAbsolute(relation)) throw new Error("resource escapes the skill directory");
       const stats = await fs.stat(path);
       if (!stats.isFile()) throw new Error("resource is not a file");
-      if (stats.size > MAX_SKILL_FILE_BYTES) throw new Error(`resource exceeds ${MAX_SKILL_FILE_BYTES} bytes`);
+      if (stats.size > MAX_SKILL_DOCUMENT_BYTES) throw new Error(`resource exceeds ${MAX_SKILL_DOCUMENT_BYTES} bytes`);
     } catch (error) {
       return JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error) });
     }

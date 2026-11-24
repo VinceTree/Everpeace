@@ -31,6 +31,7 @@ import {
   createProviderRuntime,
   createSessionPromptCacheKey,
   isOfficialOpenAiBaseUrl,
+  supportsResponsesImages,
   supportsPromptCacheOptions,
   type ProviderRuntime,
 } from "../providers/openai-compatible.js";
@@ -321,7 +322,28 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
       readEvidence: async (member) => { if (!member.sessionId) return []; const saved = await options.sessionStore.load(member.sessionId); if (saved.summary.workspace_path !== (member.sessionWorkspacePath ?? member.workspacePath ?? options.workspacePath)) throw new Error("Member evidence workspace does not match ownership"); return saved.timeline.filter((entry) => entry.kind === "output").slice(-8).map((entry) => ({ sessionId: member.sessionId, text: sanitizeExecOutput("text" in entry ? entry.text : "", 2048) })); },
       ...(options.onTeamEvent ? { onEvent: options.onTeamEvent } : {}),
       onIntegrationTiming: durationMs => agent.recordPerformanceTiming('team_integration', durationMs),
-      persistReference: async (snapshot) => { const id = options.sessionId(); if (id) await options.sessionStore.setTeam(id, { teamId: snapshot.teamId, state: snapshot.state, members: snapshot.members.map(({ agentId, taskId, sessionId, state }) => ({ agentId, taskId, ...(sessionId ? { sessionId } : {}), state })) }); },
+      persistReference: async (snapshot) => {
+        const id = options.sessionId();
+        if (!id) return;
+        await options.sessionStore.setTeam(id, {
+          teamId: snapshot.teamId,
+          state: snapshot.state,
+          members: snapshot.members.map(member => ({
+            agentId: member.agentId,
+            taskId: member.taskId,
+            ...(member.sessionId ? { sessionId: member.sessionId } : {}),
+            state: member.state,
+            role: member.task.role,
+            goal: member.task.goal,
+            acceptance: member.task.acceptance,
+            paths: [...member.task.paths],
+            dependencies: [...member.task.dependencies],
+            ...(member.summary === undefined ? {} : { summary: member.summary }),
+            ...(member.verification === undefined ? {} : { verification: member.verification }),
+            ...(member.changedPaths === undefined ? {} : { changedPaths: member.changedPaths.slice(0, 256) }),
+          })),
+        });
+      },
       onMemberUsage: async (usage) => { if (restore?.onMemberUsage) await restore.onMemberUsage(usage); else { const id = options.sessionId(); if (id) await options.sessionStore.appendUsage(id, usage, { preserveContext: true }); } await team?.recordGoalUsage(usage); },
     });
   }
@@ -381,6 +403,13 @@ export function createProductionAgent(options: ProductionAgentOptions): Producti
     io: team ? { ...rootIO, takeInteractionRequired: () => team?.takeInteraction() ?? options.io.takeInteractionRequired?.() } : options.io,
     parallelReadTools: options.parallelReadTools ?? true,
     providerCapabilities: provider.capabilities,
+    ...(supportsResponsesImages(options.model.base_url, options.model.model_name) ? {
+      readInputImage: (ref, signal) => {
+        const id = options.sessionId();
+        if (!id) throw new Error("Image resolution requires an active Session");
+        return options.sessionStore.readInputImage(id, ref, signal);
+      },
+    } : {}),
     requestSettings: provider.settings,
     sessionHistory: new SessionHistoryRuntime({
       store: options.sessionStore,
@@ -481,11 +510,12 @@ export type ProductionCommandExecutor = (
   signal?: AbortSignal,
   timeoutMs?: number,
   onOutput?: (output: BashOutputPreview) => void,
+  onOutputChunk?: import("../tools/bash.js").BashOutputChunk,
 ) => Promise<BashResult>;
 
 /** Build the sandboxed command boundary used by model tools and verification. */
 export function createProductionCommandExecutor(options: ProductionCommandExecutorOptions): ProductionCommandExecutor {
-  return (command, signal, timeoutMs, onOutput) => {
+  return (command, signal, timeoutMs, onOutput, onOutputChunk) => {
     const startup = performance.now();
     const policy = typeof options.policy === "function" ? options.policy() : options.policy;
     const readableRoots = typeof options.readableRoots === "function"
@@ -499,6 +529,7 @@ export function createProductionCommandExecutor(options: ProductionCommandExecut
       ...(options.onProcessStarted ? { onProcessStarted: () => options.onProcessStarted!(performance.now() - startup) } : {}),
       ...(signal ? { signal } : {}),
       ...(onOutput ? { onOutput } : {}),
+      ...(onOutputChunk ? { onOutputChunk } : {}),
     });
   };
 }
@@ -635,7 +666,7 @@ export function createProductionWorkflowAgentIO(options: ProductionWorkflowAgent
         if (!cleanupFailed) await workflow.observeShellExecution(signal);
       }
     },
-    async runBackgroundBash(command, signal, timeoutMs, onOutput) {
+    async runBackgroundBash(command, signal, timeoutMs, onOutput, onOutputChunk) {
       const workflow = workflowFrom(options);
       workflow.assertCleanupComplete();
       if (workflow.state.phase === "blocked") {
@@ -643,7 +674,7 @@ export function createProductionWorkflowAgentIO(options: ProductionWorkflowAgent
       }
       let cleanupFailed = false;
       try {
-        const result = await (options.executeBackground ?? options.execute)(command, signal, timeoutMs, onOutput);
+        const result = await (options.executeBackground ?? options.execute)(command, signal, timeoutMs, onOutput, onOutputChunk);
         if (result.cleanupFailed) throw new ProcessCleanupError(result.error ?? "Background process ownership is unresolved");
         return result;
       } catch (error) {

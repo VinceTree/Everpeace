@@ -1,5 +1,19 @@
 # 当前交接
 
+## DeepSeek Harness 网页工作台（2026-11-24）
+
+`everpeace web` 在本机启动网页工作台。准备固定 npm 包的浏览器资源后，页面使用 DeepSeek Harness 编码工作台，构建会携带其资源和 MIT 许可。浏览器用同源 RPC 和 SSE 连接 Everpeace。生产 `SessionStore`、模型注册、权限、沙箱、编码验证和任务 runner 管理实际工作。完整接入范围和准备方法见 [网页工作台](architecture/STATE_AND_UI.md#本地网页工作台) 及 [README](../README.zh-CN.md#网页工作台)。
+
+网页启动时优先选择已注册的 OpenCode Go `deepseek-v4.1-flash` 作为新会话默认模型。显式 `--model` 优先，已有会话按保存的模型恢复。`runInteractiveTask` 从系统密钥环解析凭据并建立 Go Responses runtime。交付分支要求审批答复来自收到请求的活跃 SSE 连接。
+
+已接入多工作区、会话切换和回复分支、模型目录、流式回复、工具与审批、队列和插话、Plan、Goal、Skill、后台任务、Windows 桌面打开、图片及自动化任务。Team 成员任务投影和插件 profile 已接入。二进制附件以引用和元数据占位保存，供应商文件输入仍待验证。插件加载与第三方安装、Team 成员完整历史、macOS 和 Linux 目录选择的实机验收仍待完成。
+
+原工作树曾通过 Playwright 和离线供应商验收上述界面，生产 SDK 回归在替换的传输层核对 Go Responses 请求。交付分支基于远程主分支，独立运行门禁。真实模型推理未在本次交付调用。
+
+交付分支在 Windows 上串行通过 `typecheck → lint → test → build`。共 1533 项测试，1530 通过、3 跳过。179 个文档文件的路径与链接、1011 项双语键、安全扫描及 diff 检查通过。构建版冒烟验证了原版页面、同源鉴权和 OpenCode Go `deepseek-v4.1-flash` 的默认注册项。验证日志在交付工作树的 `.cache/harness-delivery-gates/`。
+
+PR 的 Windows CI 使用可通过目录联接访问的临时目录。网页测试夹具现在先解析其真实路径，和正式 CLI 一样使用规范工作区保存及查找会话。本机以目录联接复现原失败，修正后在相同环境通过 23 项网页协议及工作台回归。
+
 ## 依赖 PR 验证修复（2026-11-15）
 
 整合 Dependabot #41–#45 的原提交，覆盖 Marked、Undici、OpenAI SDK、Codex 原生后端和 Oxlint。原 #41／#42／#43／#45 的 Windows expanded fixture 在准备阶段发现冻结锁与根锁不一致，#44 的 Windows 和 Linux 都被原生后端身份检查拒绝。合并 OpenAI 与 Undici 的 peer 解析后，同步两份冻结评测锁。九项 expanded proof 均通过正常基线、植入缺陷、参考修复三阶段，模型请求为零。

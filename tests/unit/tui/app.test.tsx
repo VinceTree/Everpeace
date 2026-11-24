@@ -2145,7 +2145,9 @@ test("asynchronous file submission starts once and leaves a fresh guidance draft
   const fixture = createFixture({ initial: [planModel], createAgent: (_model, io) => ({
     async runTurn(text, _signal, options) {
       calls.push(text);
-      assert.equal(options?.attachments?.[0]?.content, "attachment 中文 🙂\n");
+      const attachment = options?.attachments?.[0];
+      assert.ok(attachment && attachment.source !== "image");
+      assert.equal(attachment.content, "attachment 中文 🙂\n");
       await new Promise<void>((resolve) => { release = resolve; });
       io.writeAssistant("attachment task finished");
       return {};

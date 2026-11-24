@@ -16,6 +16,7 @@ import {
 } from "./sandbox-policy.js";
 
 export type { BashOutputPreview } from "./bash-output-preview.js";
+export type BashOutputChunk = (channel: "stdout" | "stderr", text: string) => void;
 
 /** Model shell commands must not wait forever when a child ignores guidance. */
 export const DEFAULT_MODEL_BASH_TIMEOUT_MS = 120_000;
@@ -38,6 +39,7 @@ export interface BashOptions {
   /** Stop the child after this many milliseconds. Omit for no timeout. */
   timeoutMs?: number;
   onOutput?(output: BashOutputPreview): void;
+  onOutputChunk?: BashOutputChunk;
   onProcessStarted?(): void;
   bashPath?: string;
   cwd?: string;
@@ -187,6 +189,7 @@ async function runSandboxBash(
     }, 80);
   };
   const append = (kind: "stdout" | "stderr", chunk: string) => {
+    options.onOutputChunk?.(kind, chunk);
     previewOutput?.push(chunk);
     preview();
     if (streamOutput) (kind === "stdout" ? process.stdout : process.stderr).write(chunk);

@@ -1,0 +1,38 @@
+export const copy = {
+  en: {
+    newSession: "New session", sessions: "Sessions", sidebar: "Toggle sidebar",
+    workspace: "Workspace", message: "What are we working on today?",
+    model: "Model", unavailable: "Unavailable", register: "Run everpeace login to register a model.",
+    send: "Send", stop: "Stop", stopping: "Stopping…", running: "Working…",
+    allow: "Allow once", deny: "Reject", approval: "Awaiting approval", tool: "Tool call",
+    question: "Awaiting your answer", answer: "Submit answers", customAnswer: "Your answer",
+    linkRequired: "Open the workbench using the link printed by Everpeace.",
+    connecting: "Connecting…", reconnecting: "Reconnecting to Everpeace…",
+    light: "Light", dark: "Dark", theme: "Appearance", language: "Language",
+    cancelled: "Turn stopped.", empty: "No sessions yet", preferences: "Appearance and language",
+    verification_failed: "The task did not pass verification.",
+    limit_reached: "The task reached its execution limit.",
+    interaction_required: "This operation needs further input.",
+    configuration_error: "Check the workspace and model configuration.",
+    runtime_error: "The task ended with an error.",
+  },
+  "zh-CN": {
+    newSession: "新建会话", sessions: "会话", sidebar: "切换侧栏",
+    workspace: "工作区", message: "今天想做些什么？",
+    model: "模型", unavailable: "不可用", register: "运行 everpeace login 注册模型。",
+    send: "发送", stop: "停止", stopping: "正在停止…", running: "正在处理…",
+    allow: "仅允许一次", deny: "拒绝", approval: "等待审批", tool: "工具调用",
+    question: "等待你的回答", answer: "提交回答", customAnswer: "输入你的回答",
+    linkRequired: "请使用 Everpeace 在终端显示的链接打开工作台。",
+    connecting: "正在连接…", reconnecting: "正在重新连接 Everpeace…",
+    light: "浅色", dark: "深色", theme: "外观", language: "语言",
+    cancelled: "任务已停止。", empty: "暂无会话", preferences: "外观与语言",
+    verification_failed: "任务未通过验证。",
+    limit_reached: "任务已达到运行限制。",
+    interaction_required: "此操作需要进一步输入。",
+    configuration_error: "请检查工作区和模型配置。",
+    runtime_error: "任务遇到错误并结束。",
+  },
+};
+export type Language = keyof typeof copy;
+export type Copy = typeof copy.en;

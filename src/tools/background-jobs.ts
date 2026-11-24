@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { BashOutputPreview, BashResult } from "./bash.js";
+import type { BashOutputChunk, BashOutputPreview, BashResult } from "./bash.js";
 import { commandFailureFeedback, ToolFeedbackError } from "./tool-feedback.js";
 import { ProcessCleanupError } from "./process-completion.js";
 
@@ -51,6 +51,16 @@ export interface BackgroundJobCompletion {
   finished_at: string;
 }
 
+export interface BackgroundJobObserver {
+  started(job: Pick<BackgroundJobSnapshot, "job_id" | "command" | "started_at">, requestStop: () => boolean): void;
+  output(jobId: string, ...chunk: Parameters<BashOutputChunk>): void;
+  stopping(jobId: string): void;
+  settled(completion: BackgroundJobCompletion, cleanupFailed: boolean): void;
+}
+
+type RunBackgroundCommand = (command: string, signal: AbortSignal, timeoutMs: number,
+  onOutput: (output: BashOutputPreview) => void, onOutputChunk?: BashOutputChunk) => Promise<BashResult>;
+
 interface BackgroundJob extends BackgroundJobSnapshot {
   controller: AbortController;
   promise: Promise<void>;
@@ -75,13 +85,13 @@ export function parseBackgroundJobId(argumentsJson: string): string | undefined 
 
 export class BackgroundJobManager {
   readonly #jobs = new Map<string, BackgroundJob>();
-  readonly #run: (command: string, signal: AbortSignal, timeoutMs: number, onOutput: (output: BashOutputPreview) => void) => Promise<BashResult>;
+  readonly #run: RunBackgroundCommand;
   #cleanupDepth = 0;
   #disposed = false;
   #disposal: Promise<BackgroundJobSnapshot[]> | undefined;
   #cleanupFailure: ProcessCleanupError | undefined;
 
-  constructor(run: (command: string, signal: AbortSignal, timeoutMs: number, onOutput: (output: BashOutputPreview) => void) => Promise<BashResult>) {
+  constructor(run: RunBackgroundCommand, private readonly observer?: BackgroundJobObserver) {
     this.#run = run;
   }
 
@@ -130,6 +140,10 @@ export class BackgroundJobManager {
     );
     // Reserve both admission and the cleanup promise before invoking host code.
     this.#jobs.set(job.job_id, job);
+    if (this.observer) {
+      controller.signal.addEventListener("abort", () => this.#observe(view => view.stopping(job.job_id)), { once: true });
+      this.#observe(view => view.started(this.#snapshot(job), () => this.#requestStop(job)));
+    }
     parentSignal?.addEventListener("abort", abortFromParent, { once: true });
     if (parentSignal?.aborted) abortFromParent();
     try {
@@ -137,7 +151,9 @@ export class BackgroundJobManager {
       accept(this.#run(command, controller.signal, DEFAULT_JOB_TIMEOUT_MS, (output) => {
         if (job.status !== "running") return;
         job.preview = { ...output, headLines: [...output.headLines], tailLines: [...output.tailLines] };
-      }));
+      }, this.observer ? (channel, text) => {
+        if (job.status === "running") this.#observe(view => view.output(job.job_id, channel, text));
+      } : undefined));
     } catch (error) { reject(error); }
     return this.#snapshot(job);
   }
@@ -150,12 +166,21 @@ export class BackgroundJobManager {
   async stop(jobId: string): Promise<BackgroundJobSnapshot | undefined> {
     const job = this.#jobs.get(jobId);
     if (!job) return undefined;
-    if (job.status === "running") {
-      job.controller.abort(new Error("Background job stopped"));
-    }
+    this.#requestStop(job);
     await job.promise;
     this.assertCleanupComplete();
     return this.#snapshot(job);
+  }
+
+  #requestStop(job: BackgroundJob): boolean {
+    if (job.status !== "running") return false;
+    job.controller.abort(new Error("Background job stopped"));
+    return true;
+  }
+
+  #observe(notify: (view: BackgroundJobObserver) => void): void {
+    try { if (this.observer) notify(this.observer); }
+    catch { /* Browser observers do not own process lifetime. */ }
   }
 
   async waitAll(signal?: AbortSignal): Promise<BackgroundJobSnapshot[]> {
@@ -194,8 +219,10 @@ export class BackgroundJobManager {
     job.status = status;
     job.detachParent?.();
     delete job.detachParent;
+    const completion: BackgroundJobCompletion = { job_id: job.job_id, status, exit_code: result.exitCode, finished_at: job.finished_at };
+    this.#observe(view => view.settled(completion, result.cleanupFailed === true));
     try {
-      onSettled?.({ job_id: job.job_id, status, exit_code: result.exitCode, finished_at: job.finished_at });
+      onSettled?.(completion);
     } catch {
       // Settlement observers cannot change command completion or cleanup.
     } finally { this.#prune(); }

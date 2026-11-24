@@ -8,6 +8,7 @@ import { CleanupDeadline } from '../util/cleanup-deadline.js';
 import { ModelStreamCleanupError } from '../agent/response-errors.js';
 import {
   defaultModelRequestSettings,
+  providerKind,
   resolveProviderCapabilities,
   type ModelRequestSettings,
   type ProviderCapabilities,
@@ -43,7 +44,7 @@ const PROVIDERS: Record<ProviderName, ProviderDefinition> = {
 const packageJson = createRequire(import.meta.url)("../../package.json") as { version: string };
 
 /** Exact service routes only: unrelated compatible endpoints keep their own identity. */
-function openCodeGoModelsUrl(value: string): string | undefined {
+export function openCodeGoModelsUrl(value: string): string | undefined {
   try {
     const url = new URL(value);
     if (url.protocol !== "https:" || url.host !== "opencode.ai" || url.username || url.password || url.search || url.hash) return undefined;
@@ -52,6 +53,12 @@ function openCodeGoModelsUrl(value: string): string | undefined {
     if (route === "/zen/go/v1") return "https://opencode.ai/zen/go/v1/models";
   } catch { /* Unrecognized URLs do not receive service-specific metadata. */ }
   return undefined;
+}
+
+/** The documented image input routes used by the workbench. Compatible mirrors do not inherit them. */
+export function supportsResponsesImages(baseUrl: string, modelName: string): boolean {
+  if (openCodeGoModelsUrl(baseUrl)) return modelName === "deepseek-v4.1-flash";
+  return providerKind(baseUrl) === "deepseek" && modelName === "deepseek-flash";
 }
 
 export interface ModelListClient {

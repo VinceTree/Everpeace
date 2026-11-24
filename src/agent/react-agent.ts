@@ -92,7 +92,7 @@ import {
   type WebToolExecutor,
 } from "../tools/web.js";
 import type { LearnedMemoryPolicy, LearnedMemoryRuntimeLike, LearnedTurn, LearnedTurnOutcome, MemorySnapshot } from "../memory/learned-memory.js";
-import type { GoalRuntime } from "../goal/runtime.js";
+import { GoalRoundLimitError, type GoalRuntime } from "../goal/runtime.js";
 import { formatGoalContext } from "../goal/context.js";
 import { loadProjectRuleSnapshot, type ProjectRuleSnapshot } from "./project-context.js";
 import { PLAN_INSTRUCTIONS, normalizePlanReview, parsePlanRequest, parseSubmittedPlan, type AgentMode, type PlanInteraction, type PlanReviewDecision, type PlanReviewResult, type QuestionInteraction } from "../plan/runtime.js";
@@ -113,8 +113,9 @@ import { RequestAttemptLedger, type RequestPurpose } from "./request-attempt-led
 import { RequestExecutor } from "./request-executor.js";
 import {
   userMessageWithAttachments,
-  type FileAttachment,
+  type PromptAttachment,
 } from "./file-attachments.js";
+import { inputImageReferences, projectInputImages, type ReadInputImage } from "./input-images.js";
 import {
   createContextInspectionSnapshot,
   type ContextInspectionSnapshot,
@@ -154,9 +155,11 @@ export interface AgentIO {
   takeSensitiveInputAuthorization?(digest: string): boolean;
   hasSensitiveContext?(): boolean;
   notifySensitiveContext?(): Promise<void>;
+  onSkillInvoked?(name: string): Promise<void>;
   inheritedSensitiveInput?: boolean;
   sensitiveInputSource?: string;
   getPermissions?(): PermissionPolicy;
+  beforeTool?(signal?: AbortSignal): Promise<void>;
   isToolExecutionBlocked?(): boolean;
   getWorkflowContext?(): WorkflowContext;
   confirmBash(command: string, signal?: AbortSignal): Promise<boolean>;
@@ -166,6 +169,7 @@ export interface AgentIO {
   recoverTeamByteIntegration?(record: import('../team/workspace.js').TeamWorkspaceRecord, scopes: readonly string[], integrationId: string, signal?: AbortSignal): Promise<{conflicts:string[];recovered:boolean}>;
   confirmWeb?(request: string, signal?: AbortSignal): Promise<boolean>;
   confirmMcp?(request: string, signal?: AbortSignal): Promise<boolean>;
+  confirmWithoutUntrustedMcp?(signal: AbortSignal): Promise<boolean>;
   confirmGoal?(request: string, signal?: AbortSignal): Promise<boolean>;
   requestUserInput?(request: Parameters<QuestionInteraction["requestInput"]>[0], signal?: AbortSignal, mode?: AgentMode): Promise<Record<string, string>>;
   reviewPlan?(plan: Parameters<PlanInteraction["reviewPlan"]>[0], signal?: AbortSignal): Promise<PlanReviewResult>;
@@ -174,7 +178,9 @@ export interface AgentIO {
   getTaskProgress?(): TaskProgress | undefined;
   setTaskProgress?(progress: TaskProgress): Promise<void>;
   runBash(command: string, signal?: AbortSignal): Promise<BashResult>;
-  runBackgroundBash?(command: string, signal?: AbortSignal, timeoutMs?: number, onOutput?: (output: import("../tools/bash.js").BashOutputPreview) => void): Promise<BashResult>;
+  runBackgroundBash?(command: string, signal?: AbortSignal, timeoutMs?: number, onOutput?: (output: import("../tools/bash.js").BashOutputPreview) => void,
+    onOutputChunk?: import("../tools/bash.js").BashOutputChunk): Promise<BashResult>;
+  backgroundJobs?: import("../tools/background-jobs.js").BackgroundJobObserver;
   runApplyPatch?(operations: readonly ApplyPatchOperation[], signal?: AbortSignal): Promise<ApplyPatchResult>;
   afterPatchApplied?(operations: readonly ApplyPatchOperation[], result: ApplyPatchResult, signal?: AbortSignal): Promise<WorkflowPatchFollowup | void>;
   writeAssistant(text: string): void | Promise<void>;
@@ -234,6 +240,7 @@ export interface ReactAgentOptions {
   initialHistory?: readonly Record<string, unknown>[];
   contextWindow?: number | null;
   providerCapabilities?: ProviderCapabilities;
+  readInputImage?: ReadInputImage;
   requestSettings?: ModelRequestSettings;
   initialContextTokens?: number | null;
   onHistoryAppend?(items: readonly Record<string, unknown>[]): Promise<void>;
@@ -255,12 +262,19 @@ export interface ReactAgentOptions {
   codeNavigation?: CodeNavigationRuntimeLike;
 }
 
+export interface AgentSkillInput {
+  text: string;
+  slashName?: string;
+}
+
 export interface AgentTurnOptions {
   mode?: AgentMode;
-  attachments?: readonly FileAttachment[];
+  attachments?: readonly PromptAttachment[];
+  skillInput?: AgentSkillInput;
 }
 
 export interface AgentTaskOptions {
+  continueRequestAccounting?: true;
   mode: AgentMode;
   source: WorkflowTaskSource;
 }
@@ -539,11 +553,17 @@ export class ReactAgent {
   readonly #onUsage:
     | ((usage: TokenUsageSample | null) => Promise<void>)
     | undefined;
-  #pendingSteering: Array<{ text: string; attachments: readonly FileAttachment[] }> = [];
+  #pendingSteering: Array<{
+    text: string;
+    attachments: readonly PromptAttachment[];
+    persist?: ReactAgentOptions["onHistoryAppend"];
+    skillInput?: AgentSkillInput;
+  }> = [];
   #sampleController: AbortController | undefined;
   #mcpSnapshot: McpSnapshot = { tools: [], toolInfo: [], instructions: "", servers: [] };
   #stepToolCatalog: StepToolCatalog | undefined;
   #turnInput: string[] = [];
+  #skillInputs: AgentSkillInput[] = [];
   #turnGoalId: string | undefined;
   #skillTurn: SkillTurnContext | undefined;
   #preparedSkillInput: string | undefined;
@@ -601,6 +621,7 @@ export class ReactAgent {
   readonly #onPerformanceReport: ReactAgentOptions["onPerformanceReport"];
   readonly #beforeTask: ReactAgentOptions["beforeTask"];
   readonly #beforeRequest: ReactAgentOptions["beforeRequest"];
+  readonly #readInputImage: ReadInputImage | undefined;
   readonly #sharedPerformance: TaskPerformance | undefined;
   #unledgerAttempt = 0;
   #activeProviderRequests = 0;
@@ -611,6 +632,7 @@ export class ReactAgent {
     this.#onPerformanceReport = options.onPerformanceReport;
     this.#beforeTask = options.beforeTask;
     this.#beforeRequest = options.beforeRequest;
+    this.#readInputImage = options.readInputImage;
     this.#sharedPerformance = options.sharedPerformance;
     this.#onEvent = (event) => {
       const revision = event.type === "tool_finished" && event.call.name === "read_file" ? (() => {
@@ -626,8 +648,8 @@ export class ReactAgent {
     this.#client = options.client;
     this.#model = options.model;
     this.#io = options.io;
-    this.#backgroundJobs = new BackgroundJobManager((command, signal, timeoutMs, onOutput) =>
-      options.io.runBackgroundBash?.(command, signal, timeoutMs, onOutput) ?? options.io.runBash(command, signal));
+    this.#backgroundJobs = new BackgroundJobManager((command, signal, timeoutMs, onOutput, onOutputChunk) =>
+      options.io.runBackgroundBash?.(command, signal, timeoutMs, onOutput, onOutputChunk) ?? options.io.runBash(command, signal), options.io.backgroundJobs);
     this.#promptCacheKey = options.promptCacheKey;
     this.#promptCacheOptions = options.promptCacheOptions;
     this.#advancedPromptCacheEnabled = options.promptCacheOptions !== undefined;
@@ -736,8 +758,10 @@ export class ReactAgent {
     await this.#team?.begin(options.mode);
     await this.#learnedMemory?.beginTask?.();
     this.#assertAvailable();
-    this.#requestAttemptLedger?.reset();
-    this.#costTracker?.reset();
+    if (options.continueRequestAccounting !== true) {
+      this.#requestAttemptLedger?.reset();
+      this.#costTracker?.reset();
+    }
     this.#toolFeedback.reset();
     this.#taskActive = true;
     this.performance.begin();
@@ -882,24 +906,28 @@ export class ReactAgent {
     this.#pendingGoalCompletion = undefined;
     this.#turnResult = {};
     this.#turnInput = [userInput];
+    this.#skillInputs = [options.skillInput ?? { text: userInput }];
     this.#preparedSkillInput = undefined;
     this.#learnedPromptKey = undefined;
     this.#streamRecoveryRemaining = this.#streamRecoveryBudget;
     const attachments = options.attachments?.map((attachment) => ({ ...attachment })) ?? [];
-    attachments.forEach((attachment) => this.#files.activeFiles.add(attachment.path));
+    for (const attachment of attachments) {
+      if (attachment.source === undefined) this.#files.activeFiles.add(attachment.path);
+    }
     const assistantTexts: string[] = [];
     let contextRecoveryRemaining = this.#contextRecoveryBudget;
     let persistenceFailed = false;
     let initialMcpSnapshot: McpSnapshot | undefined;
     let messageCapture: MessageCaptureBoundary | undefined;
     let messageCaptureFailure = "source_unavailable";
+    let publishedSkillInputs = 0;
     try {
       await this.#reviewRestoredContext(signal);
       if (this.#mcp && this.#turnMode === "default") {
         const snapshot = await this.#mcp.ensureReady(signal);
-        initialMcpSnapshot = snapshot;
         const pending = snapshot.servers.find((server) => server.state === "trust_required");
-        if (pending) {
+        if (!pending) initialMcpSnapshot = snapshot;
+        else if (!await this.#io.confirmWithoutUntrustedMcp?.(signal)) {
           const interactionRequired: AgentInteractionRequired = { kind: "approval", tool: pending.trustKind ?? (pending.transport === "stdio" ? "mcp_start" : "mcp_http"), prompt: "MCP startup requires approval. Use /mcp trust <server> in this workspace." };
           this.#turnResult = { interactionRequired };
           this.#io.writeTool?.(interactionRequired.prompt!);
@@ -947,7 +975,10 @@ export class ReactAgent {
             : Promise.resolve({ snapshot: { tools: [], toolInfo: [], instructions: "", servers: [] } as McpSnapshot, toolInfo: new Map<string, McpToolInfo>() });
           const turnInput = this.#turnInput.join("\n");
           const skillsPreparation = this.#skills && this.#preparedSkillInput !== turnInput
-            ? this.#skills.prepareTurn(turnInput).then((value) => {
+            ? this.#skills.prepareTurn(
+                this.#skillInputs.map(input => input.text).join("\n"),
+                this.#skillInputs.flatMap(input => input.slashName === undefined ? [] : [input.slashName]),
+              ).then((value) => {
               this.#preparedSkillInput = turnInput;
               return structuredClone(value);
             })
@@ -969,6 +1000,12 @@ export class ReactAgent {
           mcpPrepared.snapshot.instructions = await this.#protectSource(mcpPrepared.snapshot.instructions, 'MCP descriptions', loopSignal);
           this.#learnedPrompt = await this.#protectSource(this.#learnedPrompt, 'Memory', loopSignal);
           await this.#recordSensitiveBoundary();
+          if (this.#io.onSkillInvoked && publishedSkillInputs < this.#skillInputs.length) {
+            const invoked = new Set(skillTurn?.loadedSlashNames);
+            const fresh = new Set(this.#skillInputs.slice(publishedSkillInputs).map(input => input.slashName));
+            for (const name of fresh) if (name !== undefined && invoked.has(name)) await this.#io.onSkillInvoked(name);
+            publishedSkillInputs = this.#skillInputs.length;
+          }
           this.#mcpSnapshot = mcpPrepared.snapshot;
           this.#skillTurn = skillTurn;
           if (this.#projectRuleSnapshot?.revision !== projectRules.revision) {
@@ -1098,6 +1135,7 @@ export class ReactAgent {
     } catch (error) {
       persistenceFailed = error instanceof PersistenceError;
       this.#assertResourceCleanup();
+      if (error instanceof GoalRoundLimitError) return { stopReason: "goal_round_limit" };
       if (error instanceof SensitiveInteractionRequired) return { ...this.#turnResult, interactionRequired: error.interaction };
       throw error;
     } finally {
@@ -1111,6 +1149,7 @@ export class ReactAgent {
       } finally {
         this.#sampleController = undefined;
         this.#skillTurn = undefined;
+        this.#skillInputs = [];
         this.#stepToolCatalog = undefined;
         this.#turnGoalId = undefined;
         this.#mcpSnapshot = { tools: [], toolInfo: [], instructions: "", servers: [] };
@@ -1130,7 +1169,15 @@ export class ReactAgent {
     if (allow && intent && this.#goalRuntime) await this.#goalRuntime.finalizeCompletion(intent);
   }
 
-  requestSteering(text: string, attachments: readonly FileAttachment[] = []): boolean {
+  async stopAtGoalRoundLimit(signal?: AbortSignal): Promise<boolean> {
+    return await this.#goalRuntime?.stopAtRoundLimit(signal) ?? false;
+  }
+
+  requestSteering(text: string, attachments: readonly PromptAttachment[] = [], options?: {
+    persist: NonNullable<ReactAgentOptions["onHistoryAppend"]>;
+    waitForSample?: boolean;
+    skillInput?: AgentSkillInput;
+  }): boolean {
     const value = text.trim();
     if (!value || !this.#lifecycle.running) return false;
     this.#pendingGoalCompletion = undefined;
@@ -1138,8 +1185,10 @@ export class ReactAgent {
     this.#pendingSteering.push({
       text: value,
       attachments: attachments.map((attachment) => ({ ...attachment })),
+      ...(options ? { persist: options.persist } : {}),
+      ...(options?.skillInput ? { skillInput: { ...options.skillInput } } : {}),
     });
-    this.#sampleController?.abort(new LoopSteeredError());
+    if (!options?.waitForSample) this.#sampleController?.abort(new LoopSteeredError());
     return true;
   }
 
@@ -1171,18 +1220,25 @@ export class ReactAgent {
     else if (outcome === "verified") this.#learnedMemory.scheduleCapture(turn);
   }
 
-  async #record(items: readonly Record<string, unknown>[]): Promise<void> {
+  async #record(items: readonly Record<string, unknown>[], persist?: ReactAgentOptions["onHistoryAppend"]): Promise<void> {
     const protectedItems: Record<string, unknown>[] = [];
     for (const item of items) {
       if (item.role === 'user' && Array.isArray(item.content)) {
         const content = [];
-        for (const part of item.content as Array<{ type: string; text: string }>) content.push({ ...part, text: await this.#protectUserInput(part.text, /"path"\s*:\s*"[^"]*(?:\.env|\.npmrc|\.pem)/iu.test(part.text), this.#turnSignal) });
+        for (const part of item.content as Array<{ type: string; text?: string }>) {
+          if (typeof part?.text !== "string") {
+            content.push(part);
+            continue;
+          }
+          const pathSensitive = /"path"\s*:\s*"[^"]*(?:\.env|\.npmrc|\.pem)/iu.test(part.text);
+          content.push({ ...part, text: await this.#protectUserInput(part.text, pathSensitive, this.#turnSignal) });
+        }
         protectedItems.push({ ...item, content });
       } else if (item.role === 'user' && typeof item.content === 'string') protectedItems.push({ ...item, content: await this.#protectUserInput(item.content, false, this.#turnSignal) });
       else protectedItems.push(item);
     }
     await this.#recordSensitiveBoundary();
-    await this.#historyWriter.record(protectedItems);
+    await this.#historyWriter.record(protectedItems, persist);
   }
 
   async #protectSource(value: string, source: string, signal?: AbortSignal): Promise<string> {
@@ -1288,6 +1344,8 @@ export class ReactAgent {
   async #dispatchToolInner(call: ToolCall, signal?: AbortSignal): Promise<string | { output: string; stop?: boolean }> {
     await this.#recordSensitiveBoundary();
     this.#assertResourceCleanup();
+    signal?.throwIfAborted();
+    if (this.#io.beforeTool) await this.#io.beforeTool(signal);
     signal?.throwIfAborted();
     if (!this.#stepToolCatalog?.has(call.name)) {
       return JSON.stringify({ status: "denied", error: `Tool is unavailable in the current step: ${call.name}`, errorCode: "TOOL_UNAVAILABLE", remedy: "Use only tools advertised in the current request. Do not use another tool to bypass a permission or Plan restriction." });
@@ -1965,7 +2023,8 @@ export class ReactAgent {
       return await this.#context.compact(automatic, {
         isStaleRule: isPersistedProjectRuleSnapshot,
         compact: async (input, observe) => {
-          const result = await (this.#providerCapabilities.compaction === 'native' ? this.#nativeCompact(input, signal, observe, instructions) : this.#summaryCompact(input, signal, observe, instructions));
+          const native = this.#providerCapabilities.compaction === "native" && !input.some(item => inputImageReferences(item).length);
+          const result = await (native ? this.#nativeCompact(input, signal, observe, instructions) : this.#summaryCompact(input, signal, observe, instructions));
           if (this.#sensitive.sensitive && !result.output.some(item => item.content === SENSITIVE_CONTEXT_MARKER)) return { ...result, output: [...result.output, { type: 'message', role: 'developer', content: SENSITIVE_CONTEXT_MARKER }] };
           return result;
         },
@@ -2034,7 +2093,8 @@ export class ReactAgent {
     const effort = requestReasoningEffort(this.#providerCapabilities, summarySettings.reasoningEffort);
     const stableInstructions = this.#stableInstructions();
     const identityInstructions = [runtimeIdentityInstructions(this.#providerCapabilities.provider, this.#model, this.#workspacePath), workflowInstructions].filter(Boolean).join("\n");
-    const summaryContext = projectCodingContext({ capabilities: this.#providerCapabilities, stableInstructions, dynamicInstructions: identityInstructions, input: prefix, explicitCacheLayout: false });
+    const summaryInput = await projectInputImages(prefix, this.#readInputImage, signal);
+    const summaryContext = projectCodingContext({ capabilities: this.#providerCapabilities, stableInstructions, dynamicInstructions: identityInstructions, input: summaryInput, explicitCacheLayout: false });
     const response = await this.#runProviderAttempt(
       "summary",
       () => this.#client.responses.create({
@@ -2088,7 +2148,8 @@ export class ReactAgent {
     advancedPromptCache: boolean,
     recoveryBudget: { remaining: number },
   ): Promise<AgentResponse> {
-    const { snapshot, cacheOptions } = this.#buildRequestSnapshot(input, advancedPromptCache);
+    const wireInput = await projectInputImages(input, this.#readInputImage, signal);
+    const { snapshot, cacheOptions } = this.#buildRequestSnapshot(wireInput, advancedPromptCache);
     const params = snapshot.request as Record<string, unknown>;
     this.#requestReservation = Buffer.byteLength(JSON.stringify(params)) + 1024;
     const options = { maxRetries: 0, timeout: requestSettingsForPurpose("coding", this.#requestSettings).timeoutMs, ...(signal ? { signal } : {}), ...cacheOptions };
@@ -2096,7 +2157,7 @@ export class ReactAgent {
       execute: (run) => this.#runProviderAttempt('coding', run),
       prepare: async () => {
         if (this.#learnedMemory) { this.#learnedPromptKey = undefined; await this.#refreshLearnedPrompt(this.#turnInput.join('\n')); }
-        const current = this.#buildRequestSnapshot(input, advancedPromptCache);
+        const current = this.#buildRequestSnapshot(wireInput, advancedPromptCache);
         this.#publishContextInspection(current.snapshot, current.stableInstructions, current.dynamicInstructions);
         this.#reportRequestComposition(current.snapshot.request, current.stableInstructions, current.dynamicInstructions);
         return structuredClone(current.snapshot.request) as Record<string, unknown>;
@@ -2319,10 +2380,13 @@ export class ReactAgent {
     const count = this.#pendingSteering.length;
     for (let index = 0; index < count; index++) {
       const pending = this.#pendingSteering[0]!;
-      pending.attachments.forEach((attachment) => this.#files.activeFiles.add(attachment.path));
-      await this.#record([userMessageWithAttachments(pending.text, pending.attachments)]);
+      for (const attachment of pending.attachments) {
+        if (attachment.source === undefined) this.#files.activeFiles.add(attachment.path);
+      }
+      await this.#record([userMessageWithAttachments(pending.text, pending.attachments)], pending.persist);
       this.#pendingSteering.shift();
       this.#turnInput.push(pending.text);
+      this.#skillInputs.push(pending.skillInput ?? { text: pending.text });
     }
     return count;
   }

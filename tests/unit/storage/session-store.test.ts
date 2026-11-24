@@ -831,6 +831,40 @@ test("fork preserves prior and interrupted verification debt without restoring o
   }
 });
 
+test("a timeline fork copies its exact legacy byte prefix and scoped output attachments", async () => {
+  const fixture = await createFixture();
+  try {
+    const parent = await fixture.store.create({ title: "Parent", titlePending: false, workspacePath: "C:\\repo", model });
+    await fixture.store.appendTimeline(parent.id, { kind: "user", text: "保留这个回合" });
+    const earlier = prepareToolOutput("中".repeat(20_000), "bash");
+    const later = prepareToolOutput("后".repeat(20_000), "bash");
+    assert.ok(earlier.attachment && later.attachment);
+    await fixture.store.commitToolResult(parent.id, {
+      type: "function_call_output", call_id: "earlier", output: earlier.output,
+    }, earlier.attachment);
+    await fixture.store.appendTimeline(parent.id, { kind: "assistant", text: "完成 😀" });
+    const file = path.join(fixture.directory, `${parent.id}.jsonl`);
+    const prefix = (await fs.readFile(file, "utf8")).replaceAll("\n", "\r\n");
+    await fixture.store.appendTimeline(parent.id, { kind: "user", text: "Later turn" });
+    await fixture.store.commitToolResult(parent.id, {
+      type: "function_call_output", call_id: "later", output: later.output,
+    }, later.attachment);
+    await fs.writeFile(file, (await fs.readFile(file, "utf8")).replaceAll("\n", "\r\n"));
+
+    const child = await fixture.store.fork(parent.id, { throughTimelineIndex: 1 });
+    const copied = await fixture.store.load(child.id);
+    assert.equal(child.lineage?.source_boundary_bytes, Buffer.byteLength(prefix));
+    assert.deepEqual(copied.timeline.at(-1), { kind: "assistant", text: "完成 😀" });
+    assert.deepEqual(copied.context.map(item => item.call_id), ["earlier"]);
+    assert.deepEqual((await fixture.store.readToolOutput(child.id, earlier.attachment.output_id))?.bytes, earlier.attachment.bytes);
+    assert.equal(await fixture.store.readToolOutput(child.id, later.attachment.output_id), null);
+    await assert.rejects(() => fixture.store.fork(parent.id, { throughTimelineIndex: 99 }), /unavailable/u);
+    assert.equal((await fixture.store.list()).sessions.length, 2);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("forked attachment retention, eviction, and deletion stay independent", async () => {
   const fixture = await createFixture();
   try {

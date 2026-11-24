@@ -132,6 +132,8 @@ dispatch 仍检查实时权限、当前 step 目录、停止状态和取消。Pl
 
 默认每个 turn 最多 32 个逻辑 step；可选 turn 时限、Goal token 限额与 usage 不完整产生明确 stop reason。sampling retry、stream recovery、context recovery 各自有独立预算。停止后不启动工具、自动修复或 Goal 续跑。
 
+具有轮次上限的 Goal 在每次实际启动编码轮时累计计数。生产 runner 在启动下一轮或修复前检查上限。耗尽会阻止新的模型请求并保存 blocked 状态，同时保留上一轮的验证结果。该轮次限制独立于现有模型逻辑步数、token 预算和用量结算。
+
 来源和细化的顺序协议见 [AGENT_LOOP](AGENT_LOOP.md)；文件与命令工具机制见 [TOOLS](TOOLS.md)。
 
 ## 历史恢复的只读边界

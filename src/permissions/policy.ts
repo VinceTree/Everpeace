@@ -8,6 +8,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 export type PermissionMode = "read-only" | "ask" | "workspace-write" | "full-access";
+export type WebPermissionMode = Exclude<PermissionMode, "full-access">;
 export type CommandRuleAction = "allow" | "ask" | "deny";
 
 export interface CommandPrefixRule {
@@ -83,9 +84,26 @@ function normalizePolicy(policy: PermissionPolicy, defaultDeny = false): Permiss
   };
 }
 
-function restrictiveMode(left: PermissionMode, right: PermissionMode): PermissionMode {
-  const rank: Record<PermissionMode, number> = { "read-only": 0, ask: 1, "workspace-write": 2, "full-access": 3 };
-  return rank[left] <= rank[right] ? left : right;
+const permissionRank: Record<PermissionMode, number> = { "read-only": 0, ask: 1, "workspace-write": 2, "full-access": 3 };
+
+function restrictiveMode<L extends PermissionMode, R extends PermissionMode>(left: L, right: R): L | R {
+  return permissionRank[left] <= permissionRank[right] ? left : right;
+}
+
+export function isWebPermissionMode(value: unknown): value is WebPermissionMode {
+  return value === "read-only" || value === "ask" || value === "workspace-write";
+}
+
+export function webPermissionMode(host: PermissionMode, requested: WebPermissionMode = "workspace-write"): WebPermissionMode {
+  return restrictiveMode(host === "full-access" ? "workspace-write" : host, requested);
+}
+
+export function webPermissionPolicy(host: PermissionPolicy, requested?: WebPermissionMode): PermissionPolicy {
+  return {
+    ...host,
+    mode: webPermissionMode(host.mode, requested),
+    ...(host.mode === "full-access" ? { shellNetwork: "deny" } : {}),
+  };
 }
 
 export async function loadPermissionPolicy(
